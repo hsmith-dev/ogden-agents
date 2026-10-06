@@ -63,6 +63,8 @@ export function BuildRunPanel({ wsId, run }: { wsId: string; run: Run | undefine
   const [open, setOpen] = useState(false);
   const [failure, setFailure] = useState<string | undefined>();
   const detail = useRunDetail(wsId, run?.id);
+  // A refusal from an earlier action says nothing once the run has moved on.
+  useEffect(() => setFailure(undefined), [run?.id, run?.outcome]);
   const running = run?.outcome === 'running' && run.queuePosition === null;
   const now = useNow(running, 10_000);
   if (run === undefined) return null;

@@ -16,6 +16,7 @@ import {
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { BuildRefusedError } from '../src/index.js';
+import { NO_FREE_SLOT_MESSAGE } from '../src/build-names.js';
 import { codeOf, harness, refusal, testRunner, unattendedOf, type Harness, type Ticket } from './builds-harness.js';
 
 /** Three independent tickets and one that waits for the first. */
@@ -268,6 +269,28 @@ describe('the time limit, Stop and Retry (story 5.8)', () => {
   });
 });
 
+describe('end checks without an agent take a run slot (story 5.8 review)', () => {
+  it('Check again is refused while every slot is taken, changes nothing, and runs once one is free', async () => {
+    const h = await harness({ ticketList: LIST });
+    h.rerun.result = { exitCode: 1, timedOut: false, output: 'Tests: 1 failed, 1 total\n' };
+    const first = await h.builds.start(h.wsId, { ref: '1.1' });
+    const failed = await finish(h, '1.1');
+    expect(failed.outcome).toBe('failed');
+    // The project's limit is 2: two other builds take both slots.
+    const second = await h.builds.start(h.wsId, { ref: '1.2' });
+    await h.builds.start(h.wsId, { ref: '1.3' });
+    h.rerun.result = { exitCode: 0, timedOut: false, output: 'Tests: 1 passed, 1 total\n' };
+    const refused = (await h.builds.checkAgain(h.wsId, first.run.id).catch((error: Error) => error)) as BuildRefusedError;
+    expect(refused).toBeInstanceOf(BuildRefusedError);
+    expect(refused.message).toBe(NO_FREE_SLOT_MESSAGE);
+    expect(h.core.entities.getRun(first.run.id)).toMatchObject({ outcome: 'failed' });
+    await h.builds.stop(h.wsId, second.run.id);
+    await h.builds.checkAgain(h.wsId, first.run.id);
+    await h.builds.settled();
+    expect(h.core.entities.getRun(first.run.id)).toMatchObject({ outcome: 'verified' });
+  });
+});
+
 describe('verification: the plan, the tests re-run in the sandbox, the diff (story 5.8)', () => {
   const verificationOf = (h: Harness, runId: RunId) => {
     const run = h.core.entities.getRun(runId)!;
@@ -288,6 +311,33 @@ describe('verification: the plan, the tests re-run in the sandbox, the diff (sto
     expect(asked.env).toMatchObject({ PATH: '/bin' });
     expect(Object.keys(asked.env).some((name) => /KEY|TOKEN|SECRET/i.test(name))).toBe(false);
     expect(verificationOf(h, run.id)).toMatchObject({ outcome: 'verified', attended: false, testCommand: 'run-tests', checks: [{ id: 'plan_built', result: 'pass' }, { id: 'tests_pass', result: 'pass' }, { id: 'code_changed', result: 'pass' }] });
+  });
+
+  it('Stop ends a test re-run in progress, and closing the builds ends the next one', async () => {
+    const h = await harness();
+    h.rerun.hang = true;
+    const { run } = await h.builds.start(h.wsId, { ref: '1.1' });
+    h.tickets.set(run.worktreePath!, '1.1', 'built');
+    const turn = h.endTurn(run.sessionId);
+    while (h.rerun.runs.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    const signal = h.rerun.runs[0]!.signal!;
+    expect(signal.aborted).toBe(false);
+    const stopped = await h.builds.stop(h.wsId, run.id);
+    expect(stopped.outcome).toBe('stopped');
+    expect(signal.aborted).toBe(true);
+    await turn;
+    // The stopped run has no verification to announce.
+    expect(verificationOf(h, run.id)).toBeUndefined();
+
+    const q = await harness();
+    q.rerun.hang = true;
+    const second = await q.builds.start(q.wsId, { ref: '1.1' });
+    q.tickets.set(second.run.worktreePath!, '1.1', 'built');
+    const turn2 = q.endTurn(second.run.sessionId);
+    while (q.rerun.runs.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    q.builds.close();
+    expect(q.rerun.runs[0]!.signal!.aborted).toBe(true);
+    await turn2;
   });
 
   it('a run that marks its plan built but whose tests fail when re-run ends failed with the count, and cannot be approved', async () => {

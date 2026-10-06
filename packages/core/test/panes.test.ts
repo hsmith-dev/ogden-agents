@@ -5,7 +5,8 @@
  * port is core's own fake terminal (`support/fake-terminal.ts`).
  */
 import type { Pane } from '@ogden-agents/shared';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PaneLauncher } from '@ogden-agents/shared';
 import { createPanes, DeveloperModeRequiredError, NotFoundError, PaneLimitError, TerminalUnavailableError, ValidationError, type Panes, type PanesOptions } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
 import { fakeTerminal, type FakeTerminalOptions } from './support/fake-terminal.js';
@@ -50,15 +51,17 @@ describe('Developer mode gates every operation in core (E16-R3)', () => {
     expect(fake.processes).toEqual([]);
   });
 
-  it('stops every pane when Developer mode is turned off, and tells their viewers', async () => {
+  it('stops every program when Developer mode is turned off, keeps each pane as stopped, and tells their viewers', async () => {
     const { panes, workspace, fake, core } = setup();
     const pane = await panes.open(workspace.id, SIZE);
-    const closed: string[] = [];
-    panes.attach(pane.id)!.onClose(() => closed.push('closed'));
+    const states: string[] = [];
+    panes.attach(pane.id)!.onState((p) => states.push(p.state));
     core.installSettings.setDeveloperMode(false);
     expect(fake.processes[0]!.kills()).toBe(1);
-    expect(closed).toEqual(['closed']);
-    expect(panes.count()).toBe(0);
+    expect(states).toEqual(['stopped']);
+    expect(panes.count()).toBe(1);
+    core.installSettings.setDeveloperMode(true);
+    expect(panes.list(workspace.id)[0]).toMatchObject({ id: pane.id, state: 'stopped' });
   });
 });
 
@@ -230,7 +233,7 @@ describe('pane events: state only (story 16.3)', () => {
     fake.processes[0]!.print('SECRET-OUTPUT-MARKER');
     fake.processes[0]!.exit(5);
     panes.close(workspace.id, pane.id);
-    const events = paneEvents(core);
+    const events = paneEvents(core).filter((e) => e.type !== 'terminal.pane_status_changed');
     expect(events.map((e) => e.type)).toEqual(['terminal.pane_opened', 'terminal.layout_changed', 'terminal.pane_exited', 'terminal.layout_changed', 'terminal.pane_closed']);
     expect(events[0]).toMatchObject({ workspaceId: workspace.id, streamId: workspace.id, payload: { paneId: pane.id, launcherId: 'shell', title: 'Terminal 1' } });
     expect(events[2]!.payload).toEqual({ paneId: pane.id, exitCode: 5 });
@@ -238,19 +241,18 @@ describe('pane events: state only (story 16.3)', () => {
     expect(JSON.stringify(events)).not.toContain('SECRET-OUTPUT-MARKER');
   });
 
-  it('says why a pane closed: Developer mode off, or the server stopping', async () => {
+  it('says a pane\'s program ended when Developer mode turns off (the pane stays), and closed only when the user closes it', async () => {
     const { core, panes, workspace } = setup();
-    await panes.open(workspace.id, SIZE);
+    const pane = await panes.open(workspace.id, SIZE);
     core.installSettings.setDeveloperMode(false);
     await new Promise((resolve) => setImmediate(resolve));
     core.installSettings.setDeveloperMode(true);
-    await panes.open(workspace.id, SIZE);
-    panes.dispose();
-    const causes = paneEvents(core).flatMap((e) => (e.type === 'terminal.pane_closed' ? [e.payload.cause] : []));
-    expect(causes).toEqual(['developer_mode_off', 'server_stopped']);
+    panes.close(workspace.id, pane.id);
+    const kinds = paneEvents(core).filter((e) => e.type !== 'terminal.layout_changed').map((e) => e.type);
+    expect(kinds).toEqual(['terminal.pane_opened', 'terminal.pane_exited', 'terminal.pane_closed']);
   });
 
-  it('delivers the Developer mode change to a later subscriber before the pane closes, in order (no lost event)', async () => {
+  it('delivers the Developer mode change to a later subscriber before the pane event, in order (no lost event)', async () => {
     const { core, panes, workspace } = setup();
     await panes.open(workspace.id, SIZE);
     const heard: string[] = [];
@@ -258,7 +260,7 @@ describe('pane events: state only (story 16.3)', () => {
     core.events.subscribe(core.events.lastSeq(), (event) => void heard.push(event.type));
     core.installSettings.setDeveloperMode(false);
     await new Promise((resolve) => setImmediate(resolve));
-    expect(heard).toEqual(['settings.developer_mode_changed', 'terminal.layout_changed', 'terminal.pane_closed']);
+    expect(heard).toEqual(['settings.developer_mode_changed', 'terminal.pane_exited']);
   });
 
   it('announces nothing for a pane closed while it was starting', async () => {
@@ -334,7 +336,7 @@ describe('the layout (story 16.4)', () => {
     expect(panes.rename(workspace.id, a.id, '  Server  ').title).toBe('Server');
     expect(() => panes.rename(workspace.id, a.id, 'bad\u0007')).toThrow(ValidationError);
     expect(() => panes.rename(workspace.id, a.id, '   ')).toThrow(ValidationError);
-    const events = core.events.readAfter(0).filter((e) => e.type.startsWith('terminal.'));
+    const events = core.events.readAfter(0).filter((e) => e.type.startsWith('terminal.') && e.type !== 'terminal.pane_status_changed');
     expect(events.map((e) => e.type)).toEqual(['terminal.pane_opened', 'terminal.layout_changed', 'terminal.pane_renamed']);
     expect(events[1]!.payload).toEqual({ tabCount: 1, paneCount: 1 });
     expect(events[2]!.payload).toEqual({ paneId: a.id, title: 'Server' });
@@ -352,13 +354,13 @@ describe('layout review findings (16.4)', () => {
     expect(pane.id).toBeTruthy();
   });
 
-  it('the layout is empty once Developer mode turned off the panes, and arrange needs Developer mode', async () => {
+  it('the layout stays when Developer mode turns the panes off, and arrange needs Developer mode', async () => {
     const { core, panes, workspace } = setup();
     await panes.open(workspace.id, SIZE);
     core.installSettings.setDeveloperMode(false);
     expect(() => panes.arrange(workspace.id, { tabs: [], activeTabId: null })).toThrow(DeveloperModeRequiredError);
     core.installSettings.setDeveloperMode(true);
-    expect(panes.layout(workspace.id)).toEqual({ tabs: [], activeTabId: null });
+    expect(panes.layout(workspace.id).tabs).toHaveLength(1);
   });
 
   it('a split whose target closes while the new pane starts still gets a place, and nothing opens after dispose', async () => {
@@ -384,6 +386,192 @@ describe('layout review findings (16.4)', () => {
   });
 });
 
+describe('a pane\'s status (story 16.6)', () => {
+  const LAUNCHER = PaneLauncher.parse({ id: 'example', label: 'Example CLI', kind: 'cli', executables: {}, promptPatterns: [{ name: 'q', pattern: '\\(y/n\\)', depth: 1 }] });
+
+  function withLauncher() {
+    const core = openTestCore();
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    core.installSettings.setDeveloperMode(true);
+    const fake = fakeTerminal();
+    const panes = createPanes({
+      entities: core.entities,
+      installSettings: core.installSettings,
+      events: core.events,
+      terminal: fake.port,
+      launchers: {
+        list: async () => [],
+        detect: async () => [],
+        get: (id) => (id === 'example' ? LAUNCHER : undefined),
+        command: async () => ({ ok: true, file: '/abs/example', args: [] }),
+      },
+      shell: () => ({ file: '/bin/fake-shell', args: [] }),
+      env: () => ({}),
+    });
+    stops.push(() => panes.dispose());
+    return { core, workspace, fake, panes };
+  }
+
+  it('a program that asks a question goes to needs attention, with an event that names the pane and carries no text; typing makes it working; exit makes it exited', async () => {
+    vi.useFakeTimers();
+    try {
+      const { core, workspace, fake, panes } = withLauncher();
+      const pane = await panes.open(workspace.id, SIZE, undefined, { launcherId: 'example' });
+      expect(pane.status).toBe('working');
+      const viewer = panes.attach(pane.id)!;
+      const seen: string[] = [];
+      viewer.onState((p) => seen.push(p.status));
+      fake.processes[0]!.setScreen(['Delete everything?', 'Sure? (y/n)']);
+      fake.processes[0]!.print('Sure? (y/n)');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(panes.list(workspace.id)[0]!.status).toBe('needs_attention');
+      viewer.write('y\r');
+      expect(panes.list(workspace.id)[0]!.status).toBe('working');
+      fake.processes[0]!.exit(0);
+      expect(panes.list(workspace.id)[0]!.status).toBe('exited');
+      const changes = core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_status_changed');
+      expect(changes.map((e) => e.payload)).toEqual([
+        { paneId: pane.id, status: 'needs_attention', previous: 'working', title: 'Example CLI 1', notify: false },
+        { paneId: pane.id, status: 'working', previous: 'needs_attention', title: 'Example CLI 1', notify: false },
+        { paneId: pane.id, status: 'exited', previous: 'working', title: 'Example CLI 1', notify: false },
+      ]);
+      expect(JSON.stringify(changes)).not.toContain('Sure?');
+      expect(seen).toContain('needs_attention');
+      expect(seen.at(-1)).toBe('exited');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a Restart pane that could not start leaves the pane exited in status too', async () => {
+    let failing = false;
+    const core = openTestCore();
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    core.installSettings.setDeveloperMode(true);
+    const panes = createPanes({
+      entities: core.entities,
+      installSettings: core.installSettings,
+      events: core.events,
+      terminal: fakeTerminal({ opening: async () => void (failing && (() => { throw new Error('x'); })()) }).port,
+      shell: () => ({ file: '/x', args: [] }),
+      env: () => ({}),
+    });
+    stops.push(() => panes.dispose());
+    const pane = await panes.open(workspace.id, SIZE);
+    failing = true;
+    await panes.restart(workspace.id, pane.id, SIZE).catch(() => undefined);
+    expect(panes.list(workspace.id)[0]).toMatchObject({ state: 'exited', status: 'exited' });
+  });
+
+  it('working and idle stay out of the event log (every command would add two rows): only into or out of needs attention, and the end', async () => {
+    vi.useFakeTimers();
+    try {
+      const { core, workspace, fake, panes } = withLauncher();
+      await panes.open(workspace.id, SIZE, undefined, { launcherId: 'example' });
+      fake.processes[0]!.print('output');
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(panes.list(workspace.id)[0]!.status).toBe('idle');
+      expect(core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_status_changed')).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the plain shell has no prompt patterns, so it is only ever working or idle; Restart pane starts the guess over', async () => {
+    vi.useFakeTimers();
+    try {
+      const { workspace, fake, panes } = withLauncher();
+      const shell = await panes.open(workspace.id, SIZE);
+      fake.processes[0]!.setScreen(['Sure? (y/n)']);
+      fake.processes[0]!.print('Sure? (y/n)');
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(panes.list(workspace.id)[0]!.status).toBe('idle');
+      fake.processes[0]!.exit(1);
+      expect(panes.list(workspace.id)[0]!.status).toBe('exited');
+      await panes.restart(workspace.id, shell.id, SIZE);
+      expect(panes.list(workspace.id)[0]!.status).toBe('working');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('notifications are the user\'s opt in (story 16.8)', () => {
+  const LAUNCHER = PaneLauncher.parse({ id: 'example', label: 'Example CLI', kind: 'cli', executables: {}, promptPatterns: [{ name: 'q', pattern: '\\(y/n\\)', depth: 1 }] });
+
+  function booted(notifyLaunchers?: () => readonly string[]) {
+    const core = openTestCore();
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    core.installSettings.setDeveloperMode(true);
+    const fake = fakeTerminal();
+    const panes = createPanes({
+      entities: core.entities,
+      installSettings: core.installSettings,
+      events: core.events,
+      terminal: fake.port,
+      store: core.paneStore,
+      notifyLaunchers,
+      launchers: { list: async () => [], detect: async () => [], get: (id) => (id === 'example' ? LAUNCHER : undefined), command: async () => ({ ok: true, file: '/abs/example', args: [] }) },
+      shell: () => ({ file: '/x', args: [] }),
+      env: () => ({}),
+    });
+    stops.push(() => panes.dispose());
+    return { core, workspace, fake, panes };
+  }
+
+  const waiting = async (b: ReturnType<typeof booted>, id: string) => {
+    b.fake.processes[0]!.setScreen(['Sure? (y/n)']);
+    b.fake.processes[0]!.print('Sure? (y/n)');
+    await vi.advanceTimersByTimeAsync(600);
+    return b.core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_status_changed' && e.payload.paneId === id).at(-1)!.payload;
+  };
+
+  it('is off by default, saved per pane, and the status event says whether it is on; the setting is not text', async () => {
+    vi.useFakeTimers();
+    try {
+      const b = booted();
+      const pane = await b.panes.open(b.workspace.id, SIZE, undefined, { launcherId: 'example' });
+      expect(pane.notify).toBe(false);
+      expect(await waiting(b, pane.id)).toMatchObject({ status: 'needs_attention', notify: false });
+      expect(b.panes.setNotify(b.workspace.id, pane.id, true).notify).toBe(true);
+      expect(b.core.paneStore.load().panes[0]!.notify).toBe(true);
+      // Typing answers it; the next wait carries the opt in.
+      b.panes.attach(pane.id)!.write('y\r');
+      b.fake.processes[0]!.print('Again? (y/n)');
+      await vi.advanceTimersByTimeAsync(600);
+      expect(b.core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_status_changed').at(-1)!.payload).toMatchObject({ status: 'needs_attention', notify: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a launcher the user opted in turns it on for all its panes', async () => {
+    vi.useFakeTimers();
+    try {
+      const b = booted(() => ['example']);
+      const pane = await b.panes.open(b.workspace.id, SIZE, undefined, { launcherId: 'example' });
+      expect(await waiting(b, pane.id)).toMatchObject({ notify: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a flip is announced to the other windows, once', async () => {
+    const b = booted();
+    const pane = await b.panes.open(b.workspace.id, SIZE);
+    b.panes.setNotify(b.workspace.id, pane.id, true);
+    b.panes.setNotify(b.workspace.id, pane.id, true);
+    expect(b.core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_renamed').map((e) => e.payload)).toEqual([{ paneId: pane.id, title: 'Terminal 1', notify: true }]);
+  });
+
+  it('needs Developer mode and a known pane', () => {
+    const b = booted();
+    expect(() => b.panes.setNotify(b.workspace.id, 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3', true)).toThrow(NotFoundError);
+    b.core.installSettings.setDeveloperMode(false);
+    expect(() => b.panes.setNotify(b.workspace.id, 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3', true)).toThrow(DeveloperModeRequiredError);
+  });
+});
+
 describe('review findings (security review of 16.2)', () => {
   it('two Restarts at once leave one program running, the other stopped', async () => {
     const { panes, workspace, fake } = setup({ terminal: { opening: () => new Promise((resolve) => setTimeout(resolve, 5)) } });
@@ -393,7 +581,7 @@ describe('review findings (security review of 16.2)', () => {
     expect(running).toHaveLength(1);
   });
 
-  it('a live viewer typing after Developer mode went off (no event) stops the pane instead of reaching the shell', async () => {
+  it('a live viewer typing after Developer mode went off (no event) stops the panes and keeps them, and nothing reaches the shell', async () => {
     const { panes, workspace, fake, core } = setup();
     const pane = await panes.open(workspace.id, SIZE);
     const viewer = panes.attach(pane.id)!;
@@ -402,7 +590,8 @@ describe('review findings (security review of 16.2)', () => {
     viewer.write('rm -rf x\r');
     expect(fake.processes[0]!.writes).toEqual([]);
     expect(fake.processes[0]!.kills()).toBe(1);
-    expect(panes.count()).toBe(0);
+    expect(panes.count()).toBe(1);
+    expect(viewer.pane.state).toBe('stopped');
   });
 });
 

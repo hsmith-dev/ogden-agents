@@ -230,6 +230,26 @@ export function createNotifications(deps: NotificationsDeps): Notifications {
     pending.add(work);
   });
 
+  let adding: Promise<void> = Promise.resolve();
+  const addOne = async (request: unknown): Promise<NotificationSettings> => {
+    const parsed = AddWebhookRequest.safeParse(request);
+    if (!parsed.success) return refuse(parsed.error);
+    if (targets().length >= MAX_WEBHOOKS) throw new ValidationError(`You can add at most ${MAX_WEBHOOKS} webhooks.`, [{ path: ['url'], message: `You can add at most ${MAX_WEBHOOKS} webhooks.` }]);
+    const id = newId('hook');
+    // The keychain first: with none, nothing is stored and the user is told why (AD-16).
+    await secrets.set(secretName(id), parsed.data.url);
+    try {
+      orm
+        .insert(notificationWebhooks)
+        .values({ id, host: maskedHost(new URL(parsed.data.url).hostname), events: JSON.stringify([...new Set(parsed.data.events)]), createdAt: now().toISOString() })
+        .run();
+    } catch (error) {
+      await secrets.delete(secretName(id)).catch(() => undefined);
+      throw error;
+    }
+    return read();
+  };
+
   return {
     settings: read,
 
@@ -244,23 +264,14 @@ export function createNotifications(deps: NotificationsDeps): Notifications {
       return read();
     },
 
-    async addWebhook(request) {
-      const parsed = AddWebhookRequest.safeParse(request);
-      if (!parsed.success) return refuse(parsed.error);
-      if (targets().length >= MAX_WEBHOOKS) throw new ValidationError(`You can add at most ${MAX_WEBHOOKS} webhooks.`, [{ path: ['url'], message: `You can add at most ${MAX_WEBHOOKS} webhooks.` }]);
-      const id = newId('hook');
-      // The keychain first: with none, nothing is stored and the user is told why (AD-16).
-      await secrets.set(secretName(id), parsed.data.url);
-      try {
-        orm
-          .insert(notificationWebhooks)
-          .values({ id, host: maskedHost(new URL(parsed.data.url).hostname), events: JSON.stringify([...new Set(parsed.data.events)]), createdAt: now().toISOString() })
-          .run();
-      } catch (error) {
-        await secrets.delete(secretName(id)).catch(() => undefined);
-        throw error;
-      }
-      return read();
+    addWebhook(request) {
+      // One add at a time, so two at once cannot both pass the cap (story 11.5).
+      const run = adding.then(() => addOne(request));
+      adding = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
     },
 
     updateWebhook(id, request) {

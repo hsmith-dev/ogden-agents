@@ -1,4 +1,4 @@
-import { PANE_CLOSE, TERMINAL_CLOSE, type Pane, type PaneState } from '@ogden-agents/shared';
+import { PANE_CLOSE, TERMINAL_CLOSE, type Pane, type PaneState, type PaneStatus } from '@ogden-agents/shared';
 import type { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/ui/button';
@@ -6,10 +6,14 @@ import { Text } from '@/ui/typography';
 import { tokenNumber } from '@/ui/tokens';
 import { cn } from '@/ui/utils';
 import { MAX_NAME_LENGTH } from './layout-edit';
+import { STATUS_WORDS } from './pane-status-words';
 import { connectPane, type PaneConnection } from './pane-socket';
 import { restartPane } from './panes-api';
 import { RECONNECT_DELAYS_MS, STABLE_CONNECTION_MS } from './terminal-panel';
 import { loadXterm, enableUnicode11 } from './xterm-setup';
+
+/** The longest text of an argument field (the server's own limit). */
+const MAX_ARGS_LENGTH = 500;
 
 /** How long a pane may print nothing after it started before the page offers Restart pane (spike 16.1 finding 2: Windows ConPTY can hold the first output back). */
 export const SLOW_START_MS = 10_000;
@@ -33,6 +37,10 @@ export interface PaneViewProps {
   onSplit?: ((paneId: string, direction: 'row' | 'column') => void) | undefined;
   /** Rename this pane. Absent: the name is not editable. */
   onRename?: ((paneId: string, title: string) => void) | undefined;
+  /** How the program's own resume is offered (plain words), shown on a stopped pane; a launcher without one has none. */
+  resumeHint?: string | undefined;
+  /** Turn this pane's notifications on or off. Absent: no switch. */
+  onNotify?: ((paneId: string, on: boolean) => void) | undefined;
   /** Take keyboard focus when the terminal has loaded (a pane the user just opened). */
   focusOnOpen?: boolean | undefined;
   /** Why a split is not offered now (the limit of panes), in plain words. */
@@ -50,7 +58,8 @@ export interface PaneViewProps {
  * After an abnormal close it reconnects as the chat terminal does. Nothing
  * typed or printed is kept or logged here.
  */
-export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRename, splitDisabledReason, focusOnOpen = false, className }: PaneViewProps) {
+export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRename, splitDisabledReason, focusOnOpen = false, resumeHint, onNotify, className }: PaneViewProps) {
+  const [typedArgs, setTypedArgs] = useState('');
   const focusRef = useRef(focusOnOpen);
   focusRef.current = focusOnOpen;
   const [renaming, setRenaming] = useState(false);
@@ -58,6 +67,7 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
   const terminal = useRef<Terminal | undefined>(undefined);
   const [link, setLink] = useState<Link>('loading');
   const [state, setState] = useState<PaneState>(pane.state);
+  const [liveStatus, setLiveStatus] = useState<PaneStatus | undefined>(undefined);
   const [exitCode, setExitCode] = useState<number | null>(pane.exitCode);
   const [slow, setSlow] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -120,8 +130,9 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
             if (++frames > 1) tries = 0;
             term.write(bytes);
           },
-          onState: (next) => {
+          onState: (next, status) => {
             setState(next);
+            if (status !== undefined) setLiveStatus(status);
             if (next !== 'exited') setExitCode(null);
           },
           onExit: (code) => setExitCode(code),
@@ -208,7 +219,7 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
     const term = terminal.current;
     setRestarting(true);
     setRestartError(undefined);
-    restartPane(wsId, pane.id, { cols: term?.cols ?? 100, rows: term?.rows ?? 30 }).then(
+    restartPane(wsId, pane.id, { cols: term?.cols ?? 100, rows: term?.rows ?? 30 }, state === 'stopped' && pane.launcherId !== 'shell' ? typedArgs : undefined).then(
       () => setRestarting(false),
       (failure: unknown) => {
         setRestarting(false);
@@ -217,8 +228,8 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
     );
   };
 
-  const words = restartError ?? linkWords(link) ?? stateWords(state, exitCode, slow);
-  const canRestart = link === 'connected' && (state === 'exited' || (state === 'starting' && slow) || restartError !== undefined);
+  const words = restartError ?? linkWords(link) ?? stateWords(state, exitCode, slow, resumeHint);
+  const canRestart = link === 'connected' && (state === 'exited' || state === 'stopped' || (state === 'starting' && slow) || restartError !== undefined);
   return (
     <section
       aria-label={`${pane.title}`}
@@ -257,6 +268,15 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
           </button>
         )}
         <span className="flex items-center gap-2">
+          <Text variant="caption" data-testid="pane-status-chip" data-status={liveStatus ?? pane.status} title="A guess from what the program prints" className="text-terminal-foreground">
+            {state === 'stopped' ? 'Stopped' : STATUS_WORDS[liveStatus ?? pane.status]}
+          </Text>
+          {onNotify === undefined ? null : (
+            <label className="flex items-center gap-1 text-caption text-terminal-foreground" title="A sound or a notice, as in Settings, Notifications, when this terminal seems to need you. Only its name and that it may need you are shown, never what it printed.">
+              <input type="checkbox" aria-label={`Notify me when ${pane.title} may need me`} checked={pane.notify} onChange={(event) => onNotify(pane.id, event.target.checked)} data-testid="pane-notify" />
+              Notify me
+            </label>
+          )}
           {onSplit === undefined ? null : (
             <>
               <Button variant="outline" size="sm" onClick={() => onSplit(pane.id, 'row')} disabled={splitDisabledReason !== undefined} title={splitDisabledReason} data-testid="pane-split-row">
@@ -267,9 +287,20 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
               </Button>
             </>
           )}
+          {canRestart && state === 'stopped' && pane.launcherId !== 'shell' ? (
+            <input
+              aria-label={`Arguments for ${pane.title}`}
+              data-testid="pane-start-args"
+              placeholder="Arguments (optional)"
+              maxLength={MAX_ARGS_LENGTH}
+              value={typedArgs}
+              onChange={(event) => setTypedArgs(event.target.value)}
+              className="h-(--control-height) min-w-32 rounded-md border border-border bg-transparent px-2 text-label text-terminal-foreground"
+            />
+          ) : null}
           {canRestart ? (
             <Button variant="outline" size="sm" onClick={restart} disabled={restarting} data-testid="pane-restart">
-              Restart
+              {state === 'stopped' ? 'Start' : 'Restart'}
             </Button>
           ) : null}
           <Button variant="outline" size="sm" onClick={() => onClose(pane.id)} data-testid="pane-close">
@@ -308,7 +339,8 @@ function linkWords(link: Link): string | undefined {
   }
 }
 
-function stateWords(state: PaneState, exitCode: number | null, slow: boolean): string | undefined {
+function stateWords(state: PaneState, exitCode: number | null, slow: boolean, resumeHint?: string): string | undefined {
+  if (state === 'stopped') return `This terminal is stopped, because Ogden Agents was restarted or Developer mode was turned off. Press Start to run it again.${resumeHint === undefined ? '' : ` ${resumeHint}`}`;
   if (state === 'starting') return slow ? 'This terminal is slow to start. You can restart it.' : 'Starting the terminal';
   if (state === 'exited') return exitCode === null ? 'The program in this terminal ended.' : `The program in this terminal ended with code ${exitCode}.`;
   return undefined;

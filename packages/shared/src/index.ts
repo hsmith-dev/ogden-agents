@@ -8,6 +8,7 @@ export * from './desktop-update.js';
 export * from './entities.js';
 export * from './errors.js';
 export * from './events.js';
+export * from './events-socket.js';
 export * from './ids.js';
 export * from './panes.js';
 export * from './local-endpoints.js';

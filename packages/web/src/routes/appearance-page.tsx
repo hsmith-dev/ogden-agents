@@ -1,5 +1,7 @@
 import { Desktop, Moon, Sun } from '@phosphor-icons/react';
 import { useAppearance } from '@/appearance/appearance-provider';
+import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent } from '@/ui/alert-dialog';
+import { buttonVariants } from '@/ui/button';
 import { useDeveloperModeSave } from '@/appearance/developer-mode';
 import { AppShortcutSetting } from '@/appearance/app-shortcut-setting';
 import type { Density, ThemePreference } from '@/appearance/appearance';
@@ -18,7 +20,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
  */
 export function AppearancePage() {
   const { appearance, update } = useAppearance();
-  const { saving: developerSaving, error: developerError, save: setDeveloperMode } = useDeveloperModeSave();
+  const { saving: developerSaving, error: developerError, save: setDeveloperMode, terminalsQuestion, cancelQuestion } = useDeveloperModeSave();
   return (
     <>
       <WorkspaceHeader title="Appearance" />
@@ -68,7 +70,7 @@ export function AppearancePage() {
             id="developer-mode"
             layout="inline"
             label="Developer mode"
-            description="Uses Compact density, lists each tool call, shows skill names beside plain labels, shows keyboard hints, and offers the terminal and Skip all. Turning it off puts every chat in Skip all back in Ask."
+            description="Uses Compact density, lists each tool call, shows skill names beside plain labels, shows keyboard hints, and offers the terminal and Skip all. Turning it off puts every chat in Skip all back in Ask, and asks what to do with terminals that are running."
           >
             <Switch
               id="developer-mode"
@@ -80,6 +82,18 @@ export function AppearancePage() {
               onCheckedChange={setDeveloperMode}
             />
           </Field>
+          {/* Terminals are running: stop them, or keep them running in the background until Ogden Agents stops (epic 16, story 16.9). */}
+          <AlertDialog open={terminalsQuestion !== undefined} onOpenChange={(open) => !open && cancelQuestion()}>
+            <AlertDialogContent title="Terminals are still running" description={terminalsQuestion ?? ''} data-testid="terminals-running-dialog">
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogConfirm data-testid="terminals-keep" onClick={() => setDeveloperMode(false, 'keep')} className={buttonVariants({ variant: 'outline' })}>
+                Keep them running
+              </AlertDialogConfirm>
+              <AlertDialogConfirm data-testid="terminals-stop" onClick={() => setDeveloperMode(false, 'stop')}>
+                Stop them
+              </AlertDialogConfirm>
+            </AlertDialogContent>
+          </AlertDialog>
           {developerError === undefined ? null : (
             <Notice variant="blocked" role="alert" data-testid="developer-mode-error">
               {developerError}

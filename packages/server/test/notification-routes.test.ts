@@ -9,7 +9,10 @@ import { createMemoryNotifier, createMemorySecretStore } from '@ogden-agents/ada
 import { SecretsUnavailableError, type TicketStorePort } from '@ogden-agents/core';
 import { createFixedSandbox } from '@ogden-agents/adapters';
 import { API_ROUTES, ApiErrorBody, apiPath, BuildResponse, NotificationSettingsResponse, ReviewResponse, WebhookTestResult, WorkspaceResponse } from '@ogden-agents/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// Real git and a real build per test: a loaded runner needs more than the default 5 seconds.
+vi.setConfig({ testTimeout: 60_000 });
 import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, FAKE_BUILD_WAITING_PLAN } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
 import { removeAfterTest, signIn, startTestServer, waitFor, type TestServer, type SignedIn } from './helpers.js';

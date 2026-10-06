@@ -7,6 +7,8 @@ export interface NeedsYouItem {
   id: string;
   wsId: string;
   sesId: string;
+  /** Set for a terminal pane that seems to be waiting (epic 16): its row opens the project's Terminals, not a chat. */
+  paneId?: string | undefined;
   workspaceName: string;
   /** The chat it waits in, by its name (backlog story 12). */
   chatName?: string;
@@ -53,7 +55,11 @@ export function NeedsYouGroup({ items, onOpenFirst }: { items: readonly NeedsYou
           {items.map((item) => (
             <SidebarMenuItem key={item.id}>
               <SidebarMenuButton asChild data-testid="needs-you-item">
-                {item.reviewRef === undefined ? (
+                {item.paneId !== undefined ? (
+                  <Link to={'/w/$wsId/terminals' as '/w/$wsId/s/$sesId'} params={{ wsId: item.wsId, sesId: item.sesId }}>
+                    <NeedsYouRow item={item} />
+                  </Link>
+                ) : item.reviewRef === undefined ? (
                   <Link to="/w/$wsId/s/$sesId" params={{ wsId: item.wsId, sesId: item.sesId }}>
                     <NeedsYouRow item={item} />
                   </Link>

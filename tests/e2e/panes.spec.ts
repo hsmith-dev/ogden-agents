@@ -248,6 +248,21 @@ test('programs: detection shows found and not found with the install page, Detec
         await page.keyboard.type('args');
         await page.keyboard.press('Enter');
         await expect(terminal.locator('.xterm-rows')).toContainText('args=["--model","big"]');
+
+        // Status is a guess: quiet reads idle, a permission style question reads needs attention, and it shows in Needs you and the tab title.
+        const chip = page.getByTestId('pane-status-chip');
+        await expect(chip).toHaveText('Idle');
+        await page.keyboard.type('perm');
+        await page.keyboard.press('Enter');
+        await expect(chip).toHaveText('Needs attention');
+        await expect(page.getByTestId('terminal-tab').first()).toContainText('Needs attention');
+        await expect(page.getByTestId('needs-you-item')).toContainText('Codex 1 may need you');
+        await expect(page).toHaveTitle(/^\(1\)/);
+        // Answering it makes it working, then idle again; the row goes.
+        await page.keyboard.type('y');
+        await page.keyboard.press('Enter');
+        await expect(chip).toHaveText('Idle');
+        await expect(page.getByTestId('needs-you-item')).toHaveCount(0);
       },
     );
   } finally {
@@ -256,4 +271,46 @@ test('programs: detection shows found and not found with the install page, Detec
     if (before.env === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = before.env;
   }
+});
+
+test('Terminals settings: hide the surface, and turning Developer mode off with a terminal running asks, then keeps or stops it', async ({ page }) => {
+  test.skip(!process.env.CI && !(await ptyLoads()), 'node-pty cannot load on this computer');
+  await withChatServer(
+    page,
+    async ({ repo }) => {
+      const wsId = await openProject(page, repo);
+      await setBrowserDeveloperMode(page, true);
+      await setDeveloperMode(page, true);
+      await page.goto(at(page, `/w/${wsId}/terminals`));
+      await page.getByTestId('terminals-new').click();
+      await expect(page.getByTestId('pane-terminal').locator('.xterm-rows')).toContainText('fake-shell-ready');
+
+      // Settings, Terminals: the limits, the opt ins off, and hiding takes the tab away.
+      await page.goto(at(page, '/settings/terminals'));
+      await expect(page.getByTestId('terminals-limits')).toHaveText('A project can have 8 terminals open at once, and Ogden Agents 16.');
+      await expect(page.getByTestId('terminals-proxies')).toHaveAttribute('aria-checked', 'false');
+      await expect(page.getByTestId('terminals-ssh')).toHaveAttribute('aria-checked', 'false');
+      await page.getByTestId('terminals-hidden').click();
+      await page.goto(at(page, `/w/${wsId}`));
+      await expect(page.getByTestId('workspace-tab-terminals')).toHaveCount(0);
+      await page.goto(at(page, '/settings/terminals'));
+      await page.getByTestId('terminals-hidden').click();
+      await page.goto(at(page, `/w/${wsId}`));
+      await expect(page.getByTestId('workspace-tab-terminals')).toBeVisible();
+
+      // Developer mode off with the terminal running: the page asks; Keep leaves it, and it is there again when Developer mode is back on.
+      await page.goto(at(page, '/settings/appearance'));
+      await page.getByTestId('developer-mode').click();
+      await expect(page.getByTestId('terminals-running-dialog')).toContainText('A terminal is still running');
+      await page.getByTestId('terminals-keep').click();
+      await expect(page.getByTestId('developer-mode')).toHaveAttribute('aria-checked', 'false');
+      await expect(page.getByTestId('workspace-tab-terminals')).toHaveCount(0);
+      await page.getByTestId('developer-mode').click();
+      await expect(page.getByTestId('developer-mode')).toHaveAttribute('aria-checked', 'true');
+      await page.goto(at(page, `/w/${wsId}/terminals`));
+      await expect(page.getByTestId('pane')).toHaveCount(1);
+      await expect(page.getByTestId('pane-terminal').locator('.xterm-rows')).toContainText('fake-shell-ready');
+    },
+    { extra: { paneShell: { file: process.execPath, args: [FAKE_SHELL] }, paneLaunchers: NO_PROGRAMS } },
+  );
 });

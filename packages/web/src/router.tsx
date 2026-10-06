@@ -56,6 +56,13 @@ const notificationsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/notifications-page'), 'NotificationsPage'),
 });
 
+/** Developer mode's Terminals settings (epic 16, story 16.9). */
+const terminalsSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/terminals',
+  component: lazyRouteComponent(() => import('./routes/terminals-settings-page'), 'TerminalsSettingsPage'),
+});
+
 /** The version, its channel and the check for newer ones (story 13.7). */
 const aboutRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -166,7 +173,7 @@ const routeTree = rootRoute.addChildren([
   workspaceOrchestrateRoute,
   workspaceTerminalsRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

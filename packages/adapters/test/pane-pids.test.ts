@@ -9,7 +9,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createPanePidRecords, nodePanePidSystem, PANE_PIDS_FILE, START_TOLERANCE_MS, sweepPanePids, type PanePidSystem } from '../src/index.js';
+import { createPanePidRecords, nodePanePidSystem, parseElapsed, PANE_PIDS_FILE, START_TOLERANCE_MS, sweepPanePids, type PanePidSystem } from '../src/index.js';
 
 const dirs: string[] = [];
 const children: ChildProcess[] = [];
@@ -54,26 +54,59 @@ describe('the records', () => {
 });
 
 describe('the sweep, on a fake system', () => {
-  const system = (starts: Record<number, number | undefined>, killed: number[]): PanePidSystem => ({ platform: 'linux', startTime: (pid) => starts[pid], kill: (pid) => void killed.push(pid) });
+  const system = (starts: Record<number, number | undefined>, killed: number[], leaders: number[] | 'all' = 'all'): PanePidSystem => ({ platform: 'linux', startTime: (pid) => starts[pid], leadsItsGroup: (pid) => leaders === 'all' || leaders.includes(pid), kill: (pid) => void killed.push(pid) });
 
   it('stops a recorded program that is still the one recorded, drops the rest without touching them, and empties the list', () => {
     const records = createPanePidRecords(tempDir());
-    records.add(1, 100_000);
-    records.add(2, 100_000);
-    records.add(3, 100_000);
-    records.add(4, 100_000);
+    for (const pid of [101, 102, 103, 104]) records.add(pid, 100_000);
     const killed: number[] = [];
-    const result = sweepPanePids(records, system({ 1: 100_500, 2: 100_000 + START_TOLERANCE_MS + 1_000, 3: undefined, 4: 99_000 }, killed));
-    // 2 is a pid the system gave to something else later; 3 is gone.
-    expect(killed.sort()).toEqual([1, 4]);
+    const result = sweepPanePids(records, system({ 101: 100_500, 102: 100_000 + START_TOLERANCE_MS + 1_000, 103: undefined, 104: 99_000 }, killed));
+    // 102 is a pid the system gave to something else later; 103 is gone.
+    expect(killed.sort()).toEqual([101, 104]);
     expect(result).toEqual({ stopped: 2, dropped: 2 });
     expect(records.list()).toEqual([]);
+  });
+
+  it('a tampered file never makes it act on init, this server, its parent or a process that does not lead its own group', () => {
+    const records = createPanePidRecords(tempDir());
+    for (const pid of [1, process.pid, process.ppid, 500, 501]) records.add(pid, 100_000);
+    const killed: number[] = [];
+    const starts = { 1: 100_000, [process.pid]: 100_000, [process.ppid]: 100_000, 500: 100_000, 501: 100_000 };
+    const result = sweepPanePids(records, system(starts, killed, [500]));
+    expect(killed).toEqual([500]);
+    expect(result.stopped).toBe(1);
+    expect(records.list()).toEqual([]);
+  });
+
+  it('on Windows the System process and below are never acted on', () => {
+    const records = createPanePidRecords(tempDir());
+    records.add(4, 100_000);
+    const killed: number[] = [];
+    sweepPanePids(records, { ...system({ 4: 100_000 }, killed), platform: 'win32' });
+    expect(killed).toEqual([]);
+  });
+
+  it('reads at most a pane list\'s worth of records', () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, PANE_PIDS_FILE), JSON.stringify(Array.from({ length: 500 }, (_, i) => ({ pid: i + 10, startedAt: 1 }))));
+    expect(createPanePidRecords(dir).list()).toHaveLength(64);
   });
 
   it('with nothing recorded does nothing', () => {
     const killed: number[] = [];
     expect(sweepPanePids(createPanePidRecords(tempDir()), system({}, killed))).toEqual({ stopped: 0, dropped: 0 });
     expect(killed).toEqual([]);
+  });
+});
+
+describe('ps elapsed time', () => {
+  it('reads [[dd-]hh:]mm:ss, and nothing else', () => {
+    expect(parseElapsed('00:05')).toBe(5);
+    expect(parseElapsed('12:34')).toBe(754);
+    expect(parseElapsed('01:02:03')).toBe(3723);
+    expect(parseElapsed('2-03:04:05')).toBe(2 * 86_400 + 3 * 3_600 + 4 * 60 + 5);
+    expect(parseElapsed('')).toBeUndefined();
+    expect(parseElapsed('Mon Oct  6 12:00:00 2026')).toBeUndefined();
   });
 });
 

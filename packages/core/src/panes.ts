@@ -150,6 +150,8 @@ interface Entry {
   size: TerminalSize;
   viewers: Set<ViewerEntry>;
   closed: boolean;
+  /** Bumped by `stopAll`: a start that began before it is not allowed to finish (it would run with Developer mode off or after a stop). */
+  stopEpoch: number;
   /** Whether `pane_opened` was appended: only then is a `pane_closed` (a pane never announced is never retracted). */
   announced: boolean;
 }
@@ -167,16 +169,18 @@ export function createPanes(options: PanesOptions): Panes {
   /** Each project's layout (story 16.7 stores it). */
   const layouts = new Map<WorkspaceId, PaneLayout>();
   const layoutOf = (workspaceId: WorkspaceId): PaneLayout => layouts.get(workspaceId) ?? EMPTY_LAYOUT;
+  /** The last pane's creation time kept so far: each is later than the one before, so panes restore in the order they were made. */
+  let lastCreated = 0;
   /** Set when the server stops: nothing opens after it. */
   let disposed = false;
 
   const requireDeveloperMode = () => {
     if (!installSettings.developerMode()) throw new DeveloperModeRequiredError(PANES_NEED_DEVELOPER_MODE);
   };
-  /** Developer mode checked again on what a live viewer does; off, the pane is stopped (never typed into). */
+  /** Developer mode checked again on what a live viewer does; off, every pane is stopped (never typed into) and kept. */
   const developerModeOn = (entry: Entry): boolean => {
     if (installSettings.developerMode()) return true;
-    forget(entry, 'developer_mode_off');
+    stopAll('developer_mode_off');
     return false;
   };
   const safely = (fn: () => void) => {
@@ -240,6 +244,7 @@ export function createPanes(options: PanesOptions): Panes {
   const start = async (entry: Entry, size: TerminalSize): Promise<void> => {
     if (terminal?.openPane === undefined) throw new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.noTerminalPort());
     let process: PaneProcess;
+    const epoch = entry.stopEpoch;
     try {
       const command = entry.command ?? options.shell();
       process = await terminal.openPane({ file: command.file, args: command.args, cwd: entry.cwd, env: options.env(), cols: size.cols, rows: size.rows, scrollback });
@@ -251,6 +256,11 @@ export function createPanes(options: PanesOptions): Panes {
     if (entry.closed) {
       process.kill();
       return;
+    }
+    // Stopped (Developer mode off, the server stopping) while it started: nothing runs.
+    if (entry.stopEpoch !== epoch || disposed || !installSettings.developerMode()) {
+      process.kill();
+      throw new DeveloperModeRequiredError(PANES_NEED_DEVELOPER_MODE);
     }
     // A second Restart that started meanwhile: only one program per pane, the other stops.
     entry.process?.kill();
@@ -326,19 +336,29 @@ export function createPanes(options: PanesOptions): Panes {
    */
   const stopAll = (cause: PaneClosedCause = 'server_stopped') => {
     for (const entry of [...entries.values()]) {
-      const process = entry.process;
-      entry.process = undefined;
-      entry.tracker?.dispose();
-      entry.tracker = undefined;
-      process?.kill();
+      entry.stopEpoch += 1;
+      // One program that will not stop never leaves the others running.
+      safely(() => {
+        const process = entry.process;
+        entry.process = undefined;
+        entry.tracker?.dispose();
+        entry.tracker = undefined;
+        process?.kill();
+      });
       for (const viewer of entry.viewers) {
         viewer.unbind?.();
         viewer.unbind = undefined;
       }
+      // What was typed for it is not kept: Start uses what the user types then.
+      entry.typed = [];
+      entry.command = undefined;
       if (entry.pane.state === 'stopped') continue;
       const wasRunning = entry.pane.state !== 'exited';
-      entry.pane = { ...entry.pane, state: 'stopped', status: 'idle', exitCode: null };
-      for (const viewer of [...entry.viewers]) for (const listener of [...viewer.states]) safely(() => listener(entry.pane));
+      // A pane that waited on the user is not waiting any more: told through the one place that says it (which also tells the viewers).
+      const statusChanges = entry.pane.status !== 'idle';
+      entry.pane = { ...entry.pane, state: 'stopped', exitCode: null };
+      if (statusChanges) setStatus(entry, 'idle');
+      else for (const viewer of [...entry.viewers]) for (const listener of [...viewer.states]) safely(() => listener(entry.pane));
       if (entry.announced && wasRunning && cause === 'developer_mode_off') emit({ type: 'terminal.pane_exited', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, exitCode: null } });
     }
   };
@@ -363,6 +383,7 @@ export function createPanes(options: PanesOptions): Panes {
           viewers: new Set(),
           closed: false,
           announced: true,
+          stopEpoch: 0,
         });
         byWorkspace.set(saved.workspaceId, [...(byWorkspace.get(saved.workspaceId) ?? []), saved.id]);
       }
@@ -451,6 +472,7 @@ export function createPanes(options: PanesOptions): Panes {
         viewers: new Set(),
         closed: false,
         announced: false,
+        stopEpoch: 0,
       };
       // The slot is taken before the program starts.
       entries.set(entry.pane.id, entry);
@@ -470,7 +492,7 @@ export function createPanes(options: PanesOptions): Panes {
       // Closed while it started (closed by the user, Developer mode turned off, the server stopping): nothing is left running, and nothing was announced.
       if (entry.closed || disposed) throw new NotFoundError('pane', entry.pane.id);
       entry.announced = true;
-      safely(() => options.store?.savePane({ id: entry.pane.id, workspaceId, launcherId: entry.pane.launcherId, title: entry.pane.title, createdAt: Date.now() }));
+      safely(() => options.store?.savePane({ id: entry.pane.id, workspaceId, launcherId: entry.pane.launcherId, title: entry.pane.title, createdAt: (lastCreated = Math.max(Date.now(), lastCreated + 1)) }));
       const current = layoutOf(workspaceId);
       const split = placement?.kind === 'split' ? splitPane(current, placement.paneId, entry.pane.id, placement.direction) : undefined;
       emit({ type: 'terminal.pane_opened', workspaceId, streamId: workspaceId, payload: { paneId: entry.pane.id, launcherId: entry.pane.launcherId, title: entry.pane.title } });
@@ -532,6 +554,10 @@ export function createPanes(options: PanesOptions): Panes {
         entry.command = { file: again.file, args: again.args };
       }
       if (entry.closed) throw new NotFoundError('pane', paneId);
+      const wasStopped = entry.pane.state === 'stopped';
+      // The project's folder as it is now (a stopped pane may be hours old).
+      const project = entities.getWorkspace(workspaceId);
+      if (project !== undefined) entry.cwd = project.realPath ?? project.path;
       const old = entry.process;
       entry.process = undefined;
       for (const viewer of entry.viewers) {
@@ -548,9 +574,10 @@ export function createPanes(options: PanesOptions): Panes {
       } catch (error) {
         // It could not start again: the pane stays, stopped, so Restart can be tried once more.
         if (!entry.closed) {
-          setStatus(entry, 'exited');
-          setState(entry, 'exited');
-          emit({ type: 'terminal.pane_exited', workspaceId, streamId: workspaceId, payload: { paneId, exitCode: null } });
+          setStatus(entry, wasStopped ? 'idle' : 'exited');
+          // A stopped pane that could not start stays stopped; any other one is ended.
+          setState(entry, wasStopped ? 'stopped' : 'exited');
+          if (!wasStopped) emit({ type: 'terminal.pane_exited', workspaceId, streamId: workspaceId, payload: { paneId, exitCode: null } });
         }
         throw error;
       }

@@ -32,11 +32,21 @@ export interface PanePidSystem {
   platform: NodeJS.Platform;
   /** When the process with `pid` started (ms since 1970), or `undefined` when there is none. */
   startTime(pid: number): number | undefined;
+  /** Whether `pid` leads its own process group (a pane's program does: it was started as a session leader). Always true where there are no groups. */
+  leadsItsGroup(pid: number): boolean;
   /** Stops `pid` and everything it started. */
   kill(pid: number): void;
 }
 
 /** This computer's: `ps` on POSIX, PowerShell on Windows, each under the allowlisted environment, no shell. */
+/** `ps` elapsed time (`[[dd-]hh:]mm:ss`) in seconds, or `undefined` when it is not that. */
+export function parseElapsed(text: string): number | undefined {
+  const match = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(text);
+  if (match === null) return undefined;
+  const [, days, hours, minutes, seconds] = match;
+  return Number(days ?? 0) * 86_400 + Number(hours ?? 0) * 3_600 + Number(minutes) * 60 + Number(seconds);
+}
+
 export const nodePanePidSystem: PanePidSystem = {
   get platform() {
     return process.platform;
@@ -53,21 +63,32 @@ export const nodePanePidSystem: PanePidSystem = {
       const value = Number(String(out.stdout ?? '').trim());
       return Number.isFinite(value) && value > 0 ? value : undefined;
     }
-    // `ps -o lstart=` is the start as local time with one second of resolution; LC_ALL=C keeps the words English.
-    const out = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 5_000, env: { ...helperEnvironment(), LC_ALL: 'C' } });
-    const text = String(out.stdout ?? '').trim();
-    if (out.status !== 0 || text === '') return undefined;
-    const when = Date.parse(text);
-    return Number.isNaN(when) ? undefined : when;
+    // `ps -o etime=` is how long it has run, `[[dd-]hh:]mm:ss`: no locale, no time zone, no daylight saving.
+    const out = spawnSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8', timeout: 5_000, env: helperEnvironment() });
+    const elapsed = parseElapsed(String(out.stdout ?? '').trim());
+    return out.status !== 0 || elapsed === undefined ? undefined : Date.now() - elapsed * 1000;
+  },
+  leadsItsGroup(pid) {
+    if (process.platform === 'win32') return true;
+    const out = spawnSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8', timeout: 5_000, env: helperEnvironment() });
+    return out.status === 0 && Number(String(out.stdout ?? '').trim()) === pid;
   },
   kill: (pid) => killProcessTree(pid),
 };
+
+/** The most records read: a pane list is at most 16 (a file with more is not ours). */
+const MAX_RECORDS = 64;
+
+/** The lowest pid a record may name: pid 1 (init) and, on Windows, the System process (4) and below are never a pane's program. */
+function plausible(pid: number, platform: NodeJS.Platform = process.platform): boolean {
+  return pid > (platform === 'win32' ? 4 : 1) && pid !== process.pid && pid !== process.ppid;
+}
 
 function read(file: string): PanePidRecord[] {
   try {
     const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((one): one is PanePidRecord => typeof one === 'object' && one !== null && Number.isInteger((one as PanePidRecord).pid) && (one as PanePidRecord).pid > 0 && Number.isFinite((one as PanePidRecord).startedAt));
+    return parsed.slice(0, MAX_RECORDS).filter((one): one is PanePidRecord => typeof one === 'object' && one !== null && Number.isInteger((one as PanePidRecord).pid) && (one as PanePidRecord).pid > 0 && Number.isFinite((one as PanePidRecord).startedAt));
   } catch {
     return [];
   }
@@ -121,7 +142,8 @@ export interface SweepResult {
 export function sweepPanePids(records: PanePidRecords, system: PanePidSystem = nodePanePidSystem): SweepResult {
   const result: SweepResult = { stopped: 0, dropped: 0 };
   for (const record of records.list()) {
-    const started = system.startTime(record.pid);
+    // A tampered file naming init, this server or its parent is never acted on; nor is a process that does not lead its own group (a kill of -pid would reach others).
+    const started = plausible(record.pid, system.platform) && system.leadsItsGroup(record.pid) ? system.startTime(record.pid) : undefined;
     if (started !== undefined && Math.abs(started - record.startedAt) <= START_TOLERANCE_MS) {
       system.kill(record.pid);
       result.stopped += 1;

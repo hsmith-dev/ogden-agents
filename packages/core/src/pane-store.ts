@@ -5,7 +5,7 @@
  * typed or a secret. Running programs do not survive a stop; what comes back
  * is the shape, each pane stopped.
  */
-import { PaneLayout, type PaneId, type WorkspaceId } from '@ogden-agents/shared';
+import { PaneLauncherId, PaneLayout, PaneTitle, type PaneId, type WorkspaceId } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { terminalLayouts, terminalPanes } from './db/schema.js';
@@ -38,6 +38,8 @@ export function createPaneStore({ db }: { db: Database }): PaneStore {
         .from(terminalPanes)
         .all()
         .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1))
+        // A row that is not what core writes (a damaged or edited file) is left out.
+        .filter((row) => PaneTitle.safeParse(row.title).success && PaneLauncherId.safeParse(row.launcherId).success)
         .map((row): StoredPane => ({ id: row.id as PaneId, workspaceId: row.workspaceId as WorkspaceId, launcherId: row.launcherId, title: row.title, createdAt: row.createdAt }));
       const layouts = new Map<WorkspaceId, PaneLayout>();
       for (const row of orm.select().from(terminalLayouts).all()) {

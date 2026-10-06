@@ -505,7 +505,7 @@ describe('review findings (security review of 16.2)', () => {
     expect(running).toHaveLength(1);
   });
 
-  it('a live viewer typing after Developer mode went off (no event) stops the pane instead of reaching the shell', async () => {
+  it('a live viewer typing after Developer mode went off (no event) stops the panes and keeps them, and nothing reaches the shell', async () => {
     const { panes, workspace, fake, core } = setup();
     const pane = await panes.open(workspace.id, SIZE);
     const viewer = panes.attach(pane.id)!;
@@ -514,7 +514,8 @@ describe('review findings (security review of 16.2)', () => {
     viewer.write('rm -rf x\r');
     expect(fake.processes[0]!.writes).toEqual([]);
     expect(fake.processes[0]!.kills()).toBe(1);
-    expect(panes.count()).toBe(0);
+    expect(panes.count()).toBe(1);
+    expect(viewer.pane.state).toBe('stopped');
   });
 });
 

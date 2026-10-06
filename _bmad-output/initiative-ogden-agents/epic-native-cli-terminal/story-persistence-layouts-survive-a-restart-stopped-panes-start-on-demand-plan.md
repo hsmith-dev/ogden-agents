@@ -3,13 +3,13 @@ title: 'Persistence: layouts survive a restart; stopped panes start on demand'
 type: 'feature'
 ticket: '7'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: 'c55170f1520418320ec5bdc7a693e3fff77ec4fd'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/epic-native-cli-terminal.md'
@@ -69,3 +69,17 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Two reviews ran (one security, one correctness).
+
+| Finding | Verdict | Route |
+|---|---|---|
+| A tampered pid file naming pid 1 (or this server, its parent, a process that does not lead its own group) made the sweep kill a group (S) | high, real | patch: pids at or below 1 (4 on Windows), this server and its parent are refused; on POSIX only a group leader is acted on; at most 64 records are read |
+| A start under way when Developer mode turned off or the server stopped ran anyway, and open left it unannounced and running (S, C) | high, real | patch: a stop epoch; such a start kills its program and refuses |
+| A keystroke or resize after Developer mode went off deleted the pane (C) | high, real | patch: it stops every pane and keeps them |
+| Start after Developer mode off reused the old arguments; a failed Start from stopped became exited; a waiting pane's status event was lost on stop (C) | medium, real | patch |
+| One failing kill left the others running (S) | medium | patch: each pane stopped on its own |
+| `ps lstart` depends on locale, time zone and daylight saving (S, C) | low, fails safe | patch: elapsed time (`etime`), no time zone |
+| Restored names and launcher ids unchecked; a restored pane kept its old folder; same millisecond order (S, C) | low | patch: rows checked, the project's folder read again, a monotonic creation time |
+| Migration numbering may collide with other epics (C) | known | renumbered after main at merge time |
+| Records only reach a session leader; the sweep logs counts only; no test of a store that throws partway (C, S) | low | by design; counts are all the log needs |

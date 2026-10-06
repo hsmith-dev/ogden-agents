@@ -149,3 +149,69 @@ describe('the pids of the programs (story 16.7: the sweep after a hard stop)', (
     expect(recorded.size).toBe(0);
   });
 });
+
+describe('review findings (16.7)', () => {
+  it('a start still under way when Developer mode turns off does not run, and leaves the pane stopped and kept', async () => {
+    const core = openTestCore();
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    core.installSettings.setDeveloperMode(true);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const fake = fakeTerminal({ opening: () => gate });
+    const panes = createPanes({ entities: core.entities, installSettings: core.installSettings, events: core.events, terminal: fake.port, store: core.paneStore, shell: () => ({ file: '/x', args: [] }), env: () => ({}) });
+    stops.push(() => panes.dispose());
+    const opening = panes.open(workspace.id, SIZE);
+    opening.catch(() => undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+    core.installSettings.setDeveloperMode(false);
+    release();
+    await expect(opening).rejects.toBeInstanceOf(Error);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fake.processes[0]!.kills()).toBeGreaterThan(0);
+    expect(core.paneStore.load().panes).toEqual([]);
+  });
+
+  it('a keystroke or resize after Developer mode went off stops the panes and keeps them: nothing is deleted', async () => {
+    const { core, workspace } = setup();
+    const booted = boot(core);
+    const pane = await booted.panes.open(workspace.id, SIZE);
+    const viewer = booted.panes.attach(pane.id)!;
+    // Flipped without the event, then the viewer types.
+    core.installSettings.developerMode = () => false;
+    viewer.write('x');
+    viewer.resize(50, 10);
+    expect(booted.fake.processes[0]!.writes).toEqual([]);
+    expect(booted.panes.count()).toBe(1);
+    expect(core.paneStore.load().panes.map((p) => p.id)).toEqual([pane.id]);
+    expect(viewer.pane.state).toBe('stopped');
+  });
+
+  it('Start after Developer mode off runs with what is typed now, not the old arguments; a Start that cannot start leaves the pane stopped', async () => {
+    const { core, workspace } = setup();
+    const booted = boot(core);
+    const pane = await booted.panes.open(workspace.id, SIZE, undefined, { launcherId: 'example', args: '--old-flag' });
+    core.installSettings.setDeveloperMode(false);
+    await new Promise((resolve) => setImmediate(resolve));
+    core.installSettings.setDeveloperMode(true);
+    await booted.panes.restart(workspace.id, pane.id, SIZE);
+    expect(booted.asked.at(-1)).toEqual({ args: [] });
+    expect(booted.fake.processes.at(-1)!.input.args).toEqual([]);
+  });
+
+  it('rows that are not what core writes (a bad name or launcher id) are left out on restore', async () => {
+    const { core, workspace } = setup();
+    core.paneStore.savePane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W5', workspaceId: workspace.id, launcherId: 'shell', title: 'bad\u0007name', createdAt: 1 });
+    core.paneStore.savePane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W6', workspaceId: workspace.id, launcherId: 'Bad Launcher!', title: 'ok', createdAt: 2 });
+    core.paneStore.savePane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W7', workspaceId: workspace.id, launcherId: 'shell', title: 'Fine', createdAt: 3 });
+    expect(core.paneStore.load().panes.map((p) => p.title)).toEqual(['Fine']);
+  });
+
+  it('panes opened in the same millisecond come back in the order they were made', async () => {
+    const { core, workspace } = setup();
+    const first = boot(core);
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i += 1) ids.push((await first.panes.open(workspace.id, SIZE)).id);
+    first.panes.dispose();
+    expect(boot(core).panes.list(workspace.id).map((p) => p.id)).toEqual(ids);
+  });
+});

@@ -65,6 +65,15 @@ describe('Needs you from pane events', () => {
     expect([on[0]!.notify, off[0]!.notify]).toEqual([true, false]);
   });
 
+  it('follows a change of the opt in made later (from another window)', () => {
+    const waiting = storeOf(
+      event('terminal.pane_opened', { paneId: PANE, launcherId: 'a', title: 'One' }),
+      event('terminal.pane_status_changed', { paneId: PANE, status: 'needs_attention', previous: 'working', notify: false }),
+    );
+    expect(paneNeeds(waiting, WS, 'P')[0]!.notify).toBe(false);
+    expect(paneNeeds(applyEvents(waiting, [event('terminal.pane_renamed', { paneId: PANE, title: 'One', notify: true })]), WS, 'P')[0]!.notify).toBe(true);
+  });
+
   it('carries no terminal text: only the pane\'s name and ids', () => {
     const needs = paneNeeds(storeOf(event('terminal.pane_opened', { paneId: PANE, launcherId: 'a', title: 'One' }), event('terminal.pane_status_changed', { paneId: PANE, status: 'needs_attention', previous: 'idle' })), WS, 'P');
     expect(Object.values(needs[0]!).filter((v) => typeof v === 'string').join(' ')).not.toMatch(/y\/n|proceed/i);

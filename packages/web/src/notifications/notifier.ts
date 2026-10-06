@@ -78,7 +78,7 @@ export function createNotifier(deps: NotifierDeps): Notifier {
         return;
       }
       if (!deps.isLeader()) return;
-            // A terminal pane's attention only for the panes the user opted in (story 16.8); then the same sound, desktop and away settings apply.
+      // A terminal pane's attention only for the panes the user opted in (story 16.8); then the same sound, desktop and away settings apply.
       const due = fresh.filter((need) => (need.kind === 'pane' ? need.notify === true : settings.kinds[need.kind] && known.has(need.sesId)));
       if (due.length === 0) return;
       if (settings.onlyWhenAway && deps.anyTabFocused()) return;

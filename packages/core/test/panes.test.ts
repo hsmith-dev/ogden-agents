@@ -556,6 +556,14 @@ describe('notifications are the user\'s opt in (story 16.8)', () => {
     }
   });
 
+  it('a flip is announced to the other windows, once', async () => {
+    const b = booted();
+    const pane = await b.panes.open(b.workspace.id, SIZE);
+    b.panes.setNotify(b.workspace.id, pane.id, true);
+    b.panes.setNotify(b.workspace.id, pane.id, true);
+    expect(b.core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_renamed').map((e) => e.payload)).toEqual([{ paneId: pane.id, title: 'Terminal 1', notify: true }]);
+  });
+
   it('needs Developer mode and a known pane', () => {
     const b = booted();
     expect(() => b.panes.setNotify(b.workspace.id, 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3', true)).toThrow(NotFoundError);

@@ -273,7 +273,7 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
           </Text>
           {onNotify === undefined ? null : (
             <label className="flex items-center gap-1 text-caption text-terminal-foreground" title="A sound or a notice, as in Settings, Notifications, when this terminal seems to need you. Only its name and that it may need you are shown, never what it printed.">
-              <input type="checkbox" checked={pane.notify} onChange={(event) => onNotify(pane.id, event.target.checked)} data-testid="pane-notify" />
+              <input type="checkbox" aria-label={`Notify me when ${pane.title} may need me`} checked={pane.notify} onChange={(event) => onNotify(pane.id, event.target.checked)} data-testid="pane-notify" />
               Notify me
             </label>
           )}

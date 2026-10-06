@@ -195,7 +195,10 @@ export function paneNeeds(store: EventStoreState, wsId: string, workspaceName: s
         break;
       case 'terminal.pane_renamed': {
         const pane = panes.get(event.payload.paneId);
-        if (pane !== undefined) pane.title = event.payload.title;
+        if (pane !== undefined) {
+          pane.title = event.payload.title;
+          if (event.payload.notify !== undefined) pane.notify = event.payload.notify;
+        }
         break;
       }
       case 'terminal.pane_status_changed': {

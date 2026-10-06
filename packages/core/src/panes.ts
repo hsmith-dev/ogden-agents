@@ -530,9 +530,11 @@ export function createPanes(options: PanesOptions): Panes {
     setNotify(workspaceId, paneId, on) {
       requireDeveloperMode();
       const entry = find(workspaceId, paneId);
+      if (!entry.announced) throw new NotFoundError('pane', paneId);
       if (entry.pane.notify !== on) {
         entry.pane = { ...entry.pane, notify: on };
         safely(() => options.store?.setNotify(paneId, on));
+        emit({ type: 'terminal.pane_renamed', workspaceId, streamId: workspaceId, payload: { paneId, title: entry.pane.title, notify: on } });
         for (const viewer of [...entry.viewers]) for (const listener of [...viewer.states]) safely(() => listener(entry.pane));
       }
       return entry.pane;

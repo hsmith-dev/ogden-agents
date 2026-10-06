@@ -50,9 +50,9 @@ export type TerminalPaneClosedEvent = z.infer<typeof TerminalPaneClosedEvent>;
 export const TerminalPaneRenamedInput = z.object({
   type: z.literal('terminal.pane_renamed'),
   ...onWorkspaceStream,
-  payload: z.object({ paneId: PaneId, title: PaneTitle }),
+  payload: z.object({ paneId: PaneId, title: PaneTitle, /** Present when the pane's own notification opt in changed (story 16.8): the page's other windows follow it. */ notify: z.boolean().optional() }),
 });
-/** A pane was renamed (story 16.4). */
+/** A pane was renamed (story 16.4), or its notification opt in changed (story 16.8; `notify` is then set). */
 export const TerminalPaneRenamedEvent = TerminalPaneRenamedInput.extend(assigned);
 export type TerminalPaneRenamedEvent = z.infer<typeof TerminalPaneRenamedEvent>;
 

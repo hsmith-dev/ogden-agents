@@ -3,13 +3,13 @@ title: 'Pane notifications through the existing notifier, opt-in'
 type: 'feature'
 ticket: '8'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '138c2976d21c74c03f4654976296a09aa6cb6aec'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/epic-native-cli-terminal.md'
@@ -64,3 +64,15 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Two reviews ran (one security, one correctness); the opt in held up in both.
+
+| Finding | Verdict | Route |
+|---|---|---|
+| Opting in while a pane is still starting was lost on restart (S, C) | low, real | patch: the pane must be announced first |
+| A flip showed in no other window (S, C) | low, real | patch: `pane_renamed` carries `notify`; the sidebar fold follows it |
+| Title and notify were not applied atomically (S, C) | low | patch: the call without an event runs first |
+| Checkbox had no accessible name; a stray indent (C) | low | patch |
+| Opting in while a pane already waits gives no notice for that wait (C) | by design | the notice is for the next wait; the checkbox says what it shows |
+| A user who unticked every kind still gets sounds for an opted in pane (C) | by design | the pane's own opt in is the choice |
+| `notifyLaunchers` is not wired until 16.9 stores the setting (C) | known | 16.9 |

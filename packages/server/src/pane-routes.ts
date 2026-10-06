@@ -139,8 +139,9 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
     if (!body.ok) return body.response;
     try {
       let pane: Pane | undefined;
-      if (body.value.title !== undefined) pane = panes.rename(ids.workspaceId, ids.paneId, body.value.title);
+      // The call that has no event first, so a failure of the second leaves nothing half announced.
       if (body.value.notify !== undefined) pane = panes.setNotify(ids.workspaceId, ids.paneId, body.value.notify);
+      if (body.value.title !== undefined) pane = panes.rename(ids.workspaceId, ids.paneId, body.value.title);
       return c.json(PaneResponse.parse({ pane }));
     } catch (error) {
       return refuse(c, error);

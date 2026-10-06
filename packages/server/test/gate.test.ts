@@ -708,6 +708,8 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.localEndpointDetect}`,
   `GET ${API_ROUTES.localEndpointModels}`,
   `POST ${API_ROUTES.localEndpointManagerTest}`,
+  // Orchestration (epic 15, 15.2): behind the gate and core's Orchestration guard (its own helper, not a BMad piece's).
+  `GET ${API_ROUTES.workspaceOrchestration}`,
 ] as const;
 
 describe('gate placement', () => {

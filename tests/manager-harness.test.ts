@@ -88,7 +88,7 @@ describe('the reference rules agree with the table', () => {
   it('keeps a step that tries to override the rules at mode Ask, with the text only as text', () => {
     const checked = checkManagerReply('plan', readJson(caseById('plan-override-text').script.replies[0]!)!.json);
     expect(checked.ok).toBe(true);
-    if (checked.ok) expect((checked.value.steps as Array<{ mode: string }>).map((entry) => entry.mode)).toEqual(['ask']);
+    if (checked.ok) expect(((checked.value as { steps: unknown }).steps as Array<{ mode: string }>).map((entry) => entry.mode)).toEqual(['ask']);
   });
 
   it('refuses a roster agent only when it is off the roster given', () => {

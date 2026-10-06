@@ -175,6 +175,12 @@ export interface StartOptions {
    */
   availableBmadPieces?: readonly BmadPiece[];
   /**
+   * Whether this install lets a project turn Orchestration on (epic 15,
+   * 15.2), in place of `SHIPPED_ORCHESTRATION` (not yet): a test starts one
+   * that does. The launcher never sets it. Ignored when {@link core} is given.
+   */
+  orchestrationAvailable?: boolean;
+  /**
    * Override the read-only BMad detection (story 10.3) and the catalog's
    * skills (story 4.1). Default: the `bmad-catalog` adapter. With {@link core}
    * given, only the skills come from it.

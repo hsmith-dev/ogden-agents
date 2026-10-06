@@ -176,6 +176,8 @@ export const API_ERROR_CODES = [
   'checkout_busy',
   /** Save the lessons: the project has no AGENTS.md that git tracks. */
   'agents_file_missing',
+  /** A Local model endpoint on a host that is not this computer was used before the user confirmed it, or its address changed since (409; epic 14 story 14.3). Nothing was called. */
+  'endpoint_confirmation_required',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

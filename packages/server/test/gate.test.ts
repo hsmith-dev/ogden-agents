@@ -680,6 +680,15 @@ const EXPECTED_API_ROUTES = [
   `PATCH ${API_ROUTES.notificationWebhook}`,
   `DELETE ${API_ROUTES.notificationWebhook}`,
   `POST ${API_ROUTES.notificationWebhookTest}`,
+  // The Local model's endpoints (epic 14 story 14.3): install-level, behind the gate only.
+  `GET ${API_ROUTES.localEndpoints}`,
+  `POST ${API_ROUTES.localEndpoints}`,
+  `PATCH ${API_ROUTES.localEndpoint}`,
+  `DELETE ${API_ROUTES.localEndpoint}`,
+  `PUT ${API_ROUTES.localEndpointKey}`,
+  `DELETE ${API_ROUTES.localEndpointKey}`,
+  `POST ${API_ROUTES.localEndpointConfirm}`,
+  `PUT ${API_ROUTES.localEndpointDefault}`,
 ] as const;
 
 describe('gate placement', () => {

@@ -149,6 +149,8 @@ export const AGENT_ENV_NAMES = [
   'GROK_HOME',
   'GEMINI_API_KEY',
   'GEMINI_HOME',
+  'OPENCODE_CONFIG',
+  'OGDEN_ENDPOINT_KEY',
 ] as const;
 
 /** The packages that must name no agent id. */
@@ -176,6 +178,12 @@ export function findAgentIdViolations(files: readonly SourceFile[], ids: readonl
 }
 
 describe('AD-1: core and shared name no agent (epic 6)', () => {
+  it("core, shared and the web never use the string 'local' as an agent id (epic 14; a longer name such as local_endpoints is not one)", () => {
+    const violations = loadWorkspaceSources().filter((file) => (AGENT_NEUTRAL.has(file.pkg) || WEB_SOURCE.test(file.path)) && /(['"`])local\1/.test(withoutComments(file.source))).map((file) => file.path);
+    expect(violations).toEqual([]);
+  });
+
+
   it('no core or shared source names an agent id outside tests', () => {
     const files = loadWorkspaceSources();
     expect(files.some((file) => file.pkg === '@ogden-agents/core')).toBe(true);
@@ -292,6 +300,49 @@ describe('E6-R3: the shared ACP client names no agent (6.4)', () => {
       'packages/adapters/src/acp-base/b.ts: the shared ACP client imports ../acp-claude-code/x.js (an agent\'s own adapter)',
       'packages/adapters/src/acp-base/d.ts: the shared ACP client imports ../index.js (an agent\'s own adapter)',
       'packages/adapters/src/acp-base/d.ts: the shared ACP client imports @ogden-agents/adapters (an agent\'s own adapter)',
+    ]);
+  });
+});
+
+/**
+ * E14-R1 (epic 14): core, shared, the shared ACP client and the web name neither
+ * Ollama, LM Studio nor the route's harness. They come from the Local model's own
+ * adapter and descriptor (the presets are data the server serves).
+ */
+const LOCAL_MODEL_WORDS = /ollama|lm[ -]?studio|opencode/gi;
+const LOCAL_MODEL_NEUTRAL = /(^|[\\/])packages[\\/](?:core|shared|web)[\\/]src[\\/]|(^|[\\/])packages[\\/]adapters[\\/]src[\\/]acp-base[\\/]/;
+
+/** One message per local server or harness name in neutral code (comments aside). */
+export function findLocalModelNameViolations(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    if (!LOCAL_MODEL_NEUTRAL.test(path)) continue;
+    for (const match of withoutComments(source).matchAll(LOCAL_MODEL_WORDS)) violations.push(`${path}: neutral code names ${match[0]} (E14-R1: it comes from the Local model's adapter and descriptor)`);
+  }
+  return violations;
+}
+
+describe('E14-R1: core, shared, the shared ACP client and the web name no local server or harness (epic 14)', () => {
+  it('no neutral source names Ollama, LM Studio or the route\'s harness', () => {
+    const files = loadWorkspaceSources();
+    for (const area of ['core', 'shared', 'web', 'acp-base']) expect(files.some((file) => (area === 'acp-base' ? ACP_BASE.test(file.path) : file.path.split('\\').join('/').includes(`packages/${area}/src/`))), area).toBe(true);
+    expect(findLocalModelNameViolations(files)).toEqual([]);
+  });
+
+  it('flags a planted name, but not in a comment, in adapters, or in the server', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/a.ts', source: "const url = 'http://localhost:11434'; // Ollama\nconst label = 'LM Studio';" },
+      { pkg: '@ogden-agents/shared', path: 'packages/shared/src/b.ts', source: 'const kind = `lmstudio`;' },
+      { pkg: '@ogden-agents/web', path: 'packages/web/src/c.tsx', source: "const harness = 'OpenCode';" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-base/d.ts', source: "const x = 'opencode';" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-opencode/e.ts', source: "const x = 'OpenCode';" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/f.ts', source: "const x = 'Ollama';" },
+    ];
+    expect(findLocalModelNameViolations(files)).toEqual([
+      "packages/core/src/a.ts: neutral code names LM Studio (E14-R1: it comes from the Local model's adapter and descriptor)",
+      "packages/shared/src/b.ts: neutral code names lmstudio (E14-R1: it comes from the Local model's adapter and descriptor)",
+      "packages/web/src/c.tsx: neutral code names OpenCode (E14-R1: it comes from the Local model's adapter and descriptor)",
+      "packages/adapters/src/acp-base/d.ts: neutral code names opencode (E14-R1: it comes from the Local model's adapter and descriptor)",
     ]);
   });
 });

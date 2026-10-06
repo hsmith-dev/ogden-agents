@@ -13,12 +13,12 @@
 //
 // A private data folder per scenario, the fake ACP agent, no network, no real agent or keychain.
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { appExecutable, installNsis, IS_WIN, killApps, killSidecars, launchApp, listApps, listSidecars, newWorkspace, readReport, sleep, waitFor, writeQuit } from './app-harness.mjs';
+import { agentWrapper, appExecutable, installNsis, IS_WIN, killApps, killSidecars, launchApp, listApps, listSidecars, newWorkspace, readReport, sleep, tabOf, waitFor, writeQuit } from './app-harness.mjs';
 
 const { values } = parseArgs({ options: { app: { type: 'string' }, installer: { type: 'string' }, target: { type: 'string' } }, strict: true });
 if ((!values.app && !values.installer) || !values.target) {
@@ -27,10 +27,8 @@ if ((!values.app && !values.installer) || !values.target) {
 }
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = resolve(here, '..');
-const repo = resolve(desktop, '..', '..');
 const sidecar = join(desktop, 'src-tauri', 'binaries', `ogden-node-${values.target}${IS_WIN ? '.exe' : ''}`);
 const staged = join(desktop, 'stage', 'app', 'node_modules', 'ogden-agents');
-const FAKE_AGENT = join(repo, 'tests', 'fixtures', 'fake-acp-agent-installed.mjs');
 
 let exe;
 if (values.installer) {
@@ -55,17 +53,10 @@ const alive = (pid) => {
 };
 const noSidecars = () => listSidecars(before).length === 0;
 
-/** A fake agent whose process also starts a long-lived child, as the real adapter starts `claude`. */
-function agentWrapper(dir) {
-  const file = join(dir, 'agent.mjs');
-  writeFileSync(file, `process.env.FAKE_ACP_SPAWN_GRANDCHILD = '1';\nawait import(${JSON.stringify(pathToFileURL(FAKE_AGENT).href)});\n`);
-  return file;
-}
-
 /** An app with its own data folder and the fake agent; waits until the page loaded. */
 async function startApp(name, extraEnv = {}) {
   const ws = newWorkspace(`ogden-lifecycle-${name}-`);
-  const child = launchApp(exe, ws, { NODE_ENV: 'test', OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', OGDEN_AGENTS_OFFLINE: '1', OGDEN_AGENTS_CLAUDE_ACP_PATH: agentWrapper(ws.root), ...extraEnv });
+  const child = launchApp(exe, ws, { NODE_ENV: 'test', OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', OGDEN_AGENTS_OFFLINE: '1', OGDEN_AGENTS_CLAUDE_ACP_PATH: agentWrapper(ws.root, { grandchild: true }), ...extraEnv });
   cleanups.push(() => child.kill());
   await waitFor(`${name}: the page`, () => events(ws, 'page_finished').length > 0 || events(ws, 'server_error').length > 0, 120_000);
   if (events(ws, 'server_error').length > 0) throw new Error(`${name}: ${JSON.stringify(events(ws, 'server_error')[0].data)}`);
@@ -73,21 +64,9 @@ async function startApp(name, extraEnv = {}) {
   return { ws, child, port: ready.port, owned: ready.owned, url: `http://127.0.0.1:${ready.port}` };
 }
 
-/** A tab token the way the page gets one: a launch link from the launcher handshake, exchanged. */
-async function tabOf(app) {
-  const token = readFileSync(join(app.ws.data, 'launcher.token'), 'utf8').trim();
-  const hello = await (await fetch(`${app.url}/launcher/hello?launch=1`, { headers: { 'x-ogden-launcher-token': token } })).json();
-  const code = new URL(hello.launchUrl).hash.replace(/^#c=/, '');
-  const res = await fetch(`${app.url}/api/v1/tab/exchange`, { method: 'POST', headers: { origin: app.url, 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
-  if (res.status !== 200) throw new Error(`tab exchange answered ${res.status}`);
-  const tab = (await res.json()).token;
-  const headers = { authorization: `Bearer ${tab}`, origin: app.url, 'content-type': 'application/json' };
-  return { pid: hello.pid, headers, post: (path, body) => fetch(`${app.url}${path}`, { method: 'POST', headers, body: JSON.stringify(body) }) };
-}
-
 /** A project and a chat whose turn is still running ("slow" waits up to 10 s). */
 async function startBusyTurn(app) {
-  const tab = await tabOf(app);
+  const tab = await tabOf(app.ws, app.port);
   const folder = mkdtempSync(join(tmpdir(), 'ogden-lifecycle-project-'));
   cleanups.push(() => rmSync(folder, { recursive: true, force: true }));
   const ws = await (await tab.post('/api/v1/workspaces', { path: folder })).json();
@@ -147,7 +126,7 @@ await scenario('A. a second launch focuses the first window and starts no second
 await scenario('C. an npm-started server is attached to, kept running, and not stopped by the app', async () => {
   const ws = newWorkspace('ogden-lifecycle-npm-');
   // The npm route: the same launcher, no shell mode, so its server is not tied to it.
-  const env = { ...process.env, OGDEN_AGENTS_DATA_DIR: ws.data, NODE_ENV: 'test', OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', OGDEN_AGENTS_OFFLINE: '1', OGDEN_AGENTS_CLAUDE_ACP_PATH: agentWrapper(ws.root) };
+  const env = { ...process.env, OGDEN_AGENTS_DATA_DIR: ws.data, NODE_ENV: 'test', OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', OGDEN_AGENTS_OFFLINE: '1', OGDEN_AGENTS_CLAUDE_ACP_PATH: agentWrapper(ws.root, { grandchild: true }) };
   delete env.OGDEN_AGENTS_SHELL;
   const run = spawnSync(sidecar, [join(staged, 'bin', 'ogden.js'), '--json', '--no-open', '--port', '0'], { env, encoding: 'utf8', timeout: 90_000, windowsHide: true });
   const info = JSON.parse(run.stdout.trim().split('\n')[0]);
@@ -164,8 +143,7 @@ await scenario('C. an npm-started server is attached to, kept running, and not s
   await sleep(1500);
   if (!alive(info.pid)) throw new Error('the npm-started server stopped with the app');
   // Stop it as the page would.
-  const app = { ws, url: info.url };
-  const tab = await tabOf(app);
+  const tab = await tabOf(ws, info.port);
   if ((await tab.post('/api/v1/server/quit', {})).status !== 202) throw new Error('could not stop the npm-started server afterwards');
   await waitFor('the npm-started server to stop', () => !alive(info.pid), 20_000);
 });

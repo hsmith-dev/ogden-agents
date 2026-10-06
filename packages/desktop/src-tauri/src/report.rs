@@ -4,6 +4,7 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -12,11 +13,15 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
+/// One writer at a time: the page-load callback and the update thread both report, and two appends at once tore a line on Windows.
+static WRITE: Mutex<()> = Mutex::new(());
+
 pub fn report(ev: &str, data: Value) {
     let Some(path) = std::env::var_os("OGDEN_DESKTOP_TEST_REPORT") else { return };
     let line = json!({ "t": now_ms(), "ev": ev, "pid": std::process::id(), "data": data }).to_string();
+    let _guard = WRITE.lock();
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(f, "{line}");
+        let _ = f.write_all(format!("{line}\n").as_bytes());
     }
 }
 

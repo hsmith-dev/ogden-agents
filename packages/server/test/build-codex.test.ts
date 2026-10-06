@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CODEX_ATTENDED_ONLY_REASON, createCodexAgent, createFixedSandbox, createMemoryAgentSetup } from '@ogden-agents/adapters';
 import type { AgentSetupPort, TicketStorePort } from '@ogden-agents/core';
-import { API_ROUTES, apiPath, BuildAgentsResponse, BuildResponse, ReviewResponse, UNKNOWN_BUILD_AGENT_MESSAGE, WorkspaceResponse } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, BuildAgentsResponse, BuildResponse, ReviewResponse, SandboxStatusResponse, UNKNOWN_BUILD_AGENT_MESSAGE, WorkspaceBuildSettingsResponse, WorkspaceResponse } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import type { CodexPorts } from '../src/codex-wiring.js';
 import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
@@ -175,5 +175,41 @@ describe('a second agent builds (epic 17 tracer): Codex against its fake persona
     const { server, tab, wsId } = await setup();
     expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: [] })).status).toBe(200);
     expect((await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuildAgents, { wsId }))).status).toBe(409);
+  });
+
+  it('a project\'s default build agent: used when a Build names none (and by Build all ready), falls back to the project\'s chat default when it can build, else Claude Code', async () => {
+    const { server, tab, wsId, settled } = await setup({ sandbox: true, verified: true });
+    const settings = (body: unknown) => request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceBuildSettings, { wsId }), body);
+    // Nothing set: Claude Code, as before.
+    expect(WorkspaceBuildSettingsResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuildSettings, { wsId }))).json()).settings.defaultBuildAgentId).toBeNull();
+    const list = async () => BuildAgentsResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuildAgents, { wsId }))).json()).defaultAgentId;
+    expect(await list()).toBe('claude-code');
+    // The project's chat default, when it can build.
+    expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { defaultAgentId: 'codex' })).status).toBe(200);
+    expect(await list()).toBe('codex');
+    // An agent that is not wired here never becomes the default; the stored choice is kept for when it is.
+    expect((await settings({ defaultBuildAgentId: 'grok' })).status).toBe(200);
+    expect(await list()).toBe('codex');
+    expect((await settings({ defaultBuildAgentId: 'claude-code' })).status).toBe(200);
+    expect(await list()).toBe('claude-code');
+    expect((await settings({ defaultBuildAgentId: 'Not An Agent' })).status).toBe(400);
+    // A Build that names no agent uses the default.
+    expect((await settings({ defaultBuildAgentId: 'codex' })).status).toBe(200);
+    const started = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1' });
+    expect(started.status).toBe(201);
+    expect(BuildResponse.parse(await started.json()).run.agent).toBe('codex');
+    expect((await settled()).run.agent).toBe('codex');
+  });
+
+  it('the sandbox status is for the agent asked about, and an agent that cannot build is refused', async () => {
+    const { server, tab, wsId } = await setup({ sandbox: true });
+    const status = async (query: string) => request(server, tab, 'GET', `${apiPath(API_ROUTES.workspaceBuildSandbox, { wsId })}${query}`);
+    const codex = SandboxStatusResponse.parse(await (await status('?agent=codex')).json()).status;
+    expect(codex).toMatchObject({ available: false, summary: CODEX_ATTENDED_ONLY_REASON, choices: ['attended', 'other_agent'] });
+    expect(SandboxStatusResponse.parse(await (await status('?agent=claude-code')).json()).status.available).toBe(true);
+    // No agent: the project's default build agent (Claude Code here).
+    expect(SandboxStatusResponse.parse(await (await status('')).json()).status.available).toBe(true);
+    expect((await status('?agent=grok')).status).toBe(400);
+    expect((await status('?agent=Not%20An%20Agent')).status).toBe(400);
   });
 });

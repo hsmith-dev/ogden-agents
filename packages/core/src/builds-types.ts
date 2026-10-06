@@ -18,8 +18,8 @@ import type { VcsPort } from './vcs-port.js';
 export interface BuildsUseCases {
   /** Builds one ticket (see the header). Rejects as the header says; nothing is written then. */
   start(workspaceId: WorkspaceId, request: unknown): Promise<{ run: Run; session: Session }>;
-  /** What a build's sandbox is here, in plain words, for the Build dialog (story 5.6). Probes only. */
-  sandboxStatus(workspaceId: WorkspaceId): Promise<SandboxStatus>;
+  /** What a build's sandbox is here for `agent` (default: the project's default build agent), in plain words, for the Build dialog (story 5.6, epic 17). Probes only. */
+  sandboxStatus(workspaceId: WorkspaceId, agent?: BuildAgent): Promise<SandboxStatus>;
   /** Which agents can build here and how each would (epic 17: the picker's data). Probes only. */
   buildAgents(workspaceId: WorkspaceId): Promise<BuildAgentsResponse>;
   /** The ticket's latest run for the review page. `NotFoundError` without one. */
@@ -150,6 +150,8 @@ export interface BuildsDeps {
    * agent's own skill folder must hold it there): a plain reason when it cannot, else `undefined`. Only asked for an
    * agent whose runner is one of {@link runners}. A build without it is refused, never run without the skill.
    */
+  /** The project's default chat agent, for the build default's fallback (epic 17); `undefined` when none is set. */
+  projectDefaultAgent?: (workspaceId: WorkspaceId) => BuildAgent | undefined;
   skillReach?: (agent: BuildAgent, worktreePath: string) => string | undefined;
   chat: Pick<Chat, 'createChatSession' | 'sendMessage' | 'releaseAgent' | 'chatAgents'>;
   buildSessions: BuildSessions;

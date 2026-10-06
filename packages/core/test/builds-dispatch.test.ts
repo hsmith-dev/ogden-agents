@@ -411,9 +411,9 @@ describe('build settings (story 5.8)', () => {
     const h = await harness();
     // The harness sets a test command for the project; its limit is still the default.
     expect(h.core.buildSettings.runLimits()).toEqual({ maxConcurrentRunsPerInstall: 3, maxRunMinutes: 45 });
-    expect(h.core.buildSettings.workspaceSettings(h.wsId)).toEqual({ maxConcurrentRuns: 2, testCommand: 'run-tests' });
+    expect(h.core.buildSettings.workspaceSettings(h.wsId)).toEqual({ maxConcurrentRuns: 2, testCommand: 'run-tests', defaultBuildAgentId: null });
     expect(h.core.buildSettings.setRunLimits({ maxRunMinutes: 60 })).toEqual({ maxConcurrentRunsPerInstall: 3, maxRunMinutes: 60 });
-    expect(h.core.buildSettings.setWorkspaceSettings(h.wsId, { maxConcurrentRuns: 4 })).toEqual({ maxConcurrentRuns: 4, testCommand: 'run-tests' });
+    expect(h.core.buildSettings.setWorkspaceSettings(h.wsId, { maxConcurrentRuns: 4 })).toEqual({ maxConcurrentRuns: 4, testCommand: 'run-tests', defaultBuildAgentId: null });
     const types = h.core.events.readAfter(0).map((event) => event.type);
     expect(types).toContain('settings.run_limits_changed');
     expect(types.filter((type) => type === 'workspace.build_settings_changed')).toHaveLength(2);

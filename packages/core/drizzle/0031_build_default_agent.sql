@@ -1,0 +1,1 @@
+ALTER TABLE `workspace_build_settings` ADD `default_build_agent_id` text;

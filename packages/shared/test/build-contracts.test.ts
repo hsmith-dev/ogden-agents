@@ -252,7 +252,7 @@ describe('requests and responses (story 5.3)', () => {
   it('run limits: defaults 2 per project, 3 per install, 45 minutes; changes within bounds only', () => {
     expect(RUN_LIMIT_DEFAULTS).toEqual({ maxConcurrentRunsPerWorkspace: 2, maxConcurrentRunsPerInstall: 3, maxRunMinutes: 45 });
     expect(RunLimitSettings.parse({})).toEqual({ maxConcurrentRunsPerInstall: 3, maxRunMinutes: 45 });
-    expect(WorkspaceBuildSettings.parse({})).toEqual({ maxConcurrentRuns: 2, testCommand: null });
+    expect(WorkspaceBuildSettings.parse({})).toEqual({ maxConcurrentRuns: 2, testCommand: null, defaultBuildAgentId: null });
     expect(UpdateRunLimitSettingsRequest.safeParse({ maxRunMinutes: 30 }).success).toBe(true);
     expect(UpdateRunLimitSettingsRequest.safeParse({ maxRunMinutes: 1 }).success).toBe(false);
     expect(UpdateRunLimitSettingsRequest.safeParse({ maxConcurrentRunsPerInstall: 2.5 }).success).toBe(false);

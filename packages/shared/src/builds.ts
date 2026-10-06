@@ -275,9 +275,27 @@ export const BUILD_DIALOG_LOAD_FAILED = "Ogden Agents couldn't check what this c
  */
 export const buildDialogConfirmTitle = (ticketRef: string): string => `Build ticket ${ticketRef}?`;
 export const BUILD_DIALOG_CONFIRM_TEXT = 'The manager proposed this build. Nothing starts until you press a button here. Claude Code builds it in its own copy of the project, and you review the result before anything is kept.';
+export const buildDialogConfirmTextFor = (agentName: string): string => BUILD_DIALOG_CONFIRM_TEXT.replace('Claude Code builds it', `${agentName} builds it`);
 export const BUILD_DIALOG_CONFIRM_BUTTON = 'Build';
 export const BUILD_DIALOG_READY_TEXT = 'A sandbox is ready now. Close this and press Build again.';
-export const OTHER_AGENT_DISABLED_TEXT = 'Other agents arrive in a later version.';
+export const OTHER_AGENT_DISABLED_TEXT = 'No other agent can build here yet.';
+/** The Build dialog's agent picker (epic 17): plain words, no dashes. */
+export const buildDialogTitleFor = (agentName: string): string => `${agentName} can't build unattended on this computer yet.`;
+export const buildPickerTitle = (ticketRef: string): string => `Build ${ticketRef} with which agent?`;
+export const BUILD_PICKER_LABEL = 'Build with';
+export const OTHER_AGENT_PICK_TEXT = 'Pick one of the agents above.';
+export const BUILD_WAY_LABELS: Readonly<Record<BuildWay, string>> = {
+  unattended: 'Builds on its own, and you review the result',
+  attended_only: 'Builds with you watching',
+  unavailable: 'Not ready',
+};
+export const BUILD_START_ATTENDED_LABEL = 'Build with me watching';
+export const attendedExplainedTextFor = (agentName: string): string => `Each command ${agentName} wants to run asks you first, in the build session.`;
+/** Workspace settings, Builds: the agent a Build uses when you pick none. */
+export const DEFAULT_BUILD_AGENT_LABEL = 'Default build agent';
+export const DEFAULT_BUILD_AGENT_HINT = 'The agent a Build uses when you pick none. Automatic uses this project\'s default chat agent when it can build, otherwise Claude Code.';
+export const DEFAULT_BUILD_AGENT_AUTOMATIC = 'Automatic';
+export const DEFAULT_BUILD_AGENT_SAVED = 'Saved';
 export const DOCKER_READY_BUT_UNSUPPORTED_TEXT = "Docker is running here, but this version of Ogden Agents can't build inside it yet.";
 export const ATTENDED_EXPLAINED_TEXT = 'Each command Claude Code wants to run asks you first, in the build session.';
 export const NO_INSTALL_FOR_YOU_TEXT = 'Ogden Agents never installs anything for you.';

@@ -122,8 +122,8 @@ describe('settings (story 5.8)', () => {
   it("the project's build settings and the install's run limits are read and changed within their bounds", async () => {
     const s = await setup();
     const url = apiPath(API_ROUTES.workspaceBuildSettings, { wsId: s.wsId });
-    expect(WorkspaceBuildSettingsResponse.parse(await (await request(s.server, s.tab, 'GET', url)).json()).settings).toEqual({ maxConcurrentRuns: 2, testCommand: null });
-    expect(WorkspaceBuildSettingsResponse.parse(await (await request(s.server, s.tab, 'PATCH', url, { maxConcurrentRuns: 3, testCommand: 'make check' })).json()).settings).toEqual({ maxConcurrentRuns: 3, testCommand: 'make check' });
+    expect(WorkspaceBuildSettingsResponse.parse(await (await request(s.server, s.tab, 'GET', url)).json()).settings).toEqual({ maxConcurrentRuns: 2, testCommand: null, defaultBuildAgentId: null });
+    expect(WorkspaceBuildSettingsResponse.parse(await (await request(s.server, s.tab, 'PATCH', url, { maxConcurrentRuns: 3, testCommand: 'make check' })).json()).settings).toEqual({ maxConcurrentRuns: 3, testCommand: 'make check', defaultBuildAgentId: null });
     for (const bad of [{ maxConcurrentRuns: 0 }, { maxConcurrentRuns: 11 }, {}, { testCommand: 'a\nb' }, { other: 1 }]) {
       expect((await request(s.server, s.tab, 'PATCH', url, bad)).status, JSON.stringify(bad)).toBe(400);
     }

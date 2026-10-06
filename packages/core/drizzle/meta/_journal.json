@@ -218,6 +218,13 @@
       "when": 1791273475697,
       "tag": "0030_orchestration_routing",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1791283874275,
+      "tag": "0031_build_default_agent",
+      "breakpoints": true
     }
   ]
 }

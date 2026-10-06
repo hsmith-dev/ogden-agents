@@ -92,7 +92,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
   const dispatch = createDispatcher(ctx, start, outcome);
   const reviewer = createReviewer(ctx);
   const {
-    bmad, trust, entities, tickets, vcs, sandbox, runner, runnerFor, chat, dataDir, report, recorder, writeResult, guarded, uncommittedPlanFiles,
+    bmad, trust, entities, tickets, vcs, sandbox, runner, runnerFor, defaultAgentFor, chat, dataDir, report, recorder, writeResult, guarded, uncommittedPlanFiles,
     requireGit, cleanupDeps, requireSandbox, inDispatch, timers, pendingNotes, bump, draining, state, disarmDeadline, verificationOf,
     latestRun, release, cleanUp, requireCleanCheckout
   } = ctx;
@@ -113,7 +113,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       if (parsed.data.ref === undefined) throw new ValidationError(ALL_READY_ASK_MESSAGE, [{ path: ['all'], message: ALL_READY_ASK_MESSAGE }]);
       const ref = checkedRef(parsed.data.ref);
       // Each agent builds through its own runner (epic 17): one with none is refused.
-      const agent = parsed.data.agent ?? runner.agent;
+      const agent = parsed.data.agent ?? defaultAgentFor(workspaceId);
       if (runnerFor(agent) === undefined) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
       return inDispatch(() => serializedByRepo(repoPath, () => startLocked(workspaceId, repoPath, ref, agent, parsed.data.mode)));
     },
@@ -122,7 +122,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       const { repoPath } = await guarded(workspaceId);
       const parsed = StartBuildRequest.safeParse(request);
       if (!parsed.success || parsed.data.all !== true) throw new ValidationError(ALL_READY_ASK_MESSAGE, [{ path: ['all'], message: ALL_READY_ASK_MESSAGE }]);
-      const agent = parsed.data.agent ?? runner.agent;
+      const agent = parsed.data.agent ?? defaultAgentFor(workspaceId);
       if (runnerFor(agent) === undefined) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
       // Every ready ticket goes unattended: a build with the user watching is one ticket at a time.
       if (parsed.data.mode === 'attended') throw new ValidationError(ALL_READY_ASK_MESSAGE, [{ path: ['mode'], message: ALL_READY_ASK_MESSAGE }]);
@@ -184,9 +184,12 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       await inDispatch(drainQueue);
     },
 
-    async sandboxStatus(workspaceId) {
+    async sandboxStatus(workspaceId, agent) {
       bmad.requireBmadFeature(workspaceId, 'builds');
-      return sandbox.status({ agent: runner.agent });
+      // For the agent asked about (the picker's choice), else the project's default build agent (epic 17).
+      const asked = agent ?? defaultAgentFor(workspaceId);
+      if (runnerFor(asked) === undefined) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
+      return sandbox.status({ agent: asked });
     },
 
     async buildAgents(workspaceId) {
@@ -203,7 +206,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         const check = await sandbox.check({ agent: each.agentId });
         agents.push(check.available ? { agentId: each.agentId, displayName: each.displayName, way: 'unattended', reason: null } : { agentId: each.agentId, displayName: each.displayName, way: 'attended_only', reason: check.reason });
       }
-      return { agents, defaultAgentId: runner.agent };
+      return { agents, defaultAgentId: defaultAgentFor(workspaceId) };
     },
 
     async review(workspaceId, ref) {

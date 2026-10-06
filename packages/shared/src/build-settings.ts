@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BlockedCode, RunPhase } from './build-runs.js';
+import { AgentId } from './events-common.js';
 import { RunId, WebhookId, WorkspaceId } from './ids.js';
 import { TICKET_REF_PATTERN } from './planning-board.js';
 import { IsoUtcTimestamp } from './time.js';
@@ -66,14 +67,16 @@ const testCommand = z
 export const WorkspaceBuildSettings = z.object({
   maxConcurrentRuns: perWorkspace.default(RUN_LIMIT_DEFAULTS.maxConcurrentRunsPerWorkspace),
   testCommand: testCommand.nullable().default(null),
+  /** The agent a Build with no choice uses here (epic 17); `null`: the project's default chat agent when it can build, else Claude Code. */
+  defaultBuildAgentId: AgentId.nullable().default(null),
 });
 export type WorkspaceBuildSettings = z.infer<typeof WorkspaceBuildSettings>;
 export const WorkspaceBuildSettingsResponse = z.object({ settings: WorkspaceBuildSettings });
 export type WorkspaceBuildSettingsResponse = z.infer<typeof WorkspaceBuildSettingsResponse>;
 export const UpdateWorkspaceBuildSettingsRequest = z
-  .object({ maxConcurrentRuns: perWorkspace.optional(), testCommand: testCommand.nullable().optional() })
+  .object({ maxConcurrentRuns: perWorkspace.optional(), testCommand: testCommand.nullable().optional(), defaultBuildAgentId: AgentId.nullable().optional() })
   .strict()
-  .refine((request) => request.maxConcurrentRuns !== undefined || request.testCommand !== undefined, 'Choose a setting to change.');
+  .refine((request) => request.maxConcurrentRuns !== undefined || request.testCommand !== undefined || request.defaultBuildAgentId !== undefined, 'Choose a setting to change.');
 export type UpdateWorkspaceBuildSettingsRequest = z.infer<typeof UpdateWorkspaceBuildSettingsRequest>;
 
 // ---- Notifications (E11-R5; app-wide, never piece-guarded) ----

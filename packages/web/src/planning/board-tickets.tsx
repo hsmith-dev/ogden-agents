@@ -40,7 +40,7 @@ import { BoardEpic } from './board-epic';
 import { useBoardLookBack, type BoardLookBack } from './board-look-back';
 import { BuildDialog } from './build-dialog';
 import { BoardBuildContext } from './board-build-context';
-import { commitPlanFiles, startBuild, startBuildAll, useWorkspaceRuns } from './builds-api';
+import { commitPlanFiles, fetchBuildAgents, startBuild, startBuildAll, useWorkspaceRuns } from './builds-api';
 import { cardStatusLine, groupBoard, indexTickets, unmetPrerequisites, type CardStatus } from './board-model';
 import { useBoardEvents, useMarkTicket, useTickets } from './planning-api';
 import { ReducedModeNotice } from './reduced-mode-notice';
@@ -228,6 +228,8 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
   const [committed, setCommitted] = useState<'committed' | 'nothing' | undefined>();
   // The ticket whose Build was refused for want of a sandbox: the Build dialog is open for it (story 5.6).
   const [dialogRef, setDialogRef] = useState<string | undefined>();
+  // Build itself opened the dialog because more than one agent can build here (epic 17), not because a sandbox was missing.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const pending = useRef(false);
   const started = useRef(builds?.onStarted);
   started.current = builds?.onStarted;
@@ -239,9 +241,18 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
       setBuildFailure(undefined);
       setCommitted(undefined);
       setAllStarted(undefined);
-      startBuild(wsId, ref)
+      // Epic 17: with more than one agent that can build, the person picks (the dialog), else Build goes straight to the one default agent.
+      // A failed read changes nothing: Build is as it was.
+      fetchBuildAgents(wsId)
+        .then((found) => found.agents.filter((agent) => agent.way !== 'unavailable').length >= 2, () => false)
+        .then((choose) => {
+          if (!choose) return startBuild(wsId, ref).then(({ session }) => started.current?.(session.id));
+          setPickerOpen(true);
+          setDialogRef(ref);
+          return undefined;
+        })
         .then(
-          ({ session }) => started.current?.(session.id),
+          () => undefined,
           (error: unknown) => {
             // No sandbox (story 5.6): the Build dialog says why and offers the choices, instead of an alert.
             if (isApiError(error, 'sandbox_unavailable')) {
@@ -299,9 +310,12 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
     },
     [wsId],
   );
-  const closeDialog = useCallback(() => setDialogRef(undefined), []);
+  const closeDialog = useCallback(() => {
+    setDialogRef(undefined);
+    setPickerOpen(false);
+  }, []);
   const onAttendedStarted = useCallback((sessionId: string) => started.current?.(sessionId), []);
-  return { onBuild: builds === undefined ? undefined : build, onBuildAll: builds === undefined ? undefined : buildAll, allStarted, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted };
+  return { onBuild: builds === undefined ? undefined : build, onBuildAll: builds === undefined ? undefined : buildAll, allStarted, building, buildFailure, commit, committing, committed, dialogRef, pickerOpen, closeDialog, onAttendedStarted };
 }
 
 /** Build on the board (story 5.2): given only with Unattended builds on; `onStarted` opens the new build session. */
@@ -330,7 +344,7 @@ function Board({
   const [showDropped, setShowDropped] = useState(false);
   const droppedId = useId();
   const { onChoose, saving, announcement, failure } = useBoardMarks(wsId, updatedAt, showDropped, droppedId);
-  const { onBuild, onBuildAll, allStarted, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted } = build;
+  const { onBuild, onBuildAll, allStarted, building, buildFailure, commit, committing, committed, dialogRef, pickerOpen, closeDialog, onAttendedStarted } = build;
   const { controls: lookBackControls, reducedText: lookBackReduced, failure: lookBackFailure } = useBoardLookBack(wsId, lookBack);
   const commitRef = buildFailure?.commitRef;
   // Story 5.8: a ticket whose build waits for a slot says Queued on its card.
@@ -406,7 +420,7 @@ function Board({
           {lookBackFailure}
         </Notice>
       )}
-      {dialogRef === undefined ? null : <BuildDialog wsId={wsId} ticketRef={dialogRef} onClose={closeDialog} onStarted={onAttendedStarted} />}
+      {dialogRef === undefined ? null : <BuildDialog wsId={wsId} ticketRef={dialogRef} picker={pickerOpen} onClose={closeDialog} onStarted={onAttendedStarted} />}
       {committed === undefined ? null : (
         <Notice role="status" data-testid="board-plan-committed" data-committed={committed}>
           {committed === 'nothing' ? NO_PLAN_FILES_TO_COMMIT_TEXT : PLAN_FILES_COMMITTED_TEXT}

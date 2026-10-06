@@ -32,6 +32,21 @@ export function createBuildContext(deps: BuildsDeps) {
   const commandEnv = deps.commandEnv ?? (() => ({}));
   /** The runner that builds with `agent` (epic 17: one per agent, found by id); `undefined` for an agent that cannot build. */
   const runnerFor = (agent: BuildAgent): BuildRunnerPort | undefined => [runner, ...(deps.runners ?? [])].find((each) => each.agent === agent);
+  /**
+   * The agent a Build with no choice uses in a project (epic 17): the project's default build agent when it can build,
+   * else its default chat agent when that can build, else the install's (Claude Code).
+   */
+  const defaultAgentFor = (workspaceId: WorkspaceId): BuildAgent => {
+    try {
+      const own = settings.workspaceSettings(workspaceId).defaultBuildAgentId;
+      if (own !== null && runnerFor(own) !== undefined) return own;
+      const chatDefault = deps.projectDefaultAgent?.(workspaceId);
+      if (chatDefault !== undefined && runnerFor(chatDefault) !== undefined) return chatDefault;
+    } catch {
+      // A project that is gone, or a setting that can't be read: the install's default agent.
+    }
+    return runner.agent;
+  };
   /** The runner of a run's agent (an old run has none stored: the default build agent's); `undefined` when its agent can no longer build (never another agent's runner). */
   const runnerOf = (run: Pick<Run, 'agent'>): BuildRunnerPort | undefined => runnerFor(run.agent ?? runner.agent);
   const aware = deps.runAwareTickets ?? tickets;
@@ -261,7 +276,7 @@ export function createBuildContext(deps: BuildsDeps) {
   const fn: BuildFns = { armDeadline: () => undefined, scheduleDrain: () => undefined };
 
   return {
-    deps, bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, runnerFor, runnerOf, chat, buildSessions, dataDir, settings, commandEnv,
+    deps, bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, runnerFor, runnerOf, defaultAgentFor, chat, buildSessions, dataDir, settings, commandEnv,
     aware, paths, mask, report, recorder, writeResult, guarded, uncommittedPlanFiles, requirePlanCommitted, requireGit, cleanupDeps,
     sandboxFor, requireSandbox, unattendedSetup, hasCapacity, deadlineFromNow, inDispatch, setTimer, timers, pendingNotes, generation,
     bump, draining, state, rerunSignal, abortRerun, abortAllReruns, stopAgent, disarmDeadline, verificationOf, latestRun, release, cleanUp, requireCleanCheckout, fn

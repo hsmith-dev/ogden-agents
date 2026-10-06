@@ -85,3 +85,4 @@ A terminal workspace of panes running the user's own CLIs, behind Developer mode
 - Waits on epic 11 because: Needs you and `NotifierPort` webhooks are its stories.
 - Waits on epic 2 because: the sidebar and per-tab token gate are 2.1 and 2.11.
 - Deltas proposed (not applied): spec CAP-23; AD-6 note (panes are separate PTYs with the same never-logged rule, status derived in memory); AD-16 note (pane children: allowlist, no secrets, the user's own CLI logins untouched); `agent-matrix.md` columns for CLI executable and pane notes; EXPERIENCE.md Terminals workspace, pane status and install-detection states.
+- 2026-10-06 (build): stories 16.2 to 16.10 are merged. 16.8b (a pane event to webhooks) and 16.9b (open a chat's session in a pane) are not built and wait for the user (see deferred-work.md). The user's live checks with the real CLIs, on a Mac and on Windows, are listed in the plan of story 16.11.

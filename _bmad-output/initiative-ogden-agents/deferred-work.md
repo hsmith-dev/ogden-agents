@@ -128,6 +128,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 14.10 (proposed): The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one. From 14.3 review. (log: "The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one")
 - 14.10 (proposed): Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry). From 14.3 review. (log: "Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry)")
 - 14.10 (proposed): shared/src/events.ts is over 600 lines and shared compiles with DOM types. From 14.3 review. (log: "shared/src/events.ts is over 600 lines and shared compiles with DOM types")
+- 14.11 (live check): The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model. From 14.9 review. (log: "The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model")
 
 ## Log
 
@@ -876,3 +877,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-epic-contracts-and-stubs-endpoint-localmodelport-no-account-descriptor-and-the-fake-server-plan.md`
   summary: shared/src/events.ts is over 600 lines and shared compiles with DOM types: events.ts grew from 615 to 621 lines with the endpoint event and shared's tsconfig gained the DOM lib only for URL; a narrower URL declaration and a split of events.ts are the sweep's.
   evidence: 14.3 correctness review.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-bmad-skills-reach-the-local-model-where-planning-is-on-nothing-where-it-is-off-plan.md`
+  summary: The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model: spike 14.1 says it reads `.opencode/skills` unless project config is disabled and walks up from the project folder; whether `OPENCODE_DISABLE_PROJECT_CONFIG` covers `.opencode/skills` is a live check on the real harness.
+  evidence: 14.9 review; spike 14.1 report.

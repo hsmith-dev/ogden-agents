@@ -261,6 +261,28 @@ const two = () => {
 };
 const puts = () => fakes.requests.filter((r) => r.method === 'PUT').map((r) => JSON.parse(r.body!).layout);
 
+describe('notifications are the user\'s opt in (story 16.8)', () => {
+  it('each pane has a Notify me switch, off by default, that asks the server and says what it shows', async () => {
+    fakes.panes = [pane({ state: 'running' })];
+    await mount();
+    const box = screen.getByTestId('pane-notify') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(box.closest('label')!.getAttribute('title')).toContain('never what it printed');
+    fireEvent.click(box);
+    await settle();
+    const patch = fakes.requests.find((r) => r.method === 'PATCH')!;
+    expect(JSON.parse(patch.body!)).toEqual({ notify: true });
+  });
+
+  it('shows the opt in the server has, with a name for screen readers', async () => {
+    fakes.panes = [pane({ state: 'running', notify: true })];
+    await mount();
+    const box = screen.getByTestId('pane-notify') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(box.getAttribute('aria-label')).toBe('Notify me when Terminal 1 may need me');
+  });
+});
+
 describe('stopped panes after a restart (story 16.7)', () => {
   it('says it is stopped and offers Start, with the program\'s own resume words and an arguments field for a CLI', async () => {
     fakes.launchers = [launcher('example', 'Example CLI', 'found', { resumeHint: 'Run example --resume to pick up an earlier session.' })];

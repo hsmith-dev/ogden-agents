@@ -118,6 +118,18 @@ describe('the layout survives a restart', () => {
   });
 });
 
+describe('the opt in to notifications survives a restart (story 16.8)', () => {
+  it('is kept per pane', async () => {
+    const { core, workspace } = setup();
+    const first = boot(core);
+    const a = await first.panes.open(workspace.id, SIZE);
+    await first.panes.open(workspace.id, SIZE);
+    first.panes.setNotify(workspace.id, a.id, true);
+    first.panes.dispose();
+    expect(boot(core).panes.list(workspace.id).map((p) => p.notify)).toEqual([true, false]);
+  });
+});
+
 describe('what is kept (E16-R8, AD-6, AD-16)', () => {
   it('holds no output and no typed arguments: only ids, the launcher, names and the layout shape', async () => {
     const { core, workspace } = setup();
@@ -200,9 +212,9 @@ describe('review findings (16.7)', () => {
 
   it('rows that are not what core writes (a bad name or launcher id) are left out on restore', async () => {
     const { core, workspace } = setup();
-    core.paneStore.savePane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W5', workspaceId: workspace.id, launcherId: 'shell', title: 'bad\u0007name', createdAt: 1 });
-    core.paneStore.savePane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W6', workspaceId: workspace.id, launcherId: 'Bad Launcher!', title: 'ok', createdAt: 2 });
-    core.paneStore.savePane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W7', workspaceId: workspace.id, launcherId: 'shell', title: 'Fine', createdAt: 3 });
+    core.paneStore.savePane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W5', workspaceId: workspace.id, launcherId: 'shell', title: 'bad\u0007name', createdAt: 1, notify: false });
+    core.paneStore.savePane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W6', workspaceId: workspace.id, launcherId: 'Bad Launcher!', title: 'ok', createdAt: 2, notify: false });
+    core.paneStore.savePane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W7', workspaceId: workspace.id, launcherId: 'shell', title: 'Fine', createdAt: 3, notify: false });
     expect(core.paneStore.load().panes.map((p) => p.title)).toEqual(['Fine']);
   });
 

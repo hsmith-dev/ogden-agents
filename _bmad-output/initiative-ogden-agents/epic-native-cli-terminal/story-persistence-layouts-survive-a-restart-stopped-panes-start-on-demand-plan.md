@@ -46,7 +46,7 @@ context:
 
 ## Code Map
 
-- `core/src/db/schema.ts` and `drizzle/0022_terminal_panes.sql` (`terminal_panes`, `terminal_layouts`), `pane-store.ts`, `core.ts` (`paneStore`), `panes.ts` (restore, persist, `stopAll`, pids, Start with arguments).
+- `core/src/db/schema.ts` and `drizzle/0024_terminal_panes.sql` (`terminal_panes`, `terminal_layouts`), `pane-store.ts`, `core.ts` (`paneStore`), `panes.ts` (restore, persist, `stopAll`, pids, Start with arguments).
 - `adapters/src/pane-pids/index.ts` (records, sweep, `ps` and PowerShell start times).
 - `server/src/start-panes.ts` (store, pids, sweep at start), `pane-routes.ts`; `web/src/terminal/pane-view.tsx` (Stopped, Start, resume words, arguments).
 - Tests: `core/test/pane-persistence.test.ts`, `panes.test.ts`, `adapters/test/pane-pids.test.ts`, `server/test/panes.test.ts`, `web/test/terminals.dom.test.tsx`.

@@ -126,8 +126,8 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
       };
     },
     // claude-agent-acp 0.84 passes `_meta.claudeCode.options.settings` to the CLI as its flag settings; it can't be changed later.
-    sessionMeta: (protectedPaths, sandbox) => {
-      const options = claudeSessionOptions(protectedPaths, sandbox);
+    sessionMeta: (protectedPaths, sandbox, attended) => {
+      const options = claudeSessionOptions(protectedPaths, sandbox, attended === true);
       return options === undefined ? undefined : { claudeCode: { options } };
     },
     toolInputPaths: TOOL_INPUT_PATHS,

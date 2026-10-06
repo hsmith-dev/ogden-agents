@@ -43,32 +43,10 @@ import {
   type GitResult, type GitVcsOptions, parseGitVersion, gitVersionAtLeast, REVISION, RUN_BRANCH, MAX_IMPORT_BYTES, checkBranch, checkRevision,
   checkPath, checkRelative, SAFE_CONFIG, realOf, isInside, storeIsPlain
 } from './checks.js';
+import { headerPaths, MAX_PATCH_BYTES } from './patch.js';
 
 export { gitVersionAtLeast, parseGitVersion, type GitVcsOptions } from './checks.js';
-
-/** The most a saved fix may be, in bytes. */
-const MAX_PATCH_BYTES = 1024 * 1024;
-
-/** Every path a unified git patch's headers name: `diff --git`, `rename`/`copy` from and to, `---` and `+++`. Quoted paths are kept as written (git's own check refuses what it can't read). */
-export function headerPaths(patch: string): string[] {
-  const found: string[] = [];
-  const strip = (name: string) => name.replace(/^"?(?:[ab]\/)?/, '').replace(/"$/, '');
-  for (const line of patch.split(/\r?\n/)) {
-    let match = /^diff --git (?:"?a\/(.*?)"? )"?b\/(.*?)"?$/.exec(line);
-    if (match !== null) {
-      found.push(match[1]!, match[2]!);
-      continue;
-    }
-    match = /^(?:rename|copy) (?:from|to) (.*)$/.exec(line);
-    if (match !== null) {
-      found.push(strip(match[1]!).replace(/^"/, ''));
-      continue;
-    }
-    match = /^(?:---|\+\+\+) (?!\/dev\/null)(.*?)(?:\t.*)?$/.exec(line);
-    if (match !== null) found.push(strip(match[1]!));
-  }
-  return found.filter((path) => path !== '');
-}
+export { headerPaths } from './patch.js';
 
 export function createGitVcs(options: GitVcsOptions): VcsPort {
   const git = options.git ?? 'git';

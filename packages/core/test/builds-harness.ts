@@ -32,6 +32,8 @@ export const REVISION = 'a'.repeat(40);
 export interface Rerun {
   runs: SandboxRunRequest[];
   result: SandboxRunResult | undefined;
+  /** When set, a re-run does not answer until its signal aborts (a test re-run in progress). */
+  hang?: boolean;
 }
 export const newRerun = (): Rerun => ({ runs: [], result: { exitCode: 0, timedOut: false, output: 'Tests: 5 passed, 5 total\n' } });
 
@@ -49,6 +51,10 @@ export function fakeSandbox(answer: () => SandboxCheck, rerun: Rerun = newRerun(
     // The re-run of the project's tests: passes unless a test says otherwise (`runs` records each command).
     run: async (request) => {
       rerun.runs.push(request);
+      if (rerun.hang === true) {
+        await new Promise<void>((resolve) => (request.signal?.aborted === true ? resolve() : request.signal?.addEventListener('abort', () => resolve(), { once: true })));
+        return { exitCode: null, timedOut: false, output: '' };
+      }
       return rerun.result;
     },
   };

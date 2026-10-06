@@ -308,7 +308,7 @@ export function createApp({
     const addProject = createAddProject({ chat, defaults: newProjectDefaults, bmad });
     registerChatRoutes(app, chat, log, { terminalAvailability, addProject, agentDefaults });
   }
-  registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, log });
+  registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, builds, log });
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });

@@ -313,6 +313,9 @@ describe.each(ROWS)('every agent that builds: $id', { timeout: 90_000 }, (row) =
     expect(ended.run.blockedCode).toBe('usage_limit');
     expect(ended.run.reason).toContain(row.name);
     expect(ended.run.reason).toContain('usage limit');
+    // In a build the offer is the build's, never the chat's.
+    expect(ended.run.reason).toContain('build it again with another agent');
+    expect(ended.run.reason).not.toContain('chat');
     expect(ended.run.reason).not.toContain(row.usageText);
   });
 
@@ -440,6 +443,23 @@ describe('after a usage limit, build it again with another agent', () => {
     const runs = s.server.core.entities.listRuns(s.wsId).filter((run) => run.ticketRef === '1.1');
     expect(runs.map((run) => [run.agent, run.decision])).toEqual(expect.arrayContaining([['claude-code', 'rejected'], ['codex', null]]));
     expect(runs.find((run) => run.agent === 'codex')!.worktreePath).not.toBe(first.run.worktreePath);
+  });
+});
+
+describe('building again with another agent that cannot build changes nothing', () => {
+  it('a skill that is not in the project refuses it before anything is discarded: the blocked run, its copy and its work stay', async () => {
+    const codex = ROWS.find((row) => row.id === 'codex')!;
+    const claude = ROWS.find((row) => row.id === 'claude-code')!;
+    // No Codex skill in this project.
+    const s = await setup(claude, { wiring: codex.wire() ?? {}, env: { FAKE_ACP_BUILD_FAIL: 'usage', FAKE_ACP_BUILD_FAIL_TEXT: claude.usageText, CODEX_API_KEY: KEYS.codex[1] } });
+    const first = BuildResponse.parse(await (await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: s.wsId }), { ref: '1.1', agent: 'claude-code', mode: 'attended' })).json());
+    expect((await s.settled()).run.blockedCode).toBe('usage_limit');
+    const again = await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuildReject, { wsId: s.wsId, ref: '1.1' }), { retry: true, agent: 'codex' });
+    expect(again.status).toBe(409);
+    expect(JSON.stringify(await again.json())).toContain('bmad-build-auto');
+    const kept = s.server.core.entities.getRun(first.run.id)!;
+    expect(kept).toMatchObject({ outcome: 'blocked', decision: null });
+    expect(existsSync(first.run.worktreePath!)).toBe(true);
   });
 });
 

@@ -125,6 +125,13 @@ export type BlockedCode = z.infer<typeof BlockedCode>;
 /** The blocked codes that are a checkpoint pause: Retry resumes the same run's work (5.4, 5.7). */
 export const CHECKPOINT_BLOCKED_CODES: readonly BlockedCode[] = ['checkpoint_plan', 'checkpoint_done'];
 
+/**
+ * What an agent's usage limit reason ends with in a chat (the handoff offer), and in a build (epic 17): the reason itself is the
+ * adapter's one sentence; the tail follows where it is shown.
+ */
+export const USAGE_LIMIT_CHAT_TAIL = ' Continue this chat with another agent while it cools down, or try again later.';
+export const USAGE_LIMIT_BUILD_TAIL = ' Try again later, or build it again with another agent.';
+
 /** The plain sentence for each blocked code but `time_limit`, whose sentence names its minutes ({@link blockedSentence}). */
 export const BLOCKED_SENTENCES: Readonly<Record<Exclude<BlockedCode, 'time_limit'>, string>> = {
   unclear_intent: 'The story was not clear enough to build. Add detail and retry.',

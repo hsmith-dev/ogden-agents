@@ -62,4 +62,4 @@ Assumption change (Notes, question 10): the recommended default said building wi
 
 ## Review Triage Log
 
-(filled after the review)
+One combined security and correctness review (an independent agent), loop 1; no blocker. Confirmed: the reason shown is the adapter's one fixed sentence (the agent's name and key label), never its raw error, masked and bounded again on the run; nothing retries by itself; the reject path goes through the same sandbox and plan checks. Fixed: building again with another agent is checked (the sandbox, the skill) before anything is discarded, so a refusal leaves the blocked run, its copy and its work as they were (tested); the usage limit sentence ends with the build's offer in a build, not the chat's (one sentence, two tails, in `build-runs.ts`; tested for every agent). Kept and documented: a plan that says built or blocked wins over an agent error code (a built plan is still verified, a halt carries the skill's own code). Noted: the sign in sentence has an arrow ("Settings → Agents"), which is not a dash.

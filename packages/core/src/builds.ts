@@ -294,6 +294,14 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       const rejected = await serializedByRepo(repoPath, async () => {
         await guarded(workspaceId);
         const run = latestRun(workspaceId, checked);
+        // Building again with another agent is checked before anything is discarded (epic 17): a sandbox that is gone, or a skill that
+        // is not in the project, refuses it and leaves the run, its copy and its work as they were.
+        if (parsed.data.retry && parsed.data.agent !== undefined && parsed.data.agent !== run.agent) {
+          const again = parsed.data.agent;
+          if (run.sandbox !== ATTENDED_SANDBOX) await requireSandbox(again);
+          const noSkill = runnerFor(again) !== runner ? deps.skillReach?.(again, repoPath) : undefined;
+          if (noSkill !== undefined) throw new BuildRefusedError('plan_uncommitted', noSkill);
+        }
         if (run.outcome === 'running') throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
         // An approved run is merged: never rejected after (its branch is gone since story 5.5).
         if (run.decision === 'approved') throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);

@@ -3,7 +3,7 @@
  * verification, the per-run result read back, the outcome and the done
  * checkpoint.
  */
-import { ATTENDED_SANDBOX, blockedSentence, RUN_REASON_AGENT_ERROR, RUN_REASON_EMPTY_DIFF, RUN_REASON_NO_NETWORK, RUN_REASON_NOT_BUILT, RUN_REASON_PROTECTED_DIFF, RUN_REASON_RESULT_MISMATCH, RUN_REASON_SCRIPTS_CHANGED, RUN_REASON_UNREADABLE, type BlockedCode, type Run, type TicketDetail, type VerificationResult } from '@ogden-agents/shared';
+import { ATTENDED_SANDBOX, blockedSentence, USAGE_LIMIT_BUILD_TAIL, USAGE_LIMIT_CHAT_TAIL, RUN_REASON_AGENT_ERROR, RUN_REASON_EMPTY_DIFF, RUN_REASON_NO_NETWORK, RUN_REASON_NOT_BUILT, RUN_REASON_PROTECTED_DIFF, RUN_REASON_RESULT_MISMATCH, RUN_REASON_SCRIPTS_CHANGED, RUN_REASON_UNREADABLE, type BlockedCode, type Run, type TicketDetail, type VerificationResult } from '@ogden-agents/shared';
 import { detectTestCommand, verifyRun } from './build-verify.js';
 import { runFolderOf, runShortOf } from './build-run-folder.js';
 import { ScriptsChangedError } from './errors.js';
@@ -120,7 +120,9 @@ export function createOutcome(ctx: BuildCtx) {
         // words (its name, the key it needs), with Retry. Never retried by itself, so a rejected key or a limit never loops.
         outcome = 'blocked';
         blockedCode = options.errorCode;
-        reason = options.agentReason === undefined || options.agentReason.trim() === '' ? blockedSentence(options.errorCode) : mask(options.agentReason).slice(0, MAX_RESULT_TEXT);
+        // The adapter's usage limit sentence ends with the chat's offer; in a build it ends with the build's.
+        const said = options.agentReason === undefined ? '' : mask(options.agentReason).trim();
+        reason = said === '' ? blockedSentence(options.errorCode) : (said.endsWith(USAGE_LIMIT_CHAT_TAIL.trim()) ? `${said.slice(0, said.length - USAGE_LIMIT_CHAT_TAIL.trim().length).trimEnd()}${USAGE_LIMIT_BUILD_TAIL}` : said).slice(0, MAX_RESULT_TEXT);
       } else {
         outcome = 'failed';
         reason = `${ended === 'error' ? RUN_REASON_AGENT_ERROR : RUN_REASON_NOT_BUILT(status)} ${RUN_REASON_NO_NETWORK}`;

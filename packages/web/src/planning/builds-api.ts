@@ -1,7 +1,9 @@
 import {
   API_ROUTES,
   apiPath,
+  AllReadyBuildsResponse,
   APPLY_FIX_FAILED,
+  BUILD_ALL_FAILED,
   CHECK_AGAIN_FAILED,
   APPROVE_FAILED,
   BUILD_DIALOG_LOAD_FAILED,
@@ -47,6 +49,12 @@ import { useEventStream, useSessionEvents } from '@/events/event-stream';
 export async function startBuild(wsId: string, ref: string, mode: BuildMode = 'unattended', auth: Auth = tabAuth): Promise<BuildResponse> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceBuilds, { wsId }), postJson(mode === 'attended' ? { ref, mode } : { ref }), BUILD_FAILED);
   return BuildResponse.parse(json);
+}
+
+/** `POST …/builds` with `all: true` (11.3): builds every ready ticket within the limits and keeps going; the runs started and the queue now. */
+export async function startBuildAll(wsId: string, auth: Auth = tabAuth): Promise<AllReadyBuildsResponse> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceBuilds, { wsId }), postJson({ all: true }), BUILD_ALL_FAILED);
+  return AllReadyBuildsResponse.parse(json);
 }
 
 /** `GET …/build-sandbox` (story 5.6): what a build's sandbox is here, in plain words, for the Build dialog. */

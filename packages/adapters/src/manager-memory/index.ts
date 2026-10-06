@@ -35,12 +35,12 @@ const WORDS = MANAGER_FAILURE_WORDS;
 const failure = (kind: ManagerFailureKind): ManagerFailure => ({ ok: false, kind, reason: WORDS[kind] });
 
 export type MemoryManager = ManagerPort & {
-  /** Every call it got: the method and the goal, nothing else. */
-  readonly calls: ReadonlyArray<{ method: 'proposePlan' | 'decideNext'; goal: string }>;
+  /** Every call it got: the method and the goal, and the routing rules the call carried (15.12), nothing else. */
+  readonly calls: ReadonlyArray<{ method: 'proposePlan' | 'decideNext'; goal: string; rules: ReadonlyArray<{ id: string; text: string }> }>;
 };
 
 export function createMemoryManager(script: MemoryManagerScript = {}): MemoryManager {
-  const calls: Array<{ method: 'proposePlan' | 'decideNext'; goal: string }> = [];
+  const calls: Array<{ method: 'proposePlan' | 'decideNext'; goal: string; rules: ReadonlyArray<{ id: string; text: string }> }> = [];
   let plans = 0;
   let decisions = 0;
   const next = (replies: readonly unknown[], index: number): unknown => replies[Math.min(index, replies.length - 1)];
@@ -75,7 +75,7 @@ export function createMemoryManager(script: MemoryManagerScript = {}): MemoryMan
   return {
     calls,
     async proposePlan(context, signal): Promise<ManagerResult<ManagerPlan>> {
-      calls.push({ method: 'proposePlan', goal: context.goal });
+      calls.push({ method: 'proposePlan', goal: context.goal, rules: context.rules ?? [] });
       if (script.failWith !== undefined) return failure(script.failWith);
       if (signal?.aborted === true) return failure('unavailable');
       const reply = script.plans === undefined || script.plans.length === 0 ? defaultPlan(context) : next(script.plans, plans);
@@ -84,7 +84,7 @@ export function createMemoryManager(script: MemoryManagerScript = {}): MemoryMan
       return validatePlanFor(context, reply);
     },
     async decideNext(context, signal): Promise<ManagerResult<ManagerDecision>> {
-      calls.push({ method: 'decideNext', goal: context.goal });
+      calls.push({ method: 'decideNext', goal: context.goal, rules: context.rules ?? [] });
       if (script.failWith !== undefined) return failure(script.failWith);
       if (signal?.aborted === true) return failure('unavailable');
       const reply = script.decisions === undefined || script.decisions.length === 0 ? defaultDecision(context) : next(script.decisions, decisions);

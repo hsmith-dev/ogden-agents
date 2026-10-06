@@ -5,6 +5,7 @@ import { keepSaved } from '@/api/keep-saved';
 import { updateOrchestrationEnabled } from '@/orchestrate/orchestrate-api';
 import { ProjectMode } from '@/orchestrate/mode-section';
 import { ProjectRoster } from '@/orchestrate/roster-editor';
+import { ProjectRoutingRules } from '@/orchestrate/routing-editor';
 import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
 import { PageSection } from '@/ui/page';
@@ -72,6 +73,7 @@ export function OrchestrationSection({ wsId }: { wsId: string }) {
       manager={
         <>
           <ProjectRoster wsId={wsId} />
+          <ProjectRoutingRules wsId={wsId} />
           <ProjectMode wsId={wsId} />
         </>
       }

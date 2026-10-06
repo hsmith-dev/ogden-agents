@@ -146,6 +146,8 @@ describe('the route helper', () => {
         `POST ${API_ROUTES.workspaceOrchestrationStop}`,
         `POST ${API_ROUTES.workspaceOrchestrationAnswer}`,
         `GET ${API_ROUTES.workspaceOrchestrationActivity}`,
+        `GET ${API_ROUTES.workspaceOrchestrationRouting}`,
+        `PUT ${API_ROUTES.workspaceOrchestrationRouting}`,
       ].sort(),
     );
     expect(guardedRouteKeys(app)).not.toContain(`GET ${API_ROUTES.workspaceOrchestration}`);

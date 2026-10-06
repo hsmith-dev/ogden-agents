@@ -60,6 +60,12 @@ export const REVIEW_LIMITS = { maxQuestionChars: 600, maxResultChars: 1_500, max
 export const BUILD_STEP_LIMITS = { maxReasonChars: 200, maxSummaryChars: 1_200 } as const;
 
 /**
+ * The user's routing rules (15.12): plain sentences about which kind of step goes to which worker, written by the person, at most
+ * `maxRules` of them and `maxRuleChars` characters each. They reach the manager as capped, masked data and are only ever suggestions.
+ */
+export const ROUTING_LIMITS = { maxRules: 10, maxRuleChars: 300 } as const;
+
+/**
  * The worker name a build step is stored under when Ogden is not told which agent builds (a stub). It is not an agent and is never sent
  * anything: builds run on the build runner's one agent (epic 5, until epic 8 widens them), which a plan never names.
  */
@@ -102,6 +108,7 @@ export const MANAGER_REFUSAL_CODES = [
   'build_field_forbidden',
   'build_ticket_unavailable',
   'duplicate_build_ticket',
+  'unknown_rule',
 ] as const;
 export const ManagerRefusalCode = z.enum(MANAGER_REFUSAL_CODES);
 export type ManagerRefusalCode = z.infer<typeof ManagerRefusalCode>;
@@ -141,6 +148,7 @@ export const MANAGER_REFUSAL_REASONS: Readonly<Record<ManagerRefusalCode, string
   build_field_forbidden: 'A build step names only a ticket. How a build runs is for you to choose in the Build dialog, so the manager cannot name an agent, a mode, a sandbox or a flag.',
   build_ticket_unavailable: 'The manager asked for a build of a ticket that is not on the board or is not ready to build now.',
   duplicate_build_ticket: 'The manager asked for the same ticket to be built twice.',
+  unknown_rule: 'The manager said a step followed a routing rule that does not exist.',
 };
 
 export type ManagerCheck<T> = { ok: true; value: T } | { ok: false; code: ManagerRefusalCode; reason: string };
@@ -177,6 +185,13 @@ const block = (max: number) =>
 export const ManagerStepId = z.string().min(1).max(MANAGER_LIMITS.maxStepIdChars).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, BAD_REFERENCE);
 export type ManagerStepId = z.infer<typeof ManagerStepId>;
 
+/**
+ * A routing rule's id (15.12): `r` and a number. Ogden gives it when the rule is saved and it stays the rule's own, so a plan that names it
+ * keeps meaning that rule. Whether it exists is checked in code against the project's rules.
+ */
+export const RoutingRuleId = z.string().regex(/^r[1-9][0-9]{0,3}$/, BAD_REFERENCE);
+export type RoutingRuleId = z.infer<typeof RoutingRuleId>;
+
 /** The chat a step goes to: `new`, or one of the project's chats by its id. Anything else is refused. */
 export const NEW_CHAT = 'new';
 export const ManagerChatRef = z.union([z.literal(NEW_CHAT), SessionId]);
@@ -203,6 +218,11 @@ export const ManagerPlanStep = z.strictObject({
    * the rest in code: the worker is the roster's reviewer, the step is a prerequisite, the question is short.
    */
   review_of: ManagerStepId.optional(),
+  /**
+   * 15.12: the routing rule this step followed, by its id. Optional, so every plan from before is still valid. A suggestion only: Ogden
+   * checks the id exists, and the roster, the vendor's terms and the mode are checked as before whatever the rule says.
+   */
+  rule: RoutingRuleId.optional(),
 });
 export type ManagerPlanStep = z.infer<typeof ManagerPlanStep>;
 
@@ -219,6 +239,8 @@ export const ManagerBuildStep = z.strictObject({
   build: z.strictObject({ ticket: ManagerBuildTicket }),
   reason: line(BUILD_STEP_LIMITS.maxReasonChars),
   depends_on: z.array(ManagerStepId).max(MANAGER_LIMITS.maxSteps),
+  /** 15.12: the routing rule this step followed, as on a worker step. */
+  rule: RoutingRuleId.optional(),
 });
 export type ManagerBuildStep = z.infer<typeof ManagerBuildStep>;
 
@@ -421,7 +443,7 @@ function codeFor(error: z.ZodError, value: unknown): ManagerRefusalCode {
     else if (last === 'instruction' && issue.code === 'too_big') consider(2, 'instruction_too_long');
     else if (issue.code === 'custom' && issue.message === BAD_TEXT) consider(2, 'bad_text');
     else if (last === 'worker' || last === 'goal' || last === 'reason' || last === 'question') consider(2, last === 'worker' ? 'bad_reference' : 'bad_text');
-    else if (issue.message === BAD_REFERENCE || last === 'chat' || last === 'review_of' || last === 'id' || last === 'step_id' || path.at(-2) === 'depends_on') consider(2, 'bad_reference');
+    else if (issue.message === BAD_REFERENCE || last === 'chat' || last === 'review_of' || last === 'rule' || last === 'id' || last === 'step_id' || path.at(-2) === 'depends_on') consider(2, 'bad_reference');
     else consider(3, 'missing_field');
   }
   return best?.code ?? 'missing_field';
@@ -441,6 +463,8 @@ export interface ManagerPlanCheckContext {
   buildable?: readonly string[] | undefined;
   /** The agent id builds run on (15.11), given by the server's wiring: a review of a build step must be by another agent where one is ready. Absent: not checked. */
   builder?: string | undefined;
+  /** The ids of the project's routing rules (15.12). A step's `rule` may name only one of them; absent: none, so no step may name a rule. */
+  rules?: readonly string[] | undefined;
 }
 
 /** Whether any string inside `value` holds a secret (masking would change it): a manager never names one, so such a reply is refused. */
@@ -487,6 +511,7 @@ export function checkManagerPlan(value: unknown, context: ManagerPlanCheckContex
   if (work.some((step) => step.chat !== NEW_CHAT && !(context.chats?.[step.worker] ?? []).includes(step.chat))) return refuse('bad_reference');
   const problem = linkProblem(parsed.data);
   if (problem !== undefined) return refuse(problem);
+  if (parsed.data.steps.some((step) => step.rule !== undefined && !(context.rules ?? []).includes(step.rule))) return refuse('unknown_rule');
   const buildProblem = buildStepProblem(parsed.data, context);
   if (buildProblem !== undefined) return refuse(buildProblem);
   const reviewProblem = reviewLinkProblem(parsed.data, context);
@@ -732,6 +757,12 @@ export const OrchestrationStep = z.object({
    * `chat` is `new`, `instruction` is the manager's short reason, and `sessionId` stays empty.
    */
   build: z.object({ ticketRef: ManagerBuildTicket, runId: RunId.nullable() }).nullable().default(null),
+  /**
+   * 15.12: the routing rule the manager said this step followed, as the rule read when the plan was made (its id and text), or `null`. Kept
+   * with the step, so deleting or changing the rule later does not change what the plan said. A suggestion the person can see, never a rule
+   * Ogden enforces.
+   */
+  rule: z.object({ id: RoutingRuleId, text: line(ROUTING_LIMITS.maxRuleChars) }).nullable().default(null),
 });
 export type OrchestrationStep = z.infer<typeof OrchestrationStep>;
 
@@ -775,6 +806,37 @@ export type OrchestrationSettings = z.infer<typeof OrchestrationSettings>;
 /** `GET /api/v1/workspaces/:wsId/orchestration`: 409 `feature_off` while the Orchestration piece is off. */
 export const OrchestrationSettingsResponse = z.object({ settings: OrchestrationSettings });
 export type OrchestrationSettingsResponse = z.infer<typeof OrchestrationSettingsResponse>;
+
+// ---- routing rules (15.12) ----
+
+/** One rule as the project keeps it: its id and the person's sentence. */
+export const RoutingRule = z.object({ id: RoutingRuleId, text: line(ROUTING_LIMITS.maxRuleChars) });
+export type RoutingRule = z.infer<typeof RoutingRule>;
+
+/** A project's rules, in the order the person put them, at most {@link ROUTING_LIMITS}. */
+export const RoutingRules = z.array(RoutingRule).max(ROUTING_LIMITS.maxRules);
+export type RoutingRules = z.infer<typeof RoutingRules>;
+
+/** `GET` and `PUT /api/v1/workspaces/:wsId/orchestration/routing`: the rules, and the caps the screen shows. */
+export const OrchestrationRoutingResponse = z.object({ rules: RoutingRules, maxRules: z.number().int(), maxRuleChars: z.number().int() });
+export type OrchestrationRoutingResponse = z.infer<typeof OrchestrationRoutingResponse>;
+
+/**
+ * `PUT` body: the whole list in the order wanted. An item with the `id` of a rule the project has keeps that rule's id; any other item is a
+ * new rule and gets one. Core holds each text to the rules (one clean line, no secret) and answers in plain words.
+ */
+export const SetOrchestrationRoutingRequest = z.object({ rules: z.array(z.object({ id: z.string().max(20).optional(), text: z.string().max(2_000) })).max(50) });
+export type SetOrchestrationRoutingRequest = z.infer<typeof SetOrchestrationRoutingRequest>;
+
+export const ORCHESTRATION_ROUTING_WORDS = {
+  intro: 'Write, in plain words, which kind of work should go to which worker, for example "tests go to the first agent" or "reviews go to a different agent". The manager reads them as your wishes and may follow them. They are suggestions only: they never give a worker anything the team, its terms or the mode do not already allow, and you still approve every step.',
+  none: 'No rules yet. The manager chooses on its own.',
+  tooMany: `A project can have at most ${ROUTING_LIMITS.maxRules} rules. Take one out first.`,
+  tooLong: `A rule can be at most ${ROUTING_LIMITS.maxRuleChars} characters.`,
+  badText: 'A rule needs plain text on one line, with no hidden or control characters.',
+  secret: 'That text looks like it holds a key or a secret. Take it out and try again.',
+  followed: 'Followed your rule',
+} as const;
 
 // ---- the tracer's runs over REST (15.3) ----
 

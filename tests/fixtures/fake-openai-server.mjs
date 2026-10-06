@@ -75,6 +75,8 @@ export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = nul
         const ms = json.messages ?? [];
         if (!Array.isArray(json.input)) entry.messageCount = ms.length;
         entry.userText = lastText(ms).slice(0, 120);
+        // The whole of the last user message (capped), so a test can see what a manager was told (15.12).
+        entry.promptText = lastText(ms).slice(0, 20000);
         const lt = [...ms].reverse().find((m) => m.role === 'tool');
         if (lt) entry.lastToolContent = (typeof lt.content === 'string' ? lt.content : JSON.stringify(lt.content)).slice(0, 200);
         entry.systemChars = ms.filter((m) => m.role === 'system').reduce((n, m) => n + String(typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).length, 0);

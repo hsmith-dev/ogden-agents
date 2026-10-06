@@ -105,10 +105,10 @@ describe('applyLabels', () => {
   it('labels a skill, keeps the SKILL.md description without a sentence, and leaves an unlabelled skill null', () => {
     const { skills, entryAction, labelled } = applyLabels(installed, labels, ALL);
     expect(skills).toEqual([
-      { name: 'alpha', description: 'Alpha in one sentence.', label: 'Describe your idea', group: 'planning', module: null, installedAt: null, next: { skill: 'beta', label: 'Next' } },
+      { name: 'alpha', description: 'Alpha in one sentence.', label: 'Describe your idea', group: 'planning', module: null, installedAt: null, next: { skill: 'beta', label: 'Next' }, scope: null, nexts: [] },
       // An unknown group is kept as written (the Plan page shows it under Other); a next that isn't installed is null.
-      { name: 'beta', description: 'Beta from SKILL.md.', label: 'Beta label', group: 'someday', module: null, installedAt: null, next: null },
-      { name: 'gamma', description: '', label: null, group: null, module: null, installedAt: null, next: null },
+      { name: 'beta', description: 'Beta from SKILL.md.', label: 'Beta label', group: 'someday', module: null, installedAt: null, next: null, scope: null, nexts: [] },
+      { name: 'gamma', description: '', label: null, group: null, module: null, installedAt: null, next: null, scope: null, nexts: [] },
     ]);
     expect(entryAction).toBe('alpha');
     expect(labelled).toBe(true);
@@ -128,9 +128,9 @@ describe('applyLabels', () => {
   it('labels only verified skills (entry 4.12): an unverified one keeps its SKILL.md text, is never the entry action, and no next points at it', () => {
     const { skills, entryAction, labelled } = applyLabels(installed, labels, new Set(['beta']));
     expect(skills).toEqual([
-      { name: 'alpha', description: 'Alpha from SKILL.md.', label: null, group: null, module: null, installedAt: null, next: null },
-      { name: 'beta', description: 'Beta from SKILL.md.', label: 'Beta label', group: 'someday', module: null, installedAt: null, next: null },
-      { name: 'gamma', description: '', label: null, group: null, module: null, installedAt: null, next: null },
+      { name: 'alpha', description: 'Alpha from SKILL.md.', label: null, group: null, module: null, installedAt: null, next: null, scope: null, nexts: [] },
+      { name: 'beta', description: 'Beta from SKILL.md.', label: 'Beta label', group: 'someday', module: null, installedAt: null, next: null, scope: null, nexts: [] },
+      { name: 'gamma', description: '', label: null, group: null, module: null, installedAt: null, next: null, scope: null, nexts: [] },
     ]);
     expect(entryAction).toBeNull();
     expect(labelled).toBe(true);

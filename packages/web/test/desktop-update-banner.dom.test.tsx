@@ -95,6 +95,20 @@ describe('the app update banner', () => {
     expect((await screen.findByTestId('app-update-banner')).textContent).toBe('Ogden 0.6.0 is installing. Ogden restarts in a moment.');
   });
 
+  it('says plainly why an update could not be installed, and that the current version keeps working', async () => {
+    state.notice = withApp({ update: { ...update, failed: 'Its signature did not check out.' } });
+    render(wrap(<UpdateBanner />));
+    const banner = await screen.findByTestId('app-update-banner');
+    expect(banner.textContent).toBe('Ogden 0.6.0 could not be installed: Its signature did not check out. The version you have keeps working.');
+    expect(screen.queryByRole('button', { name: 'Restart to update' })).toBeNull();
+  });
+
+  it('shows the release notes in Settings, About', async () => {
+    state.notice = withApp({});
+    render(wrap(<AboutPage />));
+    expect((await screen.findByTestId('about-update-notes')).textContent).toContain('Faster starts.');
+  });
+
   it('uses plain words: no dashes, no terminal, no npx', async () => {
     for (const app of [{ update: { ...update, downloaded: false } }, {}, { blocked: true, busy: 1 }, { restartRequested: true }]) {
       state.notice = withApp(app);

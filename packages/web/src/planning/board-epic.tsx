@@ -1,5 +1,6 @@
-import { BOARD_COLUMN_LABELS, BOARD_DROPPED_LABEL, type TicketRow } from '@ogden-agents/shared';
+import { BOARD_COLUMN_LABELS, BOARD_DROPPED_LABEL, LOOK_BACK_LABEL, type TicketRow } from '@ogden-agents/shared';
 import { memo, useId } from 'react';
+import { Button } from '@/ui/button';
 import { Text } from '@/ui/typography';
 import { cn } from '@/ui/utils';
 import type { BoardEpicGroup, CardStatus } from './board-model';
@@ -23,9 +24,13 @@ export interface BoardEpicProps {
   failures?: ReadonlyMap<string, string> | undefined;
   /** While a build is being started: every Build waits. */
   building?: boolean;
+  /** Look back on this epic (story 7.1), with Retrospectives on; stable across renders. */
+  onLookBack?: ((epic: string) => void) | undefined;
+  /** While a look-back is being started: every Look back waits. */
+  lookingBack?: boolean;
 }
 
-interface CardListProps extends Omit<BoardEpicProps, 'epic'> {
+interface CardListProps extends Omit<BoardEpicProps, 'epic' | 'onLookBack' | 'lookingBack'> {
   rows: readonly TicketRow[];
   label: string;
 }
@@ -47,16 +52,24 @@ function CardList({ wsId, rows, statuses, highlighted, label, onChoose, saving =
  * tree names it), then its seven status columns. At `md` and wider they sit
  * side by side in a horizontally scrollable, focusable, labelled region;
  * below `md` the non-empty ones stack as lists under their headings. With the
- * dropped filter on, its dropped tickets follow.
+ * dropped filter on, its dropped tickets follow. Story 7.1: with Retrospectives
+ * on, its header has **Look back on this epic**.
  */
-export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlighted, onChoose, saving = false, onBuild, building = false, queued, failures }: BoardEpicProps) {
+export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlighted, onChoose, saving = false, onBuild, building = false, queued, failures, onLookBack, lookingBack = false }: BoardEpicProps) {
   const headingId = useId();
   return (
     <section data-testid="board-epic" data-epic={epic.slug} className="flex flex-col gap-3">
-      <Text as="h2" variant="heading" id={headingId} className="flex items-baseline gap-2">
-        {epic.id === null ? null : <span className="font-mono text-mono-compact text-muted-foreground">{epic.id}</span>}
-        <span>{epic.title}</span>
-      </Text>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <Text as="h2" variant="heading" id={headingId} className="flex items-baseline gap-2">
+          {epic.id === null ? null : <span className="font-mono text-mono-compact text-muted-foreground">{epic.id}</span>}
+          <span>{epic.title}</span>
+        </Text>
+        {onLookBack === undefined ? null : (
+          <Button variant="outline" size="sm" aria-disabled={lookingBack || undefined} aria-busy={lookingBack || undefined} data-testid="board-look-back" onClick={() => (lookingBack ? undefined : onLookBack(epic.slug))}>
+            {LOOK_BACK_LABEL}
+          </Button>
+        )}
+      </div>
       <div
         role="region"
         aria-labelledby={headingId}

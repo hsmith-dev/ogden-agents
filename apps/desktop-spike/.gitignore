@@ -1,8 +1,0 @@
-# SPIKE 13.1: staged and generated files (see scripts/stage.mjs).
-stage/
-.node-cache/
-src-tauri/target/
-src-tauri/binaries/
-src-tauri/icons/
-src-tauri/gen/
-src-tauri/Cargo.lock

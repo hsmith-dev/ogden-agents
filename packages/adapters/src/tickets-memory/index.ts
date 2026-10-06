@@ -30,7 +30,7 @@ export type MemoryTicketText = Partial<Pick<TicketDetail, 'description' | 'verif
 
 export interface MemoryTicketStoreOptions {
   /** Each repo path's tree (rows may leave out story 4.2's defaulted fields). */
-  repos?: Readonly<Record<string, { tickets: readonly unknown[]; problems?: readonly string[]; folder?: string | null }>>;
+  repos?: Readonly<Record<string, { tickets: readonly unknown[]; problems?: readonly string[]; folder?: string | null; epics?: readonly unknown[] }>>;
   /** Each ref's entry text, for `find`. */
   text?: Readonly<Record<string, MemoryTicketText>>;
   /** Every operation rejects with this reason (a store that can't answer). */
@@ -52,7 +52,7 @@ export interface MemoryTicketStore extends TicketStorePort {
 export function createMemoryTicketStore(options: MemoryTicketStoreOptions = {}): MemoryTicketStore {
   const repos = new Map<string, TicketsResponse>();
   for (const [path, tree] of Object.entries(options.repos ?? {})) {
-    repos.set(path, TicketsResponse.parse({ tickets: tree.tickets, problems: tree.problems ?? [], folder: tree.folder ?? null }));
+    repos.set(path, TicketsResponse.parse({ tickets: tree.tickets, problems: tree.problems ?? [], folder: tree.folder ?? null, epics: tree.epics ?? [] }));
   }
   const text = options.text ?? {};
   const calls: unknown[][] = [];

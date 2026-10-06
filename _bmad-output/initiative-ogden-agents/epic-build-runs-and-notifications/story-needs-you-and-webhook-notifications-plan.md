@@ -44,7 +44,7 @@ context:
 
 ## Code Map
 
-- `packages/adapters/src/notify-webhook/index.ts` -- the real `NotifierPort`; `packages/core/src/notifications.ts`, `db/schema.ts`, `drizzle/0021_notifications.sql` -- the webhooks, what is sent and when.
+- `packages/adapters/src/notify-webhook/index.ts` -- the real `NotifierPort`; `packages/core/src/notifications.ts`, `db/schema.ts`, `drizzle/0023_notifications.sql` -- the webhooks, what is sent and when.
 - `packages/server/src/run-settings-routes.ts`, `start.ts`, `app.ts` -- routes and wiring.
 - `packages/web/src/shell/sidebar-model.ts`, `run-needs.ts`, `needs-you-group.tsx`, `notifications/*`, `routes/notifications-page.tsx` -- Needs you, notification kinds and the webhook settings.
 
@@ -62,7 +62,7 @@ context:
 
 ## Implementation Notes
 
-- 2026-10-05 (build): the browser notification switch of backlog 8 (Desktop notifications) is the opt-in toggle E11-R5 names; the install-level `browserNotifications` flag of 5.3's contract is stored and served but the page keeps using the saved browser setting. The existing notification kinds gained Build blocked and Ready for review. The tickets.toml verify names a local test HTTP server; the user's rule for this work is a fake client only, so the adapter takes an injected resolver and transport and no test opens a socket. Migration 0021 renumbered after origin/main's 0020.
+- 2026-10-05 (build): the browser notification switch of backlog 8 (Desktop notifications) is the opt-in toggle E11-R5 names; the install-level `browserNotifications` flag of 5.3's contract is stored and served but the page keeps using the saved browser setting. The existing notification kinds gained Build blocked and Ready for review. The tickets.toml verify names a local test HTTP server; the user's rule for this work is a fake client only, so the adapter takes an injected resolver and transport and no test opens a socket. Migration 0023 (renumbered after main's 0022 when the story landed).
 
 ## Plan Change Log
 

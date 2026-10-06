@@ -10,7 +10,7 @@
  * Test 1, no BMad hook (what a user of this version sees):
  * - What this version ships (epic 10 retro A3; story 5.2 adds Unattended
  *   builds): Planning, Board and Unattended builds can be turned on and the
- *   main switch works; only Retrospectives is greyed, Coming soon; Settings →
+ *   main switch works (story 7.1 ships Retrospectives too); Settings →
  *   New projects' BMad Method can be picked.
  *   Turning Board on asks to trust the project's scripts; Cancel leaves it
  *   off.
@@ -24,7 +24,7 @@
  *   after a server restart.
  * - Quit: no repo changed.
  *
- * Test 2, with `retrospectives` registered as available (its switch can be turned on)
+ * Test 2, with the guarded probe route
  * and the guarded probe route (`OGDEN_AGENTS_TEST_BMAD_AVAILABLE`,
  * `OGDEN_AGENTS_TEST_BMAD_PROBE`):
  * - Planning on and off in one tab shows in a second browser context; the
@@ -92,8 +92,8 @@ const SECOND_TAB_MS = 60_000;
 /** The trust dialog's title (`SCRIPT_TRUST_TITLE`; `planning-setup.ts` has imports this runner can't load). */
 const SCRIPT_TRUST_TITLE = "Run this project's BMad Method scripts?";
 
-/** The pieces this version ships (`SHIPPED_BMAD_PIECES` in the server; epic 4, and Unattended builds since story 5.2). */
-const SHIPPED: readonly string[] = ['planning', 'board', 'builds'];
+/** The pieces this version ships (`SHIPPED_BMAD_PIECES` in the server; epic 4, Unattended builds since story 5.2, Retrospectives since story 7.1). */
+const SHIPPED: readonly string[] = ['planning', 'board', 'builds', 'retrospectives'];
 
 const OWN_SKILL = '.claude/skills/x/SKILL.md';
 const OWN_SKILL_TEXT = "---\nname: x\ndescription: The repo's own skill.\n---\n\nDo the thing.\n";
@@ -226,7 +226,7 @@ test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer,
   const plainId = await addProject(page, plain.path);
   const withBmadId = await addProject(page, withBmad.path);
 
-  await test.step('what this version ships: Planning, Board and Unattended builds can be turned on, Retrospectives is Coming soon; New projects too', async () => {
+  await test.step('what this version ships: Planning, Board, Unattended builds and Retrospectives can be turned on; New projects too', async () => {
     expect(await piecesOf(page, plainId)).toEqual([]);
     await page.goto(`${launched.url}/w/${plainId}/settings#${WORKSPACE_SETTINGS_BMAD_ANCHOR}`);
     for (const piece of BMAD_PIECES) {
@@ -337,7 +337,7 @@ test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer,
 
 test('a piece on and off with a second tab following, the guard, and the default for new projects, on the installed package', async ({ page, browser }) => {
   test.setTimeout(180_000);
-  // Retrospectives registered as available (the hook adds a piece no release ships yet), and the route guarded by Planning.
+  // The route guarded by Planning (the hook can add a piece no release ships yet; every piece ships now).
   const server = bmadServer('journey-pieces', { available: ['retrospectives'], probe: true });
   servers.push(server);
   const earlier = server.addRepo({ prefix: 'earlier-repo-' });
@@ -360,7 +360,7 @@ test('a piece on and off with a second tab following, the guard, and the default
     const planning = switchIn(page, BMAD_PIECE_INFO.planning.label);
     await expect(planning).toHaveAttribute('aria-checked', 'false');
     await expect(planning).toBeEnabled();
-    // Registered by the hook: Retrospectives can be turned on; Unattended builds ships (story 5.2). None is Coming soon.
+    // Every piece ships (Unattended builds since story 5.2, Retrospectives since story 7.1): none is Coming soon.
     await expect(switchIn(page, BMAD_PIECE_INFO.retrospectives.label)).toBeEnabled();
     await expect(page.getByTestId('bmad-retrospectives-coming-soon')).toHaveCount(0);
     await expect(switchIn(page, BMAD_PIECE_INFO.builds.label)).toBeEnabled();

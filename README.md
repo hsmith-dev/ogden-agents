@@ -21,6 +21,24 @@ Early development, and honest about it:
 - pnpm 12
 - At least one agent you can sign in to (Ogden can install them for you from Settings > Agents)
 
+## Download
+
+Ogden Agents is also a desktop app for macOS and Windows. It needs nothing else installed: no Node, no terminal. Download the file for your computer from the [latest release](https://github.com/hsmith-dev/ogden-agents/releases/latest) (versions marked as a prerelease are early builds for people on the next channel):
+
+| Your computer | File |
+| --- | --- |
+| Mac, Apple silicon or Intel | `Ogden-Agents_<version>_universal.dmg` |
+| Windows, most PCs (x64) | `Ogden-Agents_<version>_x64-setup.exe` |
+| Windows on ARM (for example a Snapdragon laptop) | `Ogden-Agents_<version>_arm64-setup.exe` |
+
+Each release also has `SHA256SUMS-desktop.txt`, the checksum of every desktop file. The apps are **not signed yet**, so your computer warns the first time you open one. That is expected. How to open it:
+
+**macOS.** Open the `.dmg`, drag Ogden Agents to Applications, then open it from Applications. macOS says it can't verify the app. Click Done (not Move to Trash), open System Settings, then Privacy & Security, scroll to the message about Ogden Agents and click **Open Anyway**, and enter your password. Open the app again and click Open. You do this once. macOS 13.5 or later is needed.
+
+**Windows.** Run the installer. Windows SmartScreen says it protected your PC. Click **More info**, then **Run anyway**. The installer puts Ogden Agents in your own user folder and needs no administrator rights. It needs Microsoft's WebView2, which Windows 10 (since 2018) and Windows 11 already have; on an older PC the installer fetches it, so it needs an internet connection that one time.
+
+The app checks for a newer version each time it starts, downloads it in the background and shows **Restart to update**. It never restarts while an agent is working. Quitting the app stops Ogden Agents and the agents it started. The npm route above still works, and both share the same data and projects.
+
 ## Start Ogden
 
 These scripts need a published release. Until there is one, run from a checkout (see Run below). No terminal needed once there is one: download the start script for your computer, double-click it, and Ogden Agents opens in your browser. Download the scripts only from this project's [releases page](https://github.com/hsmith-dev/ogden-agents/releases/latest), where each release also lists their SHA-256 in `SHA256SUMS.txt`; they are also in this repository's [`start/`](start/) folder. The steps below tell your computer to run a script it can't verify, so never follow them for a "Start Ogden" file someone sent you.

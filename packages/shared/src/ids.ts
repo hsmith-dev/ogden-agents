@@ -15,6 +15,8 @@ export const ID_PREFIXES = {
   permissionRule: 'rule',
   /** A notification webhook target (story 5.3 contract; stored by 11.4). */
   webhook: 'hook',
+  /** An OpenAI-compatible endpoint the Local model talks to (epic 14 story 14.3). */
+  localEndpoint: 'lep',
 } as const;
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
 
@@ -48,3 +50,7 @@ export type PermissionRuleId = z.infer<typeof PermissionRuleId>;
 /** A notification webhook target (story 5.3; 11.4 stores it, its URL through `SecretStorePort`). */
 export const WebhookId = prefixedUlid('hook');
 export type WebhookId = z.infer<typeof WebhookId>;
+
+/** An OpenAI-compatible endpoint (epic 14 story 14.3); its key is `agent-endpoint-key/<id>` in the keychain (AD-16). */
+export const LocalEndpointId = prefixedUlid('lep');
+export type LocalEndpointId = z.infer<typeof LocalEndpointId>;

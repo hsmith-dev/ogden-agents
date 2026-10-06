@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { assigned, onWorkspaceStream } from './events-envelope.js';
 import { BmadSetupProgress, BmadSetupStatus } from './planning.js';
+import { EPIC_SLUG_PATTERN } from './retrospectives.js';
 
 /**
  * Epic 4's event schemas (story 4.2's contract): the per-project script
@@ -73,3 +74,30 @@ export const BmadSetupFailedInput = z.object({
 /** The setup failed. `reason` is plain words: no path, no script output, no secret. */
 export const BmadSetupFailedEvent = BmadSetupFailedInput.extend(assigned);
 export type BmadSetupFailedEvent = z.infer<typeof BmadSetupFailedEvent>;
+
+export const LookBackOfferDismissedInput = z.object({
+  type: z.literal('workspace.look_back_offer_dismissed'),
+  ...onWorkspaceStream,
+  payload: z.object({ epic: z.string().regex(EPIC_SLUG_PATTERN) }),
+});
+/**
+ * The user answered a finished epic's "Look back on it?" with Not now (epic 7,
+ * story 7.2): core keeps it per project and epic, and the offer never shows
+ * again for that epic. Appended once per epic; a repeat changes nothing.
+ */
+export const LookBackOfferDismissedEvent = LookBackOfferDismissedInput.extend(assigned);
+export type LookBackOfferDismissedEvent = z.infer<typeof LookBackOfferDismissedEvent>;
+
+export const RetrospectiveChangedInput = z.object({
+  type: z.literal('retrospective.changed'),
+  ...onWorkspaceStream,
+  payload: z.object({ epic: z.string().regex(EPIC_SLUG_PATTERN) }),
+});
+/**
+ * An epic's retrospective file appeared, changed or went (epic 7, story 7.2;
+ * the ticket watcher appends it in story 7.4, since no ticket row changes
+ * then and `ticket.changed` stays for rows). Carries only the epic's name:
+ * the UI refetches the tickets, whose epic row carries the verdict (AD-7).
+ */
+export const RetrospectiveChangedEvent = RetrospectiveChangedInput.extend(assigned);
+export type RetrospectiveChangedEvent = z.infer<typeof RetrospectiveChangedEvent>;

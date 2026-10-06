@@ -52,6 +52,8 @@ export { CODEX_AGENT_ID, createCodexAgent, createCodexSetup, installedCodex } fr
 export type { CodexPorts } from './codex-wiring.js';
 export { createGrokAgent, createGrokSetup, GROK_AGENT_ID, installedGrok } from '@ogden-agents/adapters';
 export type { GrokPorts } from './grok-wiring.js';
+export { createLocalAgent, createLocalSetup, LOCAL_AGENT_ID } from '@ogden-agents/adapters';
+export type { LocalChatTarget, LocalChatTargetSource, LocalPorts } from './local-wiring.js';
 // The in-memory secret store, so tests never touch the real OS keychain (story 9.2).
 export { createMemorySecretStore } from '@ogden-agents/adapters';
 // BMad Method's catalog (story 4.3): the e2e suite keeps the real read-only parts and stubs setup, so no uv runs.

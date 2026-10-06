@@ -18,6 +18,7 @@ import {
   AUTOMATIC_NEEDS_CONFIRMATION,
   ORCHESTRATION_OFF_MESSAGE,
   ORCHESTRATION_UNAVAILABLE_MESSAGE,
+  MANAGER_STATE_WORDS,
   OrchestrationSettingsResponse,
   RUN_LIMITS,
   WorkspaceResponse,
@@ -88,8 +89,9 @@ describe('an install that ships Orchestration', () => {
       mode: 'approve_each',
       limits: RUN_LIMITS,
       roster: { manager: null, planner: null, worker: null, reviewer: null },
-      // No manager is set up in a plain test server (the real adapter is 15.4).
+      // No manager model is chosen in a fresh project.
       managerReady: false,
+      manager: { state: 'not_chosen', message: MANAGER_STATE_WORDS.not_chosen },
     });
     // Another project is unchanged.
     expect(await refusalOf(await request(server, tab, 'GET', orchestrationPath(other.id)))).toMatchObject({ status: 409, code: 'feature_off' });
@@ -106,7 +108,10 @@ describe('an install that ships Orchestration', () => {
     expect(OrchestrationSettingsResponse.parse(await (await request(server, tab, 'GET', orchestrationPath(workspace.id))).json()).settings.mode).toBe('automatic');
 
     // The roster, and the refusals of a bad one.
-    const roster = { manager: { kind: 'model', endpointId: 'lep_01J9Z3K4M5N6P7Q8R9S0T1V2W3', model: 'a-model' } };
+    const endpoint = (await (await request(server, tab, 'POST', API_ROUTES.localEndpoints, { label: 'My Mac', baseUrl: 'http://localhost:1234/v1' })).json()) as { endpoint: { id: string } };
+    const roster = { manager: { kind: 'model', endpointId: endpoint.endpoint.id, model: 'a-model' } };
+    // A model on a server nobody set up is refused (15.4).
+    expect((await request(server, tab, 'PATCH', settingsPath(workspace.id), { orchestrationRoster: { manager: { kind: 'model', endpointId: 'lep_01J9Z3K4M5N6P7Q8R9S0T1V2W3', model: 'a-model' } } })).status).toBe(400);
     expect(WorkspaceSettingsResponse.parse(await (await request(server, tab, 'PATCH', settingsPath(workspace.id), { orchestrationRoster: roster })).json()).settings.orchestrationRoster?.manager).toEqual(roster.manager);
     expect((await request(server, tab, 'PATCH', settingsPath(workspace.id), { orchestrationRoster: { manager: 'x' } })).status).toBe(400);
     expect((await request(server, tab, 'PATCH', settingsPath(workspace.id), { orchestrationMode: 'skip_all', confirm: true })).status).toBe(400);

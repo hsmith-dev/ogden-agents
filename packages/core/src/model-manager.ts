@@ -108,9 +108,9 @@ const fail = (kind: ManagerFailureKind, record: Partial<ManagerRecord> & Pick<Ma
 function failureOf(failure: LocalFailure): { kind: ManagerFailureKind; reason?: string; code?: ManagerRefusalCode } {
   switch (failure.kind) {
     case 'timeout':
-      return { kind: 'too_slow' };
+      return { kind: 'too_slow', code: 'timeout' };
     case 'too_large':
-      return { kind: 'too_large' };
+      return { kind: 'too_large', code: 'too_large' };
     case 'context_full':
       return { kind: 'context_too_small' };
     case 'bad_answer':

@@ -261,6 +261,32 @@ const two = () => {
 };
 const puts = () => fakes.requests.filter((r) => r.method === 'PUT').map((r) => JSON.parse(r.body!).layout);
 
+describe('stopped panes after a restart (story 16.7)', () => {
+  it('says it is stopped and offers Start, with the program\'s own resume words and an arguments field for a CLI', async () => {
+    fakes.launchers = [launcher('example', 'Example CLI', 'found', { resumeHint: 'Run example --resume to pick up an earlier session.' })];
+    fakes.panes = [pane({ launcherId: 'example', state: 'stopped', status: 'idle' })];
+    await mount();
+    expect(screen.getByTestId('pane-status-chip').textContent).toBe('Stopped');
+    const connection = fakes.connections[0]!;
+    await act(async () => connection.handlers.onOpen());
+    expect(screen.getByTestId('pane-status').textContent).toContain('Press Start to run it again.');
+    expect(screen.getByTestId('pane-status').textContent).toContain('Run example --resume');
+    fireEvent.change(screen.getByTestId('pane-start-args'), { target: { value: '--model big' } });
+    fireEvent.click(screen.getByTestId('pane-restart'));
+    await settle();
+    expect(screen.getByTestId('pane-restart').textContent).toBe('Start');
+    expect(JSON.parse(fakes.requests.find((r) => r.path.endsWith('/restart'))!.body!)).toEqual({ cols: 80, rows: 24, args: '--model big' });
+  });
+
+  it('a stopped shell has no arguments field and no resume words', async () => {
+    fakes.panes = [pane({ state: 'stopped', status: 'idle' })];
+    await mount();
+    await act(async () => fakes.connections[0]!.handlers.onOpen());
+    expect(screen.queryByTestId('pane-start-args')).toBeNull();
+    expect(screen.getByTestId('pane-restart').textContent).toBe('Start');
+  });
+});
+
 describe('status (story 16.6)', () => {
   it('shows each pane\'s status in plain words, says it is a guess, and marks a tab that has a pane needing attention', async () => {
     two();

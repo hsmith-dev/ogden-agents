@@ -4,7 +4,8 @@
  * in the real `node-pty`, over `/api/v1/workspaces/:wsId/panes` and
  * `/ws/pane/:paneId`. No test runs the user's shell or a CLI.
  */
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripTerminalEscapes } from '@ogden-agents/adapters';
@@ -535,5 +536,108 @@ describe('a pane\'s status over the API (story 16.6)', () => {
     expect(changes.some((e) => e.payload.status === 'needs_attention')).toBe(false);
     expect(JSON.stringify(changes)).not.toContain('proceed');
     expect(setup.lines.join('\n')).not.toContain('proceed');
+  }, 60_000);
+});
+
+describe('layouts survive a restart and a hard stop is cleaned up (story 16.7)', () => {
+  const pidAlive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  };
+
+  it('a restarted server brings the panes back stopped in the same layout, Start runs a fresh shell, and nothing the pane printed is in the data folder', async () => {
+    const dataDir = tempDir('ogden-agents-data-');
+    const lines: string[] = [];
+    const shell = { file: process.execPath, args: [FAKE_SHELL] };
+    const first = await startTestServer({ dataDir, lines, paneShell: shell });
+    servers.push(first);
+    const tab = await signIn(first);
+    const repo = tempDir('ogden-agents-repo-');
+    const created = WorkspaceResponse.parse(await (await fetch(`${first.url}${API_ROUTES.workspaces}`, { method: 'POST', headers: { ...tab.headers, 'content-type': 'application/json' }, body: JSON.stringify({ path: repo }) })).json());
+    first.core.installSettings.setDeveloperMode(true);
+    const one: Setup = { server: first, tab, repo, wsId: created.workspace.id, lines, record: '' };
+    const a = await openPane(one);
+    const b = PaneResponse.parse(await (await fetch(panesUrl(one), { method: 'POST', headers: jsonHeaders(tab), body: JSON.stringify({ cols: 80, rows: 24, placement: { kind: 'split', paneId: a.id, direction: 'column' } }) })).json()).pane;
+    await fetch(paneUrl(one, b.id), { method: 'PATCH', headers: jsonHeaders(tab), body: JSON.stringify({ title: 'Build' }) });
+    const viewer = viewPane(one, a.id);
+    await viewer.opened;
+    await waitFor(() => viewer.state.output.includes('fake-shell-ready'), 'the prompt', 15_000);
+    viewer.type(`echo ${MARKER}\r`);
+    await waitFor(() => viewer.state.output.includes(MARKER), 'the marker', 15_000);
+    const before = PanesResponse.parse(await (await fetch(panesUrl(one), { headers: tab.headers })).json());
+    await first.close();
+
+    const second = await startTestServer({ dataDir, lines, paneShell: shell });
+    servers.push(second);
+    const tab2 = await signIn(second);
+    const two: Setup = { ...one, server: second, tab: tab2 };
+    const after = PanesResponse.parse(await (await fetch(panesUrl(two), { headers: tab2.headers })).json());
+    expect(after.panes.map((p) => [p.id, p.title, p.state])).toEqual([[a.id, 'Terminal 1', 'stopped'], [b.id, 'Build', 'stopped']]);
+    expect(after.layout).toEqual(before.layout);
+
+    // A stopped pane's socket says so, shows nothing, and Start runs a fresh shell in the same pane.
+    const stoppedView = viewPane(two, a.id);
+    await stoppedView.opened;
+    await waitFor(() => stoppedView.state.frames.some((f) => f.type === 'state' && f.state === 'stopped'), 'the stopped state', 15_000);
+    const started = await fetch(`${paneUrl(two, a.id)}/restart`, { method: 'POST', headers: jsonHeaders(tab2), body: JSON.stringify({ cols: 80, rows: 24 }) });
+    expect(started.status).toBe(200);
+    await waitFor(() => stoppedView.state.output.includes('fake-shell-ready'), 'the fresh shell', 20_000);
+    expect(stoppedView.state.output).not.toContain(MARKER);
+
+    // What was printed is nowhere in the data folder (not the database, its journal, the logs or the pid file).
+    const files = (dir: string): string[] => readdirSync(dir).flatMap((name) => (statSync(join(dir, name)).isDirectory() ? files(join(dir, name)) : [join(dir, name)]));
+    for (const file of files(dataDir)) expect(readFileSync(file).includes(MARKER), file).toBe(false);
+    expect(lines.join('\n')).not.toContain(MARKER);
+  }, 90_000);
+
+  it('a pane left with no viewer keeps running, and a viewer that comes back is given its screen', async () => {
+    const setup = await startPaneServer();
+    const pane = await openPane(setup);
+    const first = viewPane(setup, pane.id);
+    await first.opened;
+    await waitFor(() => first.state.output.includes('fake-shell-ready'), 'the prompt', 15_000);
+    first.type('echo kept-while-away\r');
+    await waitFor(() => first.state.output.includes('kept-while-away'), 'the echo', 15_000);
+    first.ws.close();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const back = viewPane(setup, pane.id);
+    await back.opened;
+    await waitFor(() => back.state.output.includes('kept-while-away'), 'the screen to come back', 15_000);
+    back.type('echo still-here\r');
+    await waitFor(() => back.state.output.includes('still-here'), 'the running shell to answer', 15_000);
+  }, 60_000);
+
+  it('at start it stops a program a hard stop left running, by its recorded pid, and leaves anything else alone', async () => {
+    const dataDir = tempDir('ogden-agents-data-');
+    const sleeper = () => {
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore', windowsHide: true });
+      child.unref();
+      return child;
+    };
+    const survivor = sleeper();
+    const bystander = sleeper();
+    try {
+      await waitFor(() => survivor.pid !== undefined && bystander.pid !== undefined, 'the programs', 15_000);
+      writeFileSync(join(dataDir, 'pane-pids.json'), JSON.stringify([{ pid: survivor.pid, startedAt: Date.now() }]));
+      const lines: string[] = [];
+      const server = await startTestServer({ dataDir, lines });
+      servers.push(server);
+      await waitFor(() => !pidAlive(survivor.pid!), 'the left over program to stop', 30_000);
+      expect(pidAlive(bystander.pid!)).toBe(true);
+      expect(lines.join('\n')).toContain('terminal panes left running by a hard stop were cleaned up');
+      expect(JSON.parse(readFileSync(join(dataDir, 'pane-pids.json'), 'utf8'))).toEqual([]);
+    } finally {
+      for (const child of [survivor, bystander]) {
+        try {
+          if (child.pid !== undefined) process.kill(child.pid, 'SIGKILL');
+        } catch {
+          // Gone.
+        }
+      }
+    }
   }, 60_000);
 });

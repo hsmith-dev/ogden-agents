@@ -532,7 +532,7 @@ export const API_ROUTES = {
   workspaceOrchestrationRun: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId`,
   /** `POST` → `OrchestrationRunResponse`: the user approves one proposed step. 409 `step_not_proposed`. */
   workspaceOrchestrationStepApprove: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/approve`,
-  /** `POST` → `OrchestrationRunResponse`: sends an approved step's instruction into a new worker chat. 409 `step_not_approved` for any other step. */
+  /** `POST` → `OrchestrationRunResponse`: sends an approved step's instruction into a new worker chat, or the worker's own idle chat the step names. 409 `step_not_approved` for any other step, 409 `dispatch_refused` (`details.reason`, plain words) when the worker or its chat cannot take it; nothing is created or sent then. */
   workspaceOrchestrationStepDispatch: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/dispatch`,
   /** `POST EditOrchestrationStepRequest` → `OrchestrationRunResponse` (15.6): the user changes a step's instruction; an approved step goes back to waiting. 400 for bad text or a secret, 409 `step_not_changeable`. */
   workspaceOrchestrationStepEdit: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/edit`,

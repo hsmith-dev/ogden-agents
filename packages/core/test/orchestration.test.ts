@@ -7,8 +7,13 @@
  * report read back with one `result_read`. Nothing here runs an agent or a model.
  */
 import { MANAGER_LIMITS, MANAGER_PLAN_VERSION, type ManagerPlan, type OrchestrationRunView, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  DispatchRefusedError,
+  DriverIsTerminalError,
+  SessionNotIdleError,
   ManagerFailedError,
   BadOrderError,
   ManagerUnavailableError,
@@ -21,6 +26,7 @@ import {
   ValidationError,
   validatePlanFor,
   type Core,
+  type ManagerContext,
   type ManagerPort,
   type OrchestrationChat,
 } from '../src/index.js';
@@ -48,13 +54,16 @@ const PLAN3: ManagerPlan = {
 };
 
 /** A manager that answers a scripted plan through the same check a real one passes. */
-function stubManager(reply: unknown = PLAN): ManagerPort & { goals: string[] } {
+function stubManager(reply: unknown | (() => unknown) = PLAN): ManagerPort & { goals: string[]; contexts: ManagerContext[] } {
   const goals: string[] = [];
+  const contexts: ManagerContext[] = [];
   return {
     goals,
+    contexts,
     async proposePlan(context) {
       goals.push(context.goal);
-      return validatePlanFor(context, reply);
+      contexts.push(context);
+      return validatePlanFor(context, typeof reply === 'function' ? (reply as () => unknown)() : reply);
     },
     async decideNext() {
       return { ok: false, kind: 'unavailable', reason: 'not used here' };
@@ -62,7 +71,31 @@ function stubManager(reply: unknown = PLAN): ManagerPort & { goals: string[] } {
   };
 }
 
-function setUp(manager: ManagerPort | null | 'default' = 'default', { on = true }: { on?: boolean } = {}) {
+/** A ready agent as the install's agent list reports it; `fields` change any of it. */
+const agentOf = (agentId: string, displayName: string, fields: Record<string, unknown> = {}) => ({
+  agentId,
+  displayName,
+  provider: 'Fake',
+  signInMethods: [],
+  install: { state: 'installed' },
+  auth: { state: 'signed_in' },
+  terminalResume: false,
+  needsProjectTrust: false,
+  permissionModes: ['ask'],
+  ...fields,
+});
+const SUBSCRIPTION = { signInMethods: [{ kind: 'subscription', label: 'Sign in with your account' }] };
+const API_KEY = { signInMethods: [{ kind: 'api_key', label: 'Use an API key' }] };
+
+interface SetUpOptions {
+  on?: boolean;
+  /** The agents the install lists (default: Claude Code and a broken one). */
+  agents?: ReadonlyArray<ReturnType<typeof agentOf>>;
+  /** The project's team, as the roster reports its workers. Absent: every agent. */
+  workers?: ReadonlyArray<{ agentId: string; ready: boolean }>;
+}
+
+function setUp(manager: ManagerPort | null | 'default' = 'default', { on = true, agents, workers }: SetUpOptions = {}) {
   const dataDir = tempDir();
   const core: Core = openTestCore(dataDir, undefined, { orchestrationAvailable: true });
   const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
@@ -70,15 +103,14 @@ function setUp(manager: ManagerPort | null | 'default' = 'default', { on = true 
   const created: Array<{ agentId: string | undefined; permissionMode: string | undefined }> = [];
   const sent: Array<{ sessionId: SessionId; text: string; origin: string | undefined }> = [];
   const cancelled: SessionId[] = [];
+  const renamed: Array<{ sessionId: SessionId; title: string | null }> = [];
+  const removed: string[] = [];
+  /** What the next send does instead of sending (a refusal or a failure the chat would throw), and whether it queues. */
+  const sendBehaviour: { throws?: Error; queued?: boolean } = {};
+  const listed = agents ?? [agentOf('claude-code', 'Claude Code'), agentOf('broken', 'Broken Agent', { unavailable: { code: 'agent_not_installed', message: 'Not installed.', action: 'install' } })];
   const chat: OrchestrationChat = {
     async chatAgents() {
-      return {
-        defaultAgentId: 'claude-code',
-        agents: [
-          { agentId: 'claude-code', displayName: 'Claude Code', provider: 'Fake', signInMethods: [], install: { state: 'installed' }, auth: { state: 'signed_in' }, terminalResume: false, needsProjectTrust: false, permissionModes: ['ask'] },
-          { agentId: 'broken', displayName: 'Broken Agent', provider: 'Fake', signInMethods: [], install: { state: 'installed' }, auth: { state: 'signed_in' }, terminalResume: false, needsProjectTrust: false, permissionModes: ['ask'], unavailable: { code: 'agent_not_installed', message: 'Not installed.', action: 'install' } },
-        ],
-      } as unknown as Awaited<ReturnType<OrchestrationChat['chatAgents']>>;
+      return { defaultAgentId: 'claude-code', agents: listed } as unknown as Awaited<ReturnType<OrchestrationChat['chatAgents']>>;
     },
     async createChatSession(workspaceId, options) {
       // The worker's own default: the use-case passes no mode, so the session starts in Ask.
@@ -87,18 +119,34 @@ function setUp(manager: ManagerPort | null | 'default' = 'default', { on = true 
       return session;
     },
     sendMessage(workspaceId, sessionId, text, options) {
+      if (sendBehaviour.throws !== undefined) throw sendBehaviour.throws;
       sent.push({ sessionId, text, origin: options?.origin });
+      if (sendBehaviour.queued === true) return { messageId: 'queued_msg', queued: true };
       core.sessionEvents.completeMessage(sessionId, { messageId: `msg_${sent.length}`.padEnd(30, '0') as never, role: 'user', content: text, ...(options?.origin === undefined ? {} : { origin: options.origin }) });
       core.entities.setSessionState(sessionId, 'working');
       return { messageId: 'msg', queued: false };
     },
-    getSession: (workspaceId, sessionId) => core.entities.getSession(sessionId)!,
+    getSession(workspaceId, sessionId) {
+      // As the chat does: a session of another project is not found.
+      const session = core.entities.getSession(sessionId);
+      if (session === undefined || session.workspaceId !== workspaceId) throw new NotFoundError('session', sessionId);
+      return session;
+    },
+    listSessions: (workspaceId) => core.entities.listSessions(workspaceId),
+    renameSession(workspaceId, sessionId, title) {
+      renamed.push({ sessionId, title });
+      return core.entities.getSession(sessionId)!;
+    },
+    removeQueuedMessage(workspaceId, sessionId, messageId) {
+      removed.push(messageId);
+    },
     cancel(workspaceId, sessionId) {
       cancelled.push(sessionId);
       core.entities.setSessionState(sessionId, 'idle');
     },
   };
-  const orchestration = core.createOrchestration({ chat, manager: manager === 'default' ? stubManager() : (manager ?? undefined) });
+  const team = workers === undefined ? undefined : { workers: async () => workers.map((worker) => ({ ...worker, label: worker.agentId, role: 'worker' as const })) };
+  const orchestration = core.createOrchestration({ chat, manager: manager === 'default' ? stubManager() : (manager ?? undefined), ...(team === undefined ? {} : { team: team as never }) });
   /** The worker finishes: its reply is stored and the chat goes idle. */
   const finish = (sessionId: SessionId, reply: string, state: 'idle' | 'error' = 'idle') => {
     core.sessionEvents.completeMessage(sessionId, { messageId: `msg_reply_${Math.random().toString(36).slice(2)}`.padEnd(30, '0') as never, role: 'agent', content: reply });
@@ -113,7 +161,7 @@ function setUp(manager: ManagerPort | null | 'default' = 'default', { on = true 
       db.close();
     }
   };
-  return { core, workspace, orchestration, created, sent, cancelled, finish, tamper };
+  return { core, workspace, orchestration, created, sent, cancelled, renamed, removed, sendBehaviour, finish, tamper };
 }
 
 const eventTypes = (core: Core, after: number) => core.events.readAfter(after).map((event) => event.type);
@@ -609,5 +657,350 @@ describe('plan review (15.6): review fixes', () => {
     const { workspace, orchestration } = setUp(stubManager(PLAN3));
     await expect(orchestration.editStep(workspace.id, 'orc_01J9Z3K4M5N6P7Q8R9S0T1V2W3', 's1', { instruction: '' })).rejects.toBeInstanceOf(NotFoundError);
     await expect(orchestration.reorderSteps(workspace.id, 'orc_01J9Z3K4M5N6P7Q8R9S0T1V2W3', {})).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+// ---- dispatch and read-back across workers (15.7) ----
+
+const WORKERS = [
+  agentOf('claude-code', 'Claude Code', SUBSCRIPTION),
+  agentOf('antigravity', 'Antigravity', SUBSCRIPTION),
+  agentOf('codex', 'Codex', API_KEY),
+  agentOf('grok', 'Grok', API_KEY),
+];
+/** A plan of independent steps, one per entry: `[worker, chat]`. */
+const planOf = (...steps: ReadonlyArray<readonly [worker: string, chat?: string]>): ManagerPlan => ({
+  version: MANAGER_PLAN_VERSION,
+  goal: 'Do the work',
+  steps: steps.map(([worker, chat], index) => ({ id: `s${index + 1}`, worker, chat: (chat ?? 'new') as 'new', instruction: `Instruction ${index + 1} for ${worker}.`, mode: 'ask' as const, depends_on: [] })),
+});
+/** Every chat of the project as a stranger would see it: nothing about it may change on a refusal. */
+const chatsOf = (core: Core, workspaceId: WorkspaceId) => JSON.stringify(core.entities.listSessions(workspaceId));
+/** Approves `stepId` and tries to send it; returns what the send did. */
+async function trySend(orchestration: ReturnType<typeof setUp>['orchestration'], workspaceId: WorkspaceId, runId: string, stepId: string) {
+  await orchestration.approveStep(workspaceId, runId, stepId);
+  return orchestration.dispatchStep(workspaceId, runId, stepId).then(
+    (view) => ({ view, error: undefined }),
+    (error: unknown) => ({ view: undefined, error }),
+  );
+}
+
+describe('dispatch to every kind of worker (15.7)', () => {
+  it('sends an approved instruction to a Claude Code, Antigravity, Codex and Grok worker, each in a new chat of its own agent, as the manager\'s, in its own mode', async () => {
+    const { core, workspace, orchestration, created, sent } = setUp(stubManager(planOf(['claude-code'], ['antigravity'], ['codex'], ['grok'])), { agents: WORKERS });
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Do the work' });
+    for (const id of ['s1', 's2', 's3', 's4']) {
+      const result = await trySend(orchestration, workspace.id, run.id, id);
+      expect(result.error).toBeUndefined();
+    }
+    expect(created.map((entry) => [entry.agentId, entry.permissionMode])).toEqual([['claude-code', 'ask'], ['antigravity', 'ask'], ['codex', 'ask'], ['grok', 'ask']]);
+    expect(sent.map((entry) => [entry.text, entry.origin])).toEqual([
+      ['Instruction 1 for claude-code.', 'manager'],
+      ['Instruction 2 for antigravity.', 'manager'],
+      ['Instruction 3 for codex.', 'manager'],
+      ['Instruction 4 for grok.', 'manager'],
+    ]);
+    // The transcript of each chat shows who sent the instruction, and no mode was changed.
+    const view = await orchestration.getRun(workspace.id, run.id);
+    for (const step of view.steps) {
+      expect(step.state).toBe('dispatched');
+      const messages = core.events.readAfter(0).filter((event) => event.type === 'session.message_completed' && event.streamId === step.sessionId);
+      expect(messages.map((event) => (event.type === 'session.message_completed' ? event.payload.origin : ''))).toEqual(['manager']);
+      expect(core.entities.getSession(step.sessionId!)!.permissionMode).toBe('ask');
+    }
+    expect(core.events.readAfter(0).some((event) => event.type === 'session.permission_mode_changed')).toBe(false);
+  });
+});
+
+/** A worker's tool call, as the chat records it. */
+const toolCall = (core: Core, sessionId: SessionId, toolCallId: string, title: string, kind: 'read' | 'edit' | 'execute', status: 'in_progress' | 'completed') =>
+  core.sessionEvents.appendSessionEvent(sessionId, { type: status === 'in_progress' ? 'session.tool_call' : 'session.tool_call_updated', payload: { sessionId, toolCallId, title, kind, status } });
+
+/** A project with a worker and a chat of its own, and a manager that plans one step into that chat. */
+function withOwnChat(fields: { agentId?: string; kind?: 'chat' | 'build' | 'planning'; state?: 'idle' | 'working' | 'waiting' | 'error' | 'done'; driver?: 'ui' | 'terminal'; mode?: 'ask' | 'auto' } = {}, options: SetUpOptions = {}) {
+  let chatId = 'none';
+  const manager = stubManager(() => planOf(['codex', chatId]));
+  const kit = setUp(manager, { agents: WORKERS, ...options });
+  const own = kit.core.entities.createSession({ workspaceId: kit.workspace.id, kind: fields.kind ?? 'chat', agentId: (fields.agentId ?? 'codex') as never, ...(fields.driver === undefined ? {} : { driver: fields.driver }), ...(fields.state === undefined ? {} : { state: fields.state }) });
+  if (fields.mode !== undefined) kit.core.entities.setSessionPermissionMode(own.id, fields.mode, 'user');
+  chatId = own.id;
+  return { ...kit, manager, own };
+}
+
+describe('dispatch into a chat the step names (15.7)', () => {
+  it('offers the manager only the worker\'s own idle chats, and continues the one it names: no new chat, the chat\'s own mode, the instruction marked as the manager\'s', async () => {
+    const { core, workspace, orchestration, manager, own, created, sent } = withOwnChat({ mode: 'auto' });
+    // Not offered to codex: another agent's chat, a chat that works, a chat the terminal drives, a build.
+    const grokChat = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', agentId: 'grok' as never });
+    core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', agentId: 'codex' as never, state: 'working' });
+    core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', agentId: 'codex' as never, driver: 'terminal' });
+    core.entities.createSession({ workspaceId: workspace.id, kind: 'build', agentId: 'codex' as never });
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Do the work' });
+    const offered = manager.contexts[0]!.workers.map((worker) => [worker.agentId, worker.chats.map((entry) => entry.sessionId)]);
+    expect(offered).toEqual([['claude-code', []], ['antigravity', []], ['codex', [own.id]], ['grok', [grokChat.id]]]);
+
+    const result = await trySend(orchestration, workspace.id, run.id, 's1');
+    expect(result.error).toBeUndefined();
+    expect(created).toEqual([]);
+    expect(sent).toEqual([{ sessionId: own.id, text: 'Instruction 1 for codex.', origin: 'manager' }]);
+    expect(result.view!.steps[0]).toMatchObject({ state: 'dispatched', sessionId: own.id });
+    // The worker keeps its own mode: the instruction never changes it.
+    expect(core.entities.getSession(own.id)!.permissionMode).toBe('auto');
+    expect(core.events.readAfter(0).filter((event) => event.type === 'session.permission_mode_changed')).toHaveLength(1);
+  });
+
+  it('refuses a chat that is busy, finished, driven by the terminal, another agent\'s, not a plain chat or gone, in plain words, changing no chat and sending nothing', async () => {
+    const cases: Array<[string, Parameters<typeof withOwnChat>[0], string]> = [
+      ['busy', { state: 'working' }, 'chat_busy'],
+      ['waiting for an answer', { state: 'waiting' }, 'chat_busy'],
+      ['in an error', { state: 'error' }, 'chat_busy'],
+      ['finished', { state: 'done' }, 'chat_busy'],
+      ['driven by the terminal', { driver: 'terminal' }, 'driver_is_terminal'],
+    ];
+    for (const [name, fields, reason] of cases) {
+      const { core, workspace, orchestration, own, created, sent, tamper } = withOwnChat();
+      const { run } = await orchestration.startRun(workspace.id, { goal: 'Do the work' });
+      // The chat changed after the plan was made.
+      if (fields?.state !== undefined) core.entities.setSessionState(own.id, fields.state);
+      if (fields?.driver !== undefined) core.entities.setSessionDriver(own.id, fields.driver, 'user');
+      await orchestration.approveStep(workspace.id, run.id, 's1');
+      const before = { chats: chatsOf(core, workspace.id), seq: core.events.lastSeq() };
+      const error = await orchestration.dispatchStep(workspace.id, run.id, 's1').catch((failure: unknown) => failure);
+      expect(error, name).toBeInstanceOf(DispatchRefusedError);
+      expect((error as DispatchRefusedError).reason, name).toBe(reason);
+      expect((error as DispatchRefusedError).message, name).not.toMatch(/ - |–|—/);
+      expect(created, name).toEqual([]);
+      expect(sent, name).toEqual([]);
+      expect(chatsOf(core, workspace.id), name).toBe(before.chats);
+      expect(core.events.lastSeq(), name).toBe(before.seq);
+      // The step is still approved: the user can send it when the chat is free.
+      expect(stepOf(await orchestration.getRun(workspace.id, run.id), 's1').state, name).toBe('approved');
+      void tamper;
+    }
+    for (const [fields, reason] of [
+      [{ agentId: 'grok' }, 'chat_other_agent'],
+      [{ kind: 'planning' as const }, 'chat_not_a_chat'],
+    ] as const) {
+      const { core, workspace, orchestration, created, sent, manager } = withOwnChat(fields);
+      // The manager is only offered the worker's own chats, so the plan check refuses these before a step exists.
+      const failure = await orchestration.startRun(workspace.id, { goal: 'Do the work' }).catch((error: unknown) => error);
+      expect(failure, reason).toBeInstanceOf(ManagerFailedError);
+      expect(created).toEqual([]);
+      expect(sent).toEqual([]);
+      expect(manager.contexts).toHaveLength(1);
+      void core;
+    }
+  });
+
+  it('refuses a chat that was deleted, changed agent or stopped being a plain chat after the plan, as the worker\'s own check, not the manager\'s', async () => {
+    const { core, workspace, orchestration, own, created, sent, tamper } = withOwnChat();
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Do the work' });
+    await orchestration.approveStep(workspace.id, run.id, 's1');
+    const before = chatsOf(core, workspace.id);
+    tamper("UPDATE sessions SET agent_id = 'grok' WHERE id = ?", own.id);
+    const other = await orchestration.dispatchStep(workspace.id, run.id, 's1').catch((error: unknown) => error);
+    expect((other as DispatchRefusedError).reason).toBe('chat_other_agent');
+    tamper("UPDATE sessions SET agent_id = 'codex', kind = 'planning' WHERE id = ?", own.id);
+    const kind = await orchestration.dispatchStep(workspace.id, run.id, 's1').catch((error: unknown) => error);
+    expect((kind as DispatchRefusedError).reason).toBe('chat_not_a_chat');
+    tamper("UPDATE sessions SET kind = 'chat' WHERE id = ?", own.id);
+    // Another project's chat id is not found from this project.
+    const elsewhere = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    const foreign = core.entities.createSession({ workspaceId: elsewhere.id, kind: 'chat', agentId: 'codex' as never });
+    tamper("UPDATE orchestration_steps SET chat = ? WHERE run_id = ?", foreign.id, run.id);
+    const gone = await orchestration.dispatchStep(workspace.id, run.id, 's1').catch((error: unknown) => error);
+    expect((gone as DispatchRefusedError).reason).toBe('chat_gone');
+    expect(created).toEqual([]);
+    expect(sent).toEqual([]);
+    tamper("UPDATE orchestration_steps SET chat = ? WHERE run_id = ?", own.id, run.id);
+    tamper("UPDATE sessions SET agent_id = 'codex' WHERE id = ?", own.id);
+    expect(chatsOf(core, workspace.id).length).toBeGreaterThan(0);
+    void before;
+  });
+
+  it('takes back an instruction the chat queued behind a turn that was ending, and refuses', async () => {
+    const { workspace, orchestration, sendBehaviour, removed, sent } = withOwnChat();
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Do the work' });
+    sendBehaviour.queued = true;
+    const result = await trySend(orchestration, workspace.id, run.id, 's1');
+    expect((result.error as DispatchRefusedError).reason).toBe('chat_busy');
+    expect(removed).toEqual(['queued_msg']);
+    expect(sent).toHaveLength(1);
+    expect(stepOf(await orchestration.getRun(workspace.id, run.id), 's1').state).toBe('approved');
+  });
+
+  it('turns the chat\'s own refusals into plain results, and leaves the step approved for another try', async () => {
+    const { workspace, orchestration, sendBehaviour } = withOwnChat();
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Do the work' });
+    sendBehaviour.throws = new DriverIsTerminalError('The terminal is driving this chat.');
+    expect(((await trySend(orchestration, workspace.id, run.id, 's1')).error as DispatchRefusedError).reason).toBe('driver_is_terminal');
+    sendBehaviour.throws = new SessionNotIdleError('It is switching.');
+    const again = await orchestration.dispatchStep(workspace.id, run.id, 's1').catch((error: unknown) => error);
+    expect((again as DispatchRefusedError).reason).toBe('chat_busy');
+    expect(stepOf(await orchestration.getRun(workspace.id, run.id), 's1').state).toBe('approved');
+    sendBehaviour.throws = undefined;
+    expect((await orchestration.dispatchStep(workspace.id, run.id, 's1')).steps[0]!.state).toBe('dispatched');
+  });
+});
+
+describe('the worker is checked again at dispatch, and the vendor terms are applied in code (15.7)', () => {
+  const refusals: Array<[string, SetUpOptions, string, RegExp]> = [
+    ['it left the team', { workers: [{ agentId: 'grok', ready: true }] }, 'worker_not_on_team', /not on this project's team any more/],
+    ['it is no longer ready on the team', { workers: [{ agentId: 'codex', ready: false }] }, 'worker_not_ready', /not ready/],
+    ['it was signed out', { agents: [agentOf('codex', 'Codex', { ...API_KEY, unavailable: { code: 'agent_signed_out', reason: 'Signed out.', action: 'sign_in' } })] }, 'worker_signed_out', /signed out/],
+    ['the project is not trusted for it', { agents: [agentOf('codex', 'Codex', { ...API_KEY, needsProjectTrust: true, unavailable: { code: 'project_not_trusted', reason: 'Not trusted.', action: 'trust_project' } })] }, 'trust_not_given', /not trusted/],
+    ['it is not installed', { agents: [agentOf('codex', 'Codex', { ...API_KEY, unavailable: { code: 'agent_not_installed', message: 'x', reason: 'Not installed.', action: 'install' } })] }, 'worker_not_ready', /not ready/],
+    ['it left the install', { agents: [agentOf('grok', 'Grok', API_KEY)] }, 'worker_not_on_team', /not on this project's team any more/],
+    ['its vendor allows only a person', { agents: [agentOf('codex', 'Codex', { ...API_KEY, interactiveOnly: 'Its terms allow only a person at the keyboard.' })] }, 'interactive_only', /never given instructions by a manager/],
+  ];
+  for (const [name, options, reason, words] of refusals) {
+    it(`refuses an approved step when ${name}: nothing is created or sent, no chat changes, and the manager is told why`, async () => {
+      // The plan was made while the worker was fine; the change came after.
+      const kit = setUp(stubManager(planOf(['codex'])), { agents: WORKERS });
+      const { run } = await kit.orchestration.startRun(kit.workspace.id, { goal: 'Do the work' });
+      await kit.orchestration.approveStep(kit.workspace.id, run.id, 's1');
+      const changed = setUpLike(kit, options);
+      const before = { chats: chatsOf(kit.core, kit.workspace.id), seq: kit.core.events.lastSeq() };
+      const error = await changed.dispatchStep(kit.workspace.id, run.id, 's1').catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(DispatchRefusedError);
+      expect((error as DispatchRefusedError).reason).toBe(reason);
+      expect((error as DispatchRefusedError).message).toMatch(words);
+      expect((error as DispatchRefusedError).message).not.toMatch(/ - |–|—/);
+      expect(kit.created).toEqual([]);
+      expect(kit.sent).toEqual([]);
+      expect(chatsOf(kit.core, kit.workspace.id)).toBe(before.chats);
+      expect(kit.core.events.lastSeq()).toBe(before.seq);
+    });
+  }
+
+  it('applies the subscription rule at dispatch: Claude Code and Antigravity take only the user\'s own approval, in a run that dispatches automatically they are refused, and the API key workers go on', async () => {
+    const kit = setUp(stubManager(planOf(['claude-code'], ['antigravity'], ['codex'], ['grok'])), { agents: WORKERS });
+    const { run } = await kit.orchestration.startRun(kit.workspace.id, { goal: 'Do the work' });
+    for (const id of ['s1', 's2', 's3', 's4']) await kit.orchestration.approveStep(kit.workspace.id, run.id, id);
+    // The run is under the automatic mode, which approved each step itself (set directly: the mode story 15.8 does it through its own routes).
+    kit.tamper("UPDATE orchestration_runs SET mode = 'automatic' WHERE id = ?", run.id);
+    kit.tamper("UPDATE orchestration_steps SET approved_by = 'mode' WHERE run_id = ?", run.id);
+    const before = chatsOf(kit.core, kit.workspace.id);
+    for (const id of ['s1', 's2']) {
+      const error = await kit.orchestration.dispatchStep(kit.workspace.id, run.id, id).catch((failure: unknown) => failure);
+      expect((error as DispatchRefusedError).reason).toBe('approve_each_only');
+      expect((error as DispatchRefusedError).message).toMatch(/signs in with your account/);
+    }
+    expect(kit.created).toEqual([]);
+    expect(chatsOf(kit.core, kit.workspace.id)).toBe(before);
+    for (const id of ['s3', 's4']) expect((await kit.orchestration.dispatchStep(kit.workspace.id, run.id, id)).steps.find((step) => step.stepId === id)!.state).toBe('dispatched');
+    expect(kit.created.map((entry) => entry.agentId)).toEqual(['codex', 'grok']);
+  });
+
+  it('never moves a worker\'s mode: the dispatch code names no way to set a mode, hand off or switch a driver', () => {
+    const source = readFileSync(join(import.meta.dirname, '..', 'src', 'orchestration.ts'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    expect(source).not.toMatch(/setPermissionMode|handOff|handoffPreview|switchDriver|setModel/);
+  });
+});
+
+/** The same project with the install's agents or team changed since the plan, as another use-case over the same core and chat. */
+function setUpLike(kit: ReturnType<typeof setUp>, options: SetUpOptions) {
+  const chat: OrchestrationChat = {
+    async chatAgents() {
+      return { defaultAgentId: 'claude-code', agents: options.agents ?? WORKERS } as never;
+    },
+    createChatSession: () => Promise.reject(new Error('must not be reached')),
+    sendMessage: () => {
+      throw new Error('must not be reached');
+    },
+    getSession: (workspaceId, sessionId) => kit.core.entities.getSession(sessionId)!,
+    listSessions: (workspaceId) => kit.core.entities.listSessions(workspaceId),
+    renameSession: () => {
+      throw new Error('must not be reached');
+    },
+    removeQueuedMessage: () => undefined,
+    cancel: () => undefined,
+  };
+  const team = options.workers === undefined ? undefined : { workers: async () => options.workers!.map((worker) => ({ ...worker, label: worker.agentId, role: 'worker' as const })) };
+  return kit.core.createOrchestration({ chat, manager: stubManager(), ...(team === undefined ? {} : { team: team as never }) });
+}
+
+describe('a send that fails leaves no empty chat unmarked (15.7)', () => {
+  it('fails the step, names the chat it made as not sent, and never makes a second one on a retry', async () => {
+    const kit = setUp(stubManager(planOf(['codex'])), { agents: WORKERS });
+    const { run } = await kit.orchestration.startRun(kit.workspace.id, { goal: 'Do the work' });
+    kit.sendBehaviour.throws = new Error('The agent would not start.');
+    const result = await trySend(kit.orchestration, kit.workspace.id, run.id, 's1');
+    expect((result.error as Error).message).toBe('The agent would not start.');
+    expect(kit.created).toHaveLength(1);
+    const step = stepOf(await kit.orchestration.getRun(kit.workspace.id, run.id), 's1');
+    expect(step).toMatchObject({ state: 'failed', sessionId: kit.renamed[0]!.sessionId });
+    expect(kit.renamed).toEqual([{ sessionId: step.sessionId, title: 'Not sent: step s1' }]);
+    kit.sendBehaviour.throws = undefined;
+    await expect(kit.orchestration.dispatchStep(kit.workspace.id, run.id, 's1')).rejects.toBeInstanceOf(StepNotApprovedError);
+    expect(kit.created).toHaveLength(1);
+  });
+
+  it('makes no chat at all when the worker cannot start one, and a run stopped while the chat was made leaves that chat named, with nothing sent', async () => {
+    const kit = setUp(stubManager(planOf(['codex'])), { agents: WORKERS });
+    const { run } = await kit.orchestration.startRun(kit.workspace.id, { goal: 'Do the work' });
+    await kit.orchestration.approveStep(kit.workspace.id, run.id, 's1');
+    const original = kit.core.entities.createSession.bind(kit.core.entities);
+    let stopped: Promise<unknown> | undefined;
+    kit.core.entities.createSession = ((input: Parameters<typeof original>[0]) => {
+      stopped = kit.orchestration.stopRun(kit.workspace.id, run.id);
+      return original(input);
+    }) as typeof kit.core.entities.createSession;
+    await expect(kit.orchestration.dispatchStep(kit.workspace.id, run.id, 's1')).rejects.toBeInstanceOf(StepNotApprovedError);
+    await stopped;
+    expect(kit.sent).toEqual([]);
+    expect(kit.renamed).toHaveLength(1);
+    expect(kit.renamed[0]!.title).toBe('Not sent: step s1');
+  });
+});
+
+describe('read-back across workers (15.7)', () => {
+  it('gives the manager the state and a masked, capped summary of the last output and the tool calls, for each kind of worker', async () => {
+    const kit = setUp(stubManager(planOf(['claude-code'], ['antigravity'], ['codex'], ['grok'])), { agents: WORKERS });
+    const { run } = await kit.orchestration.startRun(kit.workspace.id, { goal: 'Do the work' });
+    const secret = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789';
+    const ids: Record<string, SessionId> = {};
+    for (const id of ['s1', 's2', 's3', 's4']) {
+      const result = await trySend(kit.orchestration, kit.workspace.id, run.id, id);
+      ids[id] = result.view!.steps.find((step) => step.stepId === id)!.sessionId!;
+    }
+    // Tool calls, one of them with a secret in its title, one finished after it started.
+    toolCall(kit.core, ids.s1!, 'a', `Run cat .env ${secret}`, 'execute', 'in_progress');
+    toolCall(kit.core, ids.s1!, 'a', `Run cat .env ${secret}`, 'execute', 'completed');
+    toolCall(kit.core, ids.s1!, 'b', 'Edit src/form.ts', 'edit', 'completed');
+    kit.finish(ids.s1!, `Done. Token ${secret}.`);
+    kit.finish(ids.s2!, `Plain answer. ${'y'.repeat(MANAGER_LIMITS.maxSummaryChars + 1000)}`);
+    kit.finish(ids.s3!, 'Codex is done.');
+    kit.finish(ids.s4!, 'Grok is done.', 'error');
+    const view = await kit.orchestration.getRun(kit.workspace.id, run.id);
+    const report = (id: string) => view.steps.find((step) => step.stepId === id)!.report!;
+    expect(report('s1').summary).toContain('Tool calls: ');
+    expect(report('s1').summary).toContain('Edit src/form.ts (completed)');
+    expect(report('s1').summary).toContain('(completed)');
+    expect(report('s1').summary).not.toContain('(in_progress)');
+    expect(report('s1').summary).toContain('Done. Token');
+    expect(report('s1').summary).not.toContain(secret);
+    expect(report('s1')).toMatchObject({ worker: 'claude-code', state: 'idle', truncated: false });
+    expect(report('s2').truncated).toBe(true);
+    expect(report('s2').summary.length).toBeLessThanOrEqual(MANAGER_LIMITS.maxSummaryChars);
+    expect(report('s3')).toMatchObject({ worker: 'codex', summary: 'Codex is done.', state: 'idle' });
+    expect(report('s4')).toMatchObject({ worker: 'grok', state: 'error' });
+    expect(JSON.stringify(kit.core.events.readAfter(0).filter((event) => event.type === 'orchestration.result_read'))).not.toContain(secret);
+  });
+
+  it('shows only what came after the instruction when the chat was used before, and caps a long tool list to the newest few', async () => {
+    const { core, workspace, orchestration, own, finish } = withOwnChat();
+    finish(own.id, 'An older answer from before the instruction.');
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Do the work' });
+    const sent = await trySend(orchestration, workspace.id, run.id, 's1');
+    expect(sent.view!.steps[0]!.report?.summary).toBe('');
+    for (let n = 0; n < 15; n++) toolCall(core, own.id, `t${n}`, `Step ${n}`, 'read', 'completed');
+    finish(own.id, 'The new answer.');
+    const report = stepOf(await orchestration.getRun(workspace.id, run.id), 's1').report!;
+    expect(report.summary).toContain('(the last 10 of 15)');
+    expect(report.summary).toContain('Step 14 (completed)');
+    expect(report.summary).not.toContain('Step 4 (completed)');
+    expect(report.summary.endsWith('The new answer.')).toBe(true);
+    expect(report.summary).not.toContain('older answer');
   });
 });

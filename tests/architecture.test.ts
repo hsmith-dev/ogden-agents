@@ -666,6 +666,41 @@ describe('E15: approval comes only from a user action (story 15.6)', () => {
   });
 });
 
+/**
+ * E15 (story 15.7): a worker keeps its own permission mode. The orchestration use-case sends an instruction into a chat and reads
+ * it back; it never sets a mode, a model or a driver, and never hands a chat to another agent (a step names `new` or the
+ * worker's own chat, so no chat ever changes agent).
+ */
+const MODE_CHANGES = /\b(setPermissionMode|setSessionPermissionMode|handOff|handoffPreview|switchDriver|setModel|setSessionDriver)\b/;
+export function findModeChanges(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    if (!ORCHESTRATION_USE_CASE.test(path) && !MANAGER_CODE.test(path)) continue;
+    for (const match of withoutComments(source).matchAll(new RegExp(MODE_CHANGES.source, 'g'))) violations.push(`${path}: names ${match[1]} (E15: the manager never changes a worker's mode, model, driver or agent)`);
+  }
+  return violations;
+}
+
+describe("E15: a worker keeps its own mode (story 15.7)", () => {
+  it('the orchestration use-case and the manager code never set a mode, model or driver or hand a chat to another agent', () => {
+    const files = loadWorkspaceSources();
+    expect(files.some((file) => ORCHESTRATION_USE_CASE.test(file.path))).toBe(true);
+    expect(findModeChanges(files)).toEqual([]);
+  });
+
+  it('flags a planted mode change', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration.ts', source: "// setPermissionMode is only a word here\nchat.setPermissionMode(ws, id, 'auto');" },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/model-manager.ts', source: 'chat.handOff(a, b, c);' },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/chat/turns.ts', source: 'setPermissionMode();' },
+    ];
+    expect(findModeChanges(files)).toEqual([
+      "packages/core/src/orchestration.ts: names setPermissionMode (E15: the manager never changes a worker's mode, model, driver or agent)",
+      "packages/core/src/model-manager.ts: names handOff (E15: the manager never changes a worker's mode, model, driver or agent)",
+    ]);
+  });
+});
+
 describe('E15: orchestration code is tool-free and names no model product (story 15.2)', () => {
   it('core, shared and the fake manager keep to the rules', () => {
     const files = loadWorkspaceSources();

@@ -84,7 +84,8 @@ export interface Assessment {
 export const approveEachOnlyWords = (name: string): string => `${name} signs in with your account, so for now it only takes instructions you approve one by one.`;
 const automaticWords = 'This project dispatches automatically. Switch it to Approve each instruction to use this agent as a worker.';
 
-const isSubscription = (agent: ChatAgent): boolean => agent.signInMethods.some((method) => method.kind === 'subscription');
+/** Whether the agent signs in with the user's own account, so it only takes instructions the user approves one by one. */
+export const isSubscription = (agent: ChatAgent): boolean => agent.signInMethods.some((method) => method.kind === 'subscription');
 
 /** Whether `assignee` can take `role` now. Never throws; a reason is always plain words, cut to what the view allows. */
 export function assess(role: TeamRole, assignee: TeamAssignee, ctx: RosterContext): Assessment {

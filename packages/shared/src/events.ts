@@ -23,6 +23,10 @@ import * as panes from './events-panes.js';
 export {
   TerminalLayoutChangedEvent, TerminalPaneClosedEvent, TerminalPaneExitedEvent, TerminalPaneOpenedEvent, TerminalPaneRenamedEvent, TerminalPaneStatusChangedEvent,
 } from './events-panes.js';
+// The Local model's endpoint events (epic 14 story 14.3).
+import { SettingsLocalEndpointsChangedEvent, SettingsLocalEndpointsChangedInput } from './events-local.js';
+
+export { LOCAL_ENDPOINT_CHANGES, SettingsLocalEndpointsChangedEvent } from './events-local.js';
 // Build run events and the builds and notification settings events (stories 5.2, 5.3).
 import * as runs from './events-runs.js';
 
@@ -85,6 +89,10 @@ import {
   BmadSetupProgressInput,
   BmadSetupStartedEvent,
   BmadSetupStartedInput,
+  LookBackOfferDismissedEvent,
+  LookBackOfferDismissedInput,
+  RetrospectiveChangedEvent,
+  RetrospectiveChangedInput,
   TicketChangedEvent,
   TicketChangedInput,
   WorkspaceBmadScriptsTrustedEvent,
@@ -170,6 +178,8 @@ export {
 // Epic 4's events (entry 4.12).
 export {
   WorkspaceBmadScriptsTrustedEvent,
+  LookBackOfferDismissedEvent,
+  RetrospectiveChangedEvent,
   TicketChangedEvent,
   BmadSetupStartedEvent,
   BmadSetupProgressEvent,
@@ -327,6 +337,8 @@ export const CoreEvent = z.discriminatedUnion('type', [
   WorkspaceSettingsChangedEvent,
   WorkspaceBmadOfferDismissedEvent,
   WorkspaceBmadScriptsTrustedEvent,
+  LookBackOfferDismissedEvent,
+  RetrospectiveChangedEvent,
   TicketChangedEvent,
   BmadSetupStartedEvent,
   BmadSetupProgressEvent,
@@ -370,6 +382,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SettingsWhileWorkingChangedEvent,
   runs.SettingsRunLimitsChangedEvent,
   runs.SettingsNotificationsChangedEvent,
+  SettingsLocalEndpointsChangedEvent,
   SettingsUpdateNoticeChangedEvent,
   AppUpdateAvailableEvent,
   AppUpdateRequestedEvent,
@@ -388,6 +401,8 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   WorkspaceSettingsChangedInput,
   WorkspaceBmadOfferDismissedInput,
   WorkspaceBmadScriptsTrustedInput,
+  LookBackOfferDismissedInput,
+  RetrospectiveChangedInput,
   TicketChangedInput,
   BmadSetupStartedInput,
   BmadSetupProgressInput,
@@ -431,6 +446,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SettingsWhileWorkingChangedInput,
   runs.SettingsRunLimitsChangedInput,
   runs.SettingsNotificationsChangedInput,
+  SettingsLocalEndpointsChangedInput,
   SettingsUpdateNoticeChangedInput,
   AppUpdateAvailableInput,
   AppUpdateRequestedInput,

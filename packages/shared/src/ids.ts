@@ -17,6 +17,8 @@ export const ID_PREFIXES = {
   webhook: 'hook',
   /** A terminal pane of the Terminals workspace (epic 16, story 16.2). */
   pane: 'pan',
+  /** An OpenAI-compatible endpoint the Local model talks to (epic 14 story 14.3). */
+  localEndpoint: 'lep',
 } as const;
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
 
@@ -54,3 +56,6 @@ export type WebhookId = z.infer<typeof WebhookId>;
 /** A terminal pane (epic 16): one pseudo-terminal running one launcher in a project. */
 export const PaneId = prefixedUlid('pan');
 export type PaneId = z.infer<typeof PaneId>;
+/** An OpenAI-compatible endpoint (epic 14 story 14.3); its key is `agent-endpoint-key/<id>` in the keychain (AD-16). */
+export const LocalEndpointId = prefixedUlid('lep');
+export type LocalEndpointId = z.infer<typeof LocalEndpointId>;

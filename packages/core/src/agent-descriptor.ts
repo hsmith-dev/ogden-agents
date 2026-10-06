@@ -68,6 +68,13 @@ export interface AgentDescriptor {
   homeEnv?: string | undefined;
   signInMethods: readonly AgentSignInMethodDescriptor[];
   /**
+   * The agent needs no account and no key of its own (epic 14: a model served
+   * on the user's own computer or endpoint): the card shows its endpoint's
+   * state instead of a sign in, and a chat is never refused for a missing
+   * sign in. Only with no sign in methods.
+   */
+  noAccount?: boolean | undefined;
+  /**
    * The permission modes it declares, each with its own name for that mode
    * (a mode id, or the flag it takes). Ask is every agent's. It must list
    * exactly the modes its `AgentPort.permissionModes` declares.
@@ -201,6 +208,7 @@ export function agentDescriptorProblems(descriptor: AgentDescriptor): string[] {
     for (const name of method.apiKey?.envNames ?? []) if (!ENV_NAME.test(name)) at(`${name} is not an environment variable name`);
     if (descriptor.homeEnv !== undefined && method.apiKey?.envNames.includes(descriptor.homeEnv)) at(`${descriptor.homeEnv} is both the home and a key variable`);
   }
+  if (descriptor.noAccount === true && descriptor.signInMethods.length > 0) at('it needs no account but lists sign in methods');
   const modes = Object.entries(descriptor.permissionModes);
   for (const [mode, nativeId] of modes) {
     if (!(PERMISSION_MODES as readonly string[]).includes(mode)) at(`${mode} is not a permission mode`);

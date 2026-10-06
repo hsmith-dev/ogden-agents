@@ -573,6 +573,20 @@ export class BuildRefusedError extends CoreError {
   }
 }
 
+/**
+ * Save the lessons was refused (epic 7, story 7.2): `code` says why for the
+ * API, `message` in plain words for the user (a shared sentence); nothing was
+ * committed. Each answers 409.
+ */
+export class LessonsRefusedError extends CoreError {
+  override readonly name = 'LessonsRefusedError';
+  override readonly code: 'nothing_to_save' | 'checkout_busy' | 'agents_file_missing';
+  constructor(code: 'nothing_to_save' | 'checkout_busy' | 'agents_file_missing', message: string) {
+    super(code, message);
+    this.code = code;
+  }
+}
+
 /** What a read-only build session refuses (story 5.2): it runs on its own. */
 export const BUILD_SESSION_READ_ONLY_MESSAGE = 'An unattended build runs on its own: its session is read-only.';
 

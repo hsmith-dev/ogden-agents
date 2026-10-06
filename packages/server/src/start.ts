@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, ENDPOINT_PRESETS, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
@@ -115,7 +115,7 @@ interface DescriptorsRef {
 
 /** Whether `agentId` is one this server registers (epic 6, entry 6): Claude Code, Antigravity unless left out (entry 5), then any extra agent a test wires. */
 const registeredAgent =
-  (options: Pick<StartOptions, 'extraAgents' | 'antigravity' | 'codex' | 'grok'>, hooks: Pick<TestHooks, 'codexServer' | 'codexInstall' | 'grokServer' | 'grokInstall'>) =>
+  (options: Pick<StartOptions, 'extraAgents' | 'antigravity' | 'codex' | 'grok' | 'local'>, hooks: Pick<TestHooks, 'codexServer' | 'codexInstall' | 'grokServer' | 'grokInstall' | 'localServer' | 'localEndpoint'>) =>
   (agentId: string): boolean =>
     agentId === CLAUDE_CODE_AGENT_ID ||
     (options.antigravity !== false && agentId === ANTIGRAVITY_AGENT_ID) ||
@@ -123,6 +123,8 @@ const registeredAgent =
     (options.codex === undefined && (CODEX_SHIPPED || hooks.codexServer !== undefined || hooks.codexInstall !== undefined) && agentId === CODEX_AGENT_ID) ||
     (options.grok !== undefined && options.grok !== false && agentId === GROK_AGENT_ID) ||
     (options.grok === undefined && (GROK_SHIPPED || hooks.grokServer !== undefined || hooks.grokInstall !== undefined) && agentId === GROK_AGENT_ID) ||
+    (options.local !== undefined && options.local !== false && agentId === LOCAL_AGENT_ID) ||
+    (options.local === undefined && (LOCAL_SHIPPED || hooks.localServer !== undefined || hooks.localEndpoint !== undefined) && agentId === LOCAL_AGENT_ID) ||
     (options.extraAgents ?? []).some((wiring) => wiring.descriptor.agentId === agentId);
 
 /**
@@ -161,7 +163,7 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
   // Every environment hook, on a test run only; one the options already decide is not read (story 10.8).
   const hooks = resolveTestHooks(process.env, dataDir, { ...options, ownsCore });
   // What this install ships, plus a test's own (story 10.2): the option, and the environment hook.
-  const availableBmadPieces = [...new Set([...SHIPPED_BMAD_PIECES, ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
+  const availableBmadPieces = [...new Set([...(options.shippedBmadPieces ?? SHIPPED_BMAD_PIECES), ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
   // The pinned BMad Method source, the catalog and setup's script runner holder (`start-planning.ts`).
   const bmadWiring = createBmadSourceAndCatalog(options, dataDir, log, hooks.bmadSource);
   const { bmadCatalog } = bmadWiring;
@@ -274,7 +276,7 @@ async function listenAndAnnounce({
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
   // Every agent is wired before the stored sessions are settled, as before story 6.9's split: a wiring error leaves the database untouched.
-  const { claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
+  const { localModels, localEndpoints, claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
   descriptors.current = wirings.map((wiring) => wiring.descriptor);
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
@@ -339,7 +341,7 @@ async function listenAndAnnounce({
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
-  const { planning, scriptRunner, bmadSource, board, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
+  const { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
     options,
     core,
     dataDir,
@@ -415,8 +417,12 @@ async function listenAndAnnounce({
     bmadScriptTrust: core.bmadScriptTrust,
     planning,
     board,
+    retrospectives,
     builds,
     buildSettings: core.buildSettings,
+    localEndpoints,
+    localModels,
+    endpointPresets: options.endpointPresets ?? ENDPOINT_PRESETS,
     bmadSource,
     // Setup also places the skills in each other agent's folder the project uses (epic 6 entry 8).
     bmadSetup: withAgentSkillFolders(core.bmadSetup, { core, agents }),

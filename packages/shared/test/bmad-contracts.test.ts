@@ -86,7 +86,7 @@ describe('the BMad pieces (story 10.1, rule 10.2)', () => {
     expect(UpdateWorkspaceSettingsRequest.parse({ bmadPieces: [] })).toEqual({ bmadPieces: [] });
     expect(UpdateWorkspaceSettingsRequest.parse({ bmadPieces: ['planning'], cautionLevel: 'ask_for_commands' })).toEqual({ bmadPieces: ['planning'], cautionLevel: 'ask_for_commands' });
     expect(UpdateWorkspaceSettingsRequest.parse({ bmadPieces: ['board', 'builds'] })).toEqual({ bmadPieces: ['board', 'builds'] });
-    for (const bad of [{ bmadPieces: ['yolo'] }, { bmadPieces: ['planning', 'planning'] }, { bmadPieces: 'planning' }, { bmadPieces: ['builds'] }, { bmadPieces: ['board', 'retrospectives'] }, { other: 1 }, {}]) {
+    for (const bad of [{ bmadPieces: ['yolo'] }, { bmadPieces: ['planning', 'planning'] }, { bmadPieces: 'planning' }, { bmadPieces: ['builds'] }, { bmadPieces: ['retrospectives'] }, { other: 1 }, {}]) {
       expect(UpdateWorkspaceSettingsRequest.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
     }
     const broken = UpdateWorkspaceSettingsRequest.safeParse({ bmadPieces: ['builds'] });
@@ -113,7 +113,7 @@ describe('the per-project BMad pieces contract (story 10.2)', () => {
       // Every need comes earlier in the canonical order, so the order is a valid build order.
       for (const need of info.needs) expect(BMAD_PIECES.indexOf(need), `${piece} needs ${need}`).toBeLessThan(BMAD_PIECES.indexOf(piece));
     }
-    expect(bmadPieceNeeds('retrospectives')).toEqual(['board', 'builds']);
+    expect(bmadPieceNeeds('retrospectives')).toEqual(['board']);
     expect(bmadPieceNeeds('planning')).toEqual([]);
     expect(bmadPieceDependents('board')).toEqual(['builds', 'retrospectives']);
     expect(bmadPieceDependents('planning')).toEqual([]);
@@ -122,7 +122,7 @@ describe('the per-project BMad pieces contract (story 10.2)', () => {
 
   it("the design notes' examples of the rule function", () => {
     expect(applyBmadPieceChoice(['board'], 'builds', true)).toEqual({ pieces: ['board', 'builds'], turnedOn: [], turnedOff: [] });
-    expect(applyBmadPieceChoice([], 'retrospectives', true)).toEqual({ pieces: ['board', 'builds', 'retrospectives'], turnedOn: ['board', 'builds'], turnedOff: [] });
+    expect(applyBmadPieceChoice([], 'retrospectives', true)).toEqual({ pieces: ['board', 'retrospectives'], turnedOn: ['board'], turnedOff: [] });
     expect(applyBmadPieceChoice(['board', 'builds', 'retrospectives'], 'board', false)).toEqual({ pieces: [], turnedOn: [], turnedOff: ['builds', 'retrospectives'] });
     expect(applyBmadPieceChoice(['planning', 'board', 'builds'], 'builds', false)).toEqual({ pieces: ['planning', 'board'], turnedOn: [], turnedOff: [] });
   });
@@ -177,7 +177,7 @@ describe('the per-project BMad pieces contract (story 10.2)', () => {
       'Unattended builds and Retrospectives were turned off too, because they need the feature you turned off.',
     );
     expect(describeBmadPieceChange({ turnedOn: [], turnedOff: ['retrospectives'] })).toBe('Retrospectives was turned off too, because it needs the feature you turned off.');
-    expect(bmadPiecesProblem(['board', 'retrospectives'])).toBe('Retrospectives needs Unattended builds. Turn on Unattended builds too.');
+    expect(bmadPiecesProblem(['retrospectives'])).toBe('Retrospectives needs Board. Turn on Board too.');
     expect(bmadPiecesProblem(['planning', 'board', 'builds', 'retrospectives'])).toBeUndefined();
   });
 

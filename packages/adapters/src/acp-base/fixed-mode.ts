@@ -9,12 +9,12 @@
  */
 import { AgentError, declaredModes, type AgentDescriptor, type AgentSession, type ProtectedPaths } from '@ogden-agents/core';
 import type { PermissionMode } from '@ogden-agents/shared';
-import type { AcpAgentQuirks, acpReasons } from './quirks.js';
+import type { AcpAgentQuirks, AcpBuildStart, acpReasons } from './quirks.js';
 
 /** What a fixed-mode start adds to the session requests and the session. */
 export interface FixedModeStart {
   /** Spread into `session/new`, `resume` and `load`. */
-  sessionMeta: { _meta?: Record<string, unknown> };
+  sessionMeta: Record<string, unknown> & { _meta?: Record<string, unknown> };
   /** Whether the session keeps the protected paths guarded. */
   guardsPaths: boolean;
   /** Overrides on the session: the mode it started in, the modes it offers, and the one `set_mode` it takes. */
@@ -46,6 +46,26 @@ export function startFixedMode(
       permissionModes: offered,
       async setPermissionMode(mode) {
         if (mode !== input.permissionMode) throw new AgentError('agent_failed', reasons.couldNotSwitchMode);
+      },
+    },
+  };
+}
+
+/**
+ * An unattended build session's start (epic 17): the sandbox is given once, at
+ * start, in the agent's own places, so the session runs in the mode it was
+ * started in (to core, Ask: a build session is read-only and its mode is
+ * never changed) and takes no other.
+ */
+export function buildFixedStart(build: AcpBuildStart, reasons: ReturnType<typeof acpReasons>): FixedModeStart {
+  return {
+    sessionMeta: { ...(build.sessionParams ?? {}), ...(build.meta === undefined ? {} : { _meta: build.meta }) },
+    guardsPaths: false,
+    session: {
+      fixedPermissionMode: 'ask',
+      permissionModes: ['ask'],
+      async setPermissionMode(mode) {
+        if (mode !== 'ask') throw new AgentError('agent_failed', reasons.couldNotSwitchMode);
       },
     },
   };

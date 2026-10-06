@@ -11,12 +11,12 @@ import { removeObjectStore } from './build-object-store.js';
 import { ensureWorktreesRoot, freeBytesOf } from './build-worktrees.js';
 import { BuildRefusedError, NotFoundError, ScriptsChangedError, ValidationError } from './errors.js';
 import type { VcsHead } from './vcs-port.js';
-import { READY_STATUS, PRECREATED_FOLDERS, buildBranchName, isBuildBranch, prerequisitesMet, runShortId, atCheckpoint } from './build-names.js';
+import { NO_BUILD_RUNNER_MESSAGE, READY_STATUS, PRECREATED_FOLDERS, buildBranchName, isBuildBranch, prerequisitesMet, runShortId, atCheckpoint } from './build-names.js';
 import type { BuildCtx } from './build-context.js';
 
 export function createStarter(ctx: BuildCtx) {
   const {
-    deps, trust, entities, tickets, vcs, sandbox, runner, chat, buildSessions, dataDir, paths, report, writeResult, guarded,
+    deps, trust, entities, tickets, vcs, sandbox, runner, runnerFor, chat, buildSessions, dataDir, paths, report, writeResult, guarded,
     requirePlanCommitted, requireGit, requireSandbox, unattendedSetup, hasCapacity, deadlineFromNow, pendingNotes, disarmDeadline,
     cleanUp, fn
   } = ctx;
@@ -33,6 +33,8 @@ export function createStarter(ctx: BuildCtx) {
   /** Everything a start refuses for before it writes anything (see the header); the guards run last, right before the first write. */
   const validateStart = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, mode: BuildMode, self?: RunId): Promise<StartPlan> => {
     // Fail closed: an unattended run needs a sandbox that says it is there; only the user's own `attended` mode runs without one (story 5.6).
+    // An agent that can no longer build (its runner is not wired) is refused, never built with another's runner (epic 17).
+    if (runnerFor(agent) === undefined) throw new BuildRefusedError('sandbox_unavailable', NO_BUILD_RUNNER_MESSAGE);
     const attended = mode === 'attended';
     const sandboxKind = attended ? ATTENDED_SANDBOX : await requireSandbox(agent);
     await requireGit();
@@ -64,7 +66,7 @@ export function createStarter(ctx: BuildCtx) {
    * repo or the data folder yet (its worktree comes at dispatch).
    */
   const enqueue = async (workspaceId: WorkspaceId, ref: string, agent: BuildAgent, plan: StartPlan, note?: string): Promise<{ run: Run; session: Session }> => {
-    const session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: runner.agent });
+    const session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: agent });
     const run = entities.createRun({ sessionId: session.id, ticketRef: ref, sandbox: plan.sandboxKind, agent, queuePosition: 1 });
     if (note !== undefined) pendingNotes.set(run.id, { note, resume: false });
     return { run, session };
@@ -116,7 +118,7 @@ export function createStarter(ctx: BuildCtx) {
       const setup = attended ? ({ attended: true, cwd: real } as const) : await unattendedSetup(sandboxKind, real, branch, runShort);
       const deadline = deadlineFromNow();
       if (queued === undefined) {
-        session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: runner.agent });
+        session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: agent });
         run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: sandboxKind, branch, baseRevision: head.revision, baseBranch: head.branch, agent, deadline });
       } else {
         session = entities.getSession(queued.sessionId);
@@ -132,7 +134,9 @@ export function createStarter(ctx: BuildCtx) {
         return { run, session };
       }
       fn.armDeadline(run);
-      chat.sendMessage(workspaceId, session.id, runner.invocation(ref, { note }), { build: true });
+      const own = runnerFor(agent);
+      if (own === undefined) throw new BuildRefusedError('sandbox_unavailable', NO_BUILD_RUNNER_MESSAGE);
+      chat.sendMessage(workspaceId, session.id, own.invocation(ref, { note }), { build: true });
       // The ticket's previous run, undecided and not running, is superseded (story 5.5 review): no Retry or Reject reaches it now, so its worktree and branch go.
       if (latest !== undefined && latest.id !== run.id && latest.decision === null && latest.outcome !== 'running') await cleanUp(repoPath, latest);
       return { run, session };

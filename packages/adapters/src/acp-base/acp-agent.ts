@@ -65,14 +65,14 @@ import {
 import type { PermissionMode } from '@ogden-agents/shared';
 import { killProcessTree } from '../process-tree.js';
 import { withTimeout } from '../with-timeout.js';
-import { checkFixedModeWiring, startFixedMode, type FixedModeStart } from './fixed-mode.js';
+import { buildFixedStart, checkFixedModeWiring, startFixedMode, type FixedModeStart } from './fixed-mode.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
 import { agentWords, modelOptionOf, modelsOf } from './models.js';
 import { answerPermissionRequest, type Diagnostic, type PermissionCallback } from './permission-request.js';
-import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch, type AcpLaunchInput } from './quirks.js';
+import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpBuildStart, type AcpLaunch, type AcpLaunchInput } from './quirks.js';
 
 export { acpAsksLessThanAsk, acpModeOf, acpReasons, slashSkillInvocation } from './quirks.js';
-export type { AcpAgentOptions, AcpAgentQuirks, AcpAuthChoice, AcpLaunch, AcpLaunchInput, AcpStartOptions } from './quirks.js';
+export type { AcpAgentOptions, AcpAgentQuirks, AcpAuthChoice, AcpBuildSessionQuirk, AcpBuildStart, AcpLaunch, AcpLaunchInput, AcpStartOptions } from './quirks.js';
 
 /** The ACP steering extension request (claude-agent-acp 0.84): a user message into the running turn. */
 const STEER_METHOD = '_session/steering';
@@ -127,7 +127,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
   checkFixedModeWiring(descriptor, quirks);
 
   /** Spawns the agent in `cwd` with core's environment (AD-16), in its own process group. */
-  const spawnAgent = (launchInput: AcpLaunchInput, model: string | undefined) => {
+  const spawnAgent = (launchInput: AcpLaunchInput, model: string | undefined, buildEnv: Readonly<Record<string, string>> = {}) => {
     const { cwd, env } = launchInput;
     let launch: AcpLaunch;
     try {
@@ -137,7 +137,8 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
       throw new AgentError('agent_unavailable', reasons.couldNotStart, { details: { reason: maskSecrets(String(error), secretValues(env)) }, cause: error });
     }
     // Exactly core's environment, plus what the launch adds (AD-16).
-    const childEnv: Record<string, string> = { ...launch.addEnv, ...env };
+    // An unattended build start's own variables (epic 17) win over core's: nothing else sets the agent's mode.
+    const childEnv: Record<string, string> = { ...launch.addEnv, ...env, ...buildEnv };
     // A static-list agent takes the chat's model at start (story 11): only a model it lists.
     const staticModels = descriptor.models;
     const args = [...launch.args];
@@ -185,16 +186,29 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     opening: Opening,
   ) => {
     // Fail closed: an agent with no way to take the sandbox never runs a build session without one (story 5.2).
-    if (input.sandbox !== undefined && quirks.sessionMeta === undefined) {
+    // Codex-style agents take it through their own start (epic 17: `buildSession`), and only when it is verified.
+    const buildQuirk = input.sandbox !== undefined ? quirks.buildSession : undefined;
+    if (input.sandbox !== undefined && quirks.sessionMeta === undefined && buildQuirk === undefined) {
       throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);
+    }
+    if (buildQuirk !== undefined && !buildQuirk.verified) {
+      throw new AgentError('agent_unavailable', `${descriptor.displayName} can't build unattended on this computer yet. Build with you watching instead.`);
     }
     const startModel = descriptor.models?.list.some((each) => each.id === input.model) === true ? input.model : undefined;
     const permissionMode = input.permissionMode ?? 'ask';
     // Before anything is spawned: a quirk that throws must not leave a process behind.
-    const fixed = startFixedModeSafely(permissionMode, input.protectedPaths);
+    let buildStart: AcpBuildStart | undefined;
+    if (buildQuirk !== undefined && input.sandbox !== undefined) {
+      try {
+        buildStart = buildQuirk.start(input.sandbox);
+      } catch (error) {
+        throw new AgentError('agent_unavailable', reasons.couldNotStart, { cause: error });
+      }
+    }
+    const fixed = buildStart !== undefined ? buildFixedStart(buildStart, reasons) : startFixedModeSafely(permissionMode, input.protectedPaths);
     // Fail closed: a fixed-mode start has no place for the sandbox, so a build session never runs without it (story 5.2, epic 12).
-    if (input.sandbox !== undefined && fixed !== undefined) throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);
-    const { child, secrets } = spawnAgent({ cwd: input.cwd, env: input.env, permissionMode, protectedPaths: input.protectedPaths }, startModel);
+    if (input.sandbox !== undefined && fixed !== undefined && buildStart === undefined) throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);
+    const { child, secrets } = spawnAgent({ cwd: input.cwd, env: input.env, permissionMode, protectedPaths: input.protectedPaths }, startModel, buildStart?.addEnv);
     return startOnChild(
       child,
       {
@@ -213,6 +227,8 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
         startModel,
         permissionMode,
         fixed,
+        askingModeIds: [...quirks.askingModeIds, ...(buildStart?.modeIds ?? [])],
+        buildModeIds: buildStart?.modeIds,
       },
       opening,
     );
@@ -222,6 +238,8 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     displayName: descriptor.displayName,
     permissionModes: declaredModes(descriptor),
     ...(descriptor.modeFixedAtStart === true ? { modeFixedAtStart: true } : {}),
+    // Takes the build's sandbox at start: through its own build start when verified (epic 17), or through `sessionMeta` (Claude Code).
+    unattendedBuild: quirks.buildSession !== undefined ? quirks.buildSession.verified : quirks.sessionMeta !== undefined,
 
     async startSession(input) {
       const opened = await open(input, { kind: 'new' });
@@ -277,6 +295,10 @@ interface StartContext {
   permissionMode: PermissionMode;
   /** The fixed-mode start, computed before the process was spawned. */
   fixed: FixedModeStart | undefined;
+  /** The session modes that ask as much as Ask (an unattended build's own start adds its modes). */
+  askingModeIds: readonly string[];
+  /** An unattended build start's own session modes (epic 17): the session must open in one and may never leave it. */
+  buildModeIds: readonly string[] | undefined;
 }
 
 /** Stops `child` and everything it started: its process group on POSIX, its tree on Windows. */
@@ -286,7 +308,7 @@ function killTree(child: ChildProcessWithoutNullStreams): void {
 
 async function startOnChild(
   child: ChildProcessWithoutNullStreams,
-  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, attended, startModel, fixed }: StartContext,
+  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, attended, startModel, fixed, askingModeIds, buildModeIds }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
   const { couldNotStart: COULD_NOT_START, stopped: STOPPED, failed: FAILED } = reasons;
@@ -450,6 +472,12 @@ async function startOnChild(
           break;
         }
         case 'current_mode_update': {
+          // An unattended build's agent that moves itself out of its build mode is stopped: nothing it does after that is trusted (epic 17).
+          if (buildModeIds !== undefined && !buildModeIds.includes(update.currentModeId)) {
+            reportGone(`${descriptor.displayName} changed its own permission mode, so the build was stopped.`);
+            killTree(child);
+            break;
+          }
           modeUpdates++;
           if (modes !== undefined) modes = { ...modes, currentModeId: update.currentModeId };
           if (modeSetsInFlight === 0) modeUnknown = false;
@@ -457,7 +485,7 @@ async function startOnChild(
           emit({
             type: 'permission_mode',
             mode: acpModeOf(modeIds, update.currentModeId),
-            asksLess: acpAsksLessThanAsk(quirks.askingModeIds, update.currentModeId),
+            asksLess: acpAsksLessThanAsk(askingModeIds, update.currentModeId),
             ...(label === undefined ? {} : { label: mask(label) }),
           });
           break;
@@ -582,6 +610,11 @@ async function startOnChild(
     init = result.initialized;
     agentSessionId = result.sessionId;
     restored = result.restored;
+    // Fail closed (epic 17): an unattended build runs only in the mode its start gave. A session that opened in another
+    // (a variable the agent ignored, a resumed session that kept its old mode) or that lists none is never used.
+    if (buildModeIds !== undefined && (modes === undefined || !buildModeIds.includes(modes.currentModeId))) {
+      throw new AgentError('agent_unavailable', `${descriptor.displayName} did not start in the mode a build needs, so the build was not started.`);
+    }
   } catch (error) {
     closing = true;
     connection.close();

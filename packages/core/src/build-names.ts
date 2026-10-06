@@ -11,6 +11,8 @@ import { ValidationError } from './errors.js';
 import { isProtectedSegment } from './permission-matching.js';
 
 /** Said when a re-check or Update and retry finds every run slot taken (the limits hold; nothing changed). */
+/** A run's agent has no build runner (not wired any more): refused, never built with another agent's runner (epic 17). */
+export const NO_BUILD_RUNNER_MESSAGE = "That agent can't build any more. Pick another agent, or build it with Claude Code.";
 export const NO_FREE_SLOT_MESSAGE = 'Other builds are using every free slot. Try again when one finishes.';
 
 /** The BMad output folder whose uncommitted changes never block approve (user decision 2026-10-01). */

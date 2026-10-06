@@ -378,7 +378,7 @@ async function listenAndAnnounce({
   // Inside the desktop app (story 13.11) there is no shortcut to offer: the app is the shortcut.
   const shell = options.shell === undefined ? shellModeOf() : options.shell;
   // Unattended builds (story 5.2, `start-builds.ts`): git, the sandbox check and the build runner.
-  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks, vcs });
+  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks, vcs, registeredAgents: (agentId) => agents.get(agentId) !== undefined, unattendedAgents: (agentId) => unwrapped.get(agentId)?.unattendedBuild !== false });
   // Worktrees no run needs any more (a removal that failed, a start cut off) go before builds are served (story 5.5).
   await builds.sweep();
   // Queued runs a stopped server left start where the limits allow (story 5.8).

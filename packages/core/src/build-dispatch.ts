@@ -3,18 +3,18 @@
  * queue and its drain, Build all ready, Retry, Resume and Update and retry.
  */
 import { join } from 'node:path';
-import { APPLY_FIX_REFUSED_MESSAGE, ATTENDED_SANDBOX, blockedSentence, NO_SAVED_FIX_MESSAGE, RUN_NOT_ACTIVE_MESSAGE, RunId, CHECKOUT_MOVED_MESSAGE, RUN_REASON_START_FAILED, type Run, type WorkspaceId, REBASE_CONFLICT_MESSAGE, REBASE_REFUSED_MESSAGE, type TicketStatus } from '@ogden-agents/shared';
+import { APPLY_FIX_REFUSED_MESSAGE, ATTENDED_SANDBOX, blockedSentence, NO_SAVED_FIX_MESSAGE, RUN_NOT_ACTIVE_MESSAGE, RunId, CHECKOUT_MOVED_MESSAGE, RUN_REASON_START_FAILED, type BuildAgent, type Run, type WorkspaceId, REBASE_CONFLICT_MESSAGE, REBASE_REFUSED_MESSAGE, type TicketStatus } from '@ogden-agents/shared';
 import { BuildRefusedError, NotFoundError } from './errors.js';
 import { workspaceRepoPath } from './planning.js';
 import { serializedByRepo } from './repo-serialization.js';
-import { NO_FREE_SLOT_MESSAGE, READY_STATUS, prerequisitesMet, atCheckpoint, forbiddenChanges, intentGapPatchOf } from './build-names.js';
+import { NO_BUILD_RUNNER_MESSAGE, NO_FREE_SLOT_MESSAGE, READY_STATUS, prerequisitesMet, atCheckpoint, forbiddenChanges, intentGapPatchOf } from './build-names.js';
 import type { BuildCtx } from './build-context.js';
 import type { createOutcome } from './build-outcome.js';
 import type { createStarter } from './build-start.js';
 
 export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createStarter>, outcome: ReturnType<typeof createOutcome>) {
   const {
-    bmad, entities, tickets, vcs, sandbox, runner, chat, settings, aware, paths, report, writeResult, guarded, requireGit,
+    bmad, entities, tickets, vcs, sandbox, runner, runnerOf, chat, settings, aware, paths, report, writeResult, guarded, requireGit,
     hasCapacity, deadlineFromNow, inDispatch, setTimer, timers, pendingNotes, bump, draining, state, stopAgent, disarmDeadline, fn
   } = ctx;
   const { validateStart, begin, startLocked, prepareContinue } = start;
@@ -77,7 +77,9 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
     });
     armDeadline(started);
     try {
-      chat.sendMessage(workspaceId, run.sessionId, runner.invocation(run.ticketRef, { note: options.note, resume: options.resume }), { build: true });
+      const own = runnerOf(run);
+      if (own === undefined) throw new BuildRefusedError('sandbox_unavailable', NO_BUILD_RUNNER_MESSAGE);
+      chat.sendMessage(workspaceId, run.sessionId, own.invocation(run.ticketRef, { note: options.note, resume: options.resume }), { build: true });
     } catch (error) {
       // Nothing was sent: the run is as it was (a pause, a block), never `running` with no agent.
       disarmDeadline(run.id);
@@ -275,7 +277,7 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
   };
 
   /** Starts every ready ticket of a workspace with Build all ready going, once each; the runs started. */
-  const extendAll = async (workspaceId: WorkspaceId, repoPath: string, tried: Set<string>): Promise<Run[]> => {
+  const extendAll = async (workspaceId: WorkspaceId, repoPath: string, tried: Set<string> & { agent: BuildAgent }): Promise<Run[]> => {
     const { guard } = await guarded(workspaceId);
     // The main checkout's statuses only: a ticket built in a worktree (the agent's own word) is not a prerequisite until it is merged.
     const tree = await tickets.tree(repoPath, guard);
@@ -287,7 +289,7 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
       if (latest !== undefined && atCheckpoint(latest)) continue;
       tried.add(row.ref);
       try {
-        started.push((await startLocked(workspaceId, repoPath, row.ref, runner.agent, 'unattended')).run);
+        started.push((await startLocked(workspaceId, repoPath, row.ref, tried.agent, 'unattended')).run);
       } catch (error) {
         // A ticket that can't start does not stop the others (a refusal is its own; the rest are reported).
         if (!(error instanceof BuildRefusedError)) report('none', 'build all', error);

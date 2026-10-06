@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { PROTECTED_PATHS, type AgentEvent, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { claudeAttendedSettings, claudeSandboxSettings, claudeSessionOptions } from '../src/acp-claude-code/claude-guards.js';
-import { BUILD_AUTO_SKILL, createAcpBuildRunner, createClaudeCodeAgent, createFixedSandbox } from '../src/index.js';
+import { BUILD_AUTO_SKILL, createAcpBuildRunner, createCodexBuildRunner, createClaudeCodeAgent, createFixedSandbox } from '../src/index.js';
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
 const dirs: string[] = [];
@@ -24,6 +24,13 @@ afterEach(async () => {
 describe('buildrunner-acp (story 5.2)', () => {
   it('sends bmad-build-auto for exactly one named ticket, as a slash command', () => {
     expect(createAcpBuildRunner().invocation('5.2')).toBe(`/${BUILD_AUTO_SKILL} ticket 5.2`);
+    // Codex runs an installed skill as `$name` (epic 17); the contract is the same, and a ref is still checked first.
+    const codex = createCodexBuildRunner();
+    expect(codex.agent).toBe('codex');
+    expect(codex.invocation('5.2')).toBe(`$${BUILD_AUTO_SKILL} ticket 5.2`);
+    expect(codex.invocation('5.2', { note: 'try again' })).toContain('$bmad-build-auto ticket 5.2\n\nA note');
+    expect(() => codex.invocation('5.2 && rm -rf /')).toThrow();
+    expect(codex.blockedCode('Unclear intent: x')).toBe('unclear_intent');
     expect(BUILD_AUTO_SKILL).toBe('bmad-build-auto');
     expect(() => createAcpBuildRunner().invocation('5.2 && rm -rf /')).toThrow();
     expect(() => createAcpBuildRunner().invocation('-x')).toThrow();

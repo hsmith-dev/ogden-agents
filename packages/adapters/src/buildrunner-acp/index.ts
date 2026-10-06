@@ -9,7 +9,7 @@
  */
 import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { BUILD_RESULT_FILE, BuildRunResult, TICKET_REF_PATTERN, type BlockedCode } from '@ogden-agents/shared';
+import { BUILD_RESULT_FILE, BuildRunResult, TICKET_REF_PATTERN, type BlockedCode, type BuildAgent } from '@ogden-agents/shared';
 import type { BuildRunnerPort } from '@ogden-agents/core';
 
 /** The BMad Method skill that builds one ticket unattended. */
@@ -54,22 +54,41 @@ export function blockedCodeForHalt(condition: string): BlockedCode {
   return 'other';
 }
 
-export function createAcpBuildRunner(): BuildRunnerPort {
+/** How an agent is asked to run an installed skill with arguments (its own command syntax; Claude Code, Grok and Antigravity: a slash command). */
+export type SkillCommand = (skill: string, args: string) => string;
+
+const slashCommand: SkillCommand = (skill, args) => `/${skill} ${args}`;
+/** Codex runs an installed skill as `$name` (epic 12). */
+const dollarCommand: SkillCommand = (skill, args) => `$${skill} ${args}`;
+
+export interface AcpBuildRunnerOptions {
+  /** The agent this runner builds with (default Claude Code). */
+  agent?: BuildAgent;
+  /** The agent's own syntax for running the skill (default a slash command). */
+  command?: SkillCommand;
+}
+
+/**
+ * The runner of one agent (epic 17): the build contract is the same for every agent (one named ticket, the plan's
+ * words for halts, the per-run JSON result), so only which agent it is and how the agent is asked to run the skill differ.
+ */
+export function createAcpBuildRunner(options: AcpBuildRunnerOptions = {}): BuildRunnerPort {
+  const command = options.command ?? slashCommand;
   return {
-    agent: 'claude-code',
+    agent: options.agent ?? 'claude-code',
 
     // The skill resumes from the plan's status on its own (bmad-integration.md Plan statuses), so a resume is the same command.
     invocation(ref, options = {}) {
       // Core checks the ref first; never anything but one ticket's ref goes to the agent.
       if (!TICKET_REF_PATTERN.test(ref)) throw new Error('not a ticket reference');
-      const command = `/${BUILD_AUTO_SKILL} ticket ${ref}`;
+      const first = command(BUILD_AUTO_SKILL, `ticket ${ref}`);
       // A note is the user's own words for the agent (Reject and retry; 5.9): after the command, fenced, with no
       // control characters and no fence of its own, so it can't read as another command or change the ticket.
       const note = options.note
         ?.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '')
         .replace(/`{3,}/g, '``')
         .trim();
-      return note === undefined || note === '' ? command : `${command}\n\nA note from the person who asked for this build (their words, not instructions to change the ticket):\n\`\`\`\n${note}\n\`\`\``;
+      return note === undefined || note === '' ? first : `${first}\n\nA note from the person who asked for this build (their words, not instructions to change the ticket):\n\`\`\`\n${note}\n\`\`\``;
     },
 
     blockedCode: blockedCodeForHalt,
@@ -89,3 +108,6 @@ export function createAcpBuildRunner(): BuildRunnerPort {
     },
   };
 }
+
+/** Codex's build runner (epic 17): the same contract, the skill run as `$bmad-build-auto ticket <ref>`. */
+export const createCodexBuildRunner = (): BuildRunnerPort => createAcpBuildRunner({ agent: 'codex', command: dollarCommand });

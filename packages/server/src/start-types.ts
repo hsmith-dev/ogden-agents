@@ -230,6 +230,8 @@ export interface StartOptions {
    * Default: the `buildrunner-acp` adapter (5.4 and 5.7 complete it).
    */
   buildRunner?: BuildRunnerPort;
+  /** The runners of the other agents that build (epic 17; default: Codex's). */
+  buildRunners?: readonly BuildRunnerPort[];
   /**
    * Override how notifications are sent (story 5.3's wiring slot; 11.4 wires
    * `notify-webhook` as the default and reads it; tests: `notify-memory`).

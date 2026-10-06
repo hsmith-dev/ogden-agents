@@ -792,11 +792,21 @@ async function runPrompt(params, client, session) {
       await say(client, params.sessionId, `trust=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
       return { stopReason: 'end_turn' };
     }
-    if (text.startsWith('/bmad-build-auto ticket ')) {
+    // The skill as an agent runs it: a slash command, or Codex's `$name` (epic 17).
+    if (/^[/$]bmad-build-auto ticket /.test(text)) {
       const ref = text.slice('/bmad-build-auto ticket '.length).trim().split(/\s/)[0];
       const cwd = session.opened.cwd ?? process.cwd();
       const ask = async (toolCallId, path) => {
         const toolCall = { toolCallId, title: `Write ${path}`, kind: 'edit', locations: [{ path }], rawInput: { file_path: path } };
+        // Codex in `workspace-write` (epic 17), as the real sandbox: an edit inside the workspace (or an added directory) needs no card.
+        if (CODEX && session.mode === 'workspace-write') {
+          const roots = [cwd, ...(session.opened.additionalDirectories ?? [])];
+          const insideRoot = roots.some((root) => { const rel = relative(root, path); return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel); });
+          if (insideRoot) {
+            await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'completed' });
+            return true;
+          }
+        }
         await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
         const answer = await client.request('session/request_permission', {
           sessionId: params.sessionId,
@@ -812,7 +822,11 @@ async function runPrompt(params, client, session) {
       };
       await say(client, params.sessionId, `Building ${ref}. `);
       // Story 5.7: what the build's agent was started with, for the secrets and allowlist tests.
-      if (process.env.FAKE_ACP_BUILD_ENV_DUMP) writeFileSync(process.env.FAKE_ACP_BUILD_ENV_DUMP, Object.entries(process.env).map(([name, value]) => `${name}=${value}`).join('\n'));
+      if (process.env.FAKE_ACP_BUILD_ENV_DUMP) {
+        writeFileSync(process.env.FAKE_ACP_BUILD_ENV_DUMP, Object.entries(process.env).map(([name, value]) => `${name}=${value}`).join('\n'));
+        // How the session was opened (epic 17), beside the environment: its mode and the session's added directories.
+        writeFileSync(`${process.env.FAKE_ACP_BUILD_ENV_DUMP}.session`, [`session_mode=${session.mode}`, `additionalDirectories=${JSON.stringify(session.opened.additionalDirectories ?? null)}`].join('\n'));
+      }
       if (process.env.FAKE_ACP_BUILD_ECHO_KEY === '1') await say(client, params.sessionId, `The key is ${process.env.ANTHROPIC_API_KEY ?? 'none'}. `);
       const childFile = process.env.FAKE_ACP_BUILD_CHILD;
       if (childFile) {

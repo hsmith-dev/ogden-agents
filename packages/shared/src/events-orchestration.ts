@@ -15,9 +15,6 @@ import { AgentId } from './events-common.js';
 import { assigned, onWorkspaceStream } from './events-envelope.js';
 import { SessionId, OrchestrationRunId, RunId } from './ids.js';
 import {
-  Approver,
-  DecisionOutcome,
-  DispatchRefusalReason,
   ManagerDecision,
   ManagerFailureKind,
   ManagerBuildTicket,
@@ -31,11 +28,16 @@ import {
   RoutingRuleId,
   ManagerStepId,
   MANAGER_LIMITS,
+} from './orchestration.js';
+import {
+  Approver,
+  DecisionOutcome,
+  DispatchRefusalReason,
   OrchestrationMode,
   PauseReason,
   RunLimits,
   OrchestrationStopReason,
-} from './orchestration.js';
+} from './orchestration-run.js';
 
 const runId = { runId: OrchestrationRunId };
 const step = { ...runId, stepId: ManagerStepId };

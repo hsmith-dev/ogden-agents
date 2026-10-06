@@ -95,7 +95,7 @@ import {
 } from './events-session.js';
 import { ModelId, PermissionMode, Workspace } from './entities.js';
 import { BmadPieces } from './bmad.js';
-import { OrchestrationMode } from './orchestration.js';
+import { OrchestrationMode } from './orchestration-run.js';
 import { TeamRoster } from './team.js';
 import {
   BmadSetupCompletedEvent,

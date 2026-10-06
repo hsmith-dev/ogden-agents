@@ -141,6 +141,20 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
       return { ok: false, response: apiError(c, 400, 'invalid_request', 'The request body must be JSON.') };
     }
   };
+  /**
+   * A route that takes a JSON body: the size is checked before the body is read (413 in the limit's words), then the body is read by `read`
+   * (400 when it is not JSON) and handed to `handle`. One place for what the body routes shared.
+   */
+  const withBody =
+    <V>(limiter: ReturnType<typeof bodyLimit>, read: (c: Context) => Promise<{ ok: true; value: V } | { ok: false; response: Response }>, handle: (c: Context, workspaceId: WorkspaceId, value: V) => Promise<Response> | Response): OrchestrationHandler =>
+    async (c, { workspaceId }) => {
+      let answer: Response | undefined;
+      const tooLong = await limiter(c, async () => {
+        const body = await read(c);
+        answer = body.ok ? await handle(c, workspaceId, body.value) : body.response;
+      });
+      return tooLong ?? answer!;
+    };
   /** Core's refusals as API errors; anything else is left for `onError` (500). */
   const refusal = (c: Context, error: unknown): Response => {
     if (error instanceof ManagerUnavailableError) return apiError(c, 409, 'manager_unavailable', error.message);
@@ -182,24 +196,20 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
 
   routes.get(API_ROUTES.workspaceOrchestrationRuns, (c, { workspaceId }) => run(c, async (use) => c.json(OrchestrationRunsResponse.parse({ runs: await use.listRuns(workspaceId) }))));
 
-  routes.post(API_ROUTES.workspaceOrchestrationRuns, async (c, { workspaceId }) => {
-    // The guard has run; the size is checked before the body is read.
-    let answer: Response | undefined;
-    const tooLong = await limit(c, async () => {
-      const body = await readBody(c, StartOrchestrationRunRequest);
-      if (!body.ok) {
-        answer = body.response;
-        return;
-      }
-      answer = await run(c, async (use) => {
-        const started = await use.startRun(workspaceId, body.value);
-        // The goal is the user's own words: never logged.
-        log.info('orchestration run started', { workspaceId, runId: started.run.id, steps: started.steps.length });
-        return c.json(OrchestrationRunResponse.parse({ run: started }), 201);
-      });
-    });
-    return tooLong ?? answer!;
-  });
+  routes.post(
+    API_ROUTES.workspaceOrchestrationRuns,
+    withBody(
+      limit,
+      (c) => readBody(c, StartOrchestrationRunRequest),
+      (c, workspaceId, goal) =>
+        run(c, async (use) => {
+          const started = await use.startRun(workspaceId, goal);
+          // The goal is the user's own words: never logged.
+          log.info('orchestration run started', { workspaceId, runId: started.run.id, steps: started.steps.length });
+          return c.json(OrchestrationRunResponse.parse({ run: started }), 201);
+        }),
+    ),
+  );
 
   routes.get(API_ROUTES.workspaceOrchestrationRun, (c, { workspaceId }) => run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.getRun(workspaceId, c.req.param('runId') ?? '') }))));
 
@@ -225,55 +235,33 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
 
   // The plan review (15.6). Each is the user's own action: these routes sit behind the tab's token like every route, and nothing the
   // manager's code can reach calls them (an architecture test). No body names an approver: the approver is always the user.
-  routes.post(API_ROUTES.workspaceOrchestrationStepEdit, async (c, { workspaceId }) => {
-    let answer: Response | undefined;
-    const tooLong = await reviewLimit(c, async () => {
-      const body = await readJson(c);
-      if (!body.ok) {
-        answer = body.response;
-        return;
-      }
-      answer = await run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.editStep(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '', body.value) })));
-    });
-    return tooLong ?? answer!;
-  });
+  routes.post(
+    API_ROUTES.workspaceOrchestrationStepEdit,
+    withBody(reviewLimit, readJson, (c, workspaceId, body) => run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.editStep(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '', body) })))),
+  );
 
   // The person's own call, after the Build dialog started a build for a build step (15.11): it names the run the dialog started. It starts
   // nothing and approves nothing: it records which run the step follows. No route of orchestration starts a build; the dialog's own start
   // is `POST /builds`, and nothing the manager's code can reach calls either (an architecture test).
-  routes.post(API_ROUTES.workspaceOrchestrationStepLink, async (c, { workspaceId }) => {
-    let answer: Response | undefined;
-    const tooLong = await reviewLimit(c, async () => {
-      const body = await readJson(c);
-      if (!body.ok) {
-        answer = body.response;
-        return;
-      }
-      answer = await run(c, async (use) => {
-        const view = await use.linkBuild(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '', body.value);
+  routes.post(
+    API_ROUTES.workspaceOrchestrationStepLink,
+    withBody(reviewLimit, readJson, (c, workspaceId, body) =>
+      run(c, async (use) => {
+        const view = await use.linkBuild(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '', body);
         log.info('orchestration build step linked to the build the user started', { workspaceId, runId: c.req.param('runId'), stepId: c.req.param('stepId') });
         return c.json(OrchestrationRunResponse.parse({ run: view }));
-      });
-    });
-    return tooLong ?? answer!;
-  });
+      }),
+    ),
+  );
 
   routes.post(API_ROUTES.workspaceOrchestrationStepSkip, (c, { workspaceId }) =>
     run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.skipStep(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '') }))),
   );
 
-  routes.post(API_ROUTES.workspaceOrchestrationReorder, async (c, { workspaceId }) => {
-    let answer: Response | undefined;
-    const tooLong = await reviewLimit(c, async () => {
-      const body = await readJson(c);
-      if (!body.ok) {
-        answer = body.response;
-        return;
-      }
-      answer = await run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.reorderSteps(workspaceId, c.req.param('runId') ?? '', body.value) })));
-    });
-    return tooLong ?? answer!;
-  });
+  routes.post(
+    API_ROUTES.workspaceOrchestrationReorder,
+    withBody(reviewLimit, readJson, (c, workspaceId, body) => run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.reorderSteps(workspaceId, c.req.param('runId') ?? '', body) })))),
+  );
 
   // Stop is never blockable (15.8): its route leaves the piece's guard out, so a run can be stopped with the piece switched off.
   routes.post(
@@ -288,19 +276,11 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
   );
 
   // The manager's question (15.9): the user's own answer, as data for the manager's next decision. Nothing the manager's code can reach calls it.
-  routes.post(API_ROUTES.workspaceOrchestrationAnswer, async (c, { workspaceId }) => {
-    let answer: Response | undefined;
-    const tooLong = await limit(c, async () => {
-      const body = await readJson(c);
-      if (!body.ok) {
-        answer = body.response;
-        return;
-      }
-      // The answer is the user's own words: never logged.
-      answer = await run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.answerQuestion(workspaceId, c.req.param('runId') ?? '', body.value) })));
-    });
-    return tooLong ?? answer!;
-  });
+  routes.post(
+    API_ROUTES.workspaceOrchestrationAnswer,
+    // The answer is the user's own words: never logged.
+    withBody(limit, readJson, (c, workspaceId, body) => run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.answerQuestion(workspaceId, c.req.param('runId') ?? '', body) })))),
+  );
 
   // The activity log (15.8): every instruction sent or refused, read from the events.
   routes.get(API_ROUTES.workspaceOrchestrationActivity, (c, { workspaceId }) => run(c, async (use) => c.json(OrchestrationActivityResponse.parse({ entries: await use.activity(workspaceId) }))));
@@ -309,21 +289,15 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
   // route here changes the roster, the mode or an approval.
   const routing = (rules: ReturnType<Orchestration['getRouting']>) => OrchestrationRoutingResponse.parse({ rules, maxRules: ROUTING_LIMITS.maxRules, maxRuleChars: ROUTING_LIMITS.maxRuleChars });
   routes.get(API_ROUTES.workspaceOrchestrationRouting, (c, { workspaceId }) => run(c, async (use) => c.json(routing(use.getRouting(workspaceId)))));
-  routes.put(API_ROUTES.workspaceOrchestrationRouting, async (c, { workspaceId }) => {
-    let answer: Response | undefined;
-    const tooLong = await reviewLimit(c, async () => {
-      const body = await readJson(c);
-      if (!body.ok) {
-        answer = body.response;
-        return;
-      }
+  routes.put(
+    API_ROUTES.workspaceOrchestrationRouting,
+    withBody(reviewLimit, readJson, (c, workspaceId, body) =>
       // The rules are the person's own words: only their count is logged.
-      answer = await run(c, async (use) => {
-        const saved = use.setRouting(workspaceId, body.value);
+      run(c, async (use) => {
+        const saved = use.setRouting(workspaceId, body);
         log.info('orchestration routing rules saved', { workspaceId, rules: saved.length });
         return c.json(routing(saved));
-      });
-    });
-    return tooLong ?? answer!;
-  });
+      }),
+    ),
+  );
 }

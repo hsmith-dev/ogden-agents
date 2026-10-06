@@ -3,7 +3,7 @@ import { BmadPieceSet } from './bmad.js';
 import { AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MAX_HANDOFF_BRIEF_CHARS, MessageId, PermissionDecision, WhileWorking } from './events.js';
 import { AgentModel, DefaultModeNotice, ModelId, PermissionMode, Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
-import { OrchestrationMode } from './orchestration.js';
+import { OrchestrationMode } from './orchestration-run.js';
 import { AgentInstallState } from './setup.js';
 import { TeamRoster } from './team.js';
 import { SessionTerminal } from './terminal.js';

@@ -341,6 +341,17 @@ describe('the Orchestrate page', () => {
     expect(screen.queryByTestId('orchestrate-approve')).toBeNull();
   });
 
+  it('a step beside one that was already sent cannot be moved onto it: the button is off, nothing is sent', async () => {
+    fake.runs = [view([step('s1', { state: 'done', sessionId: 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3' }), step('s2', { position: 1 }), step('s3', { position: 2 })])];
+    await mount(<WorkspaceOrchestratePage />);
+    // s2 sits under the sent s1: it cannot go up; it can go down. s3 cannot go down (last) but can go up.
+    expect(screen.getByRole('button', { name: 'Move step s2 up' }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Move step s2 down' }).getAttribute('aria-disabled')).toBe('false');
+    fireEvent.click(screen.getByRole('button', { name: 'Move step s2 up' }));
+    await settle();
+    expect(fake.bodies).toEqual([]);
+  });
+
   it('Move up and Move down send the whole new order, and a refused order shows the plain reason', async () => {
     fake.runs = [view([step('s1'), step('s2', { position: 1 }), step('s3', { position: 2, dependsOn: ['s2'] })])];
     fake.next = view([step('s2'), step('s1', { position: 1 }), step('s3', { position: 2, dependsOn: ['s2'] })]);

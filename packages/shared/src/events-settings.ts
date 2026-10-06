@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { AgentId, SETTINGS_STREAM, WhileWorking } from './events-common.js';
 import { ModelId } from './entities.js';
 import { assigned } from './events-envelope.js';
-import { OrchestrationMode, RunLimits } from './orchestration.js';
+import { OrchestrationMode, RunLimits } from './orchestration-run.js';
 import { TeamRoster } from './team.js';
 
 const onSettingsStream = { workspaceId: z.null(), streamId: z.literal(SETTINGS_STREAM) };

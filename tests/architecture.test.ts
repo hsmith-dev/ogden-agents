@@ -597,15 +597,24 @@ export function findOrchestrationViolations(files: readonly SourceFile[]): strin
 const USER_ACTIONS = /\b(approveStep|editStep|skipStep|reorderSteps|stopRun|answerQuestion)\b/;
 /** The manager's own code: core's manager files and the fake manager. */
 const MANAGER_CODE = /(^|[\\/])packages[\\/]core[\\/]src[\\/](?:manager-[\w-]+|model-manager)\.ts$|(^|[\\/])packages[\\/]adapters[\\/]src[\\/](?:manager-memory|local-model[\w-]*)[\\/]/;
-const ORCHESTRATION_USE_CASE = /(^|[\\/])packages[\\/]core[\\/]src[\\/]orchestration\.ts$/;
-/** The pieces of the use-case that call the manager or send to a worker, cut by their markers. */
-const GUARDED_SLICES: ReadonlyArray<readonly [name: string, from: string, to: string | undefined]> = [
-  ['startRun', 'async startRun(', 'async listRuns('],
-  ['dispatchStep', 'async dispatchStep(', undefined],
-  ['readBack', 'const readBack =', 'const NO_MANAGER'],
-  // Story 15.8: the automatic engine sends steps for the mode, never by calling the user's own actions.
-  ['advance', 'const chains = new Map', 'const api: Orchestration = {'],
-];
+/**
+ * The orchestration use-case: `orchestration.ts` (the public shape and the assembly) and every module the 15.13 sweep cut it into
+ * (`orchestration-rows`, `-transcript`, `-loop-state`, `-build-read`, `-manager-io`, `-review`, `-run`, `-readback`, `-activity`, `-dispatch`,
+ * `-engine`, `-actions`, `-kernel`) and the files beside them (`-feature`, `-builds`, `-routing`). A new `orchestration-*.ts` file in core is
+ * held to every rule here by name, with no list to forget. Only the install's defaults (the user's own settings use-case) are left out.
+ */
+const ORCHESTRATION_USE_CASE = /(^|[\\/])packages[\\/]core[\\/]src[\\/]orchestration(?!-defaults\b)(?:-[\w-]+)?\.ts$/;
+/** The only use-case files that may name the user's own actions: the module that implements them and the assembly that lists them. */
+const USER_ACTION_MODULES = /(^|[\\/])packages[\\/]core[\\/]src[\\/]orchestration(?:-actions)?\.ts$/;
+/** One use-case file's source by its short name (`engine` is `orchestration-engine.ts`; `''` is `orchestration.ts`). */
+function useCaseFile(files: readonly SourceFile[], name: string): string {
+  const wanted = new RegExp(`packages[\\\\/]core[\\\\/]src[\\\\/]orchestration${name === '' ? '' : `-${name}`}\\.ts$`);
+  const found = files.find((file) => wanted.test(file.path));
+  if (found === undefined) throw new Error(`no orchestration${name === '' ? '' : `-${name}`}.ts in core`);
+  return found.source;
+}
+/** Every use-case file's source, one after the other (for a rule that holds across the whole use-case). */
+const wholeUseCase = (files: readonly SourceFile[]): string => files.filter((file) => ORCHESTRATION_USE_CASE.test(file.path)).map((file) => file.source).join('\n');
 /** Where the user's actions are called from outside core: the server's orchestration routes, and the web client that sends them. */
 const USER_ACTION_CALLERS = /(^|[\\/])packages[\\/]server[\\/]src[\\/]orchestration-routes\.ts$/;
 
@@ -616,16 +625,15 @@ export function findUserActionReaches(files: readonly SourceFile[]): string[] {
     if (MANAGER_CODE.test(path)) {
       for (const match of code.matchAll(new RegExp(USER_ACTIONS.source, 'g'))) violations.push(`${path}: names ${match[1]} (E15: the manager's code cannot approve, edit, skip, reorder or stop)`);
     }
-    if (ORCHESTRATION_USE_CASE.test(path)) {
-      for (const [name, from, to] of GUARDED_SLICES) {
-        const start = code.indexOf(from);
-        const end = to === undefined ? code.length : code.indexOf(to, start);
-        if (start < 0 || end < 0) {
-          violations.push(`${path}: cannot find ${name} (E15 guard needs its marker ${from})`);
-          continue;
-        }
-        for (const match of code.slice(start, end).matchAll(new RegExp(USER_ACTIONS.source, 'g'))) violations.push(`${path}: ${name} names ${match[1]} (E15: only the user's routes may call it)`);
-      }
+    // Every use-case module but the user's actions (and the assembly that lists them): start, read-back, dispatch, the engine and the rest.
+    if (ORCHESTRATION_USE_CASE.test(path) && !USER_ACTION_MODULES.test(path)) {
+      for (const match of code.matchAll(new RegExp(USER_ACTIONS.source, 'g'))) violations.push(`${path}: names ${match[1]} (E15: only the user's routes may call it)`);
+    }
+    // The assembly lists the user's actions in its interface but only spreads them in `createOrchestration`: nothing there names one.
+    if (/(^|[\\/])packages[\\/]core[\\/]src[\\/]orchestration\.ts$/.test(path)) {
+      const at = code.indexOf('export function createOrchestration');
+      if (at < 0) violations.push(`${path}: cannot find createOrchestration (E15 guard needs it)`);
+      else for (const match of code.slice(at).matchAll(new RegExp(USER_ACTIONS.source, 'g'))) violations.push(`${path}: createOrchestration names ${match[1]} (E15: only the user's routes may call it)`);
     }
     // Outside core and its tests, only the server's orchestration routes call the use-cases.
     if (/(^|[\\/])packages[\\/]server[\\/]src[\\/]/.test(path) && !USER_ACTION_CALLERS.test(path)) {
@@ -645,26 +653,48 @@ describe('E15: approval comes only from a user action (story 15.6)', () => {
     expect(findUserActionReaches(files)).toEqual([]);
   });
 
-  it('flags a planted call from a manager file, from startRun or dispatchStep, and from another server file', () => {
+  it('flags a planted call from a manager file, from any use-case module but the actions, and from another server file', () => {
     const files: SourceFile[] = [
       { pkg: '@ogden-agents/core', path: 'packages/core/src/model-manager.ts', source: "// approveStep is only a word here\nawait use.approveStep(ws, run, step);" },
       { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/manager-memory/index.ts', source: 'orchestration.skipStep(a, b, c);' },
-      {
-        pkg: '@ogden-agents/core',
-        path: 'packages/core/src/orchestration.ts',
-        source: "const chains = new Map();\nconst api: Orchestration = {};\nasync startRun() { await this.approveStep(); }\nasync listRuns() {}\nconst readBack = () => { stopRun(); };\nconst NO_MANAGER = 1;\nasync approveStep() {}\nasync dispatchStep() { editStep(); }",
-      },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration-run.ts', source: 'const startRun = () => { approveStep(); };' },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration-dispatch.ts', source: 'const dispatchStep = () => { editStep(); };' },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration-readback.ts', source: 'const readBack = () => { stopRun(); };' },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration-engine.ts', source: 'const advancePass = () => { answerQuestion(); reorderSteps(); };' },
+      // The user's actions and the assembly that lists them are the places that name them.
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration-actions.ts', source: 'const approveStep = () => {}; const stopRun = () => {};' },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration.ts', source: 'approveStep(workspaceId: string): void;\nexport function createOrchestration() { return { ...actions }; }' },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration.ts', source: 'export function createOrchestration() { engine.stopRun(a, b); }' },
       { pkg: '@ogden-agents/server', path: 'packages/server/src/chat-routes.ts', source: 'runs.reorderSteps(a, b);' },
       { pkg: '@ogden-agents/server', path: 'packages/server/src/orchestration-routes.ts', source: 'use.approveStep(a, b, c);' },
     ];
     expect(findUserActionReaches(files)).toEqual([
       "packages/core/src/model-manager.ts: names approveStep (E15: the manager's code cannot approve, edit, skip, reorder or stop)",
       "packages/adapters/src/manager-memory/index.ts: names skipStep (E15: the manager's code cannot approve, edit, skip, reorder or stop)",
-      "packages/core/src/orchestration.ts: startRun names approveStep (E15: only the user's routes may call it)",
-      "packages/core/src/orchestration.ts: dispatchStep names editStep (E15: only the user's routes may call it)",
-      "packages/core/src/orchestration.ts: readBack names stopRun (E15: only the user's routes may call it)",
+      "packages/core/src/orchestration-run.ts: names approveStep (E15: only the user's routes may call it)",
+      "packages/core/src/orchestration-dispatch.ts: names editStep (E15: only the user's routes may call it)",
+      "packages/core/src/orchestration-readback.ts: names stopRun (E15: only the user's routes may call it)",
+      "packages/core/src/orchestration-engine.ts: names answerQuestion (E15: only the user's routes may call it)",
+      "packages/core/src/orchestration-engine.ts: names reorderSteps (E15: only the user's routes may call it)",
+      "packages/core/src/orchestration.ts: createOrchestration names stopRun (E15: only the user's routes may call it)",
       "packages/server/src/chat-routes.ts: calls reorderSteps (E15: only orchestration-routes.ts, a user's route, may)",
     ]);
+  });
+
+  it('the use-case is cut into the modules the guards name, and the user\'s actions are the one module that names them', () => {
+    const files = loadWorkspaceSources();
+    const modules = files.filter((file) => ORCHESTRATION_USE_CASE.test(file.path)).map((file) => file.path.split('\\').join('/').replace('packages/core/src/', ''));
+    expect(modules).toEqual(
+      expect.arrayContaining(['orchestration.ts', 'orchestration-kernel.ts', 'orchestration-rows.ts', 'orchestration-transcript.ts', 'orchestration-loop-state.ts', 'orchestration-build-read.ts', 'orchestration-manager-io.ts', 'orchestration-review.ts', 'orchestration-run.ts', 'orchestration-readback.ts', 'orchestration-activity.ts', 'orchestration-dispatch.ts', 'orchestration-engine.ts', 'orchestration-actions.ts', 'orchestration-routing.ts', 'orchestration-builds.ts', 'orchestration-feature.ts']),
+    );
+    // The install's defaults are the user's own settings use-case: not part of the use-case these rules guard.
+    expect(modules).not.toContain('orchestration-defaults.ts');
+    const naming = files.filter((file) => ORCHESTRATION_USE_CASE.test(file.path) && new RegExp(USER_ACTIONS.source).test(withoutComments(file.source))).map((file) => file.path.split('\\').join('/').replace('packages/core/src/', ''));
+    expect(naming.sort()).toEqual(['orchestration-actions.ts', 'orchestration.ts']);
+    // No orchestration module is large again: a module over 450 lines is a cue to cut it (15.13).
+    for (const file of files.filter((candidate) => ORCHESTRATION_USE_CASE.test(candidate.path))) {
+      expect(file.source.split('\n').length, file.path).toBeLessThanOrEqual(450);
+    }
   });
 });
 
@@ -727,21 +757,26 @@ describe('E15: the manager never changes the mode or the confirmation (story 15.
     expect(findSettingsMutatorReaches(files)).toEqual([]);
   });
 
-  it('the automatic engine is one of the guarded slices of the use-case', () => {
-    const source = loadWorkspaceSources().find((file) => ORCHESTRATION_USE_CASE.test(file.path))!.source;
-    expect(source).toContain('const chains = new Map');
-    expect(source.indexOf('const chains = new Map')).toBeLessThan(source.indexOf('const api: Orchestration = {'));
+  it('the automatic engine is a guarded module of the use-case', () => {
+    const engine = useCaseFile(loadWorkspaceSources(), 'engine');
+    expect(engine).toContain('const chains = new Map');
+    expect(engine).toContain('const advancePass =');
+    expect(ORCHESTRATION_USE_CASE.test('packages/core/src/orchestration-engine.ts')).toBe(true);
   });
 
   it('flags a planted mutator in the use-case or the manager code', () => {
     const files: SourceFile[] = [
       { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration.ts', source: "// updateSettings is only a word here\npermissions.updateSettings(ws, { orchestrationMode: 'automatic', confirm: true });" },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration-engine.ts', source: 'permissions.updateSettings(ws, { orchestrationMode: "automatic" });' },
       { pkg: '@ogden-agents/core', path: 'packages/core/src/model-manager.ts', source: 'defaults.setOrchestration(next);' },
       { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/manager-memory/index.ts', source: "const mark = { orchestrationAutomaticConfirmed: true };" },
       { pkg: '@ogden-agents/server', path: 'packages/server/src/workspace-routes.ts', source: 'permissions.updateSettings(a, b);' },
+      // The install's defaults are the user's own settings use-case.
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration-defaults.ts', source: 'setDefaults(next);' },
     ];
     expect(findSettingsMutatorReaches(files)).toEqual([
       'packages/core/src/orchestration.ts: names updateSettings (E15: the manager never changes the mode or the confirmation)',
+      'packages/core/src/orchestration-engine.ts: names updateSettings (E15: the manager never changes the mode or the confirmation)',
       'packages/core/src/model-manager.ts: names setOrchestration (E15: the manager never changes the mode or the confirmation)',
       'packages/adapters/src/manager-memory/index.ts: names orchestrationAutomaticConfirmed (E15: the manager never changes the mode or the confirmation)',
     ]);
@@ -756,10 +791,14 @@ describe('E15: routing rules only suggest (story 15.12)', () => {
     // Words in comments say what the file does not do, so only code is checked.
     const code = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     expect(code(store)).not.toMatch(forbidden);
-    const useCase = files.find((file) => ORCHESTRATION_USE_CASE.test(file.path))!.source;
-    const setRouting = useCase.slice(useCase.indexOf('    setRouting(workspaceId, request) {'), useCase.indexOf('    async listRuns('));
+    // The use-case that saves them (createRouting) lives in the same file, so the check above covers it; it is not an inline slice any more.
+    expect(code(store)).toContain('setRouting(workspaceId: WorkspaceId, request: unknown)');
+    const setRouting = store.slice(store.indexOf('setRouting(workspaceId: WorkspaceId, request: unknown)'));
     expect(setRouting.length).toBeGreaterThan(200);
     expect(code(setRouting)).not.toMatch(forbidden);
+    // Nothing else of the use-case writes the rules.
+    const writers = files.filter((file) => ORCHESTRATION_USE_CASE.test(file.path) && /writeRoutingRules/.test(withoutComments(file.source))).map((file) => file.path.split('\\').join('/').replace('packages/core/src/', ''));
+    expect(writers).toEqual(['orchestration-routing.ts']);
   });
 
   it('a step\'s rule is checked only after the roster, so no rule can make a worker allowed', () => {
@@ -785,10 +824,27 @@ describe('E15: orchestration code is tool-free and names no model product (story
         'packages/core/src/orchestration-feature.ts',
         'packages/core/src/orchestration.ts',
         'packages/core/src/orchestration-routing.ts',
+        // The modules the 15.13 sweep cut the use-case into: all held to the same rules by the pattern.
+        'packages/core/src/orchestration-kernel.ts',
+        'packages/core/src/orchestration-rows.ts',
+        'packages/core/src/orchestration-transcript.ts',
+        'packages/core/src/orchestration-loop-state.ts',
+        'packages/core/src/orchestration-build-read.ts',
+        'packages/core/src/orchestration-manager-io.ts',
+        'packages/core/src/orchestration-review.ts',
+        'packages/core/src/orchestration-run.ts',
+        'packages/core/src/orchestration-readback.ts',
+        'packages/core/src/orchestration-activity.ts',
+        'packages/core/src/orchestration-dispatch.ts',
+        'packages/core/src/orchestration-engine.ts',
+        'packages/core/src/orchestration-actions.ts',
         'packages/core/src/team-roster.ts',
         'packages/shared/src/roster.ts',
         'packages/shared/src/events-orchestration.ts',
         'packages/shared/src/orchestration.ts',
+        'packages/shared/src/orchestration-run.ts',
+        'packages/shared/src/orchestration-build-review.ts',
+        'packages/shared/src/orchestration-text.ts',
         'packages/adapters/src/manager-memory/index.ts',
       ]),
     );
@@ -842,7 +898,7 @@ describe('E15: the manager and the loop never answer a permission card (story 15
   });
 
   it('the orchestration use-case reads a Deny from the session events (it only reads them)', () => {
-    const source = loadWorkspaceSources().find((file) => ORCHESTRATION_USE_CASE.test(file.path))!.source;
+    const source = wholeUseCase(loadWorkspaceSources());
     expect(source).toContain("'permission.resolved'");
     expect(source).not.toMatch(/\.append\(\{\s*type:\s*'permission\./);
   });
@@ -957,30 +1013,33 @@ describe('E15: a build is started only in the Build dialog (story 15.11)', () =>
 
   it('the one plan route about a build only records a run: it takes a run id, names no ticket, agent or mode, and the use-case never reads a builds start', () => {
     const files = loadWorkspaceSources();
-    const useCase = files.find((file) => ORCHESTRATION_USE_CASE.test(file.path))!.source;
-    expect(useCase).toContain('LinkOrchestrationBuildRequest');
-    const link = useCase.slice(useCase.indexOf('async linkBuild('), useCase.indexOf('async answerQuestion('));
+    const actions = useCaseFile(files, 'actions');
+    expect(actions).toContain('LinkOrchestrationBuildRequest');
+    const link = actions.slice(actions.indexOf('const linkBuild'), actions.indexOf('const answerQuestion'));
     expect(link.length).toBeGreaterThan(200);
     // It reads the run table and writes the step; it makes no run, session or chat.
     expect(link).not.toMatch(/createRun|createSession|createChatSession|sendMessage|insert\(runsTable\)|update\(runsTable\)/);
+    // No module of the use-case makes a run row either: the builds' own use-case does.
+    expect(wholeUseCase(files)).not.toMatch(/insert\(runsTable\)|update\(runsTable\)/);
     const routes = files.find((file) => ORCHESTRATION_ROUTES.test(file.path))!.source;
     expect(routes).toContain('workspaceOrchestrationStepLink');
     expect(routes).not.toMatch(/API_ROUTES\.workspaceBuild/);
   });
 
   it('the plan\'s build steps are never approved, edited or sent: the use-case refuses each before anything else', () => {
-    const useCase = loadWorkspaceSources().find((file) => ORCHESTRATION_USE_CASE.test(file.path))!.source;
-    for (const [name, marker] of [
-      ['dispatchStep', 'async dispatchStep('],
-      ['approveStep', 'async approveStep('],
-      ['editStep', 'async editStep('],
-      ['approveByMode', 'const approveByMode ='],
+    const files = loadWorkspaceSources();
+    for (const [name, module, marker] of [
+      ['dispatchStep', 'dispatch', 'const dispatchStep ='],
+      ['approveStep', 'actions', 'const approveStep:'],
+      ['editStep', 'actions', 'const editStep:'],
+      ['approveByMode', 'engine', 'const approveByMode ='],
     ] as const) {
+      const useCase = useCaseFile(files, module);
       const body = useCase.slice(useCase.indexOf(marker), useCase.indexOf(marker) + 1800);
       expect(body, name).toMatch(/buildRef !== null/);
     }
     // The automatic engine waits for the person at a build, whatever the mode.
-    expect(useCase).toMatch(/if \(next\.buildRef !== null\) return waitForUser/);
+    expect(useCaseFile(files, 'engine')).toMatch(/if \(next\.buildRef !== null\) return waitForUser/);
   });
 
   it('flags a planted start of a build in the use-case, the manager code, the routes or the page', () => {

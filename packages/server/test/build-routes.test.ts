@@ -65,6 +65,14 @@ async function refusalOf(reply: Response) {
   return { status: reply.status, ...ApiErrorBody.parse(await reply.json()).error };
 }
 
+/**
+ * A whole build, review and Approve is real work: a server, a fixture repo, a worktree and run object store, the fake agent,
+ * and a dozen `git` processes (merge, `fsck`). It takes ~1.4 s on a quiet machine and 3.5x that on a macOS CI runner running
+ * the other test files beside it, past Vitest's 5 s default (main runs 37444572876, 37427267242, 37415804606 timed out at
+ * its limit with the file's other tests green). Only these full-flow tests get the longer limit; the rest keep the default.
+ */
+const FULL_BUILD_TEST_TIMEOUT_MS = 30_000;
+
 const TICKETS = [
   { ref: '1.1', title: 'Build the thing', plan: FAKE_BUILD_PLAN },
   { ref: '1.2', title: 'Build the next thing', plan: FAKE_BUILD_WAITING_PLAN, after: [1] },
@@ -231,7 +239,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(fixtureGit(repo.path, 'cat-file', '-t', reviewed!).trim()).toBe('commit');
     expect(existsSync(runStore)).toBe(false);
     expect(() => fixtureGit(repo.path, 'fsck', '--strict', '--no-dangling')).not.toThrow();
-  });
+  }, FULL_BUILD_TEST_TIMEOUT_MS);
 
   it('a conflicting merge is aborted with the checkout unchanged and blocks the run; Reject discards the worktree and branch, keeps the ticket', async () => {
     const { tab, server, wsId, build, settled, review, repo, store } = await setup();
@@ -277,7 +285,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(branches(repo.path)).toEqual(['main']);
     expect(store.marks).toEqual([]);
     expect(readFileSync(join(repo.path, ...FAKE_BUILD_PLAN.split('/')), 'utf8')).toMatch(/^status: ready-for-dev$/m);
-  });
+  }, FULL_BUILD_TEST_TIMEOUT_MS);
 
   it('a run whose plan ends blocked is blocked with the plan reason, and cannot be approved', async () => {
     const repo = buildRepo();
@@ -339,7 +347,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     // The saved fix is beside the plan in the run's worktree, and the code change was reverted.
     expect(readFileSync(join(run.worktreePath!, ...FAKE_BUILD_PLAN.replace(/\.md$/, '.patch').split('/')), 'utf8')).toContain('+++ b/src/fix-1.1.txt');
     expect(existsSync(join(run.worktreePath!, 'src', 'built-1.1.txt'))).toBe(false);
-  });
+  }, FULL_BUILD_TEST_TIMEOUT_MS);
 
   it("epics 5 and 11's other routes (story 5.3): behind the piece's guard, then 501 until their lanes; an unknown agent 400", async () => {
     const off = await setup({ builds: false });

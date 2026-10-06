@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { AgentId } from './events-common.js';
 import { PermissionMode } from './entities.js';
-import { OrchestrationMode, RunLimits } from './orchestration.js';
+import { OrchestrationMode, RunLimits } from './orchestration-run.js';
 import { TeamRoster } from './team.js';
 
 /**

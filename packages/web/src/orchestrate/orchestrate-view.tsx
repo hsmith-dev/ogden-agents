@@ -271,8 +271,9 @@ function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEd
             wsId={wsId}
             step={step}
             stateOf={stateOf}
-            first={at === 0}
-            last={at === steps.length - 1}
+            // A step beside one that was already sent cannot swap with it (it keeps its place): the server refuses, so the button says so up front.
+            first={at === 0 || wasSent(steps[at - 1]!)}
+            last={at === steps.length - 1 || wasSent(steps[at + 1]!)}
             live={canAct}
             stopped={run.state === 'stopped'}
             ended={run.state === 'finished' || run.state === 'failed' ? run.state : undefined}
@@ -286,6 +287,9 @@ function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEd
   );
 }
 
+/** Whether a step was already sent (or ended after it was): it keeps its place in the plan. */
+const wasSent = (step: OrchestrationStepView): boolean => step.state === 'dispatched' || step.state === 'done' || step.state === 'failed';
+
 /** Where a step goes: a new chat, or one the manager named. */
 const chatWords = (step: OrchestrationStepView): string => (step.chat === 'new' ? 'a new chat' : 'an existing chat');
 
@@ -294,6 +298,7 @@ interface StepRowProps {
   step: OrchestrationStepView;
   /** The state of every step of the run, by id, to say what this one waits for. */
   stateOf: ReadonlyMap<string, OrchestrationStepView['state']>;
+  /** The step cannot move up (the first, or the one above was already sent) or down (the last, or the one below was). */
   first: boolean;
   last: boolean;
   live: boolean;

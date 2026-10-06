@@ -17,6 +17,7 @@ import {
   FeatureOffError,
   NotFoundError,
   NotImplementedError,
+  ReducedModeError,
   ScriptsNotTrustedError,
   ValidationError,
   type AgentPort,
@@ -28,7 +29,7 @@ import { openTestCore, soleAgent, tempDir, unusedCatalogParts } from './helpers.
 
 const UNKNOWN = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId;
 const SKILL = 'bmad-retrospective';
-const SKILLS = [CatalogSkill.parse({ name: SKILL, description: 'Look back.' }), CatalogSkill.parse({ name: 'bmad-spec', description: 'Write a spec.' })];
+const SKILLS = [CatalogSkill.parse({ name: SKILL, description: 'Look back.', scope: 'epic' }), CatalogSkill.parse({ name: 'bmad-spec', description: 'Write a spec.' })];
 const CATALOG: Catalog = { modules: [], skills: SKILLS, agents: [], entryAction: null, capabilities: { plain_labels: true, ticket_tree: true, look_back: true } };
 const SET_UP: BmadSetupStatus = { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] };
 const epic = (slug: string) => TicketEpic.parse({ slug, id: null, status: 'active', after: [], blocks: [] });
@@ -91,7 +92,7 @@ function setup(pieces: BmadPiece[] = PIECES) {
   };
   const agent = promptRecorder();
   const chat = createChat({ dataDir: tempDir(), entities: core.entities, sessionEvents: core.sessionEvents, agents: soleAgent(agent) });
-  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog, chat, agent, skill: SKILL, offers: core.lookBackOffers });
+  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog, chat, agent, offers: core.lookBackOffers });
   return { core, workspace, retrospectives, state, reads, chat, agent };
 }
 
@@ -169,10 +170,10 @@ describe('look back on an epic (story 7.1)', () => {
     await chat.close();
   });
 
-  it('a project whose BMad Method lacks the skill is not found, creating nothing', async () => {
+  it('a project whose BMad Method has no epic-scoped look-back is in reduced mode, creating nothing', async () => {
     const { retrospectives, workspace, state, core } = setup();
     state.catalog = { ...CATALOG, skills: [SKILLS[1]!] };
-    await expect(retrospectives.lookBack(workspace.id, 'epic-one')).rejects.toThrow(NotFoundError);
+    await expect(retrospectives.lookBack(workspace.id, 'epic-one')).rejects.toThrow(ReducedModeError);
     expect(core.entities.listSessions(workspace.id)).toEqual([]);
   });
 
@@ -181,6 +182,36 @@ describe('look back on an epic (story 7.1)', () => {
     state.onCatalogRead = () => core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
     await expect(retrospectives.lookBack(workspace.id, 'epic-one')).rejects.toThrow(FeatureOffError);
     expect(core.entities.listSessions(workspace.id)).toEqual([]);
+  });
+});
+
+describe('the build summaries in the first message (story 7.4)', () => {
+  it('follow the epic folder as short facts, only for the epic\'s own tickets, and nothing is added for an epic with no runs', async () => {
+    const asked: Array<ReadonlySet<string>> = [];
+    const { core, workspace, state, chat, agent } = setup();
+    state.tree = { ...TREE, tickets: [{ ref: '1.1', epic: 'epic-one' }, { ref: '2.1', epic: 'epic-two' }] as never };
+    const withSummaries = createRetrospectives({
+      bmad: core.bmad,
+      entities: core.entities,
+      board: { tickets: async () => state.tree as TicketsResponse },
+      catalog: { catalog: async () => state.catalog, setupStatus: async () => state.status },
+      chat,
+      agent,
+      offers: core.lookBackOffers,
+      summaries: {
+        forTickets: (_ws, refs) => {
+          asked.push(refs);
+          return refs.has('1.1') ? [{ ticketRef: '1.1', outcome: 'verified', verification: 'passed', blockedReason: null, durationSeconds: 90, decision: 'approved' }] : [];
+        },
+      },
+    });
+    await withSummaries.lookBack(workspace.id, 'epic-one');
+    await withSummaries.lookBack(workspace.id, 'epic-two');
+    await chat.settled();
+    expect(asked.map((refs) => [...refs])).toEqual([['1.1'], ['2.1']]);
+    expect(agent.prompts[0]).toBe(`run-skill:${SKILL} on:_bmad-output/initiative-demo/epic-one\n\nOgden Agents' build records for this epic (short facts, oldest first):\n- 1.1: verified, checks passed, 2 min, approved`);
+    expect(agent.prompts[1]).toBe(`run-skill:${SKILL} on:_bmad-output/initiative-demo/epic-two`);
+    await chat.close();
   });
 });
 

@@ -7,7 +7,7 @@
  */
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createBmadCatalog, createScriptsSnapshotter, LOOK_BACK_SKILL, createTicketsV7, createUpstreamBmadSource, createUvScriptRunner, createUvToolchain, errorCode, ScriptRunError, type UvScriptRunner } from '@ogden-agents/adapters';
+import { createBmadCatalog, createScriptsSnapshotter, createTicketsV7, createUpstreamBmadSource, createUvScriptRunner, createUvToolchain, errorCode, ScriptRunError, type UvScriptRunner } from '@ogden-agents/adapters';
 import {
   CoreError,
   createBmadSkillFolders,
@@ -15,6 +15,7 @@ import {
   createBoard,
   createRunAwareTickets,
   createPlanning,
+  createBuildSummaries,
   createRetrospectives,
   createPlanningDocuments,
   createTicketWatcher,
@@ -196,7 +197,7 @@ export function createPlanAndBoard({
   });
   const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: bmadCatalog, tickets: boardTickets });
   // Looking back on an epic (story 7.1): a planning session on the retrospective skill, behind the Retrospectives piece; it reads the board's tree.
-  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog: bmadCatalog, chat, agent, agentOf, skill: LOOK_BACK_SKILL, offers: core.lookBackOffers });
+  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog: bmadCatalog, chat, agent, agentOf, summaries: createBuildSummaries({ entities: core.entities }), offers: core.lookBackOffers });
   // One watch per project with Board on, trusted and BMad Method set up (story 4.8; the setup status is entry 4.3's):
   // an agent's ticket write reaches the board as `ticket.changed`.
   const ticketWatcher = createTicketWatcher({

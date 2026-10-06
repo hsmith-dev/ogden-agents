@@ -7,6 +7,7 @@ import {
   CatalogResponse,
   DOCUMENT_LOAD_FAILED,
   LOOK_BACK_FAILED,
+  LookBackOffersResponse,
   DocumentResponse,
   MarkTicketResponse,
   PLAN_LOAD_FAILED,
@@ -22,7 +23,7 @@ import {
 } from '@ogden-agents/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { call, postJson, type Auth } from '@/api/http';
+import { call, callNoContent, postJson, type Auth } from '@/api/http';
 import { tabAuth } from '@/auth/tab-token';
 import { useEventStream } from '@/events/event-stream';
 
@@ -56,6 +57,17 @@ export async function startPlanningSession(wsId: string, skill: string, idea?: s
 export async function startLookBack(wsId: string, epic: string, auth: Auth = tabAuth): Promise<Session> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceEpicLookBack, { wsId, epic }), { method: 'POST' }, LOOK_BACK_FAILED);
   return SessionResponse.parse(json).session;
+}
+
+/** `GET /api/v1/workspaces/:wsId/look-back-offers`: the epics whose finished-epic offer was answered with Not now (story 7.4). */
+export async function fetchLookBackOffers(wsId: string, auth: Auth = tabAuth): Promise<LookBackOffersResponse> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceLookBackOffers, { wsId }), {}, LOOK_BACK_FAILED);
+  return LookBackOffersResponse.parse(json);
+}
+
+/** `DELETE /api/v1/workspaces/:wsId/epics/:epic/look-back-offer`: Not now on a finished epic's offer (story 7.4). */
+export async function dismissLookBackOffer(wsId: string, epic: string, auth: Auth = tabAuth): Promise<void> {
+  await callNoContent(auth, apiPath(API_ROUTES.workspaceEpicLookBackOffer, { wsId, epic }), { method: 'DELETE' }, LOOK_BACK_FAILED);
 }
 
 /** `GET /api/v1/workspaces/:wsId/tickets`: the project's tickets as BMad Method reports them. */
@@ -160,11 +172,15 @@ export function useBoardEvents(wsId: string): ReadonlySet<string> {
 
   useEffect(() => {
     const changed = new Set<string>();
+    let retrospectiveChanged = false;
     for (const event of events) {
       if (event.seq <= seen.current) continue;
       if (event.type === 'ticket.changed' && event.workspaceId === wsId) changed.add(event.payload.ref);
+      if (event.type === 'retrospective.changed' && event.workspaceId === wsId) retrospectiveChanged = true;
     }
     seen.current = Math.max(seen.current, events.at(-1)?.seq ?? 0);
+    // An epic's retrospective file changed (epic 7): the epic row carries its verdict, so the tickets are fetched again, highlighting nothing.
+    if (retrospectiveChanged) void queryClient.invalidateQueries({ queryKey: ['tickets', wsId], exact: true });
     if (changed.size === 0) return;
     const refetched = queryClient.invalidateQueries({ queryKey: ['tickets', wsId], exact: true });
     for (const ref of changed) void queryClient.invalidateQueries({ queryKey: ['ticket', wsId, ref], exact: true });

@@ -103,6 +103,13 @@ export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = nul
         if (!models.includes(model)) return send(404, { error: { message: `model '${model}' not found`, type: 'invalid_request_error', code: 'model_not_found' } });
         if (model === 'fake-noformat' && json.response_format) return send(400, { error: { message: 'response_format is not supported by this model', type: 'invalid_request_error' } });
         if (model === 'fake-nojson' && json.response_format?.type === 'json_schema') return send(400, { error: { message: "response_format.type 'json_schema' is not supported, use 'json_object' or 'text'", type: 'invalid_request_error' } });
+        // A slow structured answer (story 14.8): the slow first token applies to these requests too.
+        if (text.includes('SLOW') && (json.response_format || text.includes('MANAGER_TEST'))) await new Promise((r) => setTimeout(r, slowMs));
+        // Story 14.8: a model that only gets it right when asked again (REPAIRABLE), and one whose answer is huge (HUGE).
+        const repairing = text.startsWith('That was not valid') && messages.some((m) => m.role === 'user' && String(m.content).includes('REPAIRABLE'));
+        if (repairing) return send(200, { ...base(model), object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: '{"verdict":"fit","reason":"ok"}' }, finish_reason: 'stop' }] });
+        if (text.includes('HUGE')) return send(200, { ...base(model), object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: `{"verdict":"fit","reason":"${'x'.repeat(400_000)}"}` }, finish_reason: 'stop' }] });
+        if (text.includes('REPAIRABLE')) return send(200, { ...base(model), object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: 'Sure! I think it is fit.' }, finish_reason: 'stop' }] });
         if (!json.response_format && text.includes('MANAGER_TEST')) {
           const content = text.includes('MALFORMED') ? 'Sure! The verdict is fit.' : '```json\n{"verdict":"fit","reason":"ok"}\n```';
           return send(200, { ...base(model), object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] });

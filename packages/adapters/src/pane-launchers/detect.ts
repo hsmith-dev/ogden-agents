@@ -13,7 +13,7 @@
 import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { accessSync, constants, statSync } from 'node:fs';
-import { delimiter, posix, win32 } from 'node:path';
+import { posix, win32 } from 'node:path';
 import type { LauncherRefusal, PaneLaunchers } from '@ogden-agents/core';
 import type { PaneDetection, PaneLauncher, PaneLauncherStatus } from '@ogden-agents/shared';
 import { helperEnvironment, WINDOWS_FOLDERS } from '../child-env.js';
@@ -98,7 +98,7 @@ function candidatesFor(entry: string, system: DetectSystem): string[] {
   if (/^[A-Za-z0-9._-]+$/.test(entry)) {
     // Only absolute folders (on Windows with a drive letter: no network share and no folder relative to the current drive's root).
     const unquoted = (dir: string) => (win ? dir.replace(/^"(.*)"$/, '$1') : dir);
-    const dirs = (lookup('PATH') ?? '').split(win ? ';' : delimiter).map(unquoted).filter((dir) => dir !== '' && (win ? /^[A-Za-z]:[\\/]/.test(dir) : path.isAbsolute(dir)));
+    const dirs = (lookup('PATH') ?? '').split(win ? ';' : ':').map(unquoted).filter((dir) => dir !== '' && (win ? /^[A-Za-z]:[\\/]/.test(dir) : path.isAbsolute(dir)));
     const exts = win ? (lookup('PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map((ext) => ext.toLowerCase()) : [''];
     return dirs.flatMap((dir) => exts.map((ext) => path.join(dir, `${entry}${ext}`)));
   }

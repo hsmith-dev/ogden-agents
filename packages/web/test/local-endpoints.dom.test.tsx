@@ -27,6 +27,7 @@ const api = vi.hoisted(() => ({
   setDefault: vi.fn(),
   models: vi.fn(),
   choose: vi.fn(),
+  manager: vi.fn(),
 }));
 
 vi.mock('../src/agents/local-endpoints-api', () => ({
@@ -43,6 +44,7 @@ vi.mock('../src/agents/local-endpoints-api', () => ({
   setDefaultEndpoint: api.setDefault,
   fetchEndpointModels: api.models,
   chooseEndpointModel: api.choose,
+  testAsManager: api.manager,
 }));
 
 const { LocalEndpointsSection } = await import('../src/agents/local-endpoints');
@@ -294,5 +296,19 @@ describe("a server's models (epic 14 story 14.5)", () => {
     api.endpoints = [view({ loopback: false, needsConfirmation: true, host: 'https://b.example.com' })];
     section();
     expect(screen.queryByTestId('endpoint-show-models')).toBeNull();
+  });
+
+  it('Test as a manager shows the plain-words result for that model only', async () => {
+    api.endpoints = [view()];
+    api.models.mockResolvedValue(answer());
+    api.manager.mockResolvedValueOnce({ pass: false, mode: null, ms: 900, message: 'Too slow: no answer in 60 seconds.' });
+    section();
+    fireEvent.click(screen.getByTestId('endpoint-show-models'));
+    await waitFor(() => screen.getByTestId('endpoint-model-small-one'));
+    fireEvent.click(screen.getByRole('button', { name: 'Test small-one as a manager' }));
+    await waitFor(() => expect(screen.getByTestId('endpoint-manager-result').textContent).toBe('Too slow: no answer in 60 seconds.'));
+    expect(screen.getByTestId('endpoint-manager-result').getAttribute('data-pass')).toBe('false');
+    expect(api.manager).toHaveBeenCalledWith('lep_01J9Z3K4M5N6P7Q8R9S0T1V2W3', 'small-one');
+    expect(screen.getAllByTestId('endpoint-manager-result')).toHaveLength(1);
   });
 });

@@ -163,6 +163,10 @@ test('Show models lists what the server reports with its cautions, and Use for n
     await large.getByRole('button', { name: 'Use fake-large for new chats' }).click();
     await expect(card(page).getByTestId('endpoint-chosen-model')).toHaveText('New chats start on fake-large.');
     await expect(large).toContainText('Used for new chats');
+    // Test as a manager: the server sends one fixed small request to the model and says how it did.
+    await large.getByRole('button', { name: 'Test fake-large as a manager' }).click();
+    await expect(large.getByTestId('endpoint-manager-result')).toContainText('Passed. The model answered in the shape a manager needs');
+    expect(fake.log.filter((entry) => entry.path === '/v1/chat/completions')).toHaveLength(1);
   } finally {
     await server.close();
     await fake.close();

@@ -9,6 +9,7 @@ import {
   type BmadSourceUseCases,
   type BmadSetupUseCases,
   type BoardUseCases,
+  type RetrospectiveUseCases,
   type BuildSettings,
   type LocalEndpoints,
   type BuildsUseCases,
@@ -38,6 +39,7 @@ import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
 import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
+import { registerRetrospectiveRoutes } from './retrospective-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
 import { registerLocalEndpointRoutes } from './local-endpoint-routes.js';
 import { registerRunSettingsRoutes } from './run-settings-routes.js';
@@ -124,6 +126,8 @@ export interface AppOptions {
   planning?: PlanningUseCases;
   /** The project's tickets (story 4.1), behind the `board` piece's guard; without it that route answers 501 once the guard passes. */
   board?: BoardUseCases;
+  /** Looking back on an epic (story 7.1), behind the `retrospectives` piece's guard and the trust; without it that route answers 501 once the guards pass. */
+  retrospectives?: RetrospectiveUseCases;
   /** Unattended builds (story 5.2), behind the `builds` piece's guard and the trust; without them those routes answer 501 once the guards pass. */
   builds?: BuildsUseCases;
   /** The install's run limits and a project's build settings (story 5.8). */
@@ -179,6 +183,7 @@ export function createApp({
   bmadScriptTrust,
   planning,
   board,
+  retrospectives,
   builds,
   buildSettings,
   localEndpoints,
@@ -295,6 +300,8 @@ export function createApp({
   registerBmadTrustRoutes(app, { scriptTrust: bmadScriptTrust, permissions, log });
   // Plan and Board (stories 4.1, 4.2): every route through `bmadPieceRoutes`, behind core's guard and the script trust (AD-22).
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, bmadSetup, log });
+  // Retrospectives (story 7.1): the same helper, guard and trust.
+  if (bmad !== undefined && bmadScriptTrust !== undefined) registerRetrospectiveRoutes(app, { bmad, scriptTrust: bmadScriptTrust, retrospectives, log });
   // Unattended builds (story 5.2): the same helper, guard and trust.
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, buildSettings, log });
   registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });

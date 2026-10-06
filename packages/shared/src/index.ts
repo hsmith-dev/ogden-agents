@@ -12,6 +12,7 @@ export * from './ids.js';
 export * from './local-endpoints.js';
 export * from './permissions.js';
 export * from './planning.js';
+export * from './retrospectives.js';
 export * from './secret-patterns.js';
 export * from './semver.js';
 export * from './setup.js';

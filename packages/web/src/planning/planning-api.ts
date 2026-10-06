@@ -6,6 +6,7 @@ import {
   BmadSourceResponse,
   CatalogResponse,
   DOCUMENT_LOAD_FAILED,
+  LOOK_BACK_FAILED,
   DocumentResponse,
   MarkTicketResponse,
   PLAN_LOAD_FAILED,
@@ -44,6 +45,16 @@ export async function fetchCatalog(wsId: string, auth: Auth = tabAuth): Promise<
  */
 export async function startPlanningSession(wsId: string, skill: string, idea?: string, auth: Auth = tabAuth, fallback: string = PLAN_START_FAILED): Promise<Session> {
   const json = await call(auth, apiPath(API_ROUTES.workspacePlanningSessions, { wsId }), postJson(idea === undefined ? { skill } : { skill, idea }), fallback);
+  return SessionResponse.parse(json).session;
+}
+
+/**
+ * `POST /api/v1/workspaces/:wsId/epics/:epic/look-back` (story 7.1): a
+ * planning session in which the project's retrospective skill looks back on
+ * the epic, its first message already sent.
+ */
+export async function startLookBack(wsId: string, epic: string, auth: Auth = tabAuth): Promise<Session> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceEpicLookBack, { wsId, epic }), { method: 'POST' }, LOOK_BACK_FAILED);
   return SessionResponse.parse(json).session;
 }
 

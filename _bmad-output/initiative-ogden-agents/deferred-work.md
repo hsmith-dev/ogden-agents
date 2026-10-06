@@ -6,6 +6,7 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 
 Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim from its Log entry's summary (story 10.8). Log entries are append-only, so the phrase never goes stale; `node scripts/check-provenance.mjs` (CI job Provenance) fails on a line whose phrase is missing or matches no summary, on a line whose phrase a `Resolved:` summary contains (the entry is closed, so the line is stale), and (entry 4.12) on a Log entry added since the base branch that isn't `Resolved:`, contains no index line's phrase, and isn't quoted (`"<part of its summary>"`) by a `Resolved:` summary. A partial close starts `Resolved (…):` and leaves its index line in place.
 
+- Epic 7 (retrospectives, from 7.1 review): a look-back's epic folder can name a folder that does not exist when the active initiative is nested or the central config overrides the output folder; check it exists before starting. (log: "A look-back's epic folder is derived from tickets.py's folder name and the setup status's output folder")
 - Remove-project story (not yet ticketed): delete a project's always-allow rules before its workspace row (`permission_rules.workspace_id` has no `ON DELETE`). From 2.6 F9. (log: "Removing a project must delete its always-allow rules first")
 - Epic 5 (unattended builds): the inside-the-project check for file-kind rules is check-then-use, so a symlink swapped in before the write could redirect it. From 2.6. (log: "The inside-the-project check for file-kind rules runs before the agent acts (check-then-use)")
 - Unowned (copy change): say in the caution-level copy (EXPERIENCE.md, settings page) that `think` auto-allows helper-agent launches and TodoWrite. From 2.8 F3. (log: "the `think` kind is auto-allowed")
@@ -802,6 +803,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-review-approve-and-merge-reject-and-retry-plan.md`
   summary: Update and retry takes no run limit slot and arms no deadline
   evidence: 5.9 correctness review: `rebaseLocked` sets the run running without `hasCapacity` or `armDeadline`; `review()` calls `tickets.find` on each read.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-retrospectives/story-tracer-bullet-look-back-on-one-finished-epic-from-the-board-plan.md`
+  summary: A look-back's epic folder is derived from tickets.py's folder name and the setup status's output folder (`folder.name` for a nested active initiative, `_bmad/config.toml` only for the output folder), so a nested initiative or an overridden central output folder starts a session naming a missing folder instead of answering 404.
+  evidence: correctness review of 7.1 read tickets.py `cmd_status` (`folder.name`) and `tickets_root` (merged config); fix by checking the derived folder exists through the catalog port before starting.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-live-run-view-and-the-runs-tab-plan.md`
   summary: Apply the saved fix after a late failure: the patch stays applied while the run is still blocked when the plan mark or the prompt fails; the patch is read by git three times and is not previewed.
   evidence: 11.1 correctness and security reviews; Retry still works, and the agent is released while the run is blocked.

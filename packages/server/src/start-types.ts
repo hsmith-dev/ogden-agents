@@ -149,6 +149,13 @@ export interface StartOptions {
   /** Override the app shortcut (tests). Default: see {@link launcherEntry}. */
   appShortcut?: AppShortcutPort;
   /**
+   * The BMad pieces this install ships, in place of `SHIPPED_BMAD_PIECES`
+   * (story 7.1): a test starts an install that ships fewer, to check what a
+   * piece the install lacks does. The launcher never sets it. Ignored when
+   * {@link core} is given.
+   */
+  shippedBmadPieces?: readonly BmadPiece[];
+  /**
    * BMad pieces to report as available on top of `SHIPPED_BMAD_PIECES`
    * (story 10.2), so a test can turn on a piece no epic ships yet. The
    * launcher never sets it. Ignored when {@link core} is given: that core

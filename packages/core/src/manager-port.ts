@@ -97,7 +97,7 @@ export const readyWorkerIds = (context: Pick<ManagerContext, 'workers'>): string
 
 /** `value` as a plan for `context`, or the failure to return instead. The one check a manager's answer passes through. */
 export function validatePlanFor(context: ManagerContext, value: unknown): ManagerResult<ManagerPlan> {
-  const checked = checkManagerPlan(value, { roster: readyWorkerIds(context) });
+  const checked = checkManagerPlan(value, { roster: readyWorkerIds(context), chats: Object.fromEntries(context.workers.map((worker) => [worker.agentId, worker.chats.map((chat) => chat.sessionId)])) });
   return checked.ok ? { ok: true, value: checked.value } : { ok: false, kind: failureKindFor(checked.code), code: checked.code, reason: checked.reason };
 }
 

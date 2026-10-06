@@ -17,6 +17,9 @@ import { SessionId, OrchestrationRunId } from './ids.js';
 import {
   Approver,
   ManagerDecision,
+  ManagerGoal,
+  ManagerInstruction,
+  ManagerReason,
   ManagerPlan,
   ManagerStatusReport,
   ManagerStepId,
@@ -33,7 +36,7 @@ const step = { ...runId, stepId: ManagerStepId };
 export const OrchestrationRunStartedInput = z.object({
   type: z.literal('orchestration.run_started'),
   ...onWorkspaceStream,
-  payload: z.object({ ...runId, goal: z.string().min(1).max(MANAGER_LIMITS.maxGoalChars), mode: OrchestrationMode, limits: RunLimits }),
+  payload: z.object({ ...runId, goal: ManagerGoal, mode: OrchestrationMode, limits: RunLimits }),
 });
 /** A run began with the user's goal, under the mode and limits in force. */
 export const OrchestrationRunStartedEvent = OrchestrationRunStartedInput.extend(assigned);
@@ -69,7 +72,7 @@ export type OrchestrationStepApprovedEvent = z.infer<typeof OrchestrationStepApp
 export const OrchestrationStepEditedInput = z.object({
   type: z.literal('orchestration.step_edited'),
   ...onWorkspaceStream,
-  payload: z.object({ ...step, instruction: z.string().min(1).max(MANAGER_LIMITS.maxInstructionChars) }),
+  payload: z.object({ ...step, instruction: ManagerInstruction }),
 });
 /** The user changed an instruction before it was sent (the masked new text). */
 export const OrchestrationStepEditedEvent = OrchestrationStepEditedInput.extend(assigned);
@@ -123,7 +126,7 @@ export type OrchestrationRunStoppedEvent = z.infer<typeof OrchestrationRunStoppe
 export const OrchestrationRunFinishedInput = z.object({
   type: z.literal('orchestration.run_finished'),
   ...onWorkspaceStream,
-  payload: z.object({ ...runId, reason: z.string().min(1).max(MANAGER_LIMITS.maxReasonChars).optional() }),
+  payload: z.object({ ...runId, reason: ManagerReason.optional() }),
 });
 /** The manager said the goal is done (its reason, masked). */
 export const OrchestrationRunFinishedEvent = OrchestrationRunFinishedInput.extend(assigned);

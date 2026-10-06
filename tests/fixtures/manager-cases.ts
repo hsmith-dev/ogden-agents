@@ -92,7 +92,7 @@ export type CheckResult = { ok: true; value: unknown } | { ok: false; code: Refu
  * `roster` is the agent ids a worker may name; a decision may name a step of the harness plan. Pure.
  */
 export function checkManagerReply(kind: CaseKind, value: unknown, roster: readonly string[] = HARNESS_ROSTER, planStepIds: readonly string[] = HARNESS_STEP_IDS): CheckResult {
-  return kind === 'plan' ? checkManagerPlan(value, { roster }) : checkManagerDecision(value, { planStepIds });
+  return kind === 'plan' ? checkManagerPlan(value, { roster, chats: { grok: [HARNESS_CHAT] } }) : checkManagerDecision(value, { planStepIds });
 }
 
 // ---- the cases ----

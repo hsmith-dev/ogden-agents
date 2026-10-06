@@ -105,9 +105,11 @@ const refuse = (code: ManagerRefusalCode): { ok: false; code: ManagerRefusalCode
 // ---- text rules (every string from a manager is untrusted) ----
 
 /** Control characters other than tab and line feed, and the invisible and direction controls that disguise text. */
-const BAD_TEXT_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/u;
+const BAD_TEXT_CHARS = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\p{Co}\p{Cn}]/u;
 /** The same, plus tab and line feed: a single line. */
-const BAD_LINE_CHARS = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u2028\u2029\uFEFF]/u;
+const BAD_LINE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\p{Co}\p{Cn}]/u;
+/** Whether `text` is clean data: no control, format (tag characters, direction marks, zero width), separator, private or unassigned characters, lone surrogates included. */
+const wellFormed = (text: string, pattern: RegExp): boolean => !pattern.test(text);
 const BAD_TEXT = 'bad_text';
 const BAD_REFERENCE = 'bad_reference';
 
@@ -116,14 +118,14 @@ const line = (max: number) =>
     .string()
     .min(1)
     .max(max)
-    .refine((text) => !BAD_LINE_CHARS.test(text), BAD_TEXT)
+    .refine((text) => wellFormed(text, BAD_LINE_CHARS), BAD_TEXT)
     .refine((text) => text.trim() !== '', BAD_TEXT);
 const block = (max: number) =>
   z
     .string()
     .min(1)
     .max(max)
-    .refine((text) => !BAD_TEXT_CHARS.test(text), BAD_TEXT)
+    .refine((text) => wellFormed(text, BAD_TEXT_CHARS), BAD_TEXT)
     .refine((text) => text.trim() !== '', BAD_TEXT);
 
 /** A step's id inside one plan: letters, digits, `_` and `-`. */
@@ -136,6 +138,11 @@ export const ManagerChatRef = z.union([z.literal(NEW_CHAT), SessionId]);
 export type ManagerChatRef = z.infer<typeof ManagerChatRef>;
 
 // ---- the plan ----
+
+/** The text fields, shared with the events so a stored string passes the same rules. */
+export const ManagerGoal = line(MANAGER_LIMITS.maxGoalChars);
+export const ManagerInstruction = block(MANAGER_LIMITS.maxInstructionChars);
+export const ManagerReason = line(MANAGER_LIMITS.maxReasonChars);
 
 export const ManagerPlanStep = z.strictObject({
   id: ManagerStepId,
@@ -189,14 +196,17 @@ export type ManagerStatusReport = z.infer<typeof ManagerStatusReport>;
  * ({@link redactSecrets}), stripped of control characters and capped. Pure.
  */
 export function makeStatusReport(input: { stepId: string; worker: string; state: SessionState; text: string }): ManagerStatusReport {
-  const clean = redactSecrets(input.text).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu, '');
+  // Strip first, so hidden characters cannot split a secret past the masking; mask again after the cut, which can leave half a secret.
+  const stripped = Array.from(input.text).filter((char) => !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\p{Co}\p{Cn}]/u.test(char) || char === '\n' || char === '\t').join('');
+  const clean = redactSecrets(stripped);
   const truncated = clean.length > MANAGER_LIMITS.maxSummaryChars;
+  const cut = truncated ? redactSecrets(Array.from(clean).slice(0, MANAGER_LIMITS.maxSummaryChars).join('')) : clean;
   return ManagerStatusReport.parse({
     version: MANAGER_STATUS_VERSION,
     step_id: input.stepId,
     worker: input.worker,
     state: input.state,
-    summary: truncated ? clean.slice(0, MANAGER_LIMITS.maxSummaryChars) : clean,
+    summary: cut.slice(0, MANAGER_LIMITS.maxSummaryChars),
     truncated,
   });
 }
@@ -291,6 +301,15 @@ function codeFor(error: z.ZodError, value: unknown): ManagerRefusalCode {
 export interface ManagerPlanCheckContext {
   /** The agent ids a worker may name: the project's ready workers. */
   roster: readonly string[];
+  /** The chats each worker already has, by agent id. A step may name only `new` or one of its own worker's chats. Absent: none. */
+  chats?: Readonly<Record<string, readonly string[]>> | undefined;
+}
+
+/** Whether any string inside `value` holds a secret (masking would change it): a manager never names one, so such a reply is refused. */
+function holdsSecret(value: unknown, depth = 0): boolean {
+  if (typeof value === 'string') return redactSecrets(value) !== value;
+  if (depth > 6 || typeof value !== 'object' || value === null) return false;
+  return Object.values(value).some((each) => holdsSecret(each, depth + 1));
 }
 
 /** The first problem with how a plan's steps link to each other, or `undefined`. */
@@ -324,7 +343,9 @@ function linkProblem(plan: ManagerPlan): ManagerRefusalCode | undefined {
 export function checkManagerPlan(value: unknown, context: ManagerPlanCheckContext): ManagerCheck<ManagerPlan> {
   const parsed = ManagerPlan.safeParse(value);
   if (!parsed.success) return refuse(codeFor(parsed.error, value));
+  if (holdsSecret(parsed.data)) return refuse('forbidden_field');
   if (parsed.data.steps.some((step) => !context.roster.includes(step.worker))) return refuse('off_roster_worker');
+  if (parsed.data.steps.some((step) => step.chat !== NEW_CHAT && !(context.chats?.[step.worker] ?? []).includes(step.chat))) return refuse('bad_reference');
   const problem = linkProblem(parsed.data);
   if (problem !== undefined) return refuse(problem);
   return { ok: true, value: parsed.data };
@@ -343,11 +364,11 @@ export interface ManagerDecisionCheckContext {
 export function checkManagerDecision(value: unknown, context: ManagerDecisionCheckContext): ManagerCheck<ManagerDecision> {
   const parsed = ManagerDecision.safeParse(value);
   if (!parsed.success) return refuse(codeFor(parsed.error, value));
+  if (holdsSecret(parsed.data)) return refuse('forbidden_field');
   const { action, step_id: stepId, question } = parsed.data;
-  if (action === 'dispatch') {
-    if (stepId === undefined) return refuse('missing_field');
-    if (!context.planStepIds.includes(stepId)) return refuse('unknown_step');
-  }
+  if (action === 'dispatch' && stepId === undefined) return refuse('missing_field');
+  // Whatever the action, a step the decision names must be a step of the plan.
+  if (stepId !== undefined && !context.planStepIds.includes(stepId)) return refuse('unknown_step');
   if (action === 'ask_user' && question === undefined) return refuse('missing_field');
   return { ok: true, value: parsed.data };
 }

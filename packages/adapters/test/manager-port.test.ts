@@ -9,7 +9,7 @@
 import type { ManagerContext, ManagerDecisionContext, ManagerPort } from '@ogden-agents/core';
 import { MANAGER_DECISION_VERSION, MANAGER_PLAN_VERSION, MANAGER_REFUSAL_REASONS, type ManagerPlan } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { HARNESS_ROSTER, MANAGER_CASES } from '../../../tests/fixtures/manager-cases.js';
+import { HARNESS_CHAT, HARNESS_ROSTER, MANAGER_CASES } from '../../../tests/fixtures/manager-cases.js';
 import { readJson } from '../../../tests/fixtures/manager-harness.js';
 import { createMemoryManager, type MemoryManagerScript } from '../src/index.js';
 
@@ -19,7 +19,7 @@ const context = (overrides: Partial<ManagerContext> = {}): ManagerContext => ({
   goal: 'Add a contact form to the site',
   projectSummary: 'A small website.',
   workers: [
-    ...HARNESS_ROSTER.map((agentId) => ({ agentId, label: `Agent ${agentId}`, ready: true, modes: ['ask' as const], chats: [] })),
+    ...HARNESS_ROSTER.map((agentId) => ({ agentId, label: `Agent ${agentId}`, ready: true, modes: ['ask' as const], chats: agentId === 'grok' ? [{ sessionId: HARNESS_CHAT, state: 'idle' as const }] : [] })),
     { agentId: 'not-ready-agent', label: 'Not ready', ready: false, modes: ['ask' as const], chats: [] },
   ],
   ...overrides,

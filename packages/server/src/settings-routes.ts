@@ -67,10 +67,16 @@ export function registerSettingsRoutes(app: Hono, { installSettings, newProjectD
             if (body.value.panes === undefined) {
               return apiError(c, 409, 'panes_running', running === 1 ? 'A terminal is still running. Stop it, or keep it running in the background until Ogden Agents stops?' : `${running} terminals are still running. Stop them, or keep them running in the background until Ogden Agents stops?`, { running });
             }
-            if (body.value.panes === 'keep') panes.keepRunningOnNextDeveloperModeOff();
+            panes.keepRunningOnNextDeveloperModeOff(body.value.panes === 'keep');
           }
         }
-        const result = installSettings.setDeveloperMode(body.value.developerMode);
+        let result: ReturnType<typeof installSettings.setDeveloperMode>;
+        try {
+          result = installSettings.setDeveloperMode(body.value.developerMode);
+        } finally {
+          // The choice is for this request only: a failed save must not decide a later one.
+          panes?.keepRunningOnNextDeveloperModeOff(false);
+        }
         // The app-wide default lives in a file, outside core's transaction: it already reads as Ask while Developer mode is off,
         // and is rewritten here so it stays Ask when Developer mode comes back (default permission mode).
         let appDefaultBackInAsk = false;

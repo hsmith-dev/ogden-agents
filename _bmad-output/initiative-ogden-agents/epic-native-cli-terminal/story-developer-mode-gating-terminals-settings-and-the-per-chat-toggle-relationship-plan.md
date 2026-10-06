@@ -68,3 +68,13 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security review and correctness review, both read only.
+
+- Fixed: a viewer that attached just after a keep was fed live output (Developer mode now checked in `attach`).
+- Fixed: a stale keep choice (failed save) could override a later Stop (the choice is set per request and always cleared afterward; test added).
+- Fixed: viewers stayed connected but unfed after a keep and after Developer mode came back (open sockets are closed on keep; the page reconnects; test added).
+- Fixed: `launcherArgs` replaced the whole map (now merges per program, an empty text removes one, key order no longer causes a write); the page sends only the changed program and clears its typed text after a save; notify checkboxes are disabled while a save is pending.
+- Fixed: Terminals tab flicker while settings load.
+- Accepted: a pane still starting when Developer mode goes off is counted as running but is stopped when it finishes starting; kept panes cannot be closed while Developer mode is off (the dialog says they stay until Ogden Agents stops); kept panes still emit status events (state only).
+- Deferred: unused `notifyLaunchers` siblings `notifyNeedsAttention` and `notifyExited` in the schema; launcher id keys not checked against the registry; Cf characters in arguments; `saveDeveloperMode` ref guard; `as '/settings/tools'` cast; a Stop and Cancel dialog DOM test.

@@ -107,7 +107,7 @@ export interface Panes {
    * panes going (story 16.9): the next change leaves them running in the
    * background until the server stops, instead of stopping them.
    */
-  keepRunningOnNextDeveloperModeOff(): void;
+  keepRunningOnNextDeveloperModeOff(keep?: boolean): void;
   /** Stops every pane's program and what it started (the server stopping, Developer mode turned off); the panes stay, `stopped`. */
   closeAll(cause?: 'user' | 'developer_mode_off' | 'server_stopped'): void;
   /** {@link closeAll}, and stops following Developer mode. */
@@ -433,9 +433,11 @@ export function createPanes(options: PanesOptions): Panes {
             keepOnce = false;
             keeping = true;
             for (const entry of entries.values()) {
-              for (const viewer of entry.viewers) {
+              // Open sockets are closed (a page reconnects when Developer mode is on again), so none is left unfed or fed unseen.
+              for (const viewer of [...entry.viewers]) {
                 viewer.unbind?.();
                 viewer.unbind = undefined;
+                for (const listener of [...viewer.closes]) safely(listener);
               }
             }
           } else closeAll('developer_mode_off');
@@ -648,6 +650,7 @@ export function createPanes(options: PanesOptions): Panes {
           return entry.size;
         },
         attach(onSnapshot, onData) {
+          if (!developerModeOn(entry)) return;
           viewer.feed = { onSnapshot, onData };
           bind(entry, viewer);
         },
@@ -690,8 +693,8 @@ export function createPanes(options: PanesOptions): Panes {
 
     count: () => entries.size,
     runningCount: () => [...entries.values()].filter((entry) => entry.pane.state === 'starting' || entry.pane.state === 'running').length,
-    keepRunningOnNextDeveloperModeOff() {
-      keepOnce = true;
+    keepRunningOnNextDeveloperModeOff(keep = true) {
+      keepOnce = keep;
     },
     closeAll,
     dispose() {

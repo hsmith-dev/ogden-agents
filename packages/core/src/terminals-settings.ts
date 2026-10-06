@@ -42,8 +42,12 @@ export function createTerminalsSettings({ db, events }: { db: Database; events: 
         throw new ValidationError(parsed.error.issues[0]?.message ?? 'Those settings are not valid.', parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })));
       }
       const before = read();
-      const after = TerminalsSettings.parse({ ...before, ...parsed.data, notifyLaunchers: [...new Set(parsed.data.notifyLaunchers ?? before.notifyLaunchers)] });
-      if (JSON.stringify(after) === JSON.stringify(before)) return before;
+      // Arguments merge per program (an empty text takes a program's out), so one tab never wipes another's.
+      const launcherArgs: Record<string, string> = { ...before.launcherArgs, ...parsed.data.launcherArgs };
+      for (const [id, text] of Object.entries(launcherArgs)) if (text === '') delete launcherArgs[id];
+      const sorted = Object.fromEntries(Object.entries(launcherArgs).sort(([a], [b]) => (a < b ? -1 : 1)));
+      const after = TerminalsSettings.parse({ ...before, ...parsed.data, launcherArgs: sorted, notifyLaunchers: [...new Set(parsed.data.notifyLaunchers ?? before.notifyLaunchers)] });
+      if (JSON.stringify(after) === JSON.stringify({ ...before, launcherArgs: Object.fromEntries(Object.entries(before.launcherArgs).sort(([a], [b]) => (a < b ? -1 : 1))) })) return before;
       const json = JSON.stringify(after);
       orm.insert(terminalsSettings).values({ id: ROW_ID, settings: json }).onConflictDoUpdate({ target: terminalsSettings.id, set: { settings: json } }).run();
       events.append({ type: 'settings.terminals_changed', workspaceId: null, streamId: SETTINGS_STREAM, payload: { hidden: after.hidden } });

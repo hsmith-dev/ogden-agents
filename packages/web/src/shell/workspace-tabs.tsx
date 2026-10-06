@@ -128,7 +128,7 @@ export function WorkspaceTabs({ wsId, active, slots = WORKSPACE_TAB_SLOTS }: { w
   const { appearance } = useAppearance();
   // Developer mode's Terminals tab, unless the user hid the surface (Settings, Terminals).
   const terminalsSettings = useTerminalsSettings(appearance.developerMode);
-  const tabs = visibleWorkspaceTabs(pieces, availability, slots, appearance.developerMode && terminalsSettings.data?.hidden !== true);
+  const tabs = visibleWorkspaceTabs(pieces, availability, slots, appearance.developerMode && !terminalsSettings.isPending && terminalsSettings.data?.hidden !== true);
   useGoShortcuts(wsId, tabs);
   return <WorkspaceTabsView wsId={wsId} tabs={tabs} active={active} hints={appearance.developerMode} />;
 }

@@ -275,7 +275,7 @@ export const PANE_CLOSE = {
 export const TerminalsSettingsResponse = z.object({ settings: TerminalsSettings });
 export type TerminalsSettingsResponse = z.infer<typeof TerminalsSettingsResponse>;
 
-/** `PUT`: the fields to change (each optional, at least one); the rest stay. */
+/** `PUT`: the fields to change (each optional, at least one); the rest stay. `launcherArgs` merges per program; an empty text takes one out. */
 export const UpdateTerminalsSettingsRequest = z
   .object({
     notifyNeedsAttention: z.boolean(),

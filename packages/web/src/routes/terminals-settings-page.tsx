@@ -56,6 +56,7 @@ export function TerminalsSettingsPage() {
                     data-testid={`terminals-notify-${launcher.id}`}
                     label={launcher.label}
                     checked={current.notifyLaunchers.includes(launcher.id)}
+                    disabled={save.isPending}
                     onCheckedChange={(on) => save.mutate({ notifyLaunchers: on === true ? [...current.notifyLaunchers, launcher.id] : current.notifyLaunchers.filter((id) => id !== launcher.id) })}
                   />
                 ))
@@ -71,7 +72,7 @@ export function TerminalsSettingsPage() {
                   onChange={(event) => setArgs((now) => ({ ...now, [launcher.id]: event.target.value }))}
                   onBlur={() => {
                     const value = args[launcher.id];
-                    if (value !== undefined && value !== (current.launcherArgs[launcher.id] ?? '')) save.mutate({ launcherArgs: { ...current.launcherArgs, [launcher.id]: value } });
+                    if (value !== undefined && value !== (current.launcherArgs[launcher.id] ?? '')) save.mutate({ launcherArgs: { [launcher.id]: value } }, { onSuccess: () => setArgs(({ [launcher.id]: _done, ...rest }) => rest) });
                   }}
                 />
               </Field>

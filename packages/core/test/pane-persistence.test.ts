@@ -263,4 +263,30 @@ describe('Developer mode off with running panes (story 16.9)', () => {
     expect(booted.fake.processes[0]!.writes).toEqual([]);
     expect(booted.fake.processes[0]!.kills()).toBe(0);
   });
+
+  it('a keep closes the open viewers, and a viewer that attaches after it gets nothing', async () => {
+    const { core, workspace } = setup();
+    const booted = boot(core);
+    const pane = await booted.panes.open(workspace.id, SIZE);
+    const early = booted.panes.attach(pane.id)!;
+    const late = booted.panes.attach(pane.id)!;
+    let closed = 0;
+    early.onClose(() => void (closed += 1));
+    booted.panes.keepRunningOnNextDeveloperModeOff();
+    core.installSettings.setDeveloperMode(false);
+    expect(closed).toBe(1);
+    const fed: string[] = [];
+    late.attach(() => fed.push('snapshot'), () => fed.push('data'));
+    expect(fed).toEqual([]);
+  });
+
+  it('a keep that was cleared again (the save failed) does not decide a later stop', async () => {
+    const { core, workspace } = setup();
+    const booted = boot(core);
+    await booted.panes.open(workspace.id, SIZE);
+    booted.panes.keepRunningOnNextDeveloperModeOff();
+    booted.panes.keepRunningOnNextDeveloperModeOff(false);
+    core.installSettings.setDeveloperMode(false);
+    expect(booted.fake.processes[0]!.kills()).toBe(1);
+  });
 });

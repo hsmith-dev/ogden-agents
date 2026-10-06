@@ -11,6 +11,9 @@
  */
 import {
   AgentNotReadyError,
+  BadOrderError,
+  RunNotOpenError,
+  StepNotChangeableError,
   InvalidOperationError,
   ManagerFailedError,
   SessionBusyError,
@@ -51,6 +54,8 @@ export const SHIPPED_ORCHESTRATION = true;
 
 /** A goal is a sentence or two; the cap leaves room for JSON escaping. */
 const MAX_GOAL_BODY_BYTES = 8 * 1024;
+/** An edited instruction (up to 4000 characters) or a new order of at most twenty step ids, with room for JSON escaping. */
+const MAX_REVIEW_BODY_BYTES = 32 * 1024;
 
 export type OrchestrationHandler = (c: Context, scope: { workspaceId: WorkspaceId }) => Response | Promise<Response>;
 
@@ -110,12 +115,24 @@ export interface OrchestrationRoutesOptions {
 export function registerOrchestrationRoutes(app: Hono, { orchestration, permissions, runs, log }: OrchestrationRoutesOptions): void {
   const routes = orchestrationRoutes(app, { orchestration, log });
   const limit = bodyLimit({ maxSize: MAX_GOAL_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That goal is too long.') });
+  const reviewLimit = bodyLimit({ maxSize: MAX_REVIEW_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That is too long.') });
+  /** The JSON body as it came: core's use-case holds it to its own rules and answers in its own plain words. */
+  const readJson = async (c: Context): Promise<{ ok: true; value: unknown } | { ok: false; response: Response }> => {
+    try {
+      return { ok: true, value: JSON.parse(await c.req.text()) as unknown };
+    } catch {
+      return { ok: false, response: apiError(c, 400, 'invalid_request', 'The request body must be JSON.') };
+    }
+  };
   /** Core's refusals as API errors; anything else is left for `onError` (500). */
   const refusal = (c: Context, error: unknown): Response => {
     if (error instanceof ManagerUnavailableError) return apiError(c, 409, 'manager_unavailable', error.message);
     if (error instanceof ManagerFailedError) return apiError(c, 409, 'manager_failed', error.message);
     if (error instanceof StepNotApprovedError) return apiError(c, 409, 'step_not_approved', error.message);
     if (error instanceof StepNotProposedError) return apiError(c, 409, 'step_not_proposed', error.message);
+    if (error instanceof StepNotChangeableError) return apiError(c, 409, 'step_not_changeable', error.message);
+    if (error instanceof BadOrderError) return apiError(c, 409, 'bad_order', error.message);
+    if (error instanceof RunNotOpenError) return apiError(c, 409, 'run_not_open', error.message);
     // The worker chat could not take the instruction (stopping, busy): nothing more was done, and the plain reason is core's.
     if (error instanceof InvalidOperationError || error instanceof SessionBusyError || error instanceof SessionNotIdleError) return apiError(c, 409, 'session_busy', error.message);
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
@@ -175,6 +192,46 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
     run(c, async (use) => {
       const view = await use.dispatchStep(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '');
       log.info('orchestration instruction sent', { workspaceId, runId: c.req.param('runId'), stepId: c.req.param('stepId') });
+      return c.json(OrchestrationRunResponse.parse({ run: view }));
+    }),
+  );
+
+  // The plan review (15.6). Each is the user's own action: these routes sit behind the tab's token like every route, and nothing the
+  // manager's code can reach calls them (an architecture test). No body names an approver: the approver is always the user.
+  routes.post(API_ROUTES.workspaceOrchestrationStepEdit, async (c, { workspaceId }) => {
+    let answer: Response | undefined;
+    const tooLong = await reviewLimit(c, async () => {
+      const body = await readJson(c);
+      if (!body.ok) {
+        answer = body.response;
+        return;
+      }
+      answer = await run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.editStep(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '', body.value) })));
+    });
+    return tooLong ?? answer!;
+  });
+
+  routes.post(API_ROUTES.workspaceOrchestrationStepSkip, (c, { workspaceId }) =>
+    run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.skipStep(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '') }))),
+  );
+
+  routes.post(API_ROUTES.workspaceOrchestrationReorder, async (c, { workspaceId }) => {
+    let answer: Response | undefined;
+    const tooLong = await reviewLimit(c, async () => {
+      const body = await readJson(c);
+      if (!body.ok) {
+        answer = body.response;
+        return;
+      }
+      answer = await run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.reorderSteps(workspaceId, c.req.param('runId') ?? '', body.value) })));
+    });
+    return tooLong ?? answer!;
+  });
+
+  routes.post(API_ROUTES.workspaceOrchestrationStop, (c, { workspaceId }) =>
+    run(c, async (use) => {
+      const view = await use.stopRun(workspaceId, c.req.param('runId') ?? '');
+      log.info('orchestration run stopped by the user', { workspaceId, runId: c.req.param('runId') });
       return c.json(OrchestrationRunResponse.parse({ run: view }));
     }),
   );

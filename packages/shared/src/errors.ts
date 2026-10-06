@@ -192,6 +192,12 @@ export const API_ERROR_CODES = [
   'step_not_approved',
   /** Orchestration: a step was to be approved but is not waiting for approval, or a step it needs is not done (409). */
   'step_not_proposed',
+  /** Orchestration (15.6): a step was to be edited or skipped but was already sent, finished or skipped, or its run ended (409). */
+  'step_not_changeable',
+  /** Orchestration (15.6): a new order would put a step before its prerequisite, miss a step or move a sent one (409); the message says which. */
+  'bad_order',
+  /** Orchestration (15.6): the run has already ended (409). */
+  'run_not_open',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

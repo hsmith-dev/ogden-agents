@@ -37,7 +37,7 @@ import * as orch from './events-orchestration.js';
 
 export {
   OrchestrationManagerRepliedEvent, OrchestrationModeChangedEvent, OrchestrationPlanProposedEvent, OrchestrationResultReadEvent, OrchestrationRunFinishedEvent, OrchestrationRunPausedEvent, OrchestrationRunStartedEvent,
-  OrchestrationRunStoppedEvent, OrchestrationStepApprovedEvent, OrchestrationStepDispatchedEvent, OrchestrationStepEditedEvent, OrchestrationStepProposedEvent, OrchestrationStepSkippedEvent,
+  OrchestrationRunStoppedEvent, OrchestrationStepApprovedEvent, OrchestrationStepDispatchedEvent, OrchestrationStepEditedEvent, OrchestrationStepProposedEvent, OrchestrationStepSkippedEvent, OrchestrationStepsReorderedEvent,
 } from './events-orchestration.js';
 // Build run events and the builds and notification settings events (stories 5.2, 5.3).
 import * as runs from './events-runs.js';
@@ -411,7 +411,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   runs.SettingsRunLimitsChangedEvent,
   runs.SettingsNotificationsChangedEvent,
   SettingsLocalEndpointsChangedEvent,
-  orch.OrchestrationRunStartedEvent, orch.OrchestrationPlanProposedEvent, orch.OrchestrationStepProposedEvent, orch.OrchestrationStepApprovedEvent, orch.OrchestrationStepEditedEvent, orch.OrchestrationStepSkippedEvent,
+  orch.OrchestrationRunStartedEvent, orch.OrchestrationPlanProposedEvent, orch.OrchestrationStepProposedEvent, orch.OrchestrationStepApprovedEvent, orch.OrchestrationStepEditedEvent, orch.OrchestrationStepSkippedEvent, orch.OrchestrationStepsReorderedEvent,
   orch.OrchestrationStepDispatchedEvent, orch.OrchestrationResultReadEvent, orch.OrchestrationRunPausedEvent, orch.OrchestrationRunStoppedEvent, orch.OrchestrationRunFinishedEvent, orch.OrchestrationModeChangedEvent, orch.OrchestrationManagerRepliedEvent,
   SettingsUpdateNoticeChangedEvent,
   SettingsTerminalsChangedEvent,

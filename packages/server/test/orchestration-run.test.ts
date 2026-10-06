@@ -104,6 +104,7 @@ describe('the tracer path', () => {
       'orchestration.step_approved',
       'orchestration.step_dispatched',
       'orchestration.result_read',
+      'orchestration.run_finished',
     ]);
   });
 

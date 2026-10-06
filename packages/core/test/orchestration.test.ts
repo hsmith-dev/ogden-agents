@@ -263,5 +263,30 @@ describe('read back', () => {
     const after = await orchestration.getRun(workspace.id, run.id);
     expect(stepOf(after, 's1')).toMatchObject({ state: 'failed', sessionState: 'error' });
     await expect(orchestration.approveStep(workspace.id, run.id, 's2')).rejects.toBeInstanceOf(StepNotProposedError);
+    // A failed step ends the run, plainly, rather than leaving it working.
+    expect(after.run).toMatchObject({ state: 'failed', stopReason: 'worker_error' });
+  });
+
+  it('finishes the run when every step is done', async () => {
+    const { workspace, orchestration, finish } = setUp();
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Add a form' });
+    for (const id of ['s1', 's2']) {
+      await orchestration.approveStep(workspace.id, run.id, id);
+      const sent = await orchestration.dispatchStep(workspace.id, run.id, id);
+      finish(stepOf(sent, id).sessionId!, `done ${id}`);
+      await orchestration.getRun(workspace.id, run.id);
+    }
+    expect((await orchestration.getRun(workspace.id, run.id)).run.state).toBe('finished');
+  });
+
+  it('refuses to send an approved step once its run is over', async () => {
+    const { workspace, orchestration, finish, created } = setUp();
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Add a form' });
+    await orchestration.approveStep(workspace.id, run.id, 's1');
+    const sent = await orchestration.dispatchStep(workspace.id, run.id, 's1');
+    finish(stepOf(sent, 's1').sessionId!, 'x', 'error');
+    await orchestration.getRun(workspace.id, run.id);
+    await expect(orchestration.dispatchStep(workspace.id, run.id, 's2')).rejects.toBeInstanceOf(StepNotApprovedError);
+    expect(created).toHaveLength(1);
   });
 });

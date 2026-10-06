@@ -91,6 +91,8 @@ export interface OrchestrationOptions {
 /** How much of a session's newest events are read for its last reply. */
 const REPLY_WINDOW = Math.min(MAX_PAGE_EVENTS, 200);
 
+const isOpen = (state: string): boolean => state === 'awaiting_user' || state === 'running';
+
 type RunRow = typeof orchestrationRuns.$inferSelect;
 type StepRow = typeof orchestrationSteps.$inferSelect;
 
@@ -193,8 +195,17 @@ export function createOrchestration({ db, events, feature, chat, manager }: Orch
             const current = requireStep(run.id, step.stepId);
             if (current.state !== 'dispatched' || !canMoveStep('dispatched', to)) return false;
             orm.update(orchestrationSteps).set({ state: to }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
-            if (to === 'done') moveRun(run.id, 'awaiting_user');
             events.append({ type: 'orchestration.result_read', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], report: report! } });
+            const runId = run.id as OrchestrationRun['id'];
+            const states = stepsOf(run.id).map((other) => other.state);
+            if (to === 'failed') {
+              // A failed step is final and nothing is retried yet, so the run stops here, plainly.
+              moveRun(run.id, 'failed', 'worker_error');
+              events.append({ type: 'orchestration.run_stopped', workspaceId, streamId: workspaceId, payload: { runId, reason: 'worker_error' } });
+            } else if (states.every((state) => state === 'done' || state === 'skipped')) {
+              moveRun(run.id, 'finished');
+              events.append({ type: 'orchestration.run_finished', workspaceId, streamId: workspaceId, payload: { runId } });
+            } else if (!states.includes('dispatched')) moveRun(run.id, 'awaiting_user');
             return true;
           });
           if (settled) step = { ...step, state: to };
@@ -233,13 +244,19 @@ export function createOrchestration({ db, events, feature, chat, manager }: Orch
         events.append({ type: 'orchestration.run_started', workspaceId, streamId: workspaceId, payload: { runId, goal, mode: DEFAULT_ORCHESTRATION_MODE, limits: RUN_LIMITS } });
       });
 
-      const result = await manager.proposePlan(context);
+      let result: Awaited<ReturnType<ManagerPort['proposePlan']>>;
+      try {
+        result = await manager.proposePlan(context);
+      } catch {
+        // The port promises not to throw; if one does, the run is closed, never left planning.
+        result = { ok: false, kind: 'unavailable', reason: 'The manager is not available right now.' };
+      }
       if (!result.ok) {
         events.transaction(() => {
           moveRun(runId, 'failed', 'manager_refused');
           events.append({ type: 'orchestration.run_stopped', workspaceId, streamId: workspaceId, payload: { runId, reason: 'manager_refused' } });
         });
-        throw new ManagerFailedError(result.reason);
+        throw new ManagerFailedError(redactSecrets(result.reason).slice(0, 300));
       }
       const plan = masked(result.value);
       events.transaction(() => {
@@ -277,8 +294,8 @@ export function createOrchestration({ db, events, feature, chat, manager }: Orch
         const step = requireStep(run.id, stepId);
         const all = stepsOf(run.id);
         // Approval is the user's, never the manager's, and only while the run is open and what the step needs is done.
-        const needsDone = (JSON.parse(step.dependsOn) as string[]).every((id) => all.find((other) => other.stepId === id)?.state === 'done');
-        const open = run.state === 'awaiting_user' || run.state === 'running' || run.state === 'planning';
+        const needsDone = stepOf(step).dependsOn.every((id) => all.find((other) => other.stepId === id)?.state === 'done');
+        const open = isOpen(run.state);
         if (step.state !== 'proposed' || !canMoveStep('proposed', 'approved') || !needsDone || !open) throw new StepNotProposedError();
         orm.update(orchestrationSteps).set({ state: 'approved', approvedBy: 'user' }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
         events.append({ type: 'orchestration.step_approved', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], stepId: step.stepId, by: 'user' } });
@@ -291,14 +308,26 @@ export function createOrchestration({ db, events, feature, chat, manager }: Orch
       const run = requireRun(workspaceId, runId);
       const row = requireStep(run.id, stepId);
       // The rule that matters, in code: only a step the user approved is ever sent. Checked before anything is created.
-      if (row.state !== 'approved' || row.approvedBy === null) throw new StepNotApprovedError();
+      if (row.state !== 'approved' || row.approvedBy === null || !isOpen(run.state)) throw new StepNotApprovedError();
       const key = `${run.id}:${row.stepId}`;
       if (sending.has(key)) throw new StepNotApprovedError();
       sending.add(key);
       try {
         // The worker's own chat: created in its own default mode (this never sets one), then told the instruction as the manager's, at the user's approval.
         const session = await chat.createChatSession(workspaceId, { kind: 'chat', agentId: row.worker });
-        chat.sendMessage(workspaceId, session.id, row.instruction, { origin: 'manager' });
+        // The run may have been closed while the chat was made: nothing is sent then.
+        const again = requireRun(workspaceId, runId);
+        const current = requireStep(run.id, row.stepId);
+        if (current.state !== 'approved' || !isOpen(again.state)) throw new StepNotApprovedError();
+        try {
+          chat.sendMessage(workspaceId, session.id, row.instruction, { origin: 'manager' });
+        } catch (error) {
+          // The chat exists but did not take the instruction: the step is failed and says which chat, so a retry never sends twice.
+          events.transaction(() => {
+            orm.update(orchestrationSteps).set({ state: 'failed', sessionId: session.id }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, row.stepId))).run();
+          });
+          throw error;
+        }
         events.transaction(() => {
           orm.update(orchestrationSteps).set({ state: 'dispatched', sessionId: session.id }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, row.stepId))).run();
           moveRun(run.id, 'running');

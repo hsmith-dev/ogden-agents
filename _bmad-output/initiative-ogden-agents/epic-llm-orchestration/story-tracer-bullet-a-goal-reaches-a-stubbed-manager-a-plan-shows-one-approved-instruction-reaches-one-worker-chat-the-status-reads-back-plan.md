@@ -3,12 +3,12 @@ title: 'Tracer bullet: a goal reaches a stubbed manager, a plan shows, one appro
 type: 'feature'
 ticket: '15.3'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: 'a6e585f3d00fd1659b0ad02dbe379997ff0b53ca'
 context:
@@ -57,11 +57,11 @@ context:
 
 ## Tasks & Acceptance
 
-- [ ] shared shapes and the `manager` message origin
-- [ ] core use-case and the chat seam
-- [ ] server routes and wiring
-- [ ] web page, tab and settings switch
-- [ ] tests (core, server, web DOM, e2e, architecture)
+- [x] shared shapes and the `manager` message origin
+- [x] core use-case and the chat seam
+- [x] server routes and wiring
+- [x] web page, tab and settings switch
+- [x] tests (core, server, web DOM, e2e, architecture)
 
 **Acceptance Criteria:**
 - Given the piece on and the fake manager, a goal becomes a listed plan.
@@ -71,11 +71,16 @@ context:
 
 ## Implementation Notes
 
-(Filled in as built.)
+- `SHIPPED_ORCHESTRATION = true`: a project can turn the piece on (settings section "Orchestration", a switch; default off). With it off every orchestration route answers 409 `feature_off`, the Orchestrate tab does not show and the page shows the off notice.
+- Core `createOrchestration` (`core.createOrchestration({ chat, manager })`, like notifications): `startRun`, `listRuns`, `getRun`, `approveStep`, `dispatchStep`. Roster = the agents the install reports ready, mode fixed to approve each, limits `RUN_LIMITS` (not enforced; entries 5 to 9). Only `new` chats are planned (the manager is given no existing chats). Approval is the user's only (`approvedBy: user`). `dispatchStep` refuses in code (`StepNotApprovedError`, 409 `step_not_approved`) for any step not approved or a run not open, before a chat is created, and a second send of one step is refused. Read back is by `getRun` and `listRuns`: the chat's state and a `makeStatusReport` of its last agent reply; the first read that finds the chat idle or done settles the step (`done`), one `orchestration.result_read` once; an errored chat fails the step and the run (`worker_error`); all steps done finishes the run (the manager's own `done` decision is 15.8).
+- Chat seam (the smallest one): `Chat.sendMessage` takes `options.origin: 'manager'`, stored as the `origin` of the user `session.message_completed` (the enum gains `manager`; additive). The HTTP chat route never passes it, so a user cannot forge it (tested). Only the immediately stored message is marked; the orchestration sends only into a new, idle chat. The transcript shows the caption "Sent by the manager, approved by you". The agent itself receives the plain instruction.
+- Server: five routes under `/workspaces/:wsId/orchestration/runs` through `orchestrationRoutes`; `GET …/orchestration` gains `managerReady`; new codes `manager_unavailable`, `manager_failed`, `step_not_approved`, `step_not_proposed`. `StartOptions.manager` and the test hook `OGDEN_AGENTS_TEST_MANAGER=memory` give the fake; without them a real install answers "no manager yet" (409 `manager_unavailable`, page notice). `createMemoryManager` is exported from the server bundle for e2e.
+- Web: Orchestrate tab (key `o`) only with the project's switch on, page `/w/:wsId/orchestrate`, settings switch. `deleteWorkspaceHistory` also removes the project's orchestration rows.
+- Tests: core use-case (14), server REST (6) and hook, web DOM (10), tab tests, Playwright `tests/e2e/orchestrate.spec.ts` (2).
 
 ## Spec proposals
 
-None yet.
+None.
 
 ## Plan Change Log
 
@@ -83,8 +88,10 @@ None yet.
 
 ## Review Triage Log
 
-Not yet reviewed.
+2026-10-05, security and correctness reviewers, no critical or high findings. Patched: a failed worker step left the run `running` forever (medium), now the run fails with `worker_error` and `run_stopped`; a run whose steps were all done never finished (medium), now `finished` with `run_finished`; dispatch ignored the run's state and could send after the run closed (medium), now checked before and again after the chat is made; a `sendMessage` failure after the chat was made could orphan it and allow a second send (low), now the step is marked failed with the chat id; `proposePlan` throwing left the run `planning` (low), now closed as failed; the manager's failure reason went to the HTTP body unmasked (low), now masked and cut to 300; chat errors from `sendMessage` (stopping, busy) became 500 (low), now 409; `dependsOn` was read without the schema in approve (low), now through `stepOf`; the run list read the agents once per run (low), now once. Not changed: the worker chat starts in the project's own default permission mode, which a project may have set above Ask (the user asked for "the worker's own default mode"; the plan's `mode: ask` is a ceiling on the manager's request, not applied to a chat; the roster story 15.5 and mode story 15.8 decide whether a manager-started chat is forced to Ask); the roster is every ready agent (15.5); GET reads settle steps and so write (idempotent, once); the run list reads the last reply per dispatched step (bounded to 20 runs); a worker `error` is final for the step (retry is 15.8); no cap on runs per project; the reply window of 200 events can miss the final reply after a very long tool tail (summary then empty).
 
 ## Verification
+
+**Results:** `pnpm typecheck` clean; `pnpm test` all passed; `pnpm e2e` 169 passed (includes the new spec).
 
 **Commands:** `pnpm typecheck`, `pnpm test`, `pnpm e2e` (the `orchestrate` spec), `PROVENANCE_BASE=origin/main pnpm provenance`.

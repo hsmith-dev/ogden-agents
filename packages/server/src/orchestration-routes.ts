@@ -11,7 +11,10 @@
  */
 import {
   AgentNotReadyError,
+  InvalidOperationError,
   ManagerFailedError,
+  SessionBusyError,
+  SessionNotIdleError,
   ManagerUnavailableError,
   NotFoundError,
   OrchestrationOffError,
@@ -112,6 +115,8 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
     if (error instanceof ManagerFailedError) return apiError(c, 409, 'manager_failed', error.message);
     if (error instanceof StepNotApprovedError) return apiError(c, 409, 'step_not_approved', error.message);
     if (error instanceof StepNotProposedError) return apiError(c, 409, 'step_not_proposed', error.message);
+    // The worker chat could not take the instruction (stopping, busy): nothing more was done, and the plain reason is core's.
+    if (error instanceof InvalidOperationError || error instanceof SessionBusyError || error instanceof SessionNotIdleError) return apiError(c, 409, 'session_busy', error.message);
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
     if (error instanceof AgentNotReadyError) return apiError(c, 409, error.code, error.message, { agentId: error.agentId, action: error.action });
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', BMAD_PROJECT_NOT_FOUND_MESSAGE);

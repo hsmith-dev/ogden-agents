@@ -39,8 +39,8 @@ describe("the Local model's descriptor", () => {
     expect(LOCAL_DESCRIPTOR.configFolders).toContain('.opencode');
   });
 
-  it('is not registered by a shipped install until the chat is complete', () => {
-    expect(LOCAL_SHIPPED).toBe(false);
+  it('is registered by a shipped install now that its chat is complete (story 14.6)', () => {
+    expect(LOCAL_SHIPPED).toBe(true);
   });
 });
 

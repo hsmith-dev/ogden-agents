@@ -73,7 +73,7 @@ chmod +x start-ogden.sh
 
 ## Agents and how they sign in
 
-Each chat uses one coding agent: Claude Code, Google's Antigravity, OpenAI's Codex or xAI's Grok. **Claude Code and Antigravity can sign in with your own subscription account.** **Codex and Grok are API-key only.** Codex uses your own OpenAI API key; signing in with a ChatGPT account isn't supported, because OpenAI's terms don't allow other apps to use subscription sign in. Grok uses your own xAI API access token; signing in with an account isn't supported here. A key or token is kept in your computer's keychain and goes only to its own agent's process. Settings > Agents installs an agent into Ogden Agents' data folder and takes its key or token. Grok runs a project's own settings, hooks and MCP servers, so a Grok chat starts only in a project you trusted.
+Each chat uses one coding agent: Claude Code, Google's Antigravity, OpenAI's Codex, xAI's Grok, or a **Local model**, which needs no account and no key: it talks to a server on your own computer (or any OpenAI compatible address you add) through OpenCode. In Settings > Agents, install it, then use a preset, press Detect (it looks only at this computer's usual ports, only when you press it) or add any address; another host needs your confirmation and warns about plain http. The Local model asks before every command or file change and offers Ask only. The harness it runs through makes no connection except to the server you set up (nothing leaves your computer for a server on it), though a command or web fetch you approve can reach further, and a server on your computer can itself forward elsewhere. Its chats are stored in plain text in the data folder. Small local models follow tool instructions less reliably than hosted ones. **Claude Code and Antigravity can sign in with your own subscription account.** **Codex and Grok are API-key only.** Codex uses your own OpenAI API key; signing in with a ChatGPT account isn't supported, because OpenAI's terms don't allow other apps to use subscription sign in. Grok uses your own xAI API access token; signing in with an account isn't supported here. A key or token is kept in your computer's keychain and goes only to its own agent's process. Settings > Agents installs an agent into Ogden Agents' data folder and takes its key or token. Grok runs a project's own settings, hooks and MCP servers, so a Grok chat starts only in a project you trusted.
 
 | Agent | Sign in | Modes | Needs the project trusted |
 | --- | --- | --- | --- |
@@ -81,6 +81,7 @@ Each chat uses one coding agent: Claude Code, Google's Antigravity, OpenAI's Cod
 | Antigravity | Your Google account, or a Gemini API key | Ask, Skip all | No |
 | Codex | An OpenAI API key only | Ask, Skip all | No |
 | Grok | An xAI API access token only | Ask, Skip all (fixed when the chat starts) | Yes |
+| Local model | No account and no key (a server's own key is optional) | Ask only | No |
 
 Skip all is behind Developer mode.
 

@@ -8,6 +8,8 @@ export interface FakeServerOptions {
   /** How long a prompt containing `SLOW` waits before its first token. */
   slowMs?: number;
   models?: string[];
+  /** How long `GET /v1/models` waits before answering (a busy server). */
+  modelsDelayMs?: number;
 }
 
 /** One request the server got. Never holds a key, only whether one came. */

@@ -17,6 +17,8 @@ export interface StoredPane {
   title: string;
   /** Milliseconds since 1970. */
   createdAt: number;
+  /** The user's opt in to notifications for this pane (story 16.8). */
+  notify: boolean;
 }
 
 export interface PaneStore {
@@ -24,6 +26,7 @@ export interface PaneStore {
   load(): { panes: StoredPane[]; layouts: Map<WorkspaceId, PaneLayout> };
   savePane(pane: StoredPane): void;
   renamePane(paneId: PaneId, title: string): void;
+  setNotify(paneId: PaneId, notify: boolean): void;
   deletePane(paneId: PaneId): void;
   saveLayout(workspaceId: WorkspaceId, layout: PaneLayout): void;
   deleteLayout(workspaceId: WorkspaceId): void;
@@ -40,7 +43,7 @@ export function createPaneStore({ db }: { db: Database }): PaneStore {
         .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1))
         // A row that is not what core writes (a damaged or edited file) is left out.
         .filter((row) => PaneTitle.safeParse(row.title).success && PaneLauncherId.safeParse(row.launcherId).success)
-        .map((row): StoredPane => ({ id: row.id as PaneId, workspaceId: row.workspaceId as WorkspaceId, launcherId: row.launcherId, title: row.title, createdAt: row.createdAt }));
+        .map((row): StoredPane => ({ id: row.id as PaneId, workspaceId: row.workspaceId as WorkspaceId, launcherId: row.launcherId, title: row.title, createdAt: row.createdAt, notify: row.notify }));
       const layouts = new Map<WorkspaceId, PaneLayout>();
       for (const row of orm.select().from(terminalLayouts).all()) {
         try {
@@ -54,6 +57,7 @@ export function createPaneStore({ db }: { db: Database }): PaneStore {
     },
     savePane: (pane) => void orm.insert(terminalPanes).values(pane).onConflictDoNothing().run(),
     renamePane: (paneId, title) => void orm.update(terminalPanes).set({ title }).where(eq(terminalPanes.id, paneId)).run(),
+    setNotify: (paneId, notify) => void orm.update(terminalPanes).set({ notify }).where(eq(terminalPanes.id, paneId)).run(),
     deletePane: (paneId) => void orm.delete(terminalPanes).where(eq(terminalPanes.id, paneId)).run(),
     saveLayout: (workspaceId, layout) =>
       void orm.insert(terminalLayouts).values({ workspaceId, layout: JSON.stringify(layout) }).onConflictDoUpdate({ target: terminalLayouts.workspaceId, set: { layout: JSON.stringify(layout) } }).run(),

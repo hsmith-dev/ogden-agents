@@ -176,6 +176,13 @@
       "when": 1791258030136,
       "tag": "0024_terminal_panes",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791260072839,
+      "tag": "0025_pane_notify",
+      "breakpoints": true
     }
   ]
 }

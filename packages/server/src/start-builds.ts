@@ -48,6 +48,7 @@ export function createBuildsWiring({
   registeredAgents,
   unattendedAgents,
   describeAgent,
+  attendedOnlyReason,
 }: {
   vcs?: VcsPort;
   options: StartOptions;
@@ -64,6 +65,8 @@ export function createBuildsWiring({
   registeredAgents: (agentId: string) => boolean;
   /** Whether an agent can run an unattended build here (its port says so; `AgentPort.unattendedBuild`). */
   unattendedAgents: (agentId: string) => boolean;
+  /** An agent's own plain reason it builds only with the user watching, when it says one. */
+  attendedOnlyReason: (agentId: string) => string | undefined;
   /** An agent's product name and where its skills go in a project (its descriptor). */
   describeAgent: (agentId: string) => { displayName: string; skillsFolder: string } | undefined;
 }): BuildsUseCases {
@@ -81,14 +84,14 @@ export function createBuildsWiring({
   const sandbox: SandboxPort = {
     async check(request) {
       const agent = request?.agent;
-      if (agent !== undefined && !unattendedAgents(agent)) return { available: false, reason: AGENT_ATTENDED_ONLY_REASON, choices: ['attended', 'other_agent'] };
+      if (agent !== undefined && !unattendedAgents(agent)) return { available: false, reason: attendedOnlyReason(agent) ?? AGENT_ATTENDED_ONLY_REASON, choices: ['attended', 'other_agent'] };
       return machineSandbox.check(request);
     },
     async status(request) {
       const agent = request?.agent;
       const status = await machineSandbox.status(request);
       if (agent === undefined || unattendedAgents(agent)) return status;
-      return { ...status, available: false, kind: null, summary: AGENT_ATTENDED_ONLY_REASON, choices: ['attended', 'other_agent'], installHint: null };
+      return { ...status, available: false, kind: null, summary: attendedOnlyReason(agent) ?? AGENT_ATTENDED_ONLY_REASON, choices: ['attended', 'other_agent'], installHint: null };
     },
     run: (request) => machineSandbox.run(request),
   };

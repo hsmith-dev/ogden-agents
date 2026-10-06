@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentError, PROTECTED_PATHS, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acpReasons, CODEX_CONFIG_TOML, CODEX_DESCRIPTOR, createCodexAgent, ensureCodexConfig } from '../src/index.js';
+import { acpReasons, CODEX_ATTENDED_ONLY_REASON, CODEX_CONFIG_TOML, CODEX_DESCRIPTOR, createCodexAgent, ensureCodexConfig } from '../src/index.js';
 
 const FAKE_CODEX = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-codex.mjs');
 const KEY = `sk-proj-${'K'.repeat(40)}4321`;
@@ -217,6 +217,29 @@ describe("Codex's chat port (epic 12 entry 5)", () => {
       session.onEvent((event) => events.push(event));
       await session.prompt('mode-switch agent-full-access').catch(() => undefined);
       expect(events.some((event) => event.type === 'state' && event.state === 'error' && 'fatal' in event && event.fatal === true)).toBe(true);
+    });
+
+    it('says in plain words why it builds with you watching, until verified; nothing writable is refused; the key never reaches its config', async () => {
+      expect(agentOf().unattendedBuild).toBe(false);
+      expect(agentOf().attendedOnlyReason).toBe(CODEX_ATTENDED_ONLY_REASON);
+      expect(CODEX_ATTENDED_ONLY_REASON).not.toMatch(/[\u2013\u2014]/);
+      const verified = createCodexAgent({ dataDir: tempDir(), server: () => ({ command: process.execPath, args: [FAKE_CODEX] }), unattendedVerified: true });
+      expect(verified.unattendedBuild).toBe(true);
+      expect(verified.attendedOnlyReason).toBeUndefined();
+      // The default is the gate: with it off a start with a sandbox never spawns anything.
+      const gate = await agentOf().startSession({ cwd: tempDir(), env: envOf({ CODEX_API_KEY: KEY }), sandbox: sandboxOf(tempDir()) }).catch((error: unknown) => error);
+      expect(gate).toMatchObject({ code: 'agent_unavailable' });
+      const cwd = tempDir();
+      const empty = await verified.startSession({ cwd, env: envOf({ CODEX_API_KEY: KEY }), sandbox: { kind: 'test', writableRoots: [], deniedPaths: [], deniedReads: [], allowedReads: [] } }).catch((error: unknown) => error);
+      expect(empty).toMatchObject({ code: 'agent_unavailable' });
+      // A build start leaves Codex's own config exactly as the chat's: ephemeral credentials, plugins off, no key, no looser mode.
+      const env = envOf({ CODEX_API_KEY: KEY });
+      const session = await verified.startSession({ cwd, env, sandbox: sandboxOf(cwd) });
+      sessions.push(session);
+      const config = readFileSync(join(env.CODEX_HOME!, 'config.toml'), 'utf8');
+      expect(config).toBe(CODEX_CONFIG_TOML);
+      expect(config).not.toContain(KEY);
+      expect(config).not.toMatch(/sandbox_mode|approval_policy|danger/);
     });
   });
 });

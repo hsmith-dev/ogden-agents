@@ -114,6 +114,8 @@ export interface AcpAgentQuirks {
   toolInputPaths: AcpToolInputPaths;
   /** How it starts an unattended build session with its own sandbox (epic 17); absent for an agent that takes the sandbox through `sessionMeta` (Claude Code) or cannot. */
   buildSession?: AcpBuildSessionQuirk | undefined;
+  /** Why it builds only with the user watching, in plain words (the Build picker's line), when it cannot take a build's sandbox (epic 17). */
+  attendedOnlyReason?: string | undefined;
   /** Its session modes that ask as much as Ask (or more); any other, known or not, asks less. */
   askingModeIds: readonly string[];
   /** Its own CLI on its sessions (CAP-5), when that CLI can resume them. */

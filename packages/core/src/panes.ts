@@ -15,8 +15,9 @@
  * - What a pane prints and what is typed into it is never logged, evented or
  *   stored here (AD-6, AD-16); only a pane's state changes and why.
  */
-import type { NewCoreEvent, Pane, PaneLauncherStatus, PaneId, PaneLayout, PanePlacement, PaneState, TerminalUnavailableCode, WorkspaceId } from '@ogden-agents/shared';
+import type { NewCoreEvent, Pane, PaneLauncherStatus, PaneStatus, PaneId, PaneLayout, PanePlacement, PaneState, TerminalUnavailableCode, WorkspaceId } from '@ogden-agents/shared';
 import { PaneTitle } from '@ogden-agents/shared';
+import { createStatusTracker, type StatusTracker } from './pane-status.js';
 import { splitLauncherArgs, type PaneLaunchers } from './pane-launchers.js';
 import { addTab, EMPTY_LAYOUT, layoutPaneIds, rearrangement, removePane, splitPane } from './pane-layout.js';
 import { MAX_PANES_PER_INSTALL, MAX_PANES_PER_PROJECT, MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS } from '@ogden-agents/shared';
@@ -139,6 +140,8 @@ interface Entry {
   /** The arguments the user typed, read (kept for Restart pane). */
   typed: readonly string[];
   process: PaneProcess | undefined;
+  /** Its status guess (story 16.6), over the current program. */
+  tracker: StatusTracker | undefined;
   size: TerminalSize;
   viewers: Set<ViewerEntry>;
   closed: boolean;
@@ -199,6 +202,14 @@ export function createPanes(options: PanesOptions): Panes {
     else layouts.set(workspaceId, layout);
     emit({ type: 'terminal.layout_changed', workspaceId, streamId: workspaceId, payload: { tabCount: layout.tabs.length, paneCount: layoutPaneIds(layout).length } });
   };
+  /** A status change: the pane, its viewers and an event (state only, with the pane's name). */
+  const setStatus = (entry: Entry, status: PaneStatus, previous: PaneStatus = entry.pane.status) => {
+    if (entry.pane.status === status) return;
+    entry.pane = { ...entry.pane, status };
+    for (const viewer of [...entry.viewers]) for (const listener of [...viewer.states]) safely(() => listener(entry.pane));
+    // Working and idle come and go with every command: they reach the page over the pane's own socket. The log keeps the changes someone elsewhere acts on: into or out of needs attention, and the end.
+    if (entry.announced && (status === 'needs_attention' || previous === 'needs_attention' || status === 'exited')) emit({ type: 'terminal.pane_status_changed', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, status, previous, title: entry.pane.title } });
+  };
   const setState = (entry: Entry, state: PaneState, exitCode: number | null = null) => {
     if (entry.pane.state === state && entry.pane.exitCode === exitCode) return;
     entry.pane = { ...entry.pane, state, exitCode };
@@ -237,6 +248,15 @@ export function createPanes(options: PanesOptions): Panes {
     // A second Restart that started meanwhile: only one program per pane, the other stops.
     entry.process?.kill();
     entry.process = process;
+    entry.tracker?.dispose();
+    entry.tracker = createStatusTracker({
+      // The launcher's own words for waiting on the user; the shell and an unknown program have none, so they are only working or idle.
+      patterns: options.launchers?.get(entry.pane.launcherId)?.promptPatterns ?? [],
+      screenLines: (count) => process.screenLines(count),
+      onChange: (status, previous) => setStatus(entry, status, previous),
+    });
+    const tracker = entry.tracker;
+    process.onData(() => tracker.output());
     if (size.cols !== entry.size.cols || size.rows !== entry.size.rows) {
       entry.size = size;
       for (const viewer of entry.viewers) for (const listener of [...viewer.sized]) safely(() => listener(size));
@@ -253,6 +273,8 @@ export function createPanes(options: PanesOptions): Panes {
     process.onExit(({ exitCode }) => {
       // A program replaced by Restart pane (or closed) reports its end too: only the current one counts.
       if (entry.process === process && !entry.closed) {
+        // Status first (exited), then the state and its event.
+        tracker.exited();
         setState(entry, 'exited', exitCode);
         emit({ type: 'terminal.pane_exited', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, exitCode } });
       }
@@ -274,6 +296,8 @@ export function createPanes(options: PanesOptions): Panes {
     if (entry.announced) emit({ type: 'terminal.pane_closed', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, cause } });
     const process = entry.process;
     entry.process = undefined;
+    entry.tracker?.dispose();
+    entry.tracker = undefined;
     process?.kill();
     for (const viewer of [...entry.viewers]) {
       viewer.unbind?.();
@@ -347,11 +371,12 @@ export function createPanes(options: PanesOptions): Panes {
       if (entries.size >= perInstall) throw new PaneLimitError('install', perInstall);
       if ([...entries.values()].filter((e) => e.pane.workspaceId === workspaceId).length >= perProject) throw new PaneLimitError('project', perProject);
       const entry: Entry = {
-        pane: { id: newId('pan'), workspaceId, launcherId, title: titleFor(workspaceId, label), state: 'starting', exitCode: null },
+        pane: { id: newId('pan'), workspaceId, launcherId, title: titleFor(workspaceId, label), state: 'starting', status: 'working', exitCode: null },
         cwd: workspace.realPath ?? workspace.path,
         command,
         typed,
         process: undefined,
+        tracker: undefined,
         size: { cols: clamp(size.cols, MAX_TERMINAL_COLS), rows: clamp(size.rows, MAX_TERMINAL_ROWS) },
         viewers: new Set(),
         closed: false,
@@ -438,12 +463,16 @@ export function createPanes(options: PanesOptions): Panes {
         viewer.unbind = undefined;
       }
       old?.kill();
+      entry.tracker?.dispose();
+      entry.tracker = undefined;
       setState(entry, 'starting');
+      setStatus(entry, 'working');
       try {
         await start(entry, { cols: clamp(size.cols, MAX_TERMINAL_COLS), rows: clamp(size.rows, MAX_TERMINAL_ROWS) });
       } catch (error) {
         // It could not start again: the pane stays, stopped, so Restart can be tried once more.
         if (!entry.closed) {
+          setStatus(entry, 'exited');
           setState(entry, 'exited');
           emit({ type: 'terminal.pane_exited', workspaceId, streamId: workspaceId, payload: { paneId, exitCode: null } });
         }
@@ -491,6 +520,7 @@ export function createPanes(options: PanesOptions): Panes {
         write(data) {
           if (!developerModeOn(entry)) return;
           if (viewer.size !== undefined) applySize(viewer.size);
+          entry.tracker?.input(data);
           entry.process?.write(data);
         },
         resize(cols, rows) {

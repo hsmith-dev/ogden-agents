@@ -13,6 +13,9 @@ import { isProtectedSegment } from './permission-matching.js';
 /** The BMad output folder whose uncommitted changes never block approve (user decision 2026-10-01). */
 export const BMAD_OUTPUT_PREFIX = '_bmad-output/';
 
+/** The project's agent instructions file at the repo root: Save the lessons (epic 7) commits it, and approve's clean-checkout check tolerates it uncommitted. */
+export const AGENTS_FILE = 'AGENTS.md';
+
 /** The plan status a ticket must have to be built. */
 export const READY_STATUS = 'ready-for-dev';
 

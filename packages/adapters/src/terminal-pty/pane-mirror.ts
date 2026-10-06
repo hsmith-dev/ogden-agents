@@ -24,6 +24,8 @@ interface HeadlessTerminal {
   resize(cols: number, rows: number): void;
   loadAddon(addon: unknown): void;
   unicode?: { activeVersion: string };
+  rows: number;
+  buffer: { active: { baseY: number; getLine(index: number): { translateToString(trimRight?: boolean): string } | undefined } };
   dispose(): void;
 }
 
@@ -41,6 +43,12 @@ export interface PaneMirror {
    * inside the parser's own loop. Never called after {@link dispose}.
    */
   snapshot(done: (snapshot: string) => void): void;
+  /**
+   * Calls `done` with the last `count` non empty lines of the visible screen,
+   * once everything written before this call has been parsed (oldest first).
+   * Never called after {@link dispose}.
+   */
+  lastLines(count: number, done: (lines: string[]) => void): void;
   /** Frees the screen. Later calls do nothing. */
   dispose(): void;
 }
@@ -101,6 +109,19 @@ export async function createPaneMirror(options: PaneMirrorOptions, modules?: Mir
       // An empty write is a marker in the parser's queue: its callback runs right after everything before it.
       term.write('', () => {
         if (!disposed) done(serializer.serialize({ scrollback: options.scrollback }));
+      });
+    },
+    lastLines(count, done) {
+      if (disposed) return;
+      term.write('', () => {
+        if (disposed) return;
+        const buffer = term.buffer.active;
+        const lines: string[] = [];
+        for (let row = buffer.baseY + term.rows - 1; row >= buffer.baseY && lines.length < count; row -= 1) {
+          const text = buffer.getLine(row)?.translateToString(true) ?? '';
+          if (text.trim() !== '') lines.unshift(text);
+        }
+        done(lines);
       });
     },
     dispose() {

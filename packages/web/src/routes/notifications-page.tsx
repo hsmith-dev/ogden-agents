@@ -3,7 +3,7 @@ import { playChime } from '@/notifications/chime';
 import { desktopPermission, requestDesktopPermission } from '@/notifications/desktop';
 import { NEED_KINDS, useNotificationSettings } from '@/notifications/notification-settings';
 import { NEED_KIND_LABELS, type DesktopPermission } from '@/notifications/notifier';
-import type { NeedKind } from '@/shell/sidebar-model';
+import type { NotifiableNeedKind as NeedKind } from '@/shell/sidebar-model';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { CheckboxOption } from '@/ui/checkbox';

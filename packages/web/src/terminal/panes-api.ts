@@ -10,6 +10,9 @@ import { tabAuth } from '@/auth/tab-token';
  * without Developer mode (403 `developer_mode_required`).
  */
 
+/** How often the list is read again while the page is open: a pane's working and idle are not in the event log, so the tab marks follow by looking (the open panes follow over their own sockets). */
+export const PANES_REFRESH_MS = 3_000;
+
 export const panesQueryKey = (wsId: string) => ['panes', wsId] as const;
 
 /** `GET /api/v1/workspaces/:wsId/panes`. */
@@ -65,7 +68,7 @@ export function useLaunchers(enabled: boolean, auth: Auth = tabAuth) {
 
 /** The project's panes. Off while Developer mode is (the server would refuse). */
 export function usePanes(wsId: string, enabled: boolean, auth: Auth = tabAuth) {
-  return useQuery({ queryKey: panesQueryKey(wsId), queryFn: () => fetchPanes(wsId, auth), enabled, retry: false });
+  return useQuery({ queryKey: panesQueryKey(wsId), queryFn: () => fetchPanes(wsId, auth), enabled, retry: false, refetchInterval: PANES_REFRESH_MS });
 }
 
 /** Opening, closing, renaming and arranging panes; each refreshes the list and layout. */

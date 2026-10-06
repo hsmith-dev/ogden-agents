@@ -377,7 +377,7 @@ test('the Plan home (story 4.6): tabs and g shortcuts, groups in order, names in
       // Planning off: no Plan tab, and g p does nothing.
       await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board'] });
       await page.goto(`${server.url}/w/${wsId}/board`);
-      await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Board']);
+      await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Board', 'Terminals']);
       await page.keyboard.press('g');
       await page.keyboard.press('p');
       // A shortcut navigates in its own keydown; give a wrong one a moment to show, then check g p did nothing.
@@ -486,6 +486,7 @@ test('the board: cards in their columns, Waits for and the blocked reason, a liv
     watch: (...args) => inner.watch(...args),
     watching: (...args) => inner.watching(...args),
     emit: (...args) => inner.emit(...args),
+    emitRetrospective: (...args) => inner.emitRetrospective(...args),
     fail: (...args) => inner.fail(...args),
   };
   const bmadSource = server.createMemoryBmadSource({ ready: true });
@@ -571,6 +572,7 @@ test('changing a status from the board (story 4.10): keyboard only, focus on the
     watch: (...args) => inner.watch(...args),
     watching: (...args) => inner.watching(...args),
     emit: (...args) => inner.emit(...args),
+    emitRetrospective: (...args) => inner.emitRetrospective(...args),
     fail: (...args) => inner.fail(...args),
   };
   const bmadSource = server.createMemoryBmadSource({ ready: true });
@@ -778,6 +780,7 @@ test('reduced mode (entry 4.11): Plan, Board and Settings explain what is missin
     watch: (...args) => inner.watch(...args),
     watching: (...args) => inner.watching(...args),
     emit: (...args) => inner.emit(...args),
+    emitRetrospective: (...args) => inner.emitRetrospective(...args),
     fail: (...args) => inner.fail(...args),
   };
   const bmadSource = server.createMemoryBmadSource({ ready: true });

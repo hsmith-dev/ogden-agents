@@ -16,11 +16,11 @@ import { useGoShortcuts } from './use-go-shortcuts';
  * so does any project while its settings load or fail to.
  *
  * Story 4.6: `g` then a shown tab's `key` opens it (`g c`, `g p`, `g b`,
- * `g r`); a tab that isn't shown has no shortcut. In Developer mode only,
+ * `g r`, Developer mode's `g t`); a tab that isn't shown has no shortcut. In Developer mode only,
  * each tab's tooltip (on hover and keyboard focus) shows its keys.
  */
 
-export type WorkspaceTabId = 'chats' | 'plan' | 'board' | 'runs';
+export type WorkspaceTabId = 'chats' | 'plan' | 'board' | 'runs' | 'terminals';
 
 export interface WorkspaceTabSlot {
   id: WorkspaceTabId;
@@ -31,6 +31,8 @@ export interface WorkspaceTabSlot {
   piece?: BmadPiece;
   /** The tab's route, with `$wsId`; unset until the epic that builds its page sets it. */
   to?: string;
+  /** Shown only in Developer mode (epic 16: Terminals). The server refuses what it serves without it all the same. */
+  developerOnly?: true;
 }
 
 /** Every slot, in order. Story 4.1 sets Plan's and Board's `to` (their bare pages), 11.1 Runs'. */
@@ -39,6 +41,7 @@ export const WORKSPACE_TAB_SLOTS: readonly WorkspaceTabSlot[] = [
   { id: 'plan', label: 'Plan', key: 'p', piece: 'planning', to: '/w/$wsId/plan' },
   { id: 'board', label: 'Board', key: 'b', piece: 'board', to: '/w/$wsId/board' },
   { id: 'runs', label: 'Runs', key: 'r', piece: 'builds', to: '/w/$wsId/runs' },
+  { id: 'terminals', label: 'Terminals', key: 't', to: '/w/$wsId/terminals', developerOnly: true },
 ];
 
 /** A slot that can be shown: it has a page to link to. */
@@ -48,15 +51,18 @@ export type VisibleWorkspaceTab = WorkspaceTabSlot & { to: string };
  * The tabs to show, in slot order: those with a page, and, for a piece's
  * tab, only when the project has the piece on and this install has it
  * available. `pieces` or `availability` unknown (loading or failed) shows
- * only the tabs that serve no piece.
+ * only the tabs that serve no piece. A Developer-mode tab (Terminals, epic 16)
+ * shows only with `developerMode`, whatever the pieces say (E16-R3, AD-21).
  */
 export function visibleWorkspaceTabs(
   pieces: readonly BmadPiece[] | undefined,
   availability: readonly BmadPieceAvailability[] | undefined,
   slots: readonly WorkspaceTabSlot[] = WORKSPACE_TAB_SLOTS,
+  developerMode = false,
 ): VisibleWorkspaceTab[] {
   return slots.filter((slot): slot is VisibleWorkspaceTab => {
     if (slot.to === undefined) return false;
+    if (slot.developerOnly === true && !developerMode) return false;
     if (slot.piece === undefined) return true;
     const piece = slot.piece;
     return pieces?.includes(piece) === true && availability?.some((entry) => entry.piece === piece && entry.available) === true;
@@ -118,8 +124,8 @@ export function WorkspaceTabs({ wsId, active, slots = WORKSPACE_TAB_SLOTS }: { w
   // A failed refetch keeps the last data: while either query is in error, nothing is known.
   const pieces = settings.isError ? undefined : settings.data?.bmadPieces;
   const availability = available.isError ? undefined : available.data;
-  const tabs = visibleWorkspaceTabs(pieces, availability, slots);
-  useGoShortcuts(wsId, tabs);
   const { appearance } = useAppearance();
+  const tabs = visibleWorkspaceTabs(pieces, availability, slots, appearance.developerMode);
+  useGoShortcuts(wsId, tabs);
   return <WorkspaceTabsView wsId={wsId} tabs={tabs} active={active} hints={appearance.developerMode} />;
 }

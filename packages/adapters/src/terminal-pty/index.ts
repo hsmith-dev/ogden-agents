@@ -291,3 +291,6 @@ export function createPtyLoader(importModule: () => Promise<unknown> = () => imp
 
 /** The app's one `node-pty` loader: loads it on first use, once. */
 export const loadPty: PtyLoader = createPtyLoader();
+
+export * from './pane-mirror.js';
+export * from './shell.js';

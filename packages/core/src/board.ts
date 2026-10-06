@@ -29,6 +29,8 @@ import type { BmadSourceUseCases } from './bmad-source-port.js';
 import type { Entities } from './entities.js';
 import { BmadNotSetUpError, ReducedModeError, ReopenNotConfirmedError, StatusNotAllowedError, ValidationError } from './errors.js';
 import { workspaceRepoPath } from './planning.js';
+import { readRetrospectiveFrontmatter } from './retrospective-verdict.js';
+import { epicFolderOf } from './retrospectives.js';
 import { serializedByRepo } from './repo-serialization.js';
 import type { TicketRunGuard, TicketStorePort } from './ticket-store-port.js';
 
@@ -62,7 +64,7 @@ export interface BoardUseCases {
 }
 
 export interface BoardDeps {
-  bmad: Pick<BmadFeatures, 'requireBmadFeature'>;
+  bmad: Pick<BmadFeatures, 'requireBmadFeature' | 'pieces'>;
   trust: Pick<BmadScriptTrust, 'requireScriptsTrusted' | 'requireScriptsUnchanged'>;
   /** The pinned BMad Method (story 4.14): checked after the trust, never downloaded from here. */
   source: Pick<BmadSourceUseCases, 'requireReady'>;
@@ -72,9 +74,12 @@ export interface BoardDeps {
    * before the store runs anything: a `_bmad/` folder (`BmadNotSetUpError`
    * without one), then the ticket tree (`ReducedModeError`).
    */
-  catalog: Pick<BmadCatalogPort, 'detect' | 'missingCapabilities'>;
+  catalog: Pick<BmadCatalogPort, 'detect' | 'missingCapabilities'> & Partial<Pick<BmadCatalogPort, 'setupStatus' | 'readRetrospective'>>;
   tickets: TicketStorePort;
 }
+
+/** The most epics whose retrospective is read for one board (the rest show none). */
+const MAX_EPICS_READ = 200;
 
 /** What the board needs of the project's BMad Method (AD-14). */
 const BOARD_CAPABILITIES: readonly BmadCapability[] = ['ticket_tree'];
@@ -107,10 +112,45 @@ export function createBoard({ bmad, trust, source, entities, catalog, tickets }:
     const scripts = await trust.requireScriptsUnchanged(workspaceId);
     return { repoPath, guard: { scripts } };
   };
+  /**
+   * The tree with each epic's retrospective (epic 7, story 7.4): read only
+   * with Retrospectives on, from the epic's folder through the catalog port's
+   * confined reader, the frontmatter's verdict and date alone. With the piece
+   * off (or no output folder) every epic's is `null` and nothing is read; a
+   * file that can't be read leaves `null`. Checked again after the reads.
+   */
+  const withRetrospectives = async (workspaceId: WorkspaceId, repoPath: string, tree: TicketsResponse): Promise<TicketsResponse> => {
+    const none = (): TicketsResponse => ({ ...tree, epics: tree.epics.map((epic) => ({ ...epic, retrospective: null })) });
+    const on = (): boolean => bmad.pieces(workspaceId).includes('retrospectives');
+    const { setupStatus, readRetrospective } = catalog;
+    if (!on() || tree.epics.length === 0 || setupStatus === undefined || readRetrospective === undefined) return none();
+    let outputFolder: string | null;
+    try {
+      outputFolder = (await setupStatus.call(catalog, repoPath)).outputFolder;
+    } catch {
+      return none();
+    }
+    const read = [];
+    for (const epic of tree.epics.slice(0, MAX_EPICS_READ)) {
+      const folder = epicFolderOf(outputFolder, tree.folder, epic.slug);
+      let found: { path: string; content: string } | null = null;
+      if (folder !== undefined && outputFolder !== null) {
+        try {
+          found = await readRetrospective.call(catalog, repoPath, outputFolder, folder);
+        } catch {
+          found = null;
+        }
+      }
+      read.push({ ...epic, retrospective: found === null ? null : readRetrospectiveFrontmatter(found.path, found.content) });
+    }
+    // Checked again after the (async) reads: a piece turned off meanwhile gives nothing of it.
+    if (!on()) return none();
+    return { ...tree, epics: [...read, ...tree.epics.slice(MAX_EPICS_READ).map((epic) => ({ ...epic, retrospective: null }))] };
+  };
   return {
     async tickets(workspaceId) {
       const { repoPath, guard } = await guarded(workspaceId);
-      return tickets.tree(repoPath, guard);
+      return withRetrospectives(workspaceId, repoPath, await tickets.tree(repoPath, guard));
     },
 
     async ticket(workspaceId, ref) {

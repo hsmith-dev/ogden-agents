@@ -18,6 +18,10 @@ export interface SkillLabelsEntry {
   readonly description?: string;
   readonly group?: string;
   readonly next?: { readonly skill: string; readonly label: string };
+  /** `epic`: takes an epic's folder and shows on the board's epic header, not in Plan home (epic 7). */
+  readonly scope?: 'epic';
+  /** Further next steps beside `next` (epic 7: the look-back's lessons and action items). */
+  readonly nexts?: ReadonlyArray<{ readonly skill: string; readonly label: string }>;
 }
 
 /** The mapping file's shape. */

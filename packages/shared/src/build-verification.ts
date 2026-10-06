@@ -87,3 +87,9 @@ export const TESTS_TIMED_OUT_DETAIL = 'The tests took too long when re-run';
 export const PLAN_NOT_BUILT_DETAIL = "The plan doesn't say built";
 export const NO_CODE_CHANGES_DETAIL = 'The branch has no changes';
 export const CHECK_AGAIN_LABEL = 'Check again';
+export const CHECK_AGAIN_FAILED = "The checks couldn't be run again. Try again.";
+export const TEST_OUTPUT_TITLE = 'Test output (the end of it)';
+export const TEST_COMMAND_USED_LABEL = 'Test command used';
+export const BUILD_FAILED_PREFIX = 'Build failed: ';
+/** The card and sheet line for a ticket whose latest build failed its checks. */
+export const buildFailedText = (reason: string) => `${BUILD_FAILED_PREFIX}${reason}`;

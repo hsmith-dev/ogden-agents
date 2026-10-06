@@ -168,7 +168,7 @@ Ask: "Spike 16.1 is green on Mac, Windows and Linux with fake CLIs. Do you say G
 - [x] CI job on ubuntu, macOS and Windows: green (runs 37362082901 and 37363956365); each question above answered or recorded as a limit.
 - [x] this plan: findings, numbers, risks, recommendation, matrix addition, live checks, go or no go.
 - [x] the temporary job moved out of `.github/workflows/` to `apps/terminal-spike/ci/terminal-spike.yml`.
-- [ ] the user's go or no go and launcher list recorded as a dated Decision in the epic's Notes (after the user answers).
+- [x] the user's go and launcher list recorded as a dated Decision in the epic's Notes (2026-10-05).
 - [ ] the user's live checks recorded.
 
 ## Implementation Notes

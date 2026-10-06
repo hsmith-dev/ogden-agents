@@ -30,6 +30,29 @@ describe('tickets-memory (story 4.2)', () => {
     expect((await store.tree('/repo', GUARD)).tickets[0]!.title).toBe('One');
   });
 
+  it('tree carries each epic with its retrospective (story 7.2), null when there is none', async () => {
+    const epics = [
+      { slug: 'epic-a', id: 1, status: 'done', after: [], blocks: [], retrospective: { path: '_bmad-output/i/epic-a/epic-a-retrospective.md', verdict: 'rejected', date: '2026-10-05' } },
+      { slug: 'epic-b', id: 2, status: 'in-progress', after: [], blocks: [] },
+    ];
+    const answer = await createMemoryTicketStore({ repos: { '/repo': { ...tree, epics } } }).tree('/repo', GUARD);
+    expect(answer.epics.map((epic) => [epic.slug, epic.retrospective?.verdict ?? null])).toEqual([
+      ['epic-a', 'rejected'],
+      ['epic-b', null],
+    ]);
+  });
+
+  it('emitRetrospective tells each open watch\'s retrospective listener, until it closes (story 7.4)', async () => {
+    const store = createMemoryTicketStore({ repos: { '/repo': tree } });
+    const heard: string[][] = [];
+    const watch = await store.watch('/repo', '_bmad-output', () => {}, { onRetrospectiveChange: (epics) => heard.push(epics) });
+    store.emitRetrospective(['epic-a']);
+    expect(heard).toEqual([['epic-a']]);
+    watch.close();
+    store.emitRetrospective(['epic-b']);
+    expect(heard).toEqual([['epic-a']]);
+  });
+
   it('find answers a ticket with its text, and a missing one is NotFoundError', async () => {
     const store = createMemoryTicketStore({ repos: { '/repo': tree }, text: { '1.2': { description: 'Do two.' } } });
     expect(await store.find('/repo', '1.2', GUARD)).toMatchObject({ ref: '1.2', description: 'Do two.', verify: '', references: [], hasPlan: false });

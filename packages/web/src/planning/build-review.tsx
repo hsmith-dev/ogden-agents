@@ -12,10 +12,9 @@ import {
   RUN_PHASE_LABELS,
   runPhase,
   UPDATE_AND_RETRY_LABEL,
-  VERIFICATION_CHECK_LABELS,
   type ReviewResponse,
 } from '@ogden-agents/shared';
-import { ArrowsClockwise, CheckCircle, MinusCircle, XCircle } from '@phosphor-icons/react';
+import { ArrowsClockwise, CheckCircle, XCircle } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { Badge } from '@/ui/badge';
@@ -24,6 +23,7 @@ import { Notice } from '@/ui/notice';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { useReview, useReviewAction } from './builds-api';
+import { CheckAgainButton, VerificationChecks } from './verification-checks';
 
 /**
  * Whether Approve and merge is offered enabled (story 5.9): a verified,
@@ -35,25 +35,6 @@ export function canApproveReview(review: Pick<ReviewResponse, 'outcome' | 'merge
   const checks = review.verification?.checks;
   if (checks === undefined) return true;
   return checks.every((check) => check.result === 'pass' || (review.verification?.attended === true && check.id === 'tests_pass' && check.result === 'not_run'));
-}
-
-/** One check: a tick, a cross or a dash, never colour alone, with its detail when it did not pass. */
-function Check({ id, result, detail }: { id: keyof typeof VERIFICATION_CHECK_LABELS; result: 'pass' | 'fail' | 'not_run'; detail: string | null }) {
-  const Icon = result === 'pass' ? CheckCircle : result === 'fail' ? XCircle : MinusCircle;
-  return (
-    <li className="flex min-w-0 items-start gap-2" data-testid="review-check" data-check={id} data-result={result}>
-      <Icon aria-hidden className={result === 'pass' ? 'mt-0.5 shrink-0 text-state-success' : result === 'fail' ? 'mt-0.5 shrink-0 text-state-error' : 'mt-0.5 shrink-0 text-muted-foreground'} />
-      <span className="min-w-0">
-        <span className="text-label">{VERIFICATION_CHECK_LABELS[id]}</span>
-        <span className="sr-only">{result === 'pass' ? ': passed' : result === 'fail' ? ': failed' : ': not run'}</span>
-        {detail === null ? null : (
-          <span className="block text-caption text-muted-foreground" data-testid="review-check-detail">
-            {detail}
-          </span>
-        )}
-      </span>
-    </li>
-  );
 }
 
 /**
@@ -128,16 +109,12 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
           {failure}
         </Notice>
       )}
-      {verification === null ? null : (
+      {verification === null || outcome === 'running' ? null : (
         <section aria-label={REVIEW_CHECKS_TITLE} className="flex flex-col gap-2">
           <Text as="h2" variant="heading">
             {REVIEW_CHECKS_TITLE}
           </Text>
-          <ul className="m-0 flex list-none flex-col gap-2 p-0" data-testid="review-checks">
-            {verification.checks.map((check) => (
-              <Check key={check.id} id={check.id} result={check.result} detail={check.detail} />
-            ))}
-          </ul>
+          <VerificationChecks verification={verification} idPrefix="review" />
         </section>
       )}
       <section aria-label={REVIEW_FINDINGS_TITLE} className="flex flex-col gap-2">
@@ -205,6 +182,7 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
             {APPROVE_LABEL}
           </Button>
         ) : null}
+        <CheckAgainButton wsId={wsId} run={run} onError={setFailure} />
         {conflicted ? (
           <Button data-testid="review-update" disabled={acting} onClick={() => act(() => update.mutateAsync({ runId: run.id }))}>
             <ArrowsClockwise aria-hidden />

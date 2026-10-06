@@ -54,7 +54,7 @@ test('with no sandbox, Build opens the dialog with its three choices and Build w
       expect((await call('PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }))).status).toBe(200);
 
       await page.goto(`${server.url}/w/${wsId}/board`);
-      await page.getByRole('button', { name: 'Build 1.1' }).click();
+      await page.getByRole('button', { name: 'Build this story 1.1' }).click();
 
       // The dialog, never an alert; nothing was written.
       const dialog = page.getByTestId('build-dialog');

@@ -89,7 +89,8 @@ export function PlanHome({ wsId, onStarted, now }: { wsId: string; onStarted: (s
     );
   }
   const reduced = planReducedText(catalog.data);
-  if (catalog.data.skills.length === 0) {
+  // The look-back is epic-scoped: it shows on the board, so a catalog of only that is as empty as none (epic 7).
+  if (catalog.data.skills.every((skill) => skill.scope === 'epic')) {
     return (
       <div className="flex max-w-(--space-chat-column) flex-col gap-6">
         <ReducedModeNotice wsId={wsId} texts={reduced === undefined ? [] : [reduced]} />

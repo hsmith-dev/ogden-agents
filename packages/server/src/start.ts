@@ -2,12 +2,14 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, ENDPOINT_PRESETS, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, ENDPOINT_PRESETS, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createWebhookNotifier, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
   createAgentRegistry,
   createChat,
+  CoreError,
+  workspaceRepoPath,
   createDataDir,
   createNewProjectDefaults,
   createOnboarding,
@@ -37,6 +39,7 @@ import { createTerminalAvailability } from './terminal-availability.js';
 import { resolveTestHooks, type TestHooks } from './test-hooks.js';
 import { VERSION } from './version.js';
 import { wireAgents } from './start-agents.js';
+import { createPanesWiring } from './start-panes.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
 import { createBuildsWiring } from './start-builds.js';
@@ -162,7 +165,7 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
   // Every environment hook, on a test run only; one the options already decide is not read (story 10.8).
   const hooks = resolveTestHooks(process.env, dataDir, { ...options, ownsCore });
   // What this install ships, plus a test's own (story 10.2): the option, and the environment hook.
-  const availableBmadPieces = [...new Set([...SHIPPED_BMAD_PIECES, ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
+  const availableBmadPieces = [...new Set([...(options.shippedBmadPieces ?? SHIPPED_BMAD_PIECES), ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
   // The pinned BMad Method source, the catalog and setup's script runner holder (`start-planning.ts`).
   const bmadWiring = createBmadSourceAndCatalog(options, dataDir, log, hooks.bmadSource);
   const { bmadCatalog } = bmadWiring;
@@ -307,6 +310,8 @@ async function listenAndAnnounce({
   const agentOf = (session: Session): AgentPort | undefined => agents.get(agentIdOf(session));
   // One terminal port for the chat and the toggle's availability check (story 3.7): they agree on node-pty.
   const terminal = createPtyTerminalPort(options.loadPty);
+  // Terminal panes (epic 16): in memory, Developer mode only, stopped with the server.
+  const panes = createPanesWiring({ options, hooks, core, terminal, onError: (error) => log.warn('a terminal pane listener failed', { error: error instanceof Error ? error.name : 'unknown' }) });
   // Document cards (story 4.7, `start-planning.ts`).
   const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, agentOf, log });
   const chat = createChat({
@@ -338,7 +343,7 @@ async function listenAndAnnounce({
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
-  const { planning, scriptRunner, bmadSource, board, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
+  const { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
     options,
     core,
     dataDir,
@@ -360,6 +365,19 @@ async function listenAndAnnounce({
   await builds.sweep();
   // Queued runs a stopped server left start where the limits allow (story 5.8).
   void builds.dispatchQueued().catch((error: unknown) => log.warn('starting queued builds failed', { reason: String(error) }));
+  // Notifications for builds (story 11.4): webhooks whose URLs live in the keychain, sent through `notify-webhook` (a test passes its own notifier).
+  const notifications = core.createNotifications({
+    secrets,
+    notifier: options.notifier ?? createWebhookNotifier(),
+    // The ticket's title for a payload, from the project's own files; any failure sends none.
+    titleOf: async (workspaceId, ref) => {
+      const scripts = await core.bmadScriptTrust.requireScriptsUnchanged(workspaceId);
+      return (await ticketStore.find(workspaceRepoPath(core.entities, workspaceId), ref, { scripts })).title;
+    },
+    // Codes and the status only: never the URL or the answer (AD-16).
+    onSent: (record) => log.info('webhook sent', { webhookId: record.webhookId, event: record.event, ok: record.ok, status: record.status, failure: record.failure }),
+    onError: (step, error) => log.warn('a notification step failed', { step, code: error instanceof CoreError ? error.code : 'unexpected' }),
+  });
   const appShortcut =
     shell === 'desktop'
       ? undefined
@@ -414,8 +432,10 @@ async function listenAndAnnounce({
     bmadScriptTrust: core.bmadScriptTrust,
     planning,
     board,
+    retrospectives,
     builds,
     buildSettings: core.buildSettings,
+    notifications,
     localEndpoints,
     localModels,
     endpointPresets: options.endpointPresets ?? ENDPOINT_PRESETS,
@@ -431,6 +451,7 @@ async function listenAndAnnounce({
     shell,
     agentDefaults: { models: core.agentModels, isAgentRegistered: (agentId) => agents.get(agentId) !== undefined },
     appShortcut,
+    panes,
     tabs,
   });
 
@@ -486,6 +507,7 @@ async function listenAndAnnounce({
     // As on stop: the runner's close kills any run a watch waits on.
     const watching = ticketWatcher.close();
     builds.close();
+    notifications.close();
     await scriptRunner.close().catch(() => {});
     await watching;
     // Nothing may stay listening on a server that failed to start.
@@ -516,11 +538,14 @@ async function listenAndAnnounce({
         await agentSetup.dispose().catch((error: unknown) => log.warn('stopping sign-ins failed', { reason: String(error) }));
         await Promise.race([agentSetup.settled(), new Promise((resolve) => setTimeout(resolve, INSTALL_STOP_MS).unref())]);
       })
+      // Every terminal pane and what it started stops with the server (AD-3).
+      .finally(() => panes.dispose())
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
       // An outcome being worked out finishes (bounded by its own reads), then the builds stop following the log.
       .finally(async () => {
         await builds.settled().catch(() => undefined);
         builds.close();
+        notifications.close();
       })
       // Document detection, a setup in progress, the ticket watches and every BMad Method script (`start-planning.ts`).
       .finally(() => stopBmadWork({ planningDocuments, bmadSetup: core.bmadSetup, ticketWatcher, scriptRunner, log }))

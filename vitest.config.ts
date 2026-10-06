@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+import { HOOK_TIMEOUT_MS, TEST_TIMEOUT_MS } from './tests/fixtures/test-timeouts.ts';
 
 const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string };
 
@@ -18,7 +19,10 @@ export default defineConfig({
     // memory, and so do the processes it spawns: no test touches the real
     // OS keychain (story 9.2).
     env: { OGDEN_AGENTS_TEST_SECRET_STORE: 'memory' },
-    // Windows CI runners (Node 26 especially) run ordinary tests past Vitest's 5 s default; elsewhere keep 5 s so slow tests still show (story 2.13).
-    ...(process.platform === 'win32' ? { testTimeout: 20_000, hookTimeout: 20_000 } : { testTimeout: 5_000, hookTimeout: 10_000 }),
+    // The time limits are in tests/fixtures/test-timeouts.ts: longer on CI and Windows, 5 s locally (story 2.13).
+    testTimeout: TEST_TIMEOUT_MS,
+    hookTimeout: HOOK_TIMEOUT_MS,
+    // Experiment (main run 37458461174: Windows files took up to 69 s with the default 3 workers on 4 vCPUs, each file spawning git, node and PTYs): two workers on the Windows runner, so the spawns starve each other less. Locally and elsewhere Vitest's default.
+    ...(process.env.CI && process.platform === 'win32' ? { maxWorkers: 2 } : {}),
   },
 });

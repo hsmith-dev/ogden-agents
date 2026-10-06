@@ -63,6 +63,7 @@ export function chatAgentOf(
     provider: descriptor.provider,
     signInMethods: descriptor.signInMethods.map(({ kind, label }) => ({ kind, label })),
     ...(key?.format === undefined ? {} : { apiKeyFormat: key.format }),
+    ...(key?.label === undefined ? {} : { apiKeyName: key.label }),
     install: readiness.install,
     auth: readiness.auth,
     terminalResume: agent.terminalResume !== undefined,

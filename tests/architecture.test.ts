@@ -553,3 +553,67 @@ describe('epic 16: core, shared and acp-base name no pane program', () => {
     ]);
   });
 });
+
+/**
+ * E15 (epic 15, story 15.2): the manager is a tool-free model call. The
+ * orchestration and manager code in core, shared and the fake manager names no
+ * model product (the model is whatever endpoint the user configured), and
+ * imports no shell, file, agent or credential port and no Node module, so it
+ * cannot run a command, touch a file or read a key. The real adapter, 15.4,
+ * calls only `LocalModelPort`.
+ */
+const MODEL_PRODUCT_WORDS = /(?<![A-Za-z0-9])(gpt|llama|qwen|mistral|mixtral|gemma|deepseek|claude|anthropic|openai|ollama|lm[ -]?studio|gemini|grok|codex|copilot|antigravity|opencode)(?![A-Za-z0-9])/gi;
+/** The ports and modules that give a shell, files, a terminal, a credential or an agent. */
+const FORBIDDEN_ORCHESTRATION_IMPORTS =
+  /^(?:node:|child_process$|fs$|fs\/promises$|os$|net$|http$|https$|(?:\.{1,2}\/)+(?:[\w-]+\/)*(?:terminal-port|terminal-reasons|sandbox-port|secret-store-port|vcs-port|build-runner-port|build-object-store|build-worktrees|ticket-store-port|bmad-source-port|bmad-catalog-port|agent-port|agent-setup-port|app-shortcut-port|panes|pane-launchers|notifier-port|fs-safe|process-tree|child-env)(?:\.js)?$)/;
+/** Core, shared and fake-manager files that are the orchestration contracts. */
+const ORCHESTRATION_FILE = /(^|[\\/])packages[\\/](?:core|shared)[\\/]src[\\/](?:orchestration[\w-]*|events-orchestration|manager-port)\.ts$|(^|[\\/])packages[\\/]adapters[\\/]src[\\/]manager-memory[\\/]/;
+
+/** One message per model product named, and per forbidden import, in the orchestration files (comments aside for the names). */
+export function findOrchestrationViolations(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    if (!ORCHESTRATION_FILE.test(path)) continue;
+    const code = withoutComments(source);
+    for (const match of code.matchAll(MODEL_PRODUCT_WORDS)) violations.push(`${path}: names the model product ${match[1]} (E15: the manager is whatever endpoint the user configured)`);
+    for (const match of source.matchAll(SPECIFIER)) {
+      if (FORBIDDEN_ORCHESTRATION_IMPORTS.test(match[2]!)) violations.push(`${path}: imports ${match[2]} (E15: the manager has no shell, file, agent or credential)`);
+    }
+  }
+  return violations;
+}
+
+describe('E15: orchestration code is tool-free and names no model product (story 15.2)', () => {
+  it('core, shared and the fake manager keep to the rules', () => {
+    const files = loadWorkspaceSources();
+    const matched = files.filter((file) => ORCHESTRATION_FILE.test(file.path)).map((file) => file.path.split('\\').join('/'));
+    expect(matched).toEqual(
+      expect.arrayContaining([
+        'packages/core/src/manager-port.ts',
+        'packages/core/src/orchestration-feature.ts',
+        'packages/shared/src/events-orchestration.ts',
+        'packages/shared/src/orchestration.ts',
+        'packages/adapters/src/manager-memory/index.ts',
+      ]),
+    );
+    expect(findOrchestrationViolations(files)).toEqual([]);
+  });
+
+  it('flags a planted product name, shell, file, credential and agent import, but not in a comment or another file', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/manager-port.ts', source: "// llama is only an example\nconst model = 'qwen';\nimport { x } from './terminal-port.js';\nimport { y } from './secret-store-port.js';" },
+      { pkg: '@ogden-agents/shared', path: 'packages/shared/src/orchestration.ts', source: "import { readFileSync } from 'node:fs';\nimport { spawn } from 'child_process';\nimport { z } from 'zod';" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/manager-memory/index.ts', source: "import type { AgentPort } from '../../../core/src/agent-port.js';\nconst a = 'GPT';" },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/chat.ts', source: "import { x } from './terminal-port.js'; const m = 'llama';" },
+    ];
+    expect(findOrchestrationViolations(files)).toEqual([
+      'packages/core/src/manager-port.ts: names the model product qwen (E15: the manager is whatever endpoint the user configured)',
+      'packages/core/src/manager-port.ts: imports ./terminal-port.js (E15: the manager has no shell, file, agent or credential)',
+      'packages/core/src/manager-port.ts: imports ./secret-store-port.js (E15: the manager has no shell, file, agent or credential)',
+      'packages/shared/src/orchestration.ts: imports node:fs (E15: the manager has no shell, file, agent or credential)',
+      'packages/shared/src/orchestration.ts: imports child_process (E15: the manager has no shell, file, agent or credential)',
+      'packages/adapters/src/manager-memory/index.ts: names the model product GPT (E15: the manager is whatever endpoint the user configured)',
+      'packages/adapters/src/manager-memory/index.ts: imports ../../../core/src/agent-port.js (E15: the manager has no shell, file, agent or credential)',
+    ]);
+  });
+});

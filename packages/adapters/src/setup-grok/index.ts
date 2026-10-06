@@ -18,7 +18,7 @@
  * - Status reads the data folder only; it never starts Grok.
  */
 import { AgentSetupError, type AgentApiKeySupport, type AgentPortStatus, type AgentSetupPort } from '@ogden-agents/core';
-import { GROK, GROK_AGENT_ID } from '../acp-grok/constants.js';
+import { GROK, GROK_AGENT_ID, GROK_KEY_NAME } from '../acp-grok/constants.js';
 import { createGrokApiKey, type GrokApiKeyOptions } from './api-key.js';
 import { installedGrok, installGrok, removeStaleGrokInstalls, type InstallGrokOptions } from './install.js';
 
@@ -27,11 +27,13 @@ export { BAD_XAI_API_KEY, createGrokApiKey, XAI_API_KEY_PATTERN, XAI_VERIFY_URL,
 export { grokAcceptsToken, TOKEN_PROBE_TIMEOUT_MS } from './token-probe.js';
 export {
   decompressBinary,
+  GROK_CHECK_RECORD_SUFFIX,
   GROK_CHECKED_DIR,
   GROK_DIR,
   GROK_INSTALL_SPEC,
   GROK_MAX_BINARY_BYTES,
   GROK_PINS,
+  grokBinaryUnchanged,
   grokInstallSpec,
   installedGrok,
   installGrok,
@@ -52,7 +54,7 @@ export {
 export const GROK_NO_SIGN_IN_NOTICE = "Grok works with your own xAI API access token only. Signing in with an account isn't supported here.";
 
 /** What Grok's key is called on the card. */
-export const GROK_KEY_NAME = 'xAI API access token';
+export { GROK_KEY_NAME };
 
 /** What Install puts where, beside the Install button. */
 export const GROK_INSTALL_NOTE = "Installing puts Grok, about 200 MB, in Ogden Agents' own data folder. Nothing is installed anywhere else.";

@@ -151,6 +151,8 @@ export interface PermissionsOptions {
   onError?: (error: unknown) => void;
   /** Whether this install ships a BMad piece, so it may be turned on (core's `bmad.isAvailable`). Default: none is. */
   isBmadPieceAvailable?: (piece: BmadPiece) => boolean;
+  /** Whether this install ships Orchestration (epic 15), so it may be turned on. Absent: no. */
+  isOrchestrationAvailable?: (() => boolean) | undefined;
   /** Whether an agent is registered, so it may be a project's default (epic 6, entry 6). Default: every well-formed id. */
   isAgentRegistered?: ((agentId: AgentId) => boolean) | undefined;
   /** Whether Developer mode is on now (core's install settings): Skip all as a project's default needs it. Absent: off. */
@@ -181,7 +183,7 @@ const toRule = (row: RuleRow): PermissionRule => ({
   createdAt: row.createdAt,
 });
 
-export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false, isAgentRegistered, developerMode, agentConfigFolders }: PermissionsOptions): Permissions {
+export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false, isOrchestrationAvailable, isAgentRegistered, developerMode, agentConfigFolders }: PermissionsOptions): Permissions {
   const { orm } = db;
   /** Requests waiting for the user, by request id. */
   const pending = new Map<string, Pending>();
@@ -240,7 +242,7 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
 
   return {
     // The caution level and BMad pieces (moved to `workspace-settings.ts`, story 10.8).
-    ...createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAgentRegistered, developerMode }),
+    ...createWorkspaceSettings({ db, events, isBmadPieceAvailable, isOrchestrationAvailable, isAgentRegistered, developerMode }),
 
     async request(sessionId, request, requestOptions = {}) {
       const attended = requestOptions.attended === true;

@@ -3,7 +3,9 @@ import { BmadPieceSet } from './bmad.js';
 import { AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MAX_HANDOFF_BRIEF_CHARS, MessageId, PermissionDecision, WhileWorking } from './events.js';
 import { AgentModel, DefaultModeNotice, ModelId, PermissionMode, Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
+import { OrchestrationMode } from './orchestration.js';
 import { AgentInstallState } from './setup.js';
+import { TeamRoster } from './team.js';
 import { SessionTerminal } from './terminal.js';
 import { IsoUtcTimestamp } from './time.js';
 
@@ -88,6 +90,8 @@ export const ChatAgent = z.object({
   signInMethods: z.array(AgentSignInMethod),
   /** Plain words on what its API key looks like, when it takes one ("Starts with sk-ant-"). Never a key. */
   apiKeyFormat: z.string().min(1).optional(),
+  /** What the agent calls its key in plain words, when it is not "API key" (Grok: "xAI API access token"). Never a key. */
+  apiKeyName: z.string().min(1).max(60).optional(),
   install: AgentInstallState,
   auth: AgentAuthState,
   terminalResume: z.boolean(),
@@ -351,6 +355,12 @@ export const WorkspaceSettings = z.object({
   defaultModels: z.record(AgentId, ModelId).optional(),
   /** The project's own choice of what a message sent while the agent works does (send now or wait); absent: the app-wide one. */
   whileWorking: WhileWorking.optional(),
+  /** Whether the Orchestration piece is on for this project (epic 15). Absent: off (and from older servers). */
+  orchestrationEnabled: z.boolean().optional(),
+  /** The project's orchestration mode (epic 15). Absent: Approve each instruction (and from older servers). */
+  orchestrationMode: OrchestrationMode.optional(),
+  /** The project's team roster (epic 15). Absent: nobody assigned yet. */
+  orchestrationRoster: TeamRoster.optional(),
 });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettings>;
 
@@ -382,6 +392,14 @@ export const UpdateWorkspaceSettingsRequest = z
     defaultModels: z.record(AgentId, ModelId.nullable()).optional(),
     /** `null` goes back to the app-wide choice (send now or wait). */
     whileWorking: WhileWorking.nullable().optional(),
+    /**
+     * Orchestration (epic 15): the piece's switch (refused with `feature_unavailable` where the install does not ship it), the mode, and the team roster. Switching to
+     * automatic needs `confirm: true` (`confirmation_required`); the roster is
+     * checked against the install's agents (`agent_unknown`).
+     */
+    orchestrationEnabled: z.boolean().optional(),
+    orchestrationMode: OrchestrationMode.optional(),
+    orchestrationRoster: TeamRoster.optional(),
   })
   .refine(
     (settings) =>
@@ -390,7 +408,10 @@ export const UpdateWorkspaceSettingsRequest = z
       settings.defaultAgentId !== undefined ||
       settings.defaultPermissionMode !== undefined ||
       settings.defaultModels !== undefined ||
-      settings.whileWorking !== undefined,
+      settings.whileWorking !== undefined ||
+      settings.orchestrationEnabled !== undefined ||
+      settings.orchestrationMode !== undefined ||
+      settings.orchestrationRoster !== undefined,
     'Choose a setting to change.',
   );
 export type UpdateWorkspaceSettingsRequest = z.infer<typeof UpdateWorkspaceSettingsRequest>;

@@ -225,6 +225,12 @@ export const API_ROUTES = {
    */
   localEndpointModels: `${API_BASE}/local-endpoints/:endpointId/models`,
   /**
+   * `POST ManagerTestRequest` → `ManagerTestResponse` (story 14.8): Test as a manager. Sends one fixed small
+   * plan shaped request to the model (no tools, no files) and says in plain words whether it answered in the
+   * shape asked for. 409 `endpoint_confirmation_required` for an unconfirmed host, in which case nothing is called.
+   */
+  localEndpointManagerTest: `${API_BASE}/local-endpoints/:endpointId/manager-test`,
+  /**
    * `POST` → `LocalEndpointDetectResponse` (story 14.4): Detect. Probes only 127.0.0.1 and localhost on the
    * presets' ports, once, when the user presses it. Reads no body.
    */
@@ -510,6 +516,30 @@ export const API_ROUTES = {
   notificationWebhook: `${API_BASE}/settings/notifications/webhooks/:webhookId`,
   /** `POST` → `WebhookTestResult` (11.4): Send test, with the HTTP result inline. */
   notificationWebhookTest: `${API_BASE}/settings/notifications/webhooks/:webhookId/test`,
+  /**
+   * `GET` → `PanesResponse` (epic 16, story 16.2): the project's terminal
+   * panes and whether panes can open here. `POST OpenPaneRequest` → 201
+   * `PaneResponse`: opens a pane running the user's plain shell in the
+   * project folder. Developer mode only, enforced here: 403
+   * `developer_mode_required` otherwise; 409 `pane_limit_reached`; 409
+   * `terminal_unavailable` when `node-pty` could not load (AD-19). Never
+   * guarded by a piece (E16-R3).
+   */
+  workspacePanes: `${API_BASE}/workspaces/:wsId/panes`,
+  /**
+   * `GET` → `PaneLaunchersResponse` (epic 16, story 16.5): what a pane can run
+   * and what detection found on this computer (looked up once, then kept);
+   * `POST` (no body) → the same, looking again (the Detect button). Detection
+   * only looks and asks for `--version`: nothing is installed. Developer mode
+   * only (403); install wide, not a project's.
+   */
+  terminalLaunchers: `${API_BASE}/terminals/launchers`,
+  /** `PUT ArrangePanesRequest` → `PanesResponse` (epic 16, story 16.4): the project's layout arrangement. 400 unless it is the same panes, each once. Developer mode only. */
+  workspacePaneLayout: `${API_BASE}/workspaces/:wsId/pane-layout`,
+  /** `PATCH UpdatePaneRequest` → `PaneResponse` (stories 16.4, 16.8): rename a pane and/or turn its notifications on or off. `DELETE` → 204 (epic 16): closes the pane and stops its process tree. Developer mode only. 404 for another workspace's pane. */
+  workspacePane: `${API_BASE}/workspaces/:wsId/panes/:paneId`,
+  /** `POST` → `PaneResponse` (epic 16): Restart pane. Stops what is left of the pane's program and starts it again in the same pane. Developer mode only. */
+  workspacePaneRestart: `${API_BASE}/workspaces/:wsId/panes/:paneId/restart`,
 } as const;
 
 /**
@@ -520,6 +550,15 @@ export const API_ROUTES = {
  * Not an `API_ROUTES` entry: it is no REST route.
  */
 export const TERMINAL_SOCKET_ROUTE = '/ws/terminal/:sesId' as const;
+
+/**
+ * The WebSocket of one terminal pane (epic 16, story 16.2): under `/ws`, so
+ * the gate checks it exactly as the event socket and the session terminal
+ * (Host, the tab-token subprotocol, Origin; AD-15), and the server
+ * additionally refuses it without Developer mode. Frames as
+ * `TERMINAL_SOCKET_ROUTE`'s, plus `PaneServerFrame`.
+ */
+export const PANE_SOCKET_ROUTE = '/ws/pane/:paneId' as const;
 
 /** The parameters a route pattern names, e.g. `{ wsId, sesId }`. */
 type RouteParams<Route extends string> = Route extends `${string}:${infer Name}/${infer Rest}`

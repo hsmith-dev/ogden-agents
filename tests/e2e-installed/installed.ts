@@ -470,6 +470,9 @@ export const BMAD_SOURCE_ENV = 'OGDEN_AGENTS_TEST_BMAD_SOURCE';
 export const FIXTURE_SKILL_FILES: Readonly<Record<string, string>> = {
   'bmad-spec/SKILL.md': "---\nname: bmad-spec\ndescription: 'Condense any input into a short spec.'\n---\n\n# bmad-spec\n\nA test-only stand-in for the spec skill.\n",
   'bmad-ticket/SKILL.md': "---\nname: bmad-ticket\ndescription: 'Create and manage tickets.'\n---\n\n# bmad-ticket\n\nA test-only stand-in for the ticket skill's instructions.\n",
+  // Epic 7's journey: the look-back and the lessons (their epic scope and next steps are in Ogden's label mapping, so, being in the tarball, they are verified).
+  'bmad-retrospective/SKILL.md': "---\nname: bmad-retrospective\ndescription: 'Look back on a finished epic.'\n---\n\n# bmad-retrospective\n\nA test-only stand-in for the retrospective skill.\n",
+  'bmad-project-context/SKILL.md': "---\nname: bmad-project-context\ndescription: 'Keep AGENTS.md current.'\n---\n\n# bmad-project-context\n\nA test-only stand-in for the project context skill.\n",
 };
 
 /** Where uv keeps its managed Pythons for this run: `UV_PYTHON_INSTALL_DIR` (setup-uv sets it in CI), else `uv python dir`. */
@@ -558,7 +561,7 @@ export interface BmadServer {
  * the guarded `probe` route, and `bmadSource` (story 4.13: the fixture BMad
  * Method source, so Set up and the Board run the real `setup.py` and
  * `tickets.py` through uv with no network). Without any it is what a user
- * runs: Planning, Board and Unattended builds shipped, Retrospectives Coming soon. Repos are fake repos
+ * runs: every BMad piece shipped (Retrospectives since story 7.1). Repos are fake repos
  * in a folder of its own. Nothing is installed again.
  *
  * With `antigravity` (epic 6 entry 8), Antigravity can chat too, where it

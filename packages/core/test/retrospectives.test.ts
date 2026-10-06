@@ -12,10 +12,12 @@ import { CatalogSkill, TicketEpic, type BmadPiece, type BmadSetupStatus, type Ca
 import { describe, expect, it } from 'vitest';
 import {
   createChat,
+  createPlanning,
   createRetrospectives,
   FeatureOffError,
   NotFoundError,
   NotImplementedError,
+  ReducedModeError,
   ScriptsNotTrustedError,
   ValidationError,
   type AgentPort,
@@ -27,8 +29,8 @@ import { openTestCore, soleAgent, tempDir, unusedCatalogParts } from './helpers.
 
 const UNKNOWN = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId;
 const SKILL = 'bmad-retrospective';
-const SKILLS = [CatalogSkill.parse({ name: SKILL, description: 'Look back.' }), CatalogSkill.parse({ name: 'bmad-spec', description: 'Write a spec.' })];
-const CATALOG: Catalog = { modules: [], skills: SKILLS, agents: [], entryAction: null, capabilities: { plain_labels: true, ticket_tree: true } };
+const SKILLS = [CatalogSkill.parse({ name: SKILL, description: 'Look back.', scope: 'epic' }), CatalogSkill.parse({ name: 'bmad-spec', description: 'Write a spec.' })];
+const CATALOG: Catalog = { modules: [], skills: SKILLS, agents: [], entryAction: null, capabilities: { plain_labels: true, ticket_tree: true, look_back: true } };
 const SET_UP: BmadSetupStatus = { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] };
 const epic = (slug: string) => TicketEpic.parse({ slug, id: null, status: 'active', after: [], blocks: [] });
 const TREE: TicketsResponse = { tickets: [], problems: [], folder: 'initiative-demo', epics: [epic('epic-one'), epic('epic-two')] };
@@ -90,7 +92,7 @@ function setup(pieces: BmadPiece[] = PIECES) {
   };
   const agent = promptRecorder();
   const chat = createChat({ dataDir: tempDir(), entities: core.entities, sessionEvents: core.sessionEvents, agents: soleAgent(agent) });
-  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog, chat, agent, skill: SKILL, offers: core.lookBackOffers });
+  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog, chat, agent, offers: core.lookBackOffers });
   return { core, workspace, retrospectives, state, reads, chat, agent };
 }
 
@@ -168,10 +170,10 @@ describe('look back on an epic (story 7.1)', () => {
     await chat.close();
   });
 
-  it('a project whose BMad Method lacks the skill is not found, creating nothing', async () => {
+  it('a project whose BMad Method has no epic-scoped look-back is in reduced mode, creating nothing', async () => {
     const { retrospectives, workspace, state, core } = setup();
     state.catalog = { ...CATALOG, skills: [SKILLS[1]!] };
-    await expect(retrospectives.lookBack(workspace.id, 'epic-one')).rejects.toThrow(NotFoundError);
+    await expect(retrospectives.lookBack(workspace.id, 'epic-one')).rejects.toThrow(ReducedModeError);
     expect(core.entities.listSessions(workspace.id)).toEqual([]);
   });
 
@@ -183,16 +185,86 @@ describe('look back on an epic (story 7.1)', () => {
   });
 });
 
-describe('the rest of the use-cases (story 7.2)', () => {
-  it('Not now goes through the guard, and the step and Save the lessons are behind it, not yet served', async () => {
+describe('the build summaries in the first message (story 7.4)', () => {
+  it('follow the epic folder as short facts, only for the epic\'s own tickets, and nothing is added for an epic with no runs', async () => {
+    const asked: Array<ReadonlySet<string>> = [];
+    const { core, workspace, state, chat, agent } = setup();
+    state.tree = { ...TREE, tickets: [{ ref: '1.1', epic: 'epic-one' }, { ref: '2.1', epic: 'epic-two' }] as never };
+    const withSummaries = createRetrospectives({
+      bmad: core.bmad,
+      entities: core.entities,
+      board: { tickets: async () => state.tree as TicketsResponse },
+      catalog: { catalog: async () => state.catalog, setupStatus: async () => state.status },
+      chat,
+      agent,
+      offers: core.lookBackOffers,
+      summaries: {
+        forTickets: (_ws, refs) => {
+          asked.push(refs);
+          return refs.has('1.1') ? [{ ticketRef: '1.1', outcome: 'verified', verification: 'passed', blockedReason: null, durationSeconds: 90, decision: 'approved' }] : [];
+        },
+      },
+    });
+    await withSummaries.lookBack(workspace.id, 'epic-one');
+    await withSummaries.lookBack(workspace.id, 'epic-two');
+    await chat.settled();
+    expect(asked.map((refs) => [...refs])).toEqual([['1.1'], ['2.1']]);
+    expect(agent.prompts[0]).toBe(`run-skill:${SKILL} on:_bmad-output/initiative-demo/epic-one\n\nOgden Agents' build records for this epic (short facts, oldest first):\n- 1.1: verified, checks passed, 2 min, approved`);
+    expect(agent.prompts[1]).toBe(`run-skill:${SKILL} on:_bmad-output/initiative-demo/epic-two`);
+    await chat.close();
+  });
+});
+
+describe('Not now and the guard on every use-case (story 7.2)', () => {
+  it('Not now goes through the guard; with Retrospectives off the step and Save the lessons refuse first', async () => {
     const { retrospectives, workspace } = setup();
     retrospectives.dismissOffer(workspace.id, 'epic-one');
     expect(retrospectives.dismissedOffers(workspace.id)).toEqual(['epic-one']);
-    await expect(retrospectives.startStep(workspace.id, 'epic-one', 'bmad-project-context')).rejects.toThrow(NotImplementedError);
-    await expect(retrospectives.saveLessons(workspace.id, 'epic-one')).rejects.toThrow(NotImplementedError);
     const off = setup(['board']);
     expect(() => off.retrospectives.dismissOffer(off.workspace.id, 'epic-one')).toThrow(FeatureOffError);
     await expect(off.retrospectives.startStep(off.workspace.id, 'epic-one', 'bmad-project-context')).rejects.toThrow(FeatureOffError);
     await expect(off.retrospectives.saveLessons(off.workspace.id, 'epic-one')).rejects.toThrow(FeatureOffError);
+    expect(off.reads).toEqual([]);
+  });
+});
+
+describe('the catalog for Retrospectives alone (story 7.3)', () => {
+  const LOOK = CatalogSkill.parse({ name: SKILL, description: 'Look back.', label: 'Look back on this epic', scope: 'epic', nexts: [{ skill: 'bmad-spec', label: 'Add the lessons' }] });
+  const FULL: Catalog = { ...CATALOG, skills: [LOOK, SKILLS[1]!], agents: [{ name: 'bmad-agent-dev', label: 'Developer', description: 'x', module: null }], entryAction: 'bmad-spec' };
+
+  function planningFor(pieces: BmadPiece[]) {
+    const { core, workspace, chat, agent } = setup(pieces);
+    const catalog = { catalog: async () => FULL, setupStatus: async () => SET_UP, readDocument: async () => null };
+    const stamped: WorkspaceId[] = [];
+    const modulesSeen = { stamp: async (workspaceId: WorkspaceId, read: Catalog) => (stamped.push(workspaceId), read) };
+    return { workspace, stamped, planning: createPlanning({ bmad: core.bmad, entities: core.entities, catalog, chat, agent, modulesSeen: modulesSeen as never }) };
+  }
+
+  it('with Planning on gives the whole catalog, with only Retrospectives on its epic-scoped actions alone', async () => {
+    const both = planningFor(['planning', 'board', 'builds', 'retrospectives']);
+    expect((await both.planning.catalog(both.workspace.id)).skills.map((skill) => skill.name)).toEqual([SKILL, 'bmad-spec']);
+    const planningOnly = planningFor(['planning']);
+    expect((await planningOnly.planning.catalog(planningOnly.workspace.id)).entryAction).toBe('bmad-spec');
+    const retro = planningFor(PIECES);
+    const read = await retro.planning.catalog(retro.workspace.id);
+    expect(read.skills.map((skill) => [skill.name, skill.scope, skill.nexts.length])).toEqual([[SKILL, 'epic', 1]]);
+    expect(read.agents).toEqual([]);
+    expect(read.entryAction).toBeNull();
+    expect(read.modules).toEqual([]);
+    // No module baseline is recorded for a Planning that is off.
+    expect(retro.stamped).toEqual([]);
+    expect(both.stamped).toHaveLength(1);
+  });
+
+  it('an epic-scoped action cannot be started from Plan, even with Planning on', async () => {
+    const both = planningFor(['planning', 'board', 'builds', 'retrospectives']);
+    await expect(both.planning.start(both.workspace.id, SKILL)).rejects.toThrow(NotFoundError);
+  });
+
+  it('with neither piece on, refuses with feature_off and starting a session still needs Planning', async () => {
+    const off = planningFor(['board']);
+    await expect(off.planning.catalog(off.workspace.id)).rejects.toThrow(FeatureOffError);
+    const retro = planningFor(PIECES);
+    await expect(retro.planning.start(retro.workspace.id, SKILL)).rejects.toThrow(FeatureOffError);
   });
 });

@@ -7,7 +7,6 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim from its Log entry's summary (story 10.8). Log entries are append-only, so the phrase never goes stale; `node scripts/check-provenance.mjs` (CI job Provenance) fails on a line whose phrase is missing or matches no summary, on a line whose phrase a `Resolved:` summary contains (the entry is closed, so the line is stale), and (entry 4.12) on a Log entry added since the base branch that isn't `Resolved:`, contains no index line's phrase, and isn't quoted (`"<part of its summary>"`) by a `Resolved:` summary. A partial close starts `Resolved (…):` and leaves its index line in place.
 
 - Epic 7 (retrospectives, from 7.1 review): a look-back's epic folder can name a folder that does not exist when the active initiative is nested or the central config overrides the output folder; check it exists before starting. (log: "A look-back's epic folder is derived from tickets.py's folder name and the setup status's output folder")
-- Epic 7 (7.4, from 7.2 review): the look-back's first message must carry each build summary's blocked reason as bounded plain text, one line each. (log: "A build summary's blockedReason is agent-authored text that reaches the look-back's first message")
 - Remove-project story (not yet ticketed): delete a project's always-allow rules before its workspace row (`permission_rules.workspace_id` has no `ON DELETE`). From 2.6 F9. (log: "Removing a project must delete its always-allow rules first")
 - Epic 5 (unattended builds): the inside-the-project check for file-kind rules is check-then-use, so a symlink swapped in before the write could redirect it. From 2.6. (log: "The inside-the-project check for file-kind rules runs before the agent acts (check-then-use)")
 - Unowned (copy change): say in the caution-level copy (EXPERIENCE.md, settings page) that `think` auto-allows helper-agent launches and TodoWrite. From 2.8 F3. (log: "the `think` kind is auto-allowed")
@@ -107,9 +106,13 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (5.9 or 11.1): while a build runs, its branch ref points at objects only the run's own store holds, so the user's own `git log --all`, `git fsck` or `git gc` in the repo reports a bad object for `ogden/<run8>/…` until approve imports it or the run is discarded. Keeping the run's refs out of `refs/heads` would close it. From 5.6. (log: "Known cost of the per-run object store")
 - Epic 5 (a later story): an attended build has no managed Claude Code settings, so the user's own settings can still skip a card. From 5.6. (log: "An attended build's session has no managed Claude Code settings")
 - Epic 5 (a later sandbox story): 5.6's low review findings (a compression-bomb object, an unremovable store, the bubblewrap probe, the docker lookup). From 5.6. (log: "Low findings of 5.6's review")
-- 16.3 (proposed): pane children need a bigger secret free environment than `baseEnvironment()` (`COLORTERM`, Windows `APPDATA`, `LOCALAPPDATA`, `ProgramFiles` and more); add `paneEnvironment()` checked against `SECRET_NAME`, with a sentinel test per OS. From spike 16.1. (log: "Spike 16.1: pane children need a bigger secret free environment")
+- 16.4 (proposed): a stored layout must also refuse duplicate pane ids and an active tab that does not exist; the memory terminal stub's pane freezes its exit getters. From 16.3 reviews. (log: "16.3 review: layout duplicate ids and dangling active tab")
+- 16.9 (proposed): `PaneLayout` hard codes the cap of panes per project though core's limit is a constant it could change, and two windows arranging at once are last writer wins. From 16.4 reviews. (log: "16.4 review: the layout schema holds the pane cap")
+- 16.11 (proposed): the fake program folder has no space in its path and no test hangs a probe for real; add both to the end to end suite. From 16.5 reviews. (log: "16.5 review: the fake program folder has no space")
+- 16.8b (proposed): send a pane's opted in needs attention and exit to epic 11's webhooks through `NotifierPort` (payload event, project and pane name only, never text) once 11.4's webhook store is on main; the status event already carries the opt in. From 16.8. (log: "16.8: the webhook send for panes waits for epic 11's webhook story")
+- 16.7 (proposed): closing a pane stops its process group only, so an interactive shell's background jobs (`cmd &`, stopped jobs) survive Close, Restart, Developer mode off and the server stopping; walk descendants or HUP the shell first. From 16.2 security review. (log: "16.2 review: a pane's POSIX tree kill signals only the shell's own process group")
+- 16.9 (proposed): a pane's pty is never paused under a flood, the screen mirror's memory grows with the terminal width, and a pane route's 403 comes after a bad id or body is refused. From 16.2 reviews. (log: "16.2 review: low findings, no pty backpressure")
 - 16.2 (proposed): a server killed hard leaves a pane whose program ignores hangup running on macOS and Windows; record each pane's pid and start time and sweep only those on the next start. From spike 16.1. (log: "Spike 16.1: a server killed hard leaves a pane")
-- Unowned (when the chat terminal is next changed): the chat terminal panel does not load `@xterm/addon-unicode11`, so emoji are one cell wide and misalign a line; panes should load it. From spike 16.1. (log: "Spike 16.1: the chat terminal panel does not load")
 - Epic 5 (a later sandbox story): Stop and Quit do not stop a test re-run in progress, and the macOS Seatbelt profile is allow-default with only network and writes denied, so mach lookups and signals stay open. From 5.8 reviews. (log: "The test re-run is not stopped by Stop or Quit")
 - Epic 5 (a later sandbox story): the read fence uses unresolved credential folder paths and a short list, and macOS shares its temp folders between runs. From 5.8 security review. (log: "Read fences of the sandboxed re-run")
 - Epic 5 (5.9): queued runs start again only when another run ends, a limit changes or the server restarts, not when a turned-off piece is turned back on. From 5.8 review. (log: "Queued runs wait after a piece is turned back on")
@@ -126,6 +129,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 14.10 (proposed): The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one. From 14.3 review. (log: "The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one")
 - 14.10 (proposed): Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry). From 14.3 review. (log: "Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry)")
 - 14.10 (proposed): shared/src/events.ts is over 600 lines and shared compiles with DOM types. From 14.3 review. (log: "shared/src/events.ts is over 600 lines and shared compiles with DOM types")
+- 14.11 (live check): The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model. From 14.9 review. (log: "The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model")
 
 ## Log
 
@@ -791,6 +795,29 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
   summary: Spike 16.1: the chat terminal panel does not load `@xterm/addon-unicode11`, so emoji are one cell wide (width 1 by default, 2 with the addon) and misalign a line.
   evidence: spike plan finding 5 (`browser.probe.mjs`, `browser_unicode_cell_widths`); `packages/web/src/terminal/terminal-panel.tsx`.
 
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-tracer-bullet-one-plain-shell-pane-in-developer-mode-end-to-end-plan.md`
+  summary: Resolved: "Spike 16.1: pane children need a bigger secret free environment" (story 16.2): `paneEnvironment()` in `child-env.ts` (the base, `COLORTERM`, the XDG folders, on Windows the program folders; proxies and `SSH_AUTH_SOCK` opt in), every name checked against `SECRET_NAME`, with a sentinel test; and "Spike 16.1: the chat terminal panel does not load" `@xterm/addon-unicode11`: loaded for panes and the chat terminal panel through `xterm-setup.ts`.
+  evidence: `packages/adapters/test/terminal-pane.test.ts`, `packages/server/test/panes.test.ts` (sentinel secrets), `packages/web/test/terminals.dom.test.tsx`, `packages/web/test/terminal-panel.dom.test.tsx`.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-tracer-bullet-one-plain-shell-pane-in-developer-mode-end-to-end-plan.md`
+  summary: 16.2 review: a pane's POSIX tree kill signals only the shell's own process group, so background jobs of an interactive shell outlive Close and Restart.
+  evidence: security review; `process-tree.ts` `killGroup`, `terminal-pty/index.ts` `killTerminalTree`; the fixture's grandchild stays in the shell's group so no test covers it.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-pane-notifications-through-the-existing-notifier-opt-in-plan.md`
+  summary: 16.8: the webhook send for panes waits for epic 11's webhook story (11.4 is not on main); the browser opt in is built.
+  evidence: `NotifierPort` exists on main but the webhook store and the strict `WebhookPayload` are 11.4's.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-cli-launcher-and-install-detection-claude-code-codex-grok-antigravity-copilot-and-a-plain-shell-plan.md`
+  summary: 16.5 review: the fake program folder has no space in its path, and no test hangs a probe for real.
+  evidence: `tests/fixtures/fake-cli-folder.ts`; `detect.ts` probe.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-pane-and-layout-model-tabs-splits-resize-keyboard-focus-plan.md`
+  summary: 16.4 review: the layout schema holds the pane cap, and two windows arranging at once are last writer wins.
+  evidence: `PaneLayout` refine in `shared/src/panes.ts`; `arrange` in `core/src/panes.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-epic-contracts-and-stubs-panes-launchers-layout-and-pane-events-plan.md`
+  summary: 16.3 review: layout duplicate ids and dangling active tab, and the memory stub's frozen exit getters.
+  evidence: correctness review of 16.3; `PaneLayout` in `shared/src/panes.ts`, `terminal-memory` `openPane`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-tracer-bullet-one-plain-shell-pane-in-developer-mode-end-to-end-plan.md`
+  summary: 16.2 review: low findings, no pty backpressure under a flood, mirror memory grows with width (up to 1000 columns), 403 after 400 or 404 on a bad id or body.
+  evidence: security and correctness reviews of 16.2; spike 16.1 measured flood and memory as fine at the epic's caps.
+
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
   summary: The test re-run is not stopped by Stop or Quit, and macOS Seatbelt leaves mach lookups and signals open
   evidence: 5.8 reviews: `decideOutcome` disarms the deadline before the re-run and `stop` finds the agent already released; `seatbeltProfile` is allow-default with only `network*` and `file-write*` denied.
@@ -812,6 +839,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-retrospectives/story-epic-contracts-and-stubs-plan.md`
   summary: A build summary's blockedReason is agent-authored text that reaches the look-back's first message (it can hold text a script or agent wrote), so 7.4 builds that message from bounded single-line plain text.
   evidence: security review of 7.2 on `EpicBuildSummary.blockedReason` (max 500, no pattern); the message is built only in 7.4.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-retrospectives/story-look-back-and-the-board-plan.md`
+  summary: Resolved: "A build summary's blockedReason is agent-authored text that reaches the look-back's first message" is closed in 7.4: the summary's blocked reason is Ogden's own fixed sentence for the run's code, never the run's reason text, and each line of the message is plain, single-line and bounded.
+  evidence: `packages/core/src/build-summaries.ts` (`blockedSentence`, `summaryLine`) and its test.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-live-run-view-and-the-runs-tab-plan.md`
   summary: Apply the saved fix after a late failure: the patch stays applied while the run is still blocked when the plan mark or the prompt fails; the patch is read by git three times and is not previewed.
   evidence: 11.1 correctness and security reviews; Retry still works, and the agent is released while the run is blocked.
@@ -851,3 +881,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-epic-contracts-and-stubs-endpoint-localmodelport-no-account-descriptor-and-the-fake-server-plan.md`
   summary: shared/src/events.ts is over 600 lines and shared compiles with DOM types: events.ts grew from 615 to 621 lines with the endpoint event and shared's tsconfig gained the DOM lib only for URL; a narrower URL declaration and a split of events.ts are the sweep's.
   evidence: 14.3 correctness review.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-bmad-skills-reach-the-local-model-where-planning-is-on-nothing-where-it-is-off-plan.md`
+  summary: The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model: spike 14.1 says it reads `.opencode/skills` unless project config is disabled and walks up from the project folder; whether `OPENCODE_DISABLE_PROJECT_CONFIG` covers `.opencode/skills` is a live check on the real harness.
+  evidence: 14.9 review; spike 14.1 report.

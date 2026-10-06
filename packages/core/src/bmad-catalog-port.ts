@@ -110,6 +110,16 @@ export interface BmadCatalogPort {
    */
   readDocument(repoPath: string, outputFolder: string, path: string): Promise<{ content: string; truncated: boolean } | null>;
   /**
+   * An epic's retrospective file (epic 7, story 7.4), read-only: the file
+   * ending `-retrospective.md` directly inside `epicFolder` (repo-relative,
+   * inside `outputFolder`; the last by name when several), its first
+   * {@link MAX_RETROSPECTIVE_BYTES} bytes, with the same confinement as
+   * {@link readDocument} (real paths inside both folders, a regular file, no
+   * link followed). `null` when there is none or it can't be read; never
+   * rejects for the repo's state. Core asks it only with Retrospectives on.
+   */
+  readRetrospective(repoPath: string, outputFolder: string, epicFolder: string): Promise<{ path: string; content: string } | null>;
+  /**
    * The contents of the project's own BMad Method scripts, the code the
    * verified `tickets.py` imports from the repo (`_bmad/scripts/`, story
    * 4.13, user decision 2026-10-04): {@link BMAD_SCRIPTS_NONE} when the repo
@@ -120,6 +130,9 @@ export interface BmadCatalogPort {
    */
   scriptsFingerprint(repoPath: string): Promise<string | undefined>;
 }
+
+/** The most of a retrospective file read: its frontmatter is at the top. */
+export const MAX_RETROSPECTIVE_BYTES = 8 * 1024;
 
 /** {@link BmadCatalogPort.scriptsFingerprint} of a repo with no `_bmad/scripts/` folder. */
 export const BMAD_SCRIPTS_NONE = 'none';

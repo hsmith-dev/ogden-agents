@@ -102,6 +102,13 @@ export async function updateAndRetryRun(wsId: string, runId: string, auth: Auth 
 }
 
 /**
+ * How often a run that is still going is read again, whatever the events say: the events are what make a page
+ * follow a run at once (AD-7), and this is the backstop for one that never arrives (a blocked run stayed "Building"
+ * on a slow Linux runner, story 11.5). It stops when the run ends.
+ */
+export const RUNNING_POLL_MS = 3000;
+
+/**
  * The newest `seq` among the events `matches` (0 for none). A query refetches when this changes, never when a
  * count does: the store trims a stream it does not keep whole, so an old event can leave as a new one arrives and
  * leave the count where it was (a blocked run stayed "Building" on a slow computer, story 11.2).
@@ -120,7 +127,7 @@ export function useSessionRun(wsId: string, sesId: string, enabled: boolean) {
   useEffect(() => {
     if (runEvents > 0) void queryClient.invalidateQueries({ queryKey: ['session-run', wsId, sesId] });
   }, [runEvents, queryClient, wsId, sesId]);
-  return useQuery({ queryKey: ['session-run', wsId, sesId], queryFn: () => fetchSessionRun(wsId, sesId), retry: false, enabled });
+  return useQuery({ queryKey: ['session-run', wsId, sesId], queryFn: () => fetchSessionRun(wsId, sesId), retry: false, enabled, refetchInterval: (query) => (query.state.data?.outcome === 'running' ? RUNNING_POLL_MS : false) });
 }
 
 /** The review page's read of ticket `ref`. */
@@ -132,7 +139,7 @@ export function useReview(wsId: string, ref: string) {
   useEffect(() => {
     if (relevant > 0) void queryClient.invalidateQueries({ queryKey: ['review', wsId, ref], exact: true });
   }, [relevant, queryClient, wsId, ref]);
-  return useQuery({ queryKey: ['review', wsId, ref], queryFn: () => fetchReview(wsId, ref), retry: false });
+  return useQuery({ queryKey: ['review', wsId, ref], queryFn: () => fetchReview(wsId, ref), retry: false, refetchInterval: (query) => (query.state.data?.outcome === 'running' ? RUNNING_POLL_MS : false) });
 }
 
 /**
@@ -205,7 +212,7 @@ export function useRunDetail(wsId: string, runId: string | undefined) {
   useEffect(() => {
     if (relevant > 0) void queryClient.invalidateQueries({ queryKey: ['run', wsId, runId], exact: true });
   }, [relevant, queryClient, wsId, runId]);
-  return useQuery({ queryKey: ['run', wsId, runId], queryFn: () => fetchRun(wsId, runId!), retry: false, enabled: runId !== undefined });
+  return useQuery({ queryKey: ['run', wsId, runId], queryFn: () => fetchRun(wsId, runId!), retry: false, enabled: runId !== undefined, refetchInterval: (query) => (query.state.data?.run.outcome === 'running' ? RUNNING_POLL_MS : false) });
 }
 
 /** `POST …/runs/:runId/retry` with `mode: 'apply_fix'` (11.1): applies an intent gap's saved fix in the run's worktree and builds again. */
@@ -238,7 +245,7 @@ export function useWorkspaceRuns(wsId: string, enabled: boolean) {
   useEffect(() => {
     if (relevant > 0) void queryClient.invalidateQueries({ queryKey: ['runs', wsId], exact: true });
   }, [relevant, queryClient, wsId]);
-  return useQuery({ queryKey: ['runs', wsId], queryFn: () => fetchRuns(wsId), retry: false, enabled });
+  return useQuery({ queryKey: ['runs', wsId], queryFn: () => fetchRuns(wsId), retry: false, enabled, refetchInterval: (query) => (query.state.data?.runs.some((run) => run.outcome === 'running') === true ? RUNNING_POLL_MS : false) });
 }
 
 /** Stop or Retry: once settled, the run, the runs and the board's tickets refetch. */

@@ -1,0 +1,1 @@
+ALTER TABLE `terminal_panes` ADD `notify` integer DEFAULT false NOT NULL;

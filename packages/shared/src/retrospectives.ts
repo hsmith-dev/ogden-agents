@@ -34,11 +34,12 @@ export const LOOK_BACK_FAILED = "Ogden Agents couldn't start the look back";
 /** `not_found` (404) from the look-back route: the board has no such epic. */
 export const LOOK_BACK_EPIC_NOT_FOUND_MESSAGE = "That epic isn't on this project's board.";
 
+/** `not_found` (404) from the step and save routes: the epic is on the board but has no retrospective yet. */
+export const LOOK_BACK_NO_RETROSPECTIVE_MESSAGE = 'That epic has no retrospective yet. Look back on it first.';
+
 /** `not_found` (404) from the step route: that skill is not one of the retrospective's next steps. */
 export const LOOK_BACK_STEP_NOT_OFFERED_MESSAGE = "That step isn't offered for this retrospective.";
 
-/** `not_found` (404) from the look-back route: the project's BMad Method has no look-back step. */
-export const LOOK_BACK_UNAVAILABLE_MESSAGE = "This project's BMad Method has no step for looking back on an epic.";
 
 // ---- Story 7.2: the rest of epic 7's contract ----
 
@@ -149,9 +150,13 @@ export type SaveLessonsResponse = z.infer<typeof SaveLessonsResponse>;
 export const NOTHING_TO_SAVE_MESSAGE = 'There is nothing new to save: the lessons are already saved.';
 /** `checkout_busy` (409): a merge, rebase, cherry-pick or revert is in progress in the project's checkout. */
 export const LESSONS_CHECKOUT_BUSY_MESSAGE = 'Finish or abort the merge or rebase in this project first, then save the lessons.';
-/** `agents_file_missing` (409): the project has no `AGENTS.md` (or git ignores it) to carry the lessons. */
-export const LESSONS_NO_AGENTS_FILE_MESSAGE = "This project has no AGENTS.md that git tracks, so the lessons can't be saved for later builds. Add the lessons to AGENTS.md first.";
+/** `agents_file_missing` (409): the project has no `AGENTS.md` on disk to carry the lessons. */
+export const LESSONS_NO_AGENTS_FILE_MESSAGE = "This project has no AGENTS.md yet, so the lessons can't be saved for later builds. Add the lessons to AGENTS.md first.";
+/** `vcs_unavailable` (409) from Save the lessons: the project is not a git repository on a branch with a commit. */
+export const LESSONS_NO_GIT_MESSAGE = 'Saving the lessons needs this project to be a git repository with a branch checked out that has at least one commit.';
 export const SAVE_LESSONS_LABEL = 'Save the lessons for later builds';
 export const SAVE_LESSONS_NOTE = 'Later builds will follow these lessons.';
+/** Said once the lessons are saved. */
+export const LESSONS_SAVED_TEXT = 'Saved. Later builds will follow these lessons.';
 export const SAVE_LESSONS_FAILED = "Ogden Agents couldn't save the lessons";
 export const ADD_LESSONS_FAILED = "Ogden Agents couldn't start that step";

@@ -22,11 +22,13 @@
  * guards have passed.
  */
 import {
+  BuildRefusedError,
   LessonsRefusedError,
   NotFoundError,
   NotImplementedError,
   TicketsUnavailableError,
   ValidationError,
+  VcsError,
   type BmadFeatures,
   type BmadScriptTrust,
   type RetrospectiveUseCases,
@@ -35,8 +37,8 @@ import {
   API_ROUTES,
   BMAD_NOT_DOWNLOADED_MESSAGE,
   LOOK_BACK_EPIC_NOT_FOUND_MESSAGE,
+  LOOK_BACK_NO_RETROSPECTIVE_MESSAGE,
   LOOK_BACK_STEP_NOT_OFFERED_MESSAGE,
-  LOOK_BACK_UNAVAILABLE_MESSAGE,
   LookBackOffersResponse,
   SaveLessonsResponse,
   SessionResponse,
@@ -75,8 +77,8 @@ export function registerRetrospectiveRoutes(app: Hono, { bmad, scriptTrust, retr
         log.warn('tickets unavailable', { workspaceId, reason: error.reason });
         return error.reason === 'not_downloaded' ? apiError(c, 409, 'bmad_not_downloaded', BMAD_NOT_DOWNLOADED_MESSAGE) : apiError(c, 503, 'tickets_unavailable', error.message);
       }
-      // Which thing was missing: the epic (the board has no such epic) or the skill (the project's BMad Method lacks it).
-      if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', error.message.startsWith('skill ') ? LOOK_BACK_UNAVAILABLE_MESSAGE : LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
+      // The board has no such epic. A project whose BMad Method has no look-back step answers 409 `reduced_mode` through the guarded helper.
+      if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
       throw error;
     }
   });
@@ -101,9 +103,18 @@ export function registerRetrospectiveRoutes(app: Hono, { bmad, scriptTrust, retr
   const stepRefusal = (c: Parameters<Parameters<typeof routes.post>[2]>[0], error: unknown): Response => {
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
     if (error instanceof NotImplementedError) return apiError(c, 501, 'not_implemented', error.message);
-    if (error instanceof LessonsRefusedError) return apiError(c, 409, error.code, error.message);
-    // The epic, or a skill that is not one of the retrospective's next steps.
-    if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', error.message.startsWith('skill ') ? LOOK_BACK_STEP_NOT_OFFERED_MESSAGE : LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
+    if (error instanceof LessonsRefusedError || error instanceof BuildRefusedError) return apiError(c, 409, error.code, error.message);
+    // The epic, an epic with no retrospective yet, or a skill that is not one of the retrospective's next steps.
+    if (error instanceof NotFoundError) {
+      const message = error.message.startsWith('skill ') ? LOOK_BACK_STEP_NOT_OFFERED_MESSAGE : error.message.startsWith('retrospective ') ? LOOK_BACK_NO_RETROSPECTIVE_MESSAGE : LOOK_BACK_EPIC_NOT_FOUND_MESSAGE;
+      return apiError(c, 404, 'not_found', message);
+    }
+    // The board's own refusals (the tickets can't be read) and git's (a commit that failed), in plain words and never git's output.
+    if (error instanceof TicketsUnavailableError) return error.reason === 'not_downloaded' ? apiError(c, 409, 'bmad_not_downloaded', BMAD_NOT_DOWNLOADED_MESSAGE) : apiError(c, 503, 'tickets_unavailable', error.message);
+    if (error instanceof VcsError) {
+      log.warn('saving the lessons failed in git');
+      return apiError(c, 409, 'vcs_unavailable', error.message);
+    }
     throw error;
   };
 

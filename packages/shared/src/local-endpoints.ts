@@ -360,3 +360,20 @@ export function modelDescription(model: { sizeBytes?: number | undefined; parame
   const parts = [model.parameterSize, model.sizeBytes === undefined ? undefined : sizeWords(model.sizeBytes), model.contextTokens === undefined ? undefined : `${contextWords(model.contextTokens)} context`].filter((part): part is string => part !== undefined);
   return parts.length === 0 ? undefined : parts.join(', ');
 }
+
+/** `POST /api/v1/local-endpoints/:endpointId/manager-test`: Test as a manager, on one of the endpoint's models (epic 14 story 14.8). */
+export const ManagerTestRequest = z.object({ model: z.string().min(1).max(300) }).strict();
+export type ManagerTestRequest = z.infer<typeof ManagerTestRequest>;
+
+export const MANAGER_TEST_MODES = ['json_schema', 'json_object', 'prompt'] as const;
+
+/** What the manager test found, in plain words. */
+export const ManagerTestResponse = z.object({
+  pass: z.boolean(),
+  /** How the model was asked when it passed: the strictest ask that worked tells epic 15 what the model can do. */
+  mode: z.enum(MANAGER_TEST_MODES).nullable(),
+  /** How long the answer took, in milliseconds. */
+  ms: z.number().int().nonnegative(),
+  message: z.string().min(1),
+});
+export type ManagerTestResponse = z.infer<typeof ManagerTestResponse>;

@@ -2,23 +2,19 @@
  * `LocalModelPort` over an OpenAI-compatible endpoint (epic 14 story 14.3):
  * probe and list models with `GET {base}/models`. Names no vendor. The server
  * is the only caller (AD-15); the key is only sent as a bearer token (AD-16).
- * `structuredComplete` is story 14.8: until then it answers `unsupported`.
+ * `structuredComplete` (story 14.8) is `structured.ts`.
  */
 import type { LocalFailure, LocalModelPort, LocalModelsResult, LocalModelTarget, LocalProbeResult, StructuredResult } from '@ogden-agents/core';
 import { EndpointError, callEndpoint, type EndpointFailureKind } from './http.js';
 import { enrich } from './native.js';
+import { structuredComplete } from './structured.js';
 import { modelIdsOf } from './probe.js';
-import { endpointFailureWords } from './reasons.js';
+import { failureOf } from './reasons.js';
 
 export interface OpenAiLocalModelOptions {
   /** Default: the global `fetch`. Tests pass a fake: nothing here ever reaches a real server in a test. */
   fetch?: typeof fetch | undefined;
   timeoutMs?: number | undefined;
-}
-
-/** A failure as the port reports it. */
-export function failureOf(kind: EndpointFailureKind, baseUrl: string, status?: number): LocalFailure {
-  return { ok: false, kind, ...(status === undefined ? {} : { status }), reason: endpointFailureWords(kind, baseUrl, status) };
 }
 
 export function createOpenAiLocalModel(options: OpenAiLocalModelOptions = {}): LocalModelPort {
@@ -41,8 +37,8 @@ export function createOpenAiLocalModel(options: OpenAiLocalModelOptions = {}): L
       const listed = await listIds(target, signal);
       return listed.ok ? { ok: true, models: await enrich(target, call(target, signal), listed.ids) } : listed;
     },
-    async structuredComplete(): Promise<StructuredResult> {
-      return { ok: false, kind: 'unsupported', reason: 'Asking this model for a structured answer is not available yet.' };
+    async structuredComplete(target, request): Promise<StructuredResult> {
+      return structuredComplete({ fetch: options.fetch }, target, request);
     },
   };
 }

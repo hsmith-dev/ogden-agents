@@ -309,6 +309,36 @@ export const workspaceBuildSettings = sqliteTable('workspace_build_settings', {
 });
 
 /**
+ * A project's terminal panes (epic 16, story 16.7): what a pane IS, never what
+ * it printed: its id, launcher, name and when it was made. The program's
+ * output and the arguments the user typed are not kept. After a restart each
+ * comes back stopped, with a Start button.
+ */
+export const terminalPanes = sqliteTable(
+  'terminal_panes',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    launcherId: text('launcher_id').notNull(),
+    title: text('title').notNull(),
+    createdAt: integer('created_at').notNull(),
+    /** The user's opt in to notifications for this pane (story 16.8). */
+    notify: integer('notify', { mode: 'boolean' }).notNull().default(false),
+  },
+  (table) => [index('terminal_panes_workspace_idx').on(table.workspaceId, table.createdAt)],
+);
+
+/** A project's terminal layout (tabs of split trees of pane ids and titles) as JSON; one row per project, written on change. */
+export const terminalLayouts = sqliteTable('terminal_layouts', {
+  workspaceId: text('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  layout: text('layout').notNull(),
+});
+
+/**
  * OpenAI-compatible endpoints the Local model talks to (epic 14 story 14.3).
  * No key is ever here: `auth` says only that one is saved in the keychain
  * (`agent-endpoint-key/<id>`, AD-16). `remote_confirmed_for` is the host

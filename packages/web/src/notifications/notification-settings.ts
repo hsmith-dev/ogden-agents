@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { NeedKind } from '@/shell/sidebar-model';
+import type { NotifiableNeedKind as NeedKind } from '@/shell/sidebar-model';
 
 /**
  * Notification preferences (backlog story 8), saved in this browser like

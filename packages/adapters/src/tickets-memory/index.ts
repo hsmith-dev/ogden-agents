@@ -45,6 +45,8 @@ export interface MemoryTicketStore extends TicketStorePort {
   watching(repoPath: string): number;
   /** Tells each open watch of `repoPath` that `refs` changed, as an agent's write would. */
   emit(repoPath: string, refs: string[]): void;
+  /** Tells each open watch that `epics`' retrospective files changed, as an agent's write would (story 7.4). */
+  emitRetrospective(epics: string[]): void;
   /** Makes every later call reject with `reason` (`undefined`: answer again). */
   fail(reason: TicketsUnavailableReason | undefined): void;
 }
@@ -57,6 +59,7 @@ export function createMemoryTicketStore(options: MemoryTicketStoreOptions = {}):
   const text = options.text ?? {};
   const calls: unknown[][] = [];
   const watches = new Map<string, Set<(refs: string[]) => void>>();
+  const retroWatches = new Set<(epics: string[]) => void>();
   let failure: TicketsUnavailableReason | undefined = options.failWith;
 
   const treeOf = (repoPath: string): TicketsResponse => {
@@ -119,20 +122,32 @@ export function createMemoryTicketStore(options: MemoryTicketStoreOptions = {}):
       emit(repoPath, [ref]);
       return { ref, status };
     },
-    async watch(repoPath, outputFolder, onChange) {
+    async watch(repoPath, outputFolder, onChange, watchOptions) {
       calls.push(['watch', repoPath, outputFolder]);
       if (failure !== undefined) throw new TicketsUnavailableError(failure);
       const set = watches.get(repoPath) ?? new Set();
       watches.set(repoPath, set);
       set.add(onChange);
+      const retro = watchOptions?.onRetrospectiveChange;
+      if (retro !== undefined) retroWatches.add(retro);
       let open = true;
       return {
         close: () => {
           if (!open) return;
           open = false;
           set.delete(onChange);
+          if (retro !== undefined) retroWatches.delete(retro);
         },
       };
+    },
+    emitRetrospective: (epics) => {
+      for (const listener of [...retroWatches]) {
+        try {
+          listener([...epics]);
+        } catch {
+          // A listener's failure never stops the others.
+        }
+      }
     },
     watching: (repoPath) => watches.get(repoPath)?.size ?? 0,
     emit,

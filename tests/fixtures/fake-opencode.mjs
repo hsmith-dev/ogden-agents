@@ -170,7 +170,9 @@ async function complete({ client, sessionId, session, config, signal }) {
     });
   } catch (error) {
     if (signal.aborted) throw error;
-    if (delay > 0) await sleep(delay);
+    // The real harness gives up after its retries; a cancel ends them at once (the wait is abortable).
+    if (delay > 0) await Promise.race([sleep(delay), new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))]);
+    if (signal.aborted) throw error;
     throw acp.RequestError.internalError(undefined, 'Cannot connect to API: Unable to connect. Is the computer able to access the url?');
   }
   if (!response.ok) throw acp.RequestError.internalError(undefined, errorFor(response.status, await response.text()));
@@ -227,11 +229,13 @@ async function runPrompt(params, client, session) {
     return { stopReason: 'end_turn' };
   }
   if (text === 'session-start') {
-    await say(client, sessionId, `via=${session.via} cwd=${session.cwd} meta=${session.opened?._meta === undefined ? 'none' : JSON.stringify(session.opened._meta)}`);
+    await say(client, sessionId, `via=${session.via} cwd=${session.cwd} meta=${session.opened?._meta === undefined ? 'none' : JSON.stringify(session.opened._meta)} prompt=${JSON.stringify(text)}`);
     return { stopReason: 'end_turn' };
   }
   if (text.startsWith('/')) {
-    await say(client, sessionId, `command=${text} skills=${skillsSeen(session.cwd).length}`);
+    // A slash command is a skill only if the harness lists it (spike 14.1: skills are listed as commands).
+    const name = /^\/([A-Za-z0-9._-]+)/.exec(text)?.[1] ?? '';
+    await say(client, sessionId, `command=${text} found=${skillsSeen(session.cwd).some((each) => each.endsWith(`:${name}`))}`);
     return { stopReason: 'end_turn' };
   }
   const controller = new AbortController();

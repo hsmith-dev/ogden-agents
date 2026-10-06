@@ -10,7 +10,7 @@
  * off), records every write and resize, and exits when the test says so or a
  * moment after it is killed.
  */
-import type { OpenTerminal, TerminalAvailability, TerminalPort, TerminalProcess, TerminalSize } from '../../src/index.js';
+import type { OpenPane, OpenTerminal, PaneProcess, TerminalAvailability, TerminalPort, TerminalProcess, TerminalSize } from '../../src/index.js';
 
 /** One terminal the fake opened, with what the test can read and do. */
 export interface FakeCli {
@@ -26,6 +26,8 @@ export interface FakeCli {
   exitCode: () => number | null | undefined;
   /** Prints `text` as the program would. Ignored once it has exited. */
   print: (text: string) => void;
+  /** What the pane's screen shows now (its last lines), for the status guess. */
+  setScreen: (lines: string[]) => void;
   /** The CLI exits by itself (`/exit`, a crash). Ignored once it has exited. */
   exit: (code: number | null) => void;
 }
@@ -57,8 +59,29 @@ export function fakeTerminal({
   opening,
 }: FakeTerminalOptions = {}) {
   const processes: FakeCli[] = [];
+  /** What each terminal has printed so far, which a pane's snapshot is (the fake has no screen to serialize). */
+  const printed = new Map<TerminalProcess, string>();
+  let nextPid = 1000;
+  /** What each pane's screen shows, set by the test (the fake has no screen to read). */
+  const screens = new Map<TerminalProcess, string[]>();
   const port: TerminalPort = {
     available: async () => available,
+    async openPane(input: OpenPane): Promise<PaneProcess> {
+      const process = await port.open(input);
+      printed.set(process, '');
+      const state = processes.at(-1)!;
+      state.setScreen = (lines) => void screens.set(process, lines);
+      process.onData((text) => printed.set(process, (printed.get(process) ?? '') + text));
+      return {
+        ...process,
+        pid: nextPid++,
+        screenLines: async (count) => (screens.get(process) ?? []).slice(-count),
+        attach(onSnapshot, onData) {
+          onSnapshot(printed.get(process) ?? '');
+          return process.onData(onData);
+        },
+      };
+    },
     async open(input) {
       await opening?.();
       if (!available.ok) throw new Error(available.reason);
@@ -108,7 +131,7 @@ export function fakeTerminal({
           if (exitOnKill) setImmediate(() => exit(null));
         },
       };
-      processes.push({ input, writes, resizes, kills: () => kills, exitCode: () => exitCode, print: emit, exit });
+      processes.push({ setScreen: () => undefined, input, writes, resizes, kills: () => kills, exitCode: () => exitCode, print: emit, exit });
       if (exitOnOpen !== undefined) exit(exitOnOpen);
       return cli;
     },

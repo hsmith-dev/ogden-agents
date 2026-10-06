@@ -31,18 +31,28 @@ const status = (outputFolder: string | null): BmadSetupStatus => ({ state: 'curr
 /** A store whose watches record their callback; `emit` fires each open watch of a repo. */
 function fakeStore() {
   const open = new Map<string, Set<(refs: string[]) => void>>();
+  const retro = new Map<string, Set<(epics: string[]) => void>>();
   const calls: Array<[string, string]> = [];
   let failWatch: Error | undefined;
   let hold: Promise<void> | undefined;
   const store: Pick<TicketStorePort, 'watch'> = {
-    async watch(repoPath, outputFolder, onChange) {
+    async watch(repoPath, outputFolder, onChange, options) {
       calls.push([repoPath, outputFolder]);
       if (hold !== undefined) await hold;
       if (failWatch !== undefined) throw failWatch;
       const set = open.get(repoPath) ?? new Set();
       open.set(repoPath, set);
       set.add(onChange);
-      return { close: () => set.delete(onChange) };
+      const onRetro = options?.onRetrospectiveChange;
+      const retroSet = retro.get(repoPath) ?? new Set();
+      retro.set(repoPath, retroSet);
+      if (onRetro !== undefined) retroSet.add(onRetro);
+      return {
+        close: () => {
+          set.delete(onChange);
+          if (onRetro !== undefined) retroSet.delete(onRetro);
+        },
+      };
     },
   };
   return {
@@ -52,6 +62,9 @@ function fakeStore() {
     total: () => [...open.values()].reduce((sum, set) => sum + set.size, 0),
     emit: (repoPath: string, refs: string[]) => {
       for (const listener of [...(open.get(repoPath) ?? [])]) listener(refs);
+    },
+    emitRetro: (repoPath: string, epics: string[]) => {
+      for (const listener of [...(retro.get(repoPath) ?? [])]) listener(epics);
     },
     failWatch: (error: Error | undefined) => (failWatch = error),
     hold: (promise: Promise<void> | undefined) => (hold = promise),
@@ -76,7 +89,7 @@ function fakeCatalog(statuses: Map<string, BmadSetupStatus | Error>, missing: Ma
 }
 
 function setup(statuses = new Map<string, BmadSetupStatus | Error>(), missing = new Map<string, BmadCapability[]>()) {
-  const core = openTestCore(tempDir(), undefined, { availableBmadPieces: ['planning', 'board'] });
+  const core = openTestCore(tempDir(), undefined, { availableBmadPieces: ['planning', 'board', 'builds', 'retrospectives'] });
   const store = fakeStore();
   const catalog = fakeCatalog(statuses, missing);
   const errors: Array<[WorkspaceId, TicketWatcherStep]> = [];
@@ -93,6 +106,37 @@ function setup(statuses = new Map<string, BmadSetupStatus | Error>(), missing = 
 }
 
 const changedRefs = (core: Core, after: number) => core.events.readAfter(after).flatMap((event) => (event.type === 'ticket.changed' ? [[event.workspaceId, event.streamId, event.payload]] : []));
+
+const retroEvents = (core: Core, after: number) => core.events.readAfter(after).flatMap((event) => (event.type === 'retrospective.changed' ? [[event.workspaceId, event.payload]] : []));
+
+describe('ticket watcher: retrospective files (epic 7, story 7.4)', () => {
+  it('appends one retrospective.changed per epic, only with Retrospectives on, and ticket.changed stays for rows', async () => {
+    const { core, store, watcher } = setup();
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
+    await core.bmadScriptTrust.trustScripts(workspace.id);
+    watcher.start();
+    await waitFor(() => watcher.watching(workspace.id), 'the watch');
+    const off = core.events.lastSeq();
+    store.emitRetro(workspace.realPath!, ['epic-a']);
+    expect(retroEvents(core, off)).toEqual([]);
+
+    core.permissions.updateSettings(workspace.id, { bmadPieces: ['board', 'retrospectives'] });
+    const before = core.events.lastSeq();
+    store.emitRetro(workspace.realPath!, ['epic-a', 'epic-b']);
+    expect(retroEvents(core, before)).toEqual([
+      [workspace.id, { epic: 'epic-a' }],
+      [workspace.id, { epic: 'epic-b' }],
+    ]);
+    expect(changedRefs(core, before)).toEqual([]);
+    // Board off: the watch is closed and nothing follows.
+    core.permissions.updateSettings(workspace.id, { bmadPieces: [] });
+    const seq = core.events.lastSeq();
+    store.emitRetro(workspace.realPath!, ['epic-a']);
+    expect(retroEvents(core, seq)).toEqual([]);
+    await watcher.close();
+  });
+});
 
 describe('ticket watcher (story 4.8)', () => {
   it('watches a project with Board on and trusted, and appends one ticket.changed per ref', async () => {

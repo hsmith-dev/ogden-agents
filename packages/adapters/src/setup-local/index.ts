@@ -30,6 +30,12 @@ export { extractPinnedTarGz } from './untar.js';
 /** The privacy statement the card shows in every state (user decision, 2026-10-05). Plain words, no secrets. */
 export const LOCAL_PRIVACY_NOTICE = `Nothing leaves this computer except to the server you set up. Your chats with the ${LOCAL} are saved in plain text in Ogden Agents' data folder.`;
 
+/** What small local models are, said honestly on the card in every state (E14-R7): no guarantee, no model recommended as certain. */
+export const LOCAL_MODEL_NOTES: readonly string[] = [
+  'Small local models follow tool instructions less reliably than hosted ones, and nothing here is a promise. For dependable coding, models of about 30B or more with 32k of context or more work best, which takes a computer with 24 GB or more of memory.',
+  "The server sets the context size, not Ogden Agents. A server's default is often small; raise it to 16k to 32k or more. Speed depends on your computer, and the first reply from a model that wasn't loaded yet can take a minute.",
+];
+
 /** What Install puts where, beside the Install button. */
 export const LOCAL_INSTALL_NOTE = `Installing downloads ${OPENCODE}, about 60 MB, from its official releases on GitHub into Ogden Agents' own data folder. Nothing is installed anywhere else.`;
 
@@ -70,7 +76,7 @@ export function createLocalSetup(options: LocalSetupOptions): LocalSetup {
       // Logging never changes an outcome.
     }
   };
-  const base = { agentId: LOCAL_AGENT_ID, displayName: LOCAL, notices: [LOCAL_PRIVACY_NOTICE], noAccount: true as const };
+  const base = { agentId: LOCAL_AGENT_ID, displayName: LOCAL, notices: [LOCAL_PRIVACY_NOTICE, ...LOCAL_MODEL_NOTES], noAccount: true as const };
   let installing: AbortController | undefined;
   removeLocalLeftovers(options.dataDir, pins, onCleanupError);
   // An uninstall the OS was still holding files for is finished by the next start.

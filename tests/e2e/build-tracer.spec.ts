@@ -75,7 +75,7 @@ test('Build on a ready card builds it unattended, the session streams read-only,
 
       expect((await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board', 'builds'] })).status).toBe(200);
       await page.reload();
-      const build = page.getByRole('button', { name: 'Build 1.1' });
+      const build = page.getByRole('button', { name: 'Build this story 1.1' });
       await expect(build).toBeVisible();
       // Story 5.5: an uncommitted plan refuses Build and offers Commit plan files, which commits exactly that file.
       const planFile = join(repo, ...FAKE_BUILD_PLAN.split('/'));

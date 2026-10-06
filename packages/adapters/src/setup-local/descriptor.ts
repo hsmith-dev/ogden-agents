@@ -65,6 +65,8 @@ export const LOCAL_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<AgentDe
   // Ask only (user decision, 2026-10-05): the config makes every tool ask, and the mode is fixed at start, so the server refuses Auto and Skip all.
   permissionModes: { ask: LOCAL_MODE_IDS.ask },
   modeFixedAtStart: true,
+  // Why only Ask: a small local model makes more mistakes with tools, so nothing runs or is written without a card.
+  modesNote: 'Small local models make more mistakes with tools, so every command and file change asks first.',
   // Its project config, plugins and MCP servers are switched off (`OPENCODE_DISABLE_PROJECT_CONFIG`), so a project can't make it run anything.
   needsProjectTrust: false,
   // Its own project folder joins the protected paths (an edit there is a card).

@@ -15,11 +15,11 @@ describe('README Download section', () => {
   });
 
   it('names a file for each computer and the checksum file', () => {
-    for (const file of ['_universal.dmg', '_x64-setup.exe', '_arm64-setup.exe', 'SHA256SUMS-desktop.txt']) expect(section).toContain(file);
+    for (const file of ['_universal.dmg', '_x64-setup.exe', '_arm64-setup.exe', '_amd64.AppImage', '_aarch64.AppImage', 'SHA256SUMS-desktop.txt']) expect(section).toContain(file);
   });
 
   it('gives the steps for opening an unsigned app on each OS, and the requirements', () => {
-    for (const phrase of ['Privacy & Security', 'Open Anyway', 'More info', 'Run anyway', 'WebView2', '13.5']) expect(section).toContain(phrase);
+    for (const phrase of ['Privacy & Security', 'Open Anyway', 'More info', 'Run anyway', 'WebView2', '13.5', 'chmod +x', 'FUSE', 'GDK_BACKEND=x11', 'Secret Service']) expect(section).toContain(phrase);
   });
 
   it('says nothing about a terminal to run, and has no dashes in its sentences', () => {

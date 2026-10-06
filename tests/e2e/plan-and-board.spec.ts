@@ -486,6 +486,7 @@ test('the board: cards in their columns, Waits for and the blocked reason, a liv
     watch: (...args) => inner.watch(...args),
     watching: (...args) => inner.watching(...args),
     emit: (...args) => inner.emit(...args),
+    emitRetrospective: (...args) => inner.emitRetrospective(...args),
     fail: (...args) => inner.fail(...args),
   };
   const bmadSource = server.createMemoryBmadSource({ ready: true });
@@ -571,6 +572,7 @@ test('changing a status from the board (story 4.10): keyboard only, focus on the
     watch: (...args) => inner.watch(...args),
     watching: (...args) => inner.watching(...args),
     emit: (...args) => inner.emit(...args),
+    emitRetrospective: (...args) => inner.emitRetrospective(...args),
     fail: (...args) => inner.fail(...args),
   };
   const bmadSource = server.createMemoryBmadSource({ ready: true });
@@ -778,6 +780,7 @@ test('reduced mode (entry 4.11): Plan, Board and Settings explain what is missin
     watch: (...args) => inner.watch(...args),
     watching: (...args) => inner.watching(...args),
     emit: (...args) => inner.emit(...args),
+    emitRetrospective: (...args) => inner.emitRetrospective(...args),
     fail: (...args) => inner.fail(...args),
   };
   const bmadSource = server.createMemoryBmadSource({ ready: true });

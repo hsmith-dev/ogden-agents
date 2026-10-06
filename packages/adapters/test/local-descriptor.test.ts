@@ -28,6 +28,9 @@ describe("the Local model's descriptor", () => {
     expect(agentDescriptorProblems({ ...LOCAL_DESCRIPTOR, signInMethods: [{ id: 'x', kind: 'subscription', label: 'x' }] })).toEqual(['local: it needs no account but lists sign in methods']);
     expect(LOCAL_DESCRIPTOR.needsProjectTrust).toBe(false);
     expect(LOCAL_DESCRIPTOR.homeEnv).toBeUndefined();
+    expect(LOCAL_DESCRIPTOR.modesNote).toBe('Small local models make more mistakes with tools, so every command and file change asks first.');
+    expect(agentDescriptorProblems({ ...LOCAL_DESCRIPTOR, modesNote: '  ' })).toEqual(['local: the modes note is empty or has a dash']);
+    expect(agentDescriptorProblems({ ...LOCAL_DESCRIPTOR, modesNote: 'Only Ask \u2014 for now.' })).toEqual(['local: the modes note is empty or has a dash']);
   });
 
   it('runs a skill as a slash command from .agents/skills, and keeps a handoff brief small', () => {
@@ -39,8 +42,8 @@ describe("the Local model's descriptor", () => {
     expect(LOCAL_DESCRIPTOR.configFolders).toContain('.opencode');
   });
 
-  it('is not registered by a shipped install until the chat is complete', () => {
-    expect(LOCAL_SHIPPED).toBe(false);
+  it('is registered by a shipped install now that its chat is complete (story 14.6)', () => {
+    expect(LOCAL_SHIPPED).toBe(true);
   });
 });
 

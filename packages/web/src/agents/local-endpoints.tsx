@@ -8,6 +8,7 @@ import { Label } from '@/ui/label';
 import { Notice } from '@/ui/notice';
 import { Text } from '@/ui/typography';
 import { AddEndpoint } from './local-endpoint-form';
+import { EndpointModels } from './local-endpoint-models';
 import {
   confirmEndpointHost,
   LOCAL_ENDPOINTS_QUERY_KEY,
@@ -168,6 +169,7 @@ function EndpointRow({
           </Text>
         )}
       </div>
+      {endpoint.needsConfirmation ? null : <EndpointModels endpointId={endpoint.id} chosen={endpoint.model} guard={guard} />}
       <EndpointKey endpointId={endpoint.id} saved={endpoint.keySaved} guard={guard} onChange={onChange} />
     </div>
   );

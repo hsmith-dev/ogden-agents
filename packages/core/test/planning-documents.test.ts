@@ -36,7 +36,7 @@ const SKILLS: CatalogSkill[] = [
   CatalogSkill.parse({ name: 'bmad-spec', description: 'Write a spec.', next: NEXT }),
   CatalogSkill.parse({ name: 'bmad-ticket', description: 'Make tickets.' }),
 ];
-const CATALOG: Catalog = { modules: [], skills: SKILLS, agents: [], entryAction: null, capabilities: { plain_labels: true, ticket_tree: true } };
+const CATALOG: Catalog = { modules: [], skills: SKILLS, agents: [], entryAction: null, capabilities: { plain_labels: true, ticket_tree: true, look_back: true } };
 const SET_UP: BmadSetupStatus = { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] };
 
 /** A catalog port answering {@link CATALOG}, the given setup status, and documents from `documents`. */
@@ -53,6 +53,7 @@ function fakeCatalog(documents: Record<string, string> = {}): FakeCatalog {
     setup: () => Promise.reject(new Error('not used')),
     missingCapabilities: () => Promise.reject(new Error('not used')),
     scriptsFingerprint: async () => 'none',
+    readRetrospective: async () => null,
     readDocument: async (repoPath: string, outputFolder: string, path: string) => {
       port.reads.push([repoPath, outputFolder, path]);
       const content = documents[path];

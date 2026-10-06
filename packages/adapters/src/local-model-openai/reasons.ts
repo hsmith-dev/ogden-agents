@@ -4,6 +4,7 @@
  * what to do. Names no server product: the endpoint card (story 14.4) adds
  * the product's own advice where it knows the preset.
  */
+import type { LocalFailure } from '@ogden-agents/core';
 import type { EndpointFailureKind } from './http.js';
 
 /** `baseUrl`'s host and port (`localhost:1234`), or "the server" when it can't be read. Never a path, query or credentials. */
@@ -34,4 +35,9 @@ export function endpointFailureWords(kind: EndpointFailureKind, baseUrl: string,
     case 'http':
       return `The server at ${host} answered with an error${status === undefined ? '' : ` (${status})`}. Check it is ready, then try again.`;
   }
+}
+
+/** A failure as the port reports it: its kind, its status, and the words for it. */
+export function failureOf(kind: EndpointFailureKind, baseUrl: string, status?: number): LocalFailure {
+  return { ok: false, kind, ...(status === undefined ? {} : { status }), reason: endpointFailureWords(kind, baseUrl, status) };
 }

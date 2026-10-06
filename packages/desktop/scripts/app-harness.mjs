@@ -135,7 +135,7 @@ export function listApps(ignore = new Set()) {
   const out = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
   return out
     .split('\n')
-    .filter((l) => /\/ogden-agents(\s|$)/.test(l) || l.includes('Contents/MacOS/ogden-agents'))
+    .filter((l) => /(^|\s|\/)ogden-agents(\s|$)/.test(l.trim().replace(/^\d+\s+/, '')) || l.includes('Contents/MacOS/ogden-agents'))
     .map((l) => ({ pid: Number(l.trim().split(/\s+/)[0]) }))
     .filter((p) => !ignore.has(p.pid));
 }

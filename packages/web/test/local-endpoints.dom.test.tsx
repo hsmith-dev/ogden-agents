@@ -25,6 +25,9 @@ const api = vi.hoisted(() => ({
   removeKey: vi.fn(),
   remove: vi.fn(),
   setDefault: vi.fn(),
+  models: vi.fn(),
+  choose: vi.fn(),
+  manager: vi.fn(),
 }));
 
 vi.mock('../src/agents/local-endpoints-api', () => ({
@@ -39,6 +42,9 @@ vi.mock('../src/agents/local-endpoints-api', () => ({
   removeEndpointKey: api.removeKey,
   removeLocalEndpoint: api.remove,
   setDefaultEndpoint: api.setDefault,
+  fetchEndpointModels: api.models,
+  chooseEndpointModel: api.choose,
+  testAsManager: api.manager,
 }));
 
 const { LocalEndpointsSection } = await import('../src/agents/local-endpoints');
@@ -227,5 +233,82 @@ describe('a listed server', () => {
     expect(screen.getAllByTestId('endpoint-label')[0]!.textContent).toContain('used for new chats');
     fireEvent.click(screen.getByRole('button', { name: 'Use for new chats' }));
     await waitFor(() => expect(api.setDefault).toHaveBeenCalledWith('lep_01J9Z3K4M5N6P7Q8R9S0T1V2W4'));
+  });
+});
+
+describe("a server's models (epic 14 story 14.5)", () => {
+  const answer = (over: Record<string, unknown> = {}) => ({
+    state: 'ready',
+    message: 'Ready. 2 models are available.',
+    model: null,
+    missing: null,
+    models: [
+      { id: 'small-one', parameterSize: '7B', sizeBytes: 4_100_000_000, contextTokens: 4096, toolCall: false, cautions: ['Its context is small (4k). Editing files and running commands needs 16k to 32k or more, and long skills need more.', "The server says it can't call tools, so it can chat but not edit files or run commands."] },
+      { id: 'plain-one', cautions: [] },
+    ],
+    ...over,
+  });
+
+  it('shows each model with what the server reported and its cautions, and says when it reported nothing', async () => {
+    api.endpoints = [view()];
+    api.models.mockResolvedValue(answer());
+    section();
+    fireEvent.click(screen.getByTestId('endpoint-show-models'));
+    await waitFor(() => expect(screen.getByTestId('endpoint-model-small-one')).toBeTruthy());
+    expect(screen.getByTestId('endpoint-model-small-one').textContent).toContain('small-one (7B, 4.1 GB, 4k context)');
+    expect(screen.getAllByTestId('endpoint-model-caution').map((node) => node.textContent)).toEqual([
+      expect.stringContaining('context is small (4k)'),
+      expect.stringContaining("can't call tools"),
+    ]);
+    expect(screen.getByTestId('endpoint-model-plain-one').textContent).toContain("doesn't say how big this model is");
+  });
+
+  it('chooses the model new chats start on', async () => {
+    api.endpoints = [view()];
+    api.models.mockResolvedValue(answer());
+    api.choose.mockResolvedValue(view());
+    section();
+    fireEvent.click(screen.getByTestId('endpoint-show-models'));
+    await waitFor(() => screen.getByTestId('endpoint-model-plain-one'));
+    fireEvent.click(screen.getByRole('button', { name: 'Use plain-one for new chats' }));
+    await waitFor(() => expect(api.choose).toHaveBeenCalledWith('lep_01J9Z3K4M5N6P7Q8R9S0T1V2W3', 'plain-one'));
+  });
+
+  it('shows a chosen model the server dropped as missing, with its name, and offers no silent swap', async () => {
+    api.endpoints = [view({ model: 'gone-model' })];
+    api.models.mockResolvedValue(answer({ model: 'gone-model', missing: 'gone-model' }));
+    section();
+    expect(screen.getByTestId('endpoint-chosen-model').textContent).toBe('New chats start on gone-model.');
+    fireEvent.click(screen.getByTestId('endpoint-show-models'));
+    await waitFor(() => screen.getByTestId('endpoint-model-missing'));
+    expect(screen.getByTestId('endpoint-model-missing').textContent).toContain("The model gone-model isn't on this server any more. Chats won't start until you choose another here.");
+  });
+
+  it('says what is wrong when the server is not running', async () => {
+    api.endpoints = [view()];
+    api.models.mockResolvedValue(answer({ state: 'not_running', message: 'Not running. Start the server, then test again.', models: [] }));
+    section();
+    fireEvent.click(screen.getByTestId('endpoint-show-models'));
+    await waitFor(() => expect(screen.getByTestId('endpoint-models-state').textContent).toBe('Not running. Start the server, then test again.'));
+  });
+
+  it('offers no models for a host that is not confirmed yet', () => {
+    api.endpoints = [view({ loopback: false, needsConfirmation: true, host: 'https://b.example.com' })];
+    section();
+    expect(screen.queryByTestId('endpoint-show-models')).toBeNull();
+  });
+
+  it('Test as a manager shows the plain-words result for that model only', async () => {
+    api.endpoints = [view()];
+    api.models.mockResolvedValue(answer());
+    api.manager.mockResolvedValueOnce({ pass: false, mode: null, ms: 900, message: 'Too slow: no answer in 60 seconds.' });
+    section();
+    fireEvent.click(screen.getByTestId('endpoint-show-models'));
+    await waitFor(() => screen.getByTestId('endpoint-model-small-one'));
+    fireEvent.click(screen.getByRole('button', { name: 'Test small-one as a manager' }));
+    await waitFor(() => expect(screen.getByTestId('endpoint-manager-result').textContent).toBe('Too slow: no answer in 60 seconds.'));
+    expect(screen.getByTestId('endpoint-manager-result').getAttribute('data-pass')).toBe('false');
+    expect(api.manager).toHaveBeenCalledWith('lep_01J9Z3K4M5N6P7Q8R9S0T1V2W3', 'small-one');
+    expect(screen.getAllByTestId('endpoint-manager-result')).toHaveLength(1);
   });
 });

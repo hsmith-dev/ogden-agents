@@ -15,7 +15,7 @@ const module = (code: string, installedAt: string | null = null): CatalogModule 
 const skill = (name: string, module: string | null, installedAt: string | null = null) => CatalogSkill.parse({ name, description: `${name}.`, module, installedAt });
 
 function catalogOf(modules: CatalogModule[], skills: CatalogSkill[] = []): Catalog {
-  return { modules, skills, agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false } };
+  return { modules, skills, agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false, look_back: true } };
 }
 
 describe('bmadModulesSeen (story 4.4)', () => {

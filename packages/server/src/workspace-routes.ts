@@ -21,6 +21,7 @@ import {
   type BmadFeatures,
   type Chat,
   type Permissions,
+  type Team,
 } from '@ogden-agents/core';
 import {
   API_ROUTES,
@@ -62,11 +63,13 @@ export interface WorkspaceRoutesOptions {
    * and only when its test hook is allowed (`test-hooks.ts` `testBmadProbe`).
    */
   bmadProbe?: boolean;
+  /** Core's team roster (epic 15, 15.5): a roster in a settings change is checked against what is ready before it is saved. */
+  team?: Team | undefined;
   log: Logger;
 }
 
 export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptions): void {
-  const { chat, permissions, bmad, bmadProbe, log } = options;
+  const { chat, permissions, bmad, bmadProbe, team, log } = options;
   const limit = bodyLimit({
     maxSize: MAX_BODY_BYTES,
     onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.'),
@@ -135,6 +138,8 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
       const body = await readBody(c, UpdateWorkspaceSettingsRequest);
       if (!body.ok) return body.response;
       try {
+        // A roster that breaks a rule of what is ready now (an agent not ready, a model that failed its test) is refused here, before anything is written.
+        if (team !== undefined && body.value.orchestrationRoster !== undefined) await team.check(scope.workspaceId, body.value.orchestrationRoster, body.value.orchestrationMode);
         const settings = permissions.updateSettings(scope.workspaceId, body.value);
         log.info('workspace settings saved', {
           workspaceId: scope.workspaceId,

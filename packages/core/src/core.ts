@@ -6,6 +6,9 @@ import { createOrchestrationFeature, type OrchestrationFeature } from './orchest
 import { createOrchestration, type Orchestration, type OrchestrationChat } from './orchestration.js';
 import type { ManagerPort } from './manager-port.js';
 import { createManagerSource, type ManagerSource } from './manager-source.js';
+import { createTeam, type RosterContext, type Team } from './team-roster.js';
+import type { Chat } from './chat/types.js';
+import type { NewProjectDefaultsStore } from './new-projects.js';
 import type { LocalModelPort } from './local-model-port.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-pieces.js';
 import { createBmadModulesSeen, type BmadModulesSeen } from './bmad-modules-seen.js';
@@ -72,7 +75,12 @@ export interface Core {
    * The Orchestration use-case (epic 15, 15.3) over the chat the server holds and a manager when there is one.
    * Every call is behind {@link Core.orchestration}'s guard. The server calls it once, after it has its chat.
    */
-  createOrchestration(ports: { chat: OrchestrationChat; manager?: ManagerPort | undefined; managers?: ManagerSource | undefined }): Orchestration;
+  createOrchestration(ports: { chat: OrchestrationChat; manager?: ManagerPort | undefined; managers?: ManagerSource | undefined; team?: Team | undefined }): Orchestration;
+  /**
+   * The team roster (epic 15, 15.5): who takes each role, the defaults, whether each agent or model can, and the
+   * check every assignment passes. The server calls it once, after it has its chat, endpoints and new project defaults.
+   */
+  createTeam(ports: { chat: Pick<Chat, 'chatAgents'>; endpoints: () => LocalEndpoints; tests: () => RosterContext['tests']; defaults: Pick<NewProjectDefaultsStore, 'get' | 'setRoster'> }): Team;
   /**
    * Each project's manager, read from its roster over the model port and the endpoints (epic 15, 15.4). The server
    * calls it once, after it has its endpoints.
@@ -180,6 +188,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     localEndpoints: (secrets) => createLocalEndpoints({ db, events, secrets }),
     createOrchestration: (ports) => createOrchestration({ db, events, feature: orchestration, ...ports }),
     createManagerSource: (ports) => createManagerSource({ db, ...ports }),
+    createTeam: (ports) => createTeam({ db, events, ...ports }),
     close: () => {
       try {
         permissions.close();

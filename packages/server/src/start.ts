@@ -24,7 +24,7 @@ import {
   type AgentPort,
   type Core,
 } from '@ogden-agents/core';
-import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERRUPTED, SERVER_STREAM, type AgentId, type Session } from '@ogden-agents/shared';
+import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERRUPTED, SERVER_STREAM, type AgentId, type LocalEndpointId, type Session } from '@ogden-agents/shared';
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
@@ -416,7 +416,9 @@ async function listenAndAnnounce({
   // Orchestration (epic 15) over the chat. The manager is a test's stub when one is given (test hooks keep the memory fake); else each
   // project's own, read from its roster: a model on one of its endpoints, called through the endpoints' confirmation rule (15.4).
   const managers = core.createManagerSource({ endpoints: () => localEndpoints, port: localModelPort });
-  const orchestrationRuns = core.createOrchestration({ chat, manager: options.manager ?? (hooks.manager === 'memory' ? createMemoryManager() : undefined), managers });
+  // The team roster (15.5): who takes each role, over the chat's agents, the endpoints, the manager tests and the new project defaults.
+  const team = core.createTeam({ chat, endpoints: () => localEndpoints, tests: () => ({ result: (endpointId, model) => localModels.managerTestResult(endpointId as LocalEndpointId, model), all: () => localModels.managerTestResults() }), defaults: newProjectDefaults });
+  const orchestrationRuns = core.createOrchestration({ chat, manager: options.manager ?? (hooks.manager === 'memory' ? createMemoryManager() : undefined), managers, team });
   const app = createApp({
     events: core.events,
     webRoot: options.webRoot ?? defaultWebRoot(),
@@ -435,6 +437,7 @@ async function listenAndAnnounce({
     bmad: core.bmad,
     orchestration: core.orchestration,
     orchestrationRuns,
+    team,
     // The test-only BMad probe route (story 10.1): a test run on a temp data folder, with its own variable set.
     bmadProbe: hooks.bmadProbe,
     bmadDetection: core.bmadDetection,

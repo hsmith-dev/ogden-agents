@@ -84,4 +84,5 @@ export * from './model-manager.js';
 export * from './orchestration-feature.js';
 export * from './orchestration.js';
 export * from './local-models.js';
+export * from './team-roster.js';
 export * from './build-findings.js';

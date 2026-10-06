@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AgentId } from './events-common.js';
 import { PermissionMode } from './entities.js';
+import { TeamRoster } from './team.js';
 
 /**
  * The per-project BMad Method pieces contract (CAP-19, AD-22; frozen by story
@@ -267,6 +268,12 @@ export const NewProjectDefaults = z.object({
    * waiting for the user's confirmation for that project.
    */
   defaultPermissionMode: PermissionMode.optional(),
+  /**
+   * The team roster new projects start with (epic 15, 15.5): who takes each
+   * role, copied to a project when it is added; a role left empty uses the
+   * defaults then. Absent: every role uses the defaults.
+   */
+  orchestrationRoster: TeamRoster.optional(),
 });
 export type NewProjectDefaults = z.infer<typeof NewProjectDefaults>;
 /** The app-wide default before the user changes it: Simple (every piece off). */

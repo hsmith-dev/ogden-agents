@@ -506,6 +506,21 @@ export const API_ROUTES = {
    */
   workspaceOrchestration: `${API_BASE}/workspaces/:wsId/orchestration`,
   /**
+   * `GET` → `TeamRosterViewResponse` (epic 15, 15.5): the project's team
+   * roster as the screen shows it, each role's holder (chosen or default) and
+   * every agent or model with whether it can take the role and why not. Behind
+   * the Orchestration piece. The roster changes through the workspace
+   * settings route, which refuses an assignment that breaks a rule.
+   */
+  workspaceTeamRoster: `${API_BASE}/workspaces/:wsId/orchestration/roster`,
+  /**
+   * `GET` → `TeamRosterViewResponse`; `PUT UpdateTeamRosterDefaultRequest` →
+   * `TeamRosterViewResponse` (epic 15, 15.5): the roster new projects start
+   * with (an install-level preference beside the default for new projects).
+   * A change appends `settings.team_roster_default_changed`.
+   */
+  teamRosterDefault: `${API_BASE}/settings/team-roster`,
+  /**
    * `GET` → `OrchestrationRunsResponse` (the project's runs, newest first);
    * `POST StartOrchestrationRunRequest` → `OrchestrationRunResponse` (epic 15,
    * 15.3): the goal goes to the manager and its plan comes back as proposed

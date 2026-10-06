@@ -75,6 +75,13 @@ export interface AgentDescriptor {
    */
   noAccount?: boolean | undefined;
   /**
+   * The agent's vendor allows only a person at the keyboard to drive it
+   * (epic 15): one plain sentence saying so, with no dash. Such an agent is
+   * never a worker or reviewer a manager addresses. No agent Ogden ships today
+   * sets it; an agent whose terms forbid automation must.
+   */
+  interactiveOnly?: string | undefined;
+  /**
    * The permission modes it declares, each with its own name for that mode
    * (a mode id, or the flag it takes). Ask is every agent's. It must list
    * exactly the modes its `AgentPort.permissionModes` declares.
@@ -213,6 +220,7 @@ export function agentDescriptorProblems(descriptor: AgentDescriptor): string[] {
     for (const name of method.apiKey?.envNames ?? []) if (!ENV_NAME.test(name)) at(`${name} is not an environment variable name`);
     if (descriptor.homeEnv !== undefined && method.apiKey?.envNames.includes(descriptor.homeEnv)) at(`${descriptor.homeEnv} is both the home and a key variable`);
   }
+  if (descriptor.interactiveOnly !== undefined && (descriptor.interactiveOnly.trim() === '' || /[\u2013\u2014]/.test(descriptor.interactiveOnly))) at('the interactive only sentence is empty or has a dash');
   if (descriptor.noAccount === true && descriptor.signInMethods.length > 0) at('it needs no account but lists sign in methods');
   const modes = Object.entries(descriptor.permissionModes);
   for (const [mode, nativeId] of modes) {

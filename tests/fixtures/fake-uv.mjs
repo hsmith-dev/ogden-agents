@@ -33,7 +33,7 @@
 // `FAKE_UV_LOG_FILE`: append `{ argv, cwd, answers }` as one JSON line to that
 // file on every run (`answers` is the `--module-answers` file's text, if any).
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const argv = process.argv.slice(2);
@@ -96,6 +96,10 @@ if (mode === 'bmad-setup') {
   process.stdout.write('x'.repeat(2 * 1024 * 1024));
 } else if (mode === 'hang') {
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
-  writeFileSync(process.env.FAKE_UV_PID_FILE, JSON.stringify({ uv: process.pid, child: child.pid }));
+  // Written whole and renamed into place: a test polling for the file never reads it half-written
+  // (`writeFileSync` truncates first, so `existsSync` is true before the content is).
+  const pidFile = process.env.FAKE_UV_PID_FILE;
+  writeFileSync(`${pidFile}.tmp`, JSON.stringify({ uv: process.pid, child: child.pid }));
+  renameSync(`${pidFile}.tmp`, pidFile);
   setInterval(() => {}, 1000);
 }

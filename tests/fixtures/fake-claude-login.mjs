@@ -24,7 +24,7 @@
 // FAKE_LOGIN_STATE is the state file `auth status --json` reads
 // (`{"loggedIn":true}` once signed in); without it nobody is signed in.
 // FAKE_LOGIN_PID_FILE, when set, gets this process's pid (tree-kill tests).
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
 const args = process.argv.slice(2);
@@ -33,7 +33,11 @@ const STATE = process.env.FAKE_LOGIN_STATE;
 const CODE = process.env.FAKE_LOGIN_CODE ?? 'fake-code-123';
 const ESC = '\u001b';
 
-if (process.env.FAKE_LOGIN_PID_FILE) writeFileSync(process.env.FAKE_LOGIN_PID_FILE, String(process.pid));
+if (process.env.FAKE_LOGIN_PID_FILE) {
+  // Whole file or none (see fake-uv.mjs): a polling test never reads it half-written.
+  writeFileSync(`${process.env.FAKE_LOGIN_PID_FILE}.tmp`, String(process.pid));
+  renameSync(`${process.env.FAKE_LOGIN_PID_FILE}.tmp`, process.env.FAKE_LOGIN_PID_FILE);
+}
 
 const signedIn = () => {
   if (STATE === undefined || !existsSync(STATE)) return false;

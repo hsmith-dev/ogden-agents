@@ -3,6 +3,7 @@ import {
   apiPath,
   LocalEndpointDetectResponse,
   LocalEndpointModelsResponse,
+  ManagerTestResponse,
   LocalEndpointPresetsResponse,
   LocalEndpointResponse,
   LocalEndpointsResponse,
@@ -97,4 +98,9 @@ export async function fetchEndpointModels(id: LocalEndpointId, auth: Auth = tabA
 /** `PATCH /api/v1/local-endpoints/:endpointId`: the model this server's chats start on (`null`: the first one it lists). */
 export async function chooseEndpointModel(id: LocalEndpointId, model: string | null, auth: Auth = tabAuth) {
   return LocalEndpointResponse.parse(await call(auth, apiPath(API_ROUTES.localEndpoint, { endpointId: id }), json('PATCH', { model }), "Ogden Agents couldn't choose that model")).endpoint;
+}
+
+/** `POST /api/v1/local-endpoints/:endpointId/manager-test`: Test as a manager on one model (the server calls the endpoint, never the page). */
+export async function testAsManager(id: LocalEndpointId, model: string, auth: Auth = tabAuth) {
+  return ManagerTestResponse.parse(await call(auth, apiPath(API_ROUTES.localEndpointManagerTest, { endpointId: id }), postJson({ model }), "Ogden Agents couldn't run that test"));
 }

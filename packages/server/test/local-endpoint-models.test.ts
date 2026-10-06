@@ -8,7 +8,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLocalAgent, createMemoryAgentSetup } from '@ogden-agents/adapters';
-import { API_ROUTES, ApiErrorBody, apiPath, ChatAgentsResponse, LocalEndpointModelsResponse, LocalEndpointResponse, SessionResponse, WorkspaceResponse } from '@ogden-agents/shared';
+import { API_ROUTES, ApiErrorBody, apiPath, ChatAgentsResponse, LocalEndpointModelsResponse, LocalEndpointResponse, ManagerTestResponse, SessionResponse, WorkspaceResponse } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startFakeServer, type FakeServer } from '../../../tests/fixtures/fake-openai-server.mjs';
 import { removeAfterTest, signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type TestServer } from './helpers.js';
@@ -183,5 +183,45 @@ describe('the chat and its model picker', () => {
     expect(text).toContain("The model gone-model isn't on the server any more");
     expect(text).toContain("won't switch to a different one");
     expect(up.log.filter((entry) => entry.path.endsWith('/chat/completions')).length).toBe(before);
+  });
+});
+
+describe('Test as a manager (epic 14 story 14.8)', () => {
+  const test = (server: TestServer, tab: SignedIn, id: string, model: string) => call(server, tab, 'POST', apiPath(API_ROUTES.localEndpointManagerTest, { endpointId: id }), { model });
+
+  it('passes against a conforming model, and reports why, in plain words, for a malformed one and a model that is not there', async () => {
+    const up = await fake({ models: ['fake-small', 'fake-noformat'] });
+    const { server, tab, add } = await setUp();
+    const endpoint = await add(`${up.url}/v1`);
+    const passed = ManagerTestResponse.parse(await (await test(server, tab, endpoint.id, 'fake-small')).json());
+    expect(passed).toMatchObject({ pass: true, mode: 'json_schema' });
+    expect(passed.message).toContain('Passed.');
+    // A model that refuses any response_format and only ever gives one fixed answer cannot fit the plan shape.
+    const stubborn = ManagerTestResponse.parse(await (await test(server, tab, endpoint.id, 'fake-noformat')).json());
+    expect(stubborn).toMatchObject({ pass: false, mode: null });
+    expect(stubborn.message).toMatch(/ignored the shape|not valid JSON/);
+    const missing = ManagerTestResponse.parse(await (await test(server, tab, endpoint.id, 'no-such-model')).json());
+    expect(missing).toMatchObject({ pass: false, message: "The server doesn't have that model right now." });
+  });
+
+  it('only ever sends the fixed request: no tools, not streamed, temperature 0, and the key as a bearer', async () => {
+    const up = await fake({ models: ['fake-small'], requireKey: 'mgr-key' });
+    const { server, tab, add } = await setUp();
+    const endpoint = await add(`${up.url}/v1`, { key: 'mgr-key' });
+    await test(server, tab, endpoint.id, 'fake-small');
+    const chat = up.log.filter((entry) => entry.path === '/v1/chat/completions');
+    expect(chat).toHaveLength(1);
+    expect(chat[0]).toMatchObject({ stream: false, temperature: 0, responseFormat: 'json_schema', authMatches: true });
+    expect(chat[0]!.tools ?? []).toEqual([]);
+    expect(JSON.stringify(server.core.events.readAfter(0))).not.toContain('mgr-key');
+  });
+
+  it('refuses an unconfirmed host with 409 and calls nothing, a bad body with 400, and an unknown endpoint with 404', async () => {
+    const { server, tab, add } = await setUp();
+    const endpoint = await add('https://a.example.com/v1', { confirmHost: 'https://a.example.com' });
+    await call(server, tab, 'PATCH', apiPath(API_ROUTES.localEndpoint, { endpointId: endpoint.id }), { baseUrl: 'https://b.example.com/v1' });
+    expect((await test(server, tab, endpoint.id, 'm')).status).toBe(409);
+    expect((await call(server, tab, 'POST', apiPath(API_ROUTES.localEndpointManagerTest, { endpointId: endpoint.id }), { nope: 1 })).status).toBe(400);
+    expect((await test(server, tab, 'lep_01J9Z3K4M5N6P7Q8R9S0T1V2W3', 'm')).status).toBe(404);
   });
 });

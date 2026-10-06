@@ -225,6 +225,12 @@ export const API_ROUTES = {
    */
   localEndpointModels: `${API_BASE}/local-endpoints/:endpointId/models`,
   /**
+   * `POST ManagerTestRequest` → `ManagerTestResponse` (story 14.8): Test as a manager. Sends one fixed small
+   * plan shaped request to the model (no tools, no files) and says in plain words whether it answered in the
+   * shape asked for. 409 `endpoint_confirmation_required` for an unconfirmed host, in which case nothing is called.
+   */
+  localEndpointManagerTest: `${API_BASE}/local-endpoints/:endpointId/manager-test`,
+  /**
    * `POST` → `LocalEndpointDetectResponse` (story 14.4): Detect. Probes only 127.0.0.1 and localhost on the
    * presets' ports, once, when the user presses it. Reads no body.
    */

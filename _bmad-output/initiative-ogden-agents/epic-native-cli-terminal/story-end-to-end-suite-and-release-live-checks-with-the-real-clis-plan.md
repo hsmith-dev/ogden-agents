@@ -75,3 +75,5 @@ On a Mac and on a Windows machine, Developer mode on, Terminals tab:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security pass: no findings. Correctness pass: fixed the browser's Developer mode copy after the restart (per address; the test passed without it locally, set anyway so it cannot depend on the port) and the release note wording (the notice names the project and the terminal). Verified: the planted secret name would be listed by the fake shell if it leaked, the double server close is safe, the data folder scan covers the database and its log, and the README facts match the code. Not checked against code by the reviewer: the Detect trigger and the stop or keep question, both covered by existing tests (programs and settings e2e).

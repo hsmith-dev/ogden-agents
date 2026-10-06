@@ -371,6 +371,8 @@ test('the layout, names and opt in survive a server restart as stopped terminals
         const next = await startServer(dataDir, 0, { paneShell: { file: process.execPath, args: [FAKE_SHELL] }, paneLaunchers: NO_PROGRAMS });
         try {
           await openConnected(page, '/', next.launchUrl);
+          // The browser's own copy of Developer mode is per address, and the new server has a new one.
+          await setBrowserDeveloperMode(page, true);
           await page.goto(at(page, `/w/${wsId}/terminals`));
           await expect(page.getByTestId('pane')).toHaveCount(2);
           await expect(page.getByTestId('layout-divider')).toHaveCount(1);

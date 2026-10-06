@@ -49,6 +49,13 @@ import {
   checkManagerPlan,
   isRunOver,
   makeStatusReport,
+  EditOrchestrationStepRequest,
+  ReorderOrchestrationStepsRequest,
+  ORCHESTRATION_STEP_NOT_CHANGEABLE_MESSAGE,
+  ORCHESTRATION_RUN_NOT_OPEN_MESSAGE,
+  ORCHESTRATION_EDIT_SECRET_MESSAGE,
+  ORCHESTRATION_EDIT_BAD_TEXT_MESSAGE,
+  ORCHESTRATION_ORDER_WORDS,
 } from '../src/index.js';
 
 const CHAT = 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
@@ -259,6 +266,11 @@ describe('the mode, limits and run', () => {
     expect(canMoveStep('proposed', 'dispatched')).toBe(false);
     expect(canMoveStep('skipped', 'approved')).toBe(false);
     expect(canMoveStep('dispatched', 'done')).toBe(true);
+    // An edit sends an approved step back to waiting; a sent or skipped step never goes back.
+    expect(canMoveStep('approved', 'proposed')).toBe(true);
+    expect(canMoveStep('dispatched', 'proposed')).toBe(false);
+    expect(canMoveStep('skipped', 'proposed')).toBe(false);
+    expect(canMoveStep('done', 'proposed')).toBe(false);
   });
 
   it('parses the run and step entities and the settings response', () => {
@@ -284,6 +296,7 @@ describe('the orchestration events', () => {
     'orchestration.step_approved': { runId: RUN, stepId: 's1', by: 'user' },
     'orchestration.step_edited': { runId: RUN, stepId: 's1', instruction: 'Do it differently.' },
     'orchestration.step_skipped': { runId: RUN, stepId: 's1' },
+    'orchestration.steps_reordered': { runId: RUN, order: ['s2', 's1'] },
     'orchestration.step_dispatched': { runId: RUN, stepId: 's1', worker: 'agent-a', sessionId: CHAT },
     'orchestration.result_read': { runId: RUN, report: makeStatusReport({ stepId: 's1', worker: 'agent-a', state: 'done', text: 'ok' }) },
     'orchestration.run_paused': { runId: RUN, reason: 'permission_card' },
@@ -292,8 +305,8 @@ describe('the orchestration events', () => {
     'orchestration.mode_changed': { runId: RUN, mode: 'automatic', previous: 'approve_each' },
   };
 
-  it('names the twelve events of the entry and parses each, as an input and as a stored event', () => {
-    expect(Object.keys(samples)).toHaveLength(12);
+  it('names the events of the run (the entry\'s twelve and the reorder) and parses each, as an input and as a stored event', () => {
+    expect(Object.keys(samples)).toHaveLength(13);
     for (const [type, payload] of Object.entries(samples)) {
       const input = { type, workspaceId: WS, streamId: WS, payload };
       expect(NewCoreEvent.safeParse(input).success, type).toBe(true);
@@ -334,5 +347,37 @@ describe('the Orchestration piece and the settings shapes', () => {
     expect(UpdateWorkspaceSettingsRequest.safeParse({ orchestrationMode: 'never' }).success).toBe(false);
     expect(UpdateWorkspaceSettingsRequest.safeParse({ orchestrationRoster: { worker: { kind: 'agent', agentId: 'agent-a' } } }).success).toBe(true);
     expect(UpdateWorkspaceSettingsRequest.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('the plan review requests (15.6)', () => {
+  it('holds an edited instruction to the manager\'s text rules, folding line breaks and trimming the ends', () => {
+    expect(EditOrchestrationStepRequest.parse({ instruction: '  one\r\ntwo  ' }).instruction).toBe('one\ntwo');
+    for (const instruction of ['', '   ', 'x'.repeat(MANAGER_LIMITS.maxInstructionChars + 1), 'a\u0000b', 'a\u202Eb', 'a\u200Bb', 5, null]) {
+      expect(EditOrchestrationStepRequest.safeParse({ instruction }).success, String(instruction)).toBe(false);
+    }
+    expect(EditOrchestrationStepRequest.safeParse({}).success).toBe(false);
+  });
+
+  it('takes a new order as a list of step ids, at most the plan size', () => {
+    expect(ReorderOrchestrationStepsRequest.parse({ order: ['s1', 's2'] }).order).toEqual(['s1', 's2']);
+    for (const order of [[], ['bad id'], Array.from({ length: MANAGER_LIMITS.maxSteps + 1 }, (_, i) => `s${i}`), 'x', undefined]) {
+      expect(ReorderOrchestrationStepsRequest.safeParse({ order }).success).toBe(false);
+    }
+  });
+
+  it('words its refusals plainly, with no dash', () => {
+    const words = [
+      ORCHESTRATION_STEP_NOT_CHANGEABLE_MESSAGE,
+      ORCHESTRATION_RUN_NOT_OPEN_MESSAGE,
+      ORCHESTRATION_EDIT_SECRET_MESSAGE,
+      ORCHESTRATION_EDIT_BAD_TEXT_MESSAGE,
+      ORCHESTRATION_ORDER_WORDS.not_every_step,
+      ORCHESTRATION_ORDER_WORDS.sent_step_moved,
+      ORCHESTRATION_ORDER_WORDS.prerequisite('s3', 's2'),
+    ];
+    for (const text of words) expect(text).not.toMatch(NO_DASH);
+    expect(ORCHESTRATION_ORDER_WORDS.prerequisite('s3', 's2')).toBe('Step s3 needs step s2 first, so it cannot come before it.');
+    expect(API_ROUTES.workspaceOrchestrationStop).toBe('/api/v1/workspaces/:wsId/orchestration/runs/:runId/stop');
   });
 });

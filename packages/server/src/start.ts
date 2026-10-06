@@ -2,11 +2,12 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
   createAgentRegistry,
+  createBuildableTickets,
   createChat,
   createDataDir,
   createNewProjectDefaults,
@@ -431,6 +432,10 @@ async function listenAndAnnounce({
     managers,
     team,
     limits: () => orchestrationDefaults.get().limits,
+    // The board's tickets ready to build now (15.11): a read only list for the manager's proposals. Nothing here can start a build.
+    buildable: createBuildableTickets({ bmad: core.bmad, board, entities: core.entities }),
+    // The agent builds run on, so a build step is stored under it and its reviewer is another agent where one is ready.
+    builder: (options.buildRunner ?? createAcpBuildRunner()).agent,
   });
   // A run that was going when the last server stopped is picked up from its rows and events: it re-arms, settles what finished, asks for a decision
   // that was owed and never sends an instruction twice (15.9). The stored sessions were settled above, so a worker cut off by the restart reads so.

@@ -7,7 +7,7 @@
  * 15.1 is played through it: each row's scripted reply gives the row's outcome.
  */
 import { createModelManager, type LocalEndpoints, type ManagerContext, type ManagerDecisionContext, type ManagerPort } from '@ogden-agents/core';
-import { MANAGER_DECISION_VERSION, MANAGER_LIMITS, MANAGER_PLAN_VERSION, MANAGER_REFUSAL_REASONS, type ManagerPlan } from '@ogden-agents/shared';
+import { MANAGER_DECISION_VERSION, MANAGER_LIMITS, MANAGER_PLAN_VERSION, MANAGER_REFUSAL_REASONS, type ManagerPlan, type ManagerPlanStep } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startFakeServer, type FakeServer } from '../../../tests/fixtures/fake-openai-server.mjs';
 import { HARNESS_CHAT, HARNESS_ROSTER, MANAGER_CASES, markerFor, type ManagerCase } from '../../../tests/fixtures/manager-cases.js';
@@ -48,8 +48,8 @@ function managerContract(name: string, make: (script?: MemoryManagerScript) => M
       const plan = await manager.proposePlan(context());
       expect(plan.ok).toBe(true);
       if (!plan.ok) return;
-      expect(plan.value.steps.map((step) => step.worker)).toEqual(HARNESS_ROSTER);
-      expect(plan.value.steps.every((step) => step.mode === 'ask')).toBe(true);
+      expect(plan.value.steps.map((step) => (step as ManagerPlanStep).worker)).toEqual(HARNESS_ROSTER);
+      expect(plan.value.steps.every((step) => (step as ManagerPlanStep).mode === 'ask')).toBe(true);
       const first = await manager.decideNext({ ...context(), plan: plan.value });
       expect(first).toMatchObject({ ok: true, value: { action: 'dispatch', step_id: 's1' } });
       const report = { version: 'ogden.manager.status.v1' as const, step_id: 's3', worker: 'grok', state: 'done' as const, summary: 'ok', truncated: false };
@@ -276,7 +276,7 @@ describe('the real manager against what a hostile model or worker could try', ()
     expect(quiet).toMatchObject({ ok: true });
     expect(loud).toEqual(expect.objectContaining({ ok: true, value: quiet.ok ? quiet.value : null }));
     // Text that tells a worker to skip checks is just text: the mode is still Ask.
-    expect(quiet.ok && quiet.value.steps.every((step) => step.mode === 'ask')).toBe(true);
+    expect(quiet.ok && quiet.value.steps.every((step) => (step as ManagerPlanStep).mode === 'ask')).toBe(true);
   });
 
   it('puts no key, file body, diff or path outside the project in the input, and sends the key only as the header', async () => {

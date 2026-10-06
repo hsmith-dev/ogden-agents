@@ -1,13 +1,17 @@
 import {
   MANAGER_LIMITS,
+  ORCHESTRATION_BUILD_BUTTON,
+  ORCHESTRATION_BUILD_STEP_NOTE,
   ORCHESTRATION_DECISION_UNAVAILABLE_WORDS,
   ORCHESTRATION_MODE_INFO,
   ORCHESTRATION_NEEDS_YOUR_APPROVAL,
   ORCHESTRATION_NO_MANAGER_MESSAGE,
   ORCHESTRATION_TOLD_WORDS,
+  ORCHESTRATION_WAITING_BUILD_WORDS,
   ORCHESTRATION_WAITING_CARD_WORDS,
   ORCHESTRATION_WAITING_INTERRUPTED_WORDS,
   REVIEW_LIMITS,
+  orchestrationBuildTitle,
   orchestrationReviewNote,
   orchestrationStopWords,
   type OrchestrationActivityEntry,
@@ -62,6 +66,16 @@ const RUN_STATE_WORDS: Readonly<Record<OrchestrationRunView['run']['state'], str
   failed: 'The run failed',
 };
 
+/** What a build step reads as, in its own words: it is a build the user starts, not an instruction that is sent. */
+const BUILD_STATE_WORDS: Readonly<Record<OrchestrationStepView['state'], string>> = {
+  proposed: 'Waiting for you to start the build',
+  approved: 'Waiting for you to start the build',
+  skipped: 'Skipped',
+  dispatched: 'Building',
+  done: 'Built, ready for you to review',
+  failed: 'The build did not finish',
+};
+
 /** The words for a step once its run has been stopped: what was never sent, and what was cut off. */
 const STOPPED_STEP_WORDS: Partial<Record<OrchestrationStepView['state'], string>> = {
   proposed: 'Not sent. The run was stopped.',
@@ -94,6 +108,8 @@ export interface OrchestrateViewProps {
   /** The whole new order of the steps, by step id. */
   onReorder: (order: string[]) => void;
   onStop: () => void;
+  /** Opens the Build dialog for a build step (15.11): the page holds the dialog, so the person confirms there and nowhere else. */
+  onOpenBuild?: ((stepId: string, ticketRef: string) => void) | undefined;
   /** Sends the user's answer to the manager's question; resolves true when it was kept (the box clears). */
   onAnswer?: ((answer: string) => Promise<boolean>) | undefined;
   /** A stop request is in flight. */
@@ -114,9 +130,10 @@ interface StepActions {
   onEdit: (stepId: string, instruction: string) => Promise<boolean>;
   onSkip: (stepId: string) => void;
   onMove: (stepId: string, by: -1 | 1) => void;
+  onOpenBuild?: ((stepId: string, ticketRef: string) => void) | undefined;
 }
 
-export function OrchestrateView({ wsId, managerReady, managerMessage, run, busy, error, onStart, onApprove, onSend, onEdit, onSkip, onReorder, onStop, onAnswer, stopping, mode = 'approve_each', activity, activityError }: OrchestrateViewProps) {
+export function OrchestrateView({ wsId, managerReady, managerMessage, run, busy, error, onStart, onApprove, onSend, onEdit, onSkip, onReorder, onStop, onOpenBuild, onAnswer, stopping, mode = 'approve_each', activity, activityError }: OrchestrateViewProps) {
   const [goal, setGoal] = useState('');
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -156,7 +173,7 @@ export function OrchestrateView({ wsId, managerReady, managerMessage, run, busy,
           </Notice>
         )}
       </PageSection>
-      {run === undefined ? null : <RunSection wsId={wsId} view={run} where={managerReady ? managerMessage : undefined} busy={busy} stopping={stopping} onApprove={onApprove} onSend={onSend} onEdit={onEdit} onSkip={onSkip} onReorder={onReorder} onStop={onStop} onAnswer={onAnswer} />}
+      {run === undefined ? null : <RunSection wsId={wsId} view={run} where={managerReady ? managerMessage : undefined} busy={busy} stopping={stopping} onApprove={onApprove} onSend={onSend} onEdit={onEdit} onSkip={onSkip} onReorder={onReorder} onStop={onStop} onOpenBuild={onOpenBuild} onAnswer={onAnswer} />}
       <ActivityLog wsId={wsId} entries={activity} error={activityError} />
     </div>
   );
@@ -183,10 +200,11 @@ interface RunSectionProps {
   onSkip: (stepId: string) => void;
   onReorder: (order: string[]) => void;
   onStop: () => void;
+  onOpenBuild?: ((stepId: string, ticketRef: string) => void) | undefined;
   onAnswer?: ((answer: string) => Promise<boolean>) | undefined;
 }
 
-function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEdit, onSkip, onReorder, onStop, onAnswer }: RunSectionProps) {
+function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEdit, onSkip, onReorder, onStop, onOpenBuild, onAnswer }: RunSectionProps) {
   const { run, steps, waiting, decision } = view;
   const live = isLive(run.state);
   // While the run is paused on a worker's card, nothing is approved or sent from here: the user answers on the worker's own card.
@@ -238,7 +256,7 @@ function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEd
           {orchestrationStopWords(run.stopReason, run.limits)}
         </Notice>
       ) : null}
-      {waiting == null ? null : <WaitingNote wsId={wsId} waiting={waiting} onAnswer={onAnswer} busy={busy} />}
+      {waiting == null ? null : <WaitingNote wsId={wsId} waiting={waiting} onAnswer={onAnswer} onOpenBuild={canAct ? onOpenBuild : undefined} busy={busy} />}
       <DecisionNote view={view} />
       {waiting == null && run.mode === 'automatic' && run.state === 'awaiting_user' && steps.some((step) => step.state === 'proposed' && step.dependsOn.every((id) => stateOf.get(id) === 'done')) ? (
         <Text variant="caption" data-testid="orchestrate-needs-approval">
@@ -259,7 +277,7 @@ function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEd
             ended={run.state === 'finished' || run.state === 'failed' ? run.state : undefined}
             denied={run.stopReason === 'permission_denied'}
             suggested={suggested === step.stepId}
-            actions={{ busy, onApprove, onSend, onEdit, onSkip, onMove: move }}
+            actions={{ busy, onApprove, onSend, onEdit, onSkip, onMove: move, onOpenBuild }}
           />
         ))}
       </ol>
@@ -289,17 +307,22 @@ interface StepRowProps {
 }
 
 function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denied = false, suggested = false, actions }: StepRowProps) {
-  const { busy, onApprove, onSend, onEdit, onSkip, onMove } = actions;
+  const { busy, onApprove, onSend, onEdit, onSkip, onMove, onOpenBuild } = actions;
+  /** A build step (15.11): a proposed build of a ticket, started only by the user in the Build dialog. */
+  const build = step.build ?? null;
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(step.instruction);
   const waitingOn = step.dependsOn.filter((id) => stateOf.get(id) !== 'done');
   const skippedNeeds = waitingOn.filter((id) => stateOf.get(id) === 'skipped');
   const ready = waitingOn.length === 0;
   const changeable = live && canChange(step.state);
+  /** A build step has nothing to edit and nothing to approve here: only the Build dialog moves it. */
+  const editable = changeable && build === null;
   const stateWords =
     (denied && step.state === 'failed' ? 'Denied, the step ended' : undefined) ??
     (ended === 'finished' && (step.state === 'proposed' || step.state === 'approved') ? 'Not needed, the manager said the goal is done' : undefined) ??
     (stopped && !(step.state === 'failed' && step.sessionState === 'error') ? STOPPED_STEP_WORDS[step.state] : undefined) ??
+    (build !== null && !(stopped && (step.state === 'proposed' || step.state === 'approved')) ? BUILD_STATE_WORDS[step.state] : undefined) ??
     STEP_STATE_WORDS[step.state];
   const save = () => {
     if (busy || text.trim() === '') return;
@@ -311,9 +334,15 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denie
     <li className="flex flex-col gap-2 rounded-lg border border-border p-(--panel-padding)" data-testid="orchestrate-step" data-step-id={step.stepId} data-state={step.state}>
       <div className="flex flex-wrap items-center gap-2">
         <Text variant="label">Step {step.stepId}</Text>
-        <Badge variant="outline" data-testid="orchestrate-step-worker">
-          {step.workerLabel}
-        </Badge>
+        {build === null ? (
+          <Badge variant="outline" data-testid="orchestrate-step-worker">
+            {step.workerLabel}
+          </Badge>
+        ) : (
+          <Badge variant="outline" data-testid="orchestrate-step-build-badge">
+            {orchestrationBuildTitle(build.ticketRef)}
+          </Badge>
+        )}
         <Badge data-testid="orchestrate-step-state">{stateWords}</Badge>
         {step.reviewOf === null ? null : (
           <Badge variant="outline" data-testid="orchestrate-step-review-badge">
@@ -332,17 +361,21 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denie
         ) : null}
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1">
-        <Text variant="caption" data-testid="orchestrate-step-target">
-          Goes to {chatWords(step)}
-        </Text>
-        <Text variant="caption" data-testid="orchestrate-step-mode">
-          Mode: Ask
-        </Text>
+        {build === null ? (
+          <>
+            <Text variant="caption" data-testid="orchestrate-step-target">
+              Goes to {chatWords(step)}
+            </Text>
+            <Text variant="caption" data-testid="orchestrate-step-mode">
+              Mode: Ask
+            </Text>
+          </>
+        ) : null}
         <Text variant="caption" data-testid="orchestrate-step-needs">
           {step.dependsOn.length === 0 ? 'Needs nothing first' : `Needs ${step.dependsOn.join(', ')} first`}
         </Text>
       </div>
-      {editing && changeable ? (
+      {editing && editable ? (
         <div className="flex flex-col gap-2" data-testid="orchestrate-edit-form">
           <Textarea
             aria-label={`Instruction for step ${step.stepId}`}
@@ -376,7 +409,12 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denie
         </div>
       ) : (
         <Text data-testid="orchestrate-step-instruction" className="whitespace-pre-wrap">
-          {step.instruction}
+          {build === null ? step.instruction : `Why: ${step.instruction}`}
+        </Text>
+      )}
+      {build === null ? null : (
+        <Text variant="caption" data-testid="orchestrate-step-build-note">
+          {ORCHESTRATION_BUILD_STEP_NOTE}
         </Text>
       )}
       {step.reviewOf === null ? null : (
@@ -403,17 +441,22 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denie
         </Text>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
-        {live && step.state === 'proposed' && ready ? (
+        {live && build !== null && step.state === 'proposed' && ready && onOpenBuild !== undefined ? (
+          <Button size="sm" data-testid="orchestrate-build-open" aria-disabled={busy} onClick={busy ? undefined : () => onOpenBuild(step.stepId, build.ticketRef)}>
+            {ORCHESTRATION_BUILD_BUTTON}
+          </Button>
+        ) : null}
+        {live && build === null && step.state === 'proposed' && ready ? (
           <Button size="sm" data-testid="orchestrate-approve" aria-disabled={busy} onClick={busy ? undefined : () => onApprove(step.stepId)}>
             Approve and send
           </Button>
         ) : null}
-        {live && step.state === 'approved' ? (
+        {live && build === null && step.state === 'approved' ? (
           <Button size="sm" data-testid="orchestrate-send" aria-disabled={busy} onClick={busy ? undefined : () => onSend(step.stepId)}>
             Send
           </Button>
         ) : null}
-        {changeable && !editing ? (
+        {editable && !editing ? (
           <Button
             size="sm"
             variant="outline"
@@ -447,6 +490,31 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denie
           </>
         ) : null}
       </div>
+      {build === null || step.buildRun == null ? null : (
+        <div className="flex flex-col gap-1" data-testid="orchestrate-step-build" data-build-outcome={step.buildRun.outcome}>
+          <Text variant="caption" data-testid="orchestrate-step-build-state">
+            {step.state === 'dispatched' ? 'The build is running.' : step.state === 'done' ? 'The build passed its checks and waits for your review. Nothing is merged until you approve it.' : 'The build did not pass or did not finish.'}
+          </Text>
+          {step.buildRun.checks === null ? null : (
+            <Text variant="caption" data-testid="orchestrate-step-build-checks">
+              Checks: {step.buildRun.checks.passed} passed, {step.buildRun.checks.failed} failed, {step.buildRun.checks.notRun} not run.
+            </Text>
+          )}
+          {step.buildRun.decision === null ? null : (
+            <Text variant="caption" data-testid="orchestrate-step-build-decision">
+              You {step.buildRun.decision === 'approved' ? 'approved and merged' : 'rejected'} this build.
+            </Text>
+          )}
+          <div className="flex flex-wrap gap-3">
+            <Link to="/w/$wsId/runs" params={{ wsId }} className="text-label underline" data-testid="orchestrate-step-build-runs">
+              Open Runs
+            </Link>
+            <Link to="/w/$wsId/review/$ref" params={{ wsId, ref: build.ticketRef }} className="text-label underline" data-testid="orchestrate-step-build-review">
+              Open the review page
+            </Link>
+          </div>
+        </div>
+      )}
       {step.sessionId === null ? null : (
         <div className="flex flex-col gap-1" data-testid="orchestrate-step-status">
           <Text variant="caption" data-testid="orchestrate-step-session-state" data-session-state={step.sessionState ?? undefined}>
@@ -472,7 +540,7 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denie
 }
 
 /** Why the run waits, in plain words: a worker's card (answered on the worker's own card), the manager's question, or a worker the restart cut off. */
-function WaitingNote({ wsId, waiting, onAnswer, busy }: { wsId: string; waiting: NonNullable<OrchestrationRunView['waiting']>; onAnswer?: ((answer: string) => Promise<boolean>) | undefined; busy: boolean }) {
+function WaitingNote({ wsId, waiting, onAnswer, onOpenBuild, busy }: { wsId: string; waiting: NonNullable<OrchestrationRunView['waiting']>; onAnswer?: ((answer: string) => Promise<boolean>) | undefined; onOpenBuild?: ((stepId: string, ticketRef: string) => void) | undefined; busy: boolean }) {
   const [answer, setAnswer] = useState('');
   if (waiting.kind === 'question') {
     const submit = (event: FormEvent) => {
@@ -495,6 +563,20 @@ function WaitingNote({ wsId, waiting, onAnswer, busy }: { wsId: string; waiting:
               Send answer
             </Button>
           </form>
+        </div>
+      </Notice>
+    );
+  }
+  if (waiting.kind === 'build') {
+    return (
+      <Notice variant="info" infoGlyph role="status" data-testid="orchestrate-waiting" data-waiting="build">
+        <div className="flex flex-col gap-2">
+          <Text data-testid="orchestrate-waiting-words">{ORCHESTRATION_WAITING_BUILD_WORDS}</Text>
+          {onOpenBuild === undefined ? null : (
+            <Button size="sm" className="self-start" data-testid="orchestrate-waiting-build-open" aria-disabled={busy} onClick={busy ? undefined : () => onOpenBuild(waiting.stepId, waiting.ticketRef)}>
+              {ORCHESTRATION_BUILD_BUTTON}
+            </Button>
+          )}
         </div>
       </Notice>
     );

@@ -1,7 +1,9 @@
 import { z } from 'zod';
-import { SessionState } from './entities.js';
+import { RunOutcome, SessionState } from './entities.js';
+import { RunDecision } from './build-runs.js';
 import { AgentId } from './events-common.js';
-import { OrchestrationRunId, SessionId, WorkspaceId } from './ids.js';
+import { OrchestrationRunId, RunId, SessionId, WorkspaceId } from './ids.js';
+import { TICKET_REF_PATTERN } from './planning-board.js';
 import { redactSecrets } from './secret-patterns.js';
 import { TeamRoster } from './team.js';
 import { IsoUtcTimestamp } from './time.js';
@@ -51,6 +53,18 @@ export const MANAGER_LIMITS = {
  */
 export const REVIEW_LIMITS = { maxQuestionChars: 600, maxResultChars: 1_500, maxMessageChars: 3_000 } as const;
 
+/**
+ * A build step the manager may propose (15.11): only a reference to a ticket and a short reason. Nothing about how to build: the person
+ * chooses that in the Build dialog.
+ */
+export const BUILD_STEP_LIMITS = { maxReasonChars: 200, maxSummaryChars: 1_200 } as const;
+
+/**
+ * The worker name a build step is stored under when Ogden is not told which agent builds (a stub). It is not an agent and is never sent
+ * anything: builds run on the build runner's one agent (epic 5, until epic 8 widens them), which a plan never names.
+ */
+export const ORCHESTRATION_BUILD_WORKER = 'build';
+
 /** What the manager may decide next. `dispatch` still needs the user's approval in the default mode (enforced by core). */
 export const DECISION_ACTIONS = ['dispatch', 'ask_user', 'done', 'stop'] as const;
 export const DecisionAction = z.enum(DECISION_ACTIONS);
@@ -85,6 +99,9 @@ export const MANAGER_REFUSAL_CODES = [
   'review_not_prerequisite',
   'reviewer_is_worker',
   'review_question_too_long',
+  'build_field_forbidden',
+  'build_ticket_unavailable',
+  'duplicate_build_ticket',
 ] as const;
 export const ManagerRefusalCode = z.enum(MANAGER_REFUSAL_CODES);
 export type ManagerRefusalCode = z.infer<typeof ManagerRefusalCode>;
@@ -121,6 +138,9 @@ export const MANAGER_REFUSAL_REASONS: Readonly<Record<ManagerRefusalCode, string
   review_not_prerequisite: 'A review step must wait for the step it reviews.',
   reviewer_is_worker: 'The reviewer must be a different agent from the one that did the work.',
   review_question_too_long: `A question for the reviewer can be at most ${REVIEW_LIMITS.maxQuestionChars} characters.`,
+  build_field_forbidden: 'A build step names only a ticket. How a build runs is for you to choose in the Build dialog, so the manager cannot name an agent, a mode, a sandbox or a flag.',
+  build_ticket_unavailable: 'The manager asked for a build of a ticket that is not on the board or is not ready to build now.',
+  duplicate_build_ticket: 'The manager asked for the same ticket to be built twice.',
 };
 
 export type ManagerCheck<T> = { ok: true; value: T } | { ok: false; code: ManagerRefusalCode; reason: string };
@@ -186,10 +206,33 @@ export const ManagerPlanStep = z.strictObject({
 });
 export type ManagerPlanStep = z.infer<typeof ManagerPlanStep>;
 
+/** A ticket as a plan names it: the board's own reference (`2.3`), nothing else. */
+export const ManagerBuildTicket = z.string().min(1).max(128).regex(TICKET_REF_PATTERN, BAD_REFERENCE);
+
+/**
+ * A build step (15.11): "Build ticket N", a proposal only. It carries the ticket and a short reason and nothing else: no worker, no chat, no
+ * instruction, no mode, and no field that names a build driver, agent, sandbox or flag (the schema is strict, so any such field is refused).
+ * Ogden checks the ticket against the board's tickets that are ready to build now; the person starts the build in the Build dialog.
+ */
+export const ManagerBuildStep = z.strictObject({
+  id: ManagerStepId,
+  build: z.strictObject({ ticket: ManagerBuildTicket }),
+  reason: line(BUILD_STEP_LIMITS.maxReasonChars),
+  depends_on: z.array(ManagerStepId).max(MANAGER_LIMITS.maxSteps),
+});
+export type ManagerBuildStep = z.infer<typeof ManagerBuildStep>;
+
+/** A step of a plan: an instruction for a worker, or a proposed build. */
+export const ManagerAnyStep = z.union([ManagerPlanStep, ManagerBuildStep]);
+export type ManagerAnyStep = z.infer<typeof ManagerAnyStep>;
+
+/** Whether a plan's step is a proposed build (it has no worker or instruction). */
+export const isManagerBuildStep = (step: ManagerAnyStep): step is ManagerBuildStep => 'build' in step;
+
 export const ManagerPlan = z.strictObject({
   version: z.literal(MANAGER_PLAN_VERSION),
   goal: line(MANAGER_LIMITS.maxGoalChars),
-  steps: z.array(ManagerPlanStep).min(1).max(MANAGER_LIMITS.maxSteps),
+  steps: z.array(ManagerAnyStep).min(1).max(MANAGER_LIMITS.maxSteps),
 });
 export type ManagerPlan = z.infer<typeof ManagerPlan>;
 
@@ -276,7 +319,27 @@ function exportable(schema: unknown): unknown {
 
 const jsonSchemaOf = (schema: z.ZodType): Readonly<Record<string, unknown>> => exportable(z.toJSONSchema(schema, { target: 'draft-7', io: 'input', unrepresentable: 'any' })) as Record<string, unknown>;
 
-export const MANAGER_PLAN_JSON_SCHEMA = jsonSchemaOf(ManagerPlan);
+/** The plan's schema for steps that go to workers, as the server is asked with it when no build may be proposed (nothing is ready to build). */
+const workPlanSchema = (): Readonly<Record<string, unknown>> => {
+  const base = jsonSchemaOf(ManagerPlan) as { properties: { steps: { items?: unknown } } };
+  base.properties.steps.items = jsonSchemaOf(ManagerPlanStep);
+  return base;
+};
+export const MANAGER_PLAN_JSON_SCHEMA = workPlanSchema();
+
+/**
+ * The plan's schema when a build may be proposed (15.11: some ticket is ready to build). A step is one object with the fields of either kind,
+ * only `id` and `depends_on` required (the subset has no `anyOf`), so the server's own check is looser here; Ogden's check refuses a step
+ * that mixes the two, names anything more or leaves out what its kind needs. Nothing in it names how to build.
+ */
+const planWithBuildsSchema = (): Readonly<Record<string, unknown>> => {
+  const base = jsonSchemaOf(ManagerPlan) as { properties: { steps: { items?: unknown } } };
+  const work = jsonSchemaOf(ManagerPlanStep) as { properties: Record<string, unknown> };
+  const build = jsonSchemaOf(ManagerBuildStep) as { properties: Record<string, unknown> };
+  base.properties.steps.items = { type: 'object', properties: { ...work.properties, ...build.properties }, required: ['id', 'depends_on'], additionalProperties: false };
+  return base;
+};
+export const MANAGER_PLAN_WITH_BUILDS_JSON_SCHEMA = planWithBuildsSchema();
 export const MANAGER_DECISION_JSON_SCHEMA = jsonSchemaOf(ManagerDecision);
 export const MANAGER_STATUS_JSON_SCHEMA = jsonSchemaOf(ManagerStatusReport);
 
@@ -309,19 +372,46 @@ const valueAt = (root: unknown, path: readonly PropertyKey[]): { found: boolean;
   return { found: current !== undefined, value: current };
 };
 
+/** Whether a step is a build step as far as its shape says: it holds a `build` object. A bare `build: "x"` is a worker step asking for something it may not (forbidden action). */
+const isBuildShaped = (step: unknown): boolean => isRecord(step) && isRecord(step.build);
+
+/**
+ * The issues of `error` with a step's union opened up (15.11): a step that holds `build` is judged as a build step, any other as a worker
+ * step, so the code names the problem of the kind the manager meant. `build` says the issue is inside a build step.
+ */
+function flattened(error: z.ZodError, value: unknown): Array<{ issue: z.core.$ZodIssue; path: PropertyKey[]; build: boolean }> {
+  const out: Array<{ issue: z.core.$ZodIssue; path: PropertyKey[]; build: boolean }> = [];
+  const walk = (issues: readonly z.core.$ZodIssue[], prefix: readonly PropertyKey[], build: boolean): void => {
+    for (const issue of issues) {
+      const path = [...prefix, ...issue.path];
+      if (issue.code === 'invalid_union') {
+        const here = valueAt(value, path).value;
+        const isBuild = isBuildShaped(here);
+        walk(issue.errors[isBuild ? 1 : 0] ?? issue.errors[0] ?? [], path, isBuild);
+      } else {
+        // Zod gives a lone failing branch's issues as they are, so whether this is a build step is read from the step itself.
+        const step = path[0] === 'steps' && typeof path[1] === 'number' ? valueAt(value, ['steps', path[1]]).value : undefined;
+        out.push({ issue, path, build: build || isBuildShaped(step) });
+      }
+    }
+  };
+  walk(error.issues, [], false);
+  return out;
+}
+
 /** The one refusal that best names why `value` failed `error`'s schema: extra keys first, then the version, then the rest in order. */
 function codeFor(error: z.ZodError, value: unknown): ManagerRefusalCode {
   let best: { rank: number; code: ManagerRefusalCode } | undefined;
   const consider = (rank: number, code: ManagerRefusalCode) => {
     if (best === undefined || rank < best.rank) best = { rank, code };
   };
-  for (const issue of error.issues) {
-    const path = issue.path;
+  for (const { issue, path, build } of flattened(error, value)) {
     const last = path.at(-1);
     const here = valueAt(value, path);
     if (issue.code === 'unrecognized_keys') {
-      const codes = issue.keys.map(extraKeyCode);
-      consider(0, codes.find((code) => code === 'forbidden_field') ?? codes.find((code) => code === 'forbidden_action') ?? 'unknown_field');
+      // Anything extra on a build step (or inside its `build`) is a try at naming how to build: a secret-like key is the worse of the two.
+      const codes = build ? issue.keys.map((key) => (FORBIDDEN_KEY.test(key) ? 'forbidden_field' : 'build_field_forbidden')) : issue.keys.map(extraKeyCode);
+      consider(0, codes.find((code) => code === 'forbidden_field') ?? codes.find((code) => code === 'forbidden_action') ?? codes.find((code) => code === 'build_field_forbidden') ?? 'unknown_field');
     } else if (!here.found) consider(3, 'missing_field');
     else if (last === 'version') consider(1, 'wrong_version');
     else if (last === 'mode') consider(2, 'mode_above_ask');
@@ -344,6 +434,13 @@ export interface ManagerPlanCheckContext {
   chats?: Readonly<Record<string, readonly string[]>> | undefined;
   /** The roster's reviewer (15.10): the agent id of a ready reviewer, or absent. Only a step with `review_of` may go to it as a review. */
   reviewer?: string | undefined;
+  /**
+   * The ticket refs on the board that are ready to build now (15.11), given by core. A build step may name only one of them; absent: none,
+   * so no build step is valid.
+   */
+  buildable?: readonly string[] | undefined;
+  /** The agent id builds run on (15.11), given by the server's wiring: a review of a build step must be by another agent where one is ready. Absent: not checked. */
+  builder?: string | undefined;
 }
 
 /** Whether any string inside `value` holds a secret (masking would change it): a manager never names one, so such a reply is refused. */
@@ -385,26 +482,43 @@ export function checkManagerPlan(value: unknown, context: ManagerPlanCheckContex
   const parsed = ManagerPlan.safeParse(value);
   if (!parsed.success) return refuse(codeFor(parsed.error, value));
   if (holdsSecret(parsed.data)) return refuse('forbidden_field');
-  if (parsed.data.steps.some((step) => !context.roster.includes(step.worker))) return refuse('off_roster_worker');
-  if (parsed.data.steps.some((step) => step.chat !== NEW_CHAT && !(context.chats?.[step.worker] ?? []).includes(step.chat))) return refuse('bad_reference');
+  const work = parsed.data.steps.filter((step): step is ManagerPlanStep => !isManagerBuildStep(step));
+  if (work.some((step) => !context.roster.includes(step.worker))) return refuse('off_roster_worker');
+  if (work.some((step) => step.chat !== NEW_CHAT && !(context.chats?.[step.worker] ?? []).includes(step.chat))) return refuse('bad_reference');
   const problem = linkProblem(parsed.data);
   if (problem !== undefined) return refuse(problem);
+  const buildProblem = buildStepProblem(parsed.data, context);
+  if (buildProblem !== undefined) return refuse(buildProblem);
   const reviewProblem = reviewLinkProblem(parsed.data, context);
   if (reviewProblem !== undefined) return refuse(reviewProblem);
   return { ok: true, value: parsed.data };
+}
+
+/** The first problem with a plan's build steps (15.11), or `undefined`: each ticket must be ready to build now, and named once. */
+function buildStepProblem(plan: ManagerPlan, context: ManagerPlanCheckContext): ManagerRefusalCode | undefined {
+  const seen = new Set<string>();
+  for (const step of plan.steps) {
+    if (!isManagerBuildStep(step)) continue;
+    if (!(context.buildable ?? []).includes(step.build.ticket)) return 'build_ticket_unavailable';
+    if (seen.has(step.build.ticket)) return 'duplicate_build_ticket';
+    seen.add(step.build.ticket);
+  }
+  return undefined;
 }
 
 /** The first problem with a plan's review steps (15.10), or `undefined`. */
 function reviewLinkProblem(plan: ManagerPlan, context: ManagerPlanCheckContext): ManagerRefusalCode | undefined {
   const byId = new Map(plan.steps.map((step) => [step.id, step]));
   for (const step of plan.steps) {
-    if (step.review_of === undefined) continue;
+    if (isManagerBuildStep(step) || step.review_of === undefined) continue;
     const reviewed = byId.get(step.review_of);
-    if (reviewed === undefined || reviewed.id === step.id || reviewed.review_of !== undefined || step.chat !== NEW_CHAT) return 'bad_review';
+    // A review of a build step is the review page's question (15.11): the build has no worker chat, and its builder is the build runner's agent.
+    if (reviewed === undefined || reviewed.id === step.id || (!isManagerBuildStep(reviewed) && reviewed.review_of !== undefined) || step.chat !== NEW_CHAT) return 'bad_review';
     if (context.reviewer === undefined || step.worker !== context.reviewer) return 'reviewer_not_rostered';
     if (!step.depends_on.includes(reviewed.id)) return 'review_not_prerequisite';
     // A different agent from the one that did the work, where another ready agent exists.
-    if (reviewed.worker === step.worker && context.roster.some((id) => id !== step.worker)) return 'reviewer_is_worker';
+    const worker = isManagerBuildStep(reviewed) ? context.builder : reviewed.worker;
+    if (worker === step.worker && context.roster.some((id) => id !== step.worker)) return 'reviewer_is_worker';
     if (step.instruction.length > REVIEW_LIMITS.maxQuestionChars) return 'review_question_too_long';
   }
   return undefined;
@@ -612,6 +726,12 @@ export const OrchestrationStep = z.object({
   sessionId: SessionId.nullable(),
   /** 15.10: the step whose result this step asks the reviewer about, or `null` for an ordinary step. */
   reviewOf: ManagerStepId.nullable().default(null),
+  /**
+   * 15.11: a proposed build. `ticketRef` is the ticket, `runId` the build run once the person started it in the Build dialog (and the page
+   * told Ogden which run it was); `null` for an ordinary step. A build step has no worker chat: `worker` is the agent builds run on,
+   * `chat` is `new`, `instruction` is the manager's short reason, and `sessionId` stays empty.
+   */
+  build: z.object({ ticketRef: ManagerBuildTicket, runId: RunId.nullable() }).nullable().default(null),
 });
 export type OrchestrationStep = z.infer<typeof OrchestrationStep>;
 
@@ -678,7 +798,21 @@ export const OrchestrationReviewTarget = z.discriminatedUnion('kind', [
 ]);
 export type OrchestrationReviewTarget = z.infer<typeof OrchestrationReviewTarget>;
 
+/**
+ * How a build step's run stands, read from the run (15.11): its outcome and what the person decided on the review page, and the counts of
+ * the end checks. Never a diff or a file.
+ */
+export const OrchestrationBuildRunView = z.object({
+  runId: RunId,
+  outcome: RunOutcome,
+  decision: RunDecision.nullable(),
+  checks: z.object({ passed: z.number().int().min(0), failed: z.number().int().min(0), notRun: z.number().int().min(0) }).nullable(),
+});
+export type OrchestrationBuildRunView = z.infer<typeof OrchestrationBuildRunView>;
+
 export const OrchestrationStepView = OrchestrationStep.extend({
+  /** For a build step whose build was started: the run as it stands now (15.11). */
+  buildRun: OrchestrationBuildRunView.nullable().optional(),
   /** For a review step whose reviewed step was sent: where to look at that result (15.10). */
   review: OrchestrationReviewTarget.nullable().optional(),
   /** The worker's name as the user knows it. */
@@ -715,6 +849,8 @@ export const OrchestrationWaiting = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('permission_card'), stepId: ManagerStepId, sessionId: SessionId }),
   z.object({ kind: z.literal('question'), question: z.string().min(1).max(MANAGER_LIMITS.maxQuestionChars) }),
   z.object({ kind: z.literal('interrupted'), stepId: ManagerStepId, sessionId: SessionId }),
+  /** 15.11: an automatic run is at a proposed build, which only the person starts, in the Build dialog. */
+  z.object({ kind: z.literal('build'), stepId: ManagerStepId, ticketRef: ManagerBuildTicket }),
 ]);
 export type OrchestrationWaiting = z.infer<typeof OrchestrationWaiting>;
 
@@ -944,6 +1080,43 @@ export const ORCHESTRATION_TOLD_WORDS = { denied: 'The manager was told the perm
 /** What a worker's summary says for a step a Deny or a refusal ended: Ogden's own words, handed to the manager as the step's result. */
 export const ORCHESTRATION_DENIED_RESULT = 'Ogden: the user denied a permission request for this step, so the step ended before it finished.';
 export const orchestrationRefusedResult = (words: string): string => `Ogden: the instruction was not sent. ${words}`;
+
+// ---- builds the manager proposes (15.11) ----
+
+/** What an automatic run says while it waits at a build step: it never starts a build on its own. */
+export const ORCHESTRATION_WAITING_BUILD_WORDS = 'Waiting for you to start the build. Open the Build dialog on the step to choose how it runs.';
+/** What the page says under a build step. */
+export const ORCHESTRATION_BUILD_STEP_NOTE = 'A build is only ever started by you, in the Build dialog, where you choose how it runs. The manager cannot start it.';
+export const orchestrationBuildTitle = (ticketRef: string): string => `Build ticket ${ticketRef}`;
+export const ORCHESTRATION_BUILD_BUTTON = 'Open the Build dialog';
+/** Said when a build step is approved, edited or sent like an instruction. */
+export const ORCHESTRATION_BUILD_STEP_WORDS = 'This step is a build. Only you start it, in the Build dialog.';
+export const ORCHESTRATION_BUILD_NOT_THIS_TICKET_MESSAGE = 'That build is not a build of this ticket in this project, or it was started before this plan, or another step already has it.';
+export const ORCHESTRATION_BUILD_LINK_FAILED = "Ogden could not tell the plan about the build. The build itself was started. Look for it in Runs.";
+
+/** What the person tells Ogden after the Build dialog started a build for a build step: the run the dialog started. */
+export const LinkOrchestrationBuildRequest = z.strictObject({ runId: RunId });
+export type LinkOrchestrationBuildRequest = z.infer<typeof LinkOrchestrationBuildRequest>;
+
+/**
+ * The summary of a build the manager (and a reviewer) reads (15.11): the outcome in plain words and the end checks' counts, capped and with
+ * secrets masked. Never a diff, a file or the agent's own output; the build's reason is Ogden's own sentence, cleaned and cut.
+ */
+export function buildSummaryText(input: { ticketRef: string; outcome: RunOutcome; decision: RunDecision | null; checks: OrchestrationBuildRunView['checks']; reason: string | null }): string {
+  const ended: Record<RunOutcome, string> = {
+    running: 'is still running',
+    verified: 'ended built and verified, ready for you to review (nothing is merged until you approve it)',
+    failed: 'failed',
+    blocked: 'is blocked',
+    stopped: 'was stopped',
+  };
+  const parts = [`Build of ticket ${input.ticketRef} ${ended[input.outcome]}.`];
+  if (input.checks !== null) parts.push(`End checks: ${input.checks.passed} passed, ${input.checks.failed} failed, ${input.checks.notRun} not run.`);
+  if (input.decision !== null) parts.push(`Your decision on the review page: ${input.decision}.`);
+  const reason = input.reason === null ? '' : redactSecrets(input.reason).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\p{Co}\p{Cn}]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+  if (reason !== '' && input.outcome !== 'verified') parts.push(`Reason: ${reason}`);
+  return redactSecrets(parts.join(' ')).slice(0, BUILD_STEP_LIMITS.maxSummaryChars);
+}
 
 // ---- the reviewer's question (15.10) ----
 

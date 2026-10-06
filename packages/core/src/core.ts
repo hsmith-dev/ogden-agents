@@ -4,6 +4,7 @@ import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detectio
 import { createLookBackOffers, type LookBackOffers } from './look-back-offers.js';
 import { createOrchestrationFeature, type OrchestrationFeature } from './orchestration-feature.js';
 import { createOrchestration, type Orchestration, type OrchestrationChat } from './orchestration.js';
+import type { BuildableTickets } from './orchestration-builds.js';
 import type { ManagerPort } from './manager-port.js';
 import { createManagerSource, type ManagerSource } from './manager-source.js';
 import { createTeam, type RosterContext, type Team } from './team-roster.js';
@@ -91,6 +92,10 @@ export interface Core {
     limits?: (() => RunLimits) | undefined;
     /** The time in milliseconds, for a run's time limit (a test's fake clock). Absent: the real clock. */
     clock?: (() => number) | undefined;
+    /** The board's tickets ready to build now (15.11), a read only list the manager may propose builds from. Absent: none. */
+    buildable?: BuildableTickets | undefined;
+    /** The agent id builds run on (15.11), from the server's wiring. */
+    builder?: string | undefined;
   }): Orchestration;
   /**
    * The install's orchestration defaults (15.8): the mode new projects are offered and the limits of every run, kept beside the

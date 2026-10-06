@@ -15,6 +15,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { startFakeServer } from '../fixtures/fake-openai-server.mjs';
+import { FAKE_BMAD_FILES, FAKE_BUILD_REPO_FILES, fixtureGit } from '../fixtures/fake-bmad-repo.ts';
+import { fixedSandbox } from '../fixtures/fixed-sandbox.ts';
+import { createPlanFileTicketStore } from '../fixtures/plan-file-ticket-store.ts';
 import { API_ROUTES, fakeSecondAgent, serverModule, startServer } from '../support.js';
 import { withChatServer } from './chat-server.js';
 import { openConnected, storedToken } from './tab.js';
@@ -756,5 +759,134 @@ test('the manager asks the roster\'s reviewer a bounded question about a worker\
       expect(direct.status).toBeGreaterThanOrEqual(400);
     },
     { extra: { manager: createMemoryManager({ plans: [plan] }), extraAgents: [await apiKeyWorker('fake-codex', 'Fake Codex'), await apiKeyWorker('fake-grok', 'Fake Grok')] } },
+  );
+});
+
+
+// ---- builds the manager proposes (epic 15, story 15.11) ----
+
+const BUILD_TICKETS = [{ ref: '1.1', title: 'Build the thing', plan: '_bmad-output/initiative-demo/epic-first/story-build-the-thing-plan.md' }];
+const BUILD_FILES = { ...FAKE_BMAD_FILES, '_bmad/config.toml': '[core]\noutput_folder = "{project-root}/_bmad-output"\n', ...FAKE_BUILD_REPO_FILES };
+const BUILD_STEP = { id: 'b1', build: { ticket: '1.1' }, reason: 'It is ready and has tests.', depends_on: [] as string[] };
+
+/** The project with real git, the board and Unattended builds on and trusted, and Orchestration on, through the REST API. */
+async function openBuildProject(page: Page, server: { url: string }, repo: string, settings: Record<string, unknown> = {}) {
+  fixtureGit(repo, 'init', '-q', '--initial-branch=main');
+  fixtureGit(repo, 'config', 'core.autocrlf', 'false');
+  fixtureGit(repo, 'config', 'user.name', 'Fixture');
+  fixtureGit(repo, 'config', 'user.email', 'fixture@example.com');
+  fixtureGit(repo, 'add', '-A');
+  fixtureGit(repo, 'commit', '-q', '--no-verify', '-m', 'The fixture');
+  const wsId = await addProject(page, repo);
+  const headers = { authorization: `Bearer ${(await storedToken(page))!}`, origin: server.url, 'content-type': 'application/json' };
+  const call = (method: string, path: string, body?: unknown) => fetch(`${server.url}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  expect((await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { orchestrationEnabled: true, bmadPieces: ['board', 'builds'], ...settings })).status).toBe(200);
+  expect((await call('PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }))).status).toBe(200);
+  const buildRuns = async () => ((await (await call('GET', apiPath(API_ROUTES.workspaceRuns, { wsId }))).json()) as { runs: Array<{ id: string; ticketRef: string; outcome: string; decision: string | null }> }).runs;
+  return { wsId, call, buildRuns };
+}
+
+test('a build the manager proposes starts nothing until the Build dialog is confirmed, then shows in Runs, reads back to the manager and still waits for the person\'s review', async ({ page }) => {
+  test.setTimeout(120_000);
+  const { createMemoryManager, createMemoryBmadSource } = await serverModule();
+  const manager = createMemoryManager({ plans: [{ version: 'ogden.manager.plan.v1', goal: 'Build the first ticket', steps: [BUILD_STEP, { id: 's2', worker: 'claude-code', chat: 'new', instruction: 'Summarise what was built.', mode: 'ask', depends_on: ['b1'] }] }] });
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const { wsId, buildRuns } = await openBuildProject(page, server, repo);
+      await page.goto(`${server.url}/w/${wsId}/orchestrate`);
+      await page.getByTestId('orchestrate-goal').fill('Build the first ticket');
+      await page.getByTestId('orchestrate-plan').click();
+
+      // The plan holds a proposed build of ticket 1.1, with the manager's short reason and nothing to approve, edit or send.
+      const build = row(page, 'b1');
+      await expect(build.getByTestId('orchestrate-step-build-badge')).toHaveText('Build ticket 1.1');
+      await expect(build.getByTestId('orchestrate-step-state')).toHaveText('Waiting for you to start the build');
+      await expect(build.getByTestId('orchestrate-step-instruction')).toHaveText('Why: It is ready and has tests.');
+      await expect(build.getByTestId('orchestrate-approve')).toHaveCount(0);
+      await expect(build.getByTestId('orchestrate-edit')).toHaveCount(0);
+      expect(await buildRuns()).toEqual([]);
+
+      // The button opens epic 5's Build dialog for the ticket. Closing it starts nothing.
+      await build.getByTestId('orchestrate-build-open').click();
+      const dialog = page.getByTestId('build-dialog');
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId('build-dialog-confirm-text')).toContainText('Nothing starts until you press a button here');
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      expect(await buildRuns()).toEqual([]);
+
+      // The dialog's own Build starts the build; the plan follows it to built.
+      await build.getByTestId('orchestrate-build-open').click();
+      await page.getByTestId('build-dialog-start').click();
+      await expect(dialog).toHaveCount(0);
+      await expect(build.getByTestId('orchestrate-step-state')).toHaveText('Built, ready for you to review', { timeout: 60_000 });
+      await expect(build.getByTestId('orchestrate-step-build-checks')).toHaveText('Checks: 3 passed, 0 failed, 0 not run.');
+      const runs = await buildRuns();
+      expect(runs).toHaveLength(1);
+      expect(runs[0]).toMatchObject({ ticketRef: '1.1', outcome: 'verified', decision: null });
+      // The manager read it back and suggests the next step; the person still has not approved anything.
+      await expect(page.getByTestId('orchestrate-decision')).toContainText('The manager suggests step s2 next');
+
+      // The run is in the Runs tab, and the review page is where the person decides.
+      await page.getByTestId('workspace-tab-runs').click();
+      const rowOfRun = page.locator('[data-testid="run-row"][data-ref="1.1"]');
+      await expect(rowOfRun).toHaveCount(1);
+      await page.goBack();
+      await build.getByTestId('orchestrate-step-build-review').click();
+      await expect(page.getByTestId('review-outcome')).toHaveText('Ready for review');
+      await expect(page.getByTestId('review-approve')).toBeVisible();
+      expect((await buildRuns())[0]!.decision).toBeNull();
+    },
+    { files: BUILD_FILES, extra: { manager, ticketStore: createPlanFileTicketStore(BUILD_TICKETS) as never, bmadSource: createMemoryBmadSource({ ready: true }), sandbox: fixedSandbox({ available: true, kind: 'test' }) } },
+  );
+});
+
+test('Dispatch automatically sends the work before a build and then waits for you to start the build, starting nothing itself', async ({ page }) => {
+  test.setTimeout(120_000);
+  const { createMemoryManager, createMemoryBmadSource } = await serverModule();
+  const manager = createMemoryManager({
+    plans: [{ version: 'ogden.manager.plan.v1', goal: 'Build the first ticket', steps: [{ id: 's1', worker: 'fake-codex', chat: 'new', instruction: 'Write the tests first.', mode: 'ask', depends_on: [] }, { ...BUILD_STEP, depends_on: ['s1'] }] }],
+  });
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const { wsId, buildRuns } = await openBuildProject(page, server, repo, { orchestrationRoster: rosterOf('fake-codex', 'fake-codex'), orchestrationMode: 'automatic', confirm: true });
+      await page.goto(`${server.url}/w/${wsId}/orchestrate`);
+      await page.getByTestId('orchestrate-goal').fill('Build the first ticket');
+      await page.getByTestId('orchestrate-plan').click();
+      // The first instruction went by itself; the run then waits at the build, with its plain reason, and nothing is built.
+      await expect(row(page, 's1').getByTestId('orchestrate-step-state')).toHaveText('Finished', { timeout: 30_000 });
+      await expect(page.getByTestId('orchestrate-waiting-words')).toHaveText('Waiting for you to start the build. Open the Build dialog on the step to choose how it runs.');
+      await expect(row(page, 'b1').getByTestId('orchestrate-step-state')).toHaveText('Waiting for you to start the build');
+      await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'awaiting_user');
+      await page.waitForTimeout(1500);
+      expect(await buildRuns()).toEqual([]);
+
+      // Only the dialog starts it.
+      await page.getByTestId('orchestrate-waiting-build-open').click();
+      await page.getByTestId('build-dialog-start').click();
+      await expect(row(page, 'b1').getByTestId('orchestrate-step-state')).toHaveText('Built, ready for you to review', { timeout: 60_000 });
+      expect(await buildRuns()).toHaveLength(1);
+    },
+    { files: BUILD_FILES, extra: { manager, ticketStore: createPlanFileTicketStore(BUILD_TICKETS) as never, bmadSource: createMemoryBmadSource({ ready: true }), sandbox: fixedSandbox({ available: true, kind: 'test' }), extraAgents: [await apiKeyWorker('fake-codex', 'Fake Codex')] } },
+  );
+});
+
+test('a plan that names how to build, or a ticket that is not ready, is refused with plain words and nothing is stored', async ({ page }) => {
+  const { createMemoryManager, createMemoryBmadSource } = await serverModule();
+  const manager = createMemoryManager({ plans: [{ version: 'ogden.manager.plan.v1', goal: 'Build', steps: [{ ...BUILD_STEP, agent: 'claude-code', mode: 'unattended' }] }] });
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const { wsId, buildRuns } = await openBuildProject(page, server, repo);
+      await page.goto(`${server.url}/w/${wsId}/orchestrate`);
+      await page.getByTestId('orchestrate-goal').fill('Build the first ticket');
+      await page.getByTestId('orchestrate-plan').click();
+      await expect(page.getByTestId('orchestrate-error')).toContainText('names only a ticket');
+      await expect(page.getByTestId('orchestrate-step')).toHaveCount(0);
+      expect(await buildRuns()).toEqual([]);
+    },
+    { files: BUILD_FILES, extra: { manager, ticketStore: createPlanFileTicketStore(BUILD_TICKETS) as never, bmadSource: createMemoryBmadSource({ ready: true }), sandbox: fixedSandbox({ available: true, kind: 'test' }) } },
   );
 });

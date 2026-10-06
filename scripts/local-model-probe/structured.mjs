@@ -4,7 +4,7 @@
 // constrained by a JSON schema, checks it itself, and walks a ladder when a server refuses:
 //   1. response_format json_schema (strict)   2. response_format json_object + schema in the prompt
 //   3. no response_format, schema in the prompt, tolerate a code fence
-import { startFakeServer } from './fake-openai-server.mjs';
+import { startFakeServer } from '../../tests/fixtures/fake-openai-server.mjs';
 
 const SCHEMA = { type: 'object', additionalProperties: false, required: ['verdict', 'reason'], properties: { verdict: { enum: ['fit', 'unfit'] }, reason: { type: 'string' } } };
 

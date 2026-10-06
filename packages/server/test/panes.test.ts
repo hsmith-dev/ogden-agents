@@ -254,7 +254,8 @@ describe("what the pane's program is given (E16-R2, AD-16)", () => {
       await waitFor(() => viewer.state.output.includes('secret-done'), 'the secret listing', 15_000);
       const { envNames, colorterm, term } = recordOf(setup);
       for (const name of Object.keys(sentinels)) expect(envNames, name).not.toContain(name);
-      expect(envNames).toEqual(expect.arrayContaining(process.platform === 'win32' ? ['PATH', 'COLORTERM'] : ['PATH', 'COLORTERM', 'TERM']));
+      // Windows spells it `Path`: names match without case there.
+      expect(envNames.map((name) => name.toUpperCase())).toEqual(expect.arrayContaining(process.platform === 'win32' ? ['PATH', 'COLORTERM'] : ['PATH', 'COLORTERM', 'TERM']));
       expect(colorterm).toBe('truecolor');
       // node-pty names the terminal for a POSIX program; a ConPTY program has no TERM.
       if (process.platform !== 'win32') expect(term).toBe('xterm-256color');

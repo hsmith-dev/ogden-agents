@@ -104,6 +104,12 @@ export interface AcpAgentQuirks {
    * and only then; `sessionMeta` is not used.
    */
   startOptions?: ((input: { permissionMode: PermissionMode; protectedPaths?: ProtectedPaths | undefined }) => AcpStartOptions) | undefined;
+  /**
+   * Plain words for a failed prompt, from the agent's own error text (read in memory only, never logged or shown),
+   * or `undefined` to say nothing more than the generic reason (epic 14: a model server that stopped, a full context).
+   * Not used for a sign in (`-32000`) or usage limit failure, which have their own.
+   */
+  failureReason?: ((text: string) => string | undefined) | undefined;
   /** The raw-input fields of its shell tools that hold the command a card shows, first found wins. Default `['command']`. */
   commandFields?: readonly string[] | undefined;
   /** How it is asked to run an installed skill (`AgentPort.skillInvocation`, story 4.1): its own command syntax; the shared client adds none. */

@@ -380,7 +380,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
         expect((await request(on.server, on.tab, method, path)).status, `${method} ${path}`).toBe(200);
         continue;
       }
-      const expected = path.endsWith('/retry') || path.endsWith('/stop') || path.endsWith(runId) ? 404 : 501;
+      const expected = path.endsWith('/retry') || path.endsWith('/stop') || path.endsWith('/check-again') || path.endsWith(runId) ? 404 : 501;
       expect((await refusalOf(await request(on.server, on.tab, method, path, method === 'GET' ? undefined : {}))).status, `${method} ${path}`).toBe(expected);
     }
     expect(await refusalOf(await request(on.server, on.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: on.wsId }), { agent: 'codex', ref: '1.1' }))).toEqual({ status: 400, code: 'invalid_request', message: UNKNOWN_BUILD_AGENT_MESSAGE });

@@ -343,12 +343,14 @@ describe('Plan and Board routes (story 4.1)', () => {
       module: null,
       installedAt: null,
       next: { skill: 'bmad-ticket', label: 'Turn this spec into tickets' },
+      scope: null,
+      nexts: [],
     });
     expect(catalogBody.skills.find((skill) => skill.name === 'bmad-help')).toMatchObject({ description: 'Fake BMad help skill.', label: null });
     expect(catalogBody.entryAction).toBeNull();
     expect(catalogBody.modules).toEqual([]);
     // The fixture's config script defines `load_central_config` (entry 4.11), so it has the ticket tree.
-    expect(catalogBody.capabilities).toEqual({ plain_labels: true, ticket_tree: true });
+    expect(catalogBody.capabilities).toEqual({ plain_labels: true, ticket_tree: true, look_back: false });
 
     // Unknown and malformed skills create nothing.
     const unknown = await request(server, tab, 'POST', start, { skill: 'bmad-nothing' });
@@ -651,7 +653,7 @@ describe.skipIf(uvMissing)('the board through real uv and the verified pinned ti
     const { tickets, problems, folder, epics } = TicketsResponse.parse(JSON.parse(text));
     expect(problems).toEqual([]);
     expect(folder).toBe('initiative-demo');
-    expect(epics).toEqual([{ slug: 'epic-first', id: 1, status: '', after: [], blocks: [] }]);
+    expect(epics).toEqual([{ slug: 'epic-first', id: 1, status: '', after: [], blocks: [], retrospective: null }]);
     const rest = { file: null, tracker_id: '', assignee: '', hitl: false, covers: [], blocked_at: '' };
     expect(tickets).toEqual([
       { ref: '1.1', id: 1, epic: 'epic-first', title: 'Build the first thing', type: 'story', status: 'in-review', state: 'review', blocked_reason: '', ...rest, after: [], blocks: [2] },

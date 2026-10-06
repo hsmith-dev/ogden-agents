@@ -19,7 +19,7 @@ const inside = (folder: string, path: string): boolean => {
 export interface PanesWiringOptions {
   options: Pick<StartOptions, 'paneShell' | 'paneLaunchers'>;
   hooks: Pick<TestHooks, 'paneShell' | 'panePath'>;
-  core: Pick<Core, 'entities' | 'installSettings' | 'events' | 'paneStore'>;
+  core: Pick<Core, 'entities' | 'installSettings' | 'events' | 'paneStore' | 'terminalsSettings'>;
   /** The data folder: the pids of the panes' programs are recorded in it. */
   dataDir: string;
   terminal: TerminalPort;
@@ -65,8 +65,12 @@ export function createPanesWiring({ options, hooks, core, terminal, onError, onS
     events: core.events,
     terminal,
     shell,
-    // The allowlist and nothing else (AD-16): no key, no token, no Ogden switch. Proxies and the SSH agent stay off until the user opts in (story 16.9).
-    env: () => paneEnvironment(),
+    // The allowlist and nothing else (AD-16): no key, no token, no Ogden switch. Proxies and the SSH agent only when the user opted in (Settings, Terminals), read at each start.
+    env: () => {
+      const settings = core.terminalsSettings.get();
+      return paneEnvironment({ proxies: settings.passProxies, sshAgent: settings.passSshAgent });
+    },
+    notifyLaunchers: () => core.terminalsSettings.get().notifyLaunchers,
     onError,
   });
 }

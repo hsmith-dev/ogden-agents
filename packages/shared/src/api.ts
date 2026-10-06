@@ -534,6 +534,14 @@ export const API_ROUTES = {
    * only (403); install wide, not a project's.
    */
   terminalLaunchers: `${API_BASE}/terminals/launchers`,
+  /**
+   * `GET` → `TerminalsSettingsResponse`; `PUT UpdateTerminalsSettingsRequest`
+   * → the same (epic 16, story 16.9): the install's Terminals settings
+   * (notifications per launcher, what the pane environment adds on request,
+   * each launcher's own arguments, hiding the surface). Developer mode only
+   * (403); the proxies and the SSH agent are opt in here, off by default.
+   */
+  terminalSettings: `${API_BASE}/settings/terminals`,
   /** `PUT ArrangePanesRequest` → `PanesResponse` (epic 16, story 16.4): the project's layout arrangement. 400 unless it is the same panes, each once. Developer mode only. */
   workspacePaneLayout: `${API_BASE}/workspaces/:wsId/pane-layout`,
   /** `PATCH UpdatePaneRequest` → `PaneResponse` (stories 16.4, 16.8): rename a pane and/or turn its notifications on or off. `DELETE` → 204 (epic 16): closes the pane and stops its process tree. Developer mode only. 404 for another workspace's pane. */

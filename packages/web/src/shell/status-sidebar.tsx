@@ -1,4 +1,5 @@
-import { Bell, FolderSimplePlus, GearSix, HandWaving, Hammer, Info, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
+import { useDeveloperModeOn } from '@/appearance/appearance-provider';
+import { Bell, FolderSimplePlus, GearSix, HandWaving, Hammer, Info, PaintBrush, Plus, Robot, TerminalWindow, Wrench } from '@phosphor-icons/react';
 import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -332,6 +333,8 @@ const SessionRow = memo(function SessionRow({
 /** Settings sections: Agents (9.1), Appearance, New projects (10.4), Notifications (backlog story 8; webhooks join it with builds) and Tools, and Welcome again (9.5). */
 function SettingsMenu() {
   const { setSheetOpen } = useSidebar();
+  // Terminals settings are Developer mode's (epic 16): a simple user never sees the entry (AD-21).
+  const developerMode = useDeveloperModeOn();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -372,6 +375,14 @@ function SettingsMenu() {
             Notifications
           </Link>
         </DropdownMenuItem>
+        {developerMode ? (
+          <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
+            <Link to={'/settings/terminals' as '/settings/tools'} data-testid="settings-terminals">
+              <TerminalWindow aria-hidden />
+              Terminals
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
           <Link to="/settings/tools">
             <Wrench aria-hidden />

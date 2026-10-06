@@ -227,3 +227,66 @@ describe('review findings (16.7)', () => {
     expect(boot(core).panes.list(workspace.id).map((p) => p.id)).toEqual(ids);
   });
 });
+
+describe('Developer mode off with running panes (story 16.9)', () => {
+  it('counts the running ones, stops them by default, and keeps them running when the user chose to', async () => {
+    const { core, workspace } = setup();
+    const booted = boot(core);
+    const stopped = await booted.panes.open(workspace.id, SIZE);
+    await booted.panes.open(workspace.id, SIZE);
+    expect(booted.panes.runningCount()).toBe(2);
+    booted.fake.processes[1]!.exit(0);
+    expect(booted.panes.runningCount()).toBe(1);
+    booted.panes.keepRunningOnNextDeveloperModeOff();
+    core.installSettings.setDeveloperMode(false);
+    // Kept: nothing was killed, nobody is fed, nothing is reachable.
+    expect(booted.fake.processes[0]!.kills()).toBe(0);
+    const viewerGate = () => booted.panes.attach(stopped.id);
+    expect(viewerGate).toThrow();
+    core.installSettings.setDeveloperMode(true);
+    expect(booted.panes.list(workspace.id).find((p) => p.id === stopped.id)!.state).not.toBe('stopped');
+    expect(booted.panes.runningCount()).toBe(1);
+    // The next time it is turned off without that choice, they stop.
+    core.installSettings.setDeveloperMode(false);
+    expect(booted.fake.processes[0]!.kills()).toBe(1);
+    expect(booted.panes.runningCount()).toBe(0);
+  });
+
+  it('a keystroke at a kept pane after Developer mode went off is refused without stopping it', async () => {
+    const { core, workspace } = setup();
+    const booted = boot(core);
+    const pane = await booted.panes.open(workspace.id, SIZE);
+    const viewer = booted.panes.attach(pane.id)!;
+    booted.panes.keepRunningOnNextDeveloperModeOff();
+    core.installSettings.setDeveloperMode(false);
+    viewer.write('x');
+    expect(booted.fake.processes[0]!.writes).toEqual([]);
+    expect(booted.fake.processes[0]!.kills()).toBe(0);
+  });
+
+  it('a keep closes the open viewers, and a viewer that attaches after it gets nothing', async () => {
+    const { core, workspace } = setup();
+    const booted = boot(core);
+    const pane = await booted.panes.open(workspace.id, SIZE);
+    const early = booted.panes.attach(pane.id)!;
+    const late = booted.panes.attach(pane.id)!;
+    let closed = 0;
+    early.onClose(() => void (closed += 1));
+    booted.panes.keepRunningOnNextDeveloperModeOff();
+    core.installSettings.setDeveloperMode(false);
+    expect(closed).toBe(1);
+    const fed: string[] = [];
+    late.attach(() => fed.push('snapshot'), () => fed.push('data'));
+    expect(fed).toEqual([]);
+  });
+
+  it('a keep that was cleared again (the save failed) does not decide a later stop', async () => {
+    const { core, workspace } = setup();
+    const booted = boot(core);
+    await booted.panes.open(workspace.id, SIZE);
+    booted.panes.keepRunningOnNextDeveloperModeOff();
+    booted.panes.keepRunningOnNextDeveloperModeOff(false);
+    core.installSettings.setDeveloperMode(false);
+    expect(booted.fake.processes[0]!.kills()).toBe(1);
+  });
+});

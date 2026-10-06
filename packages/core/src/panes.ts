@@ -100,6 +100,14 @@ export interface Panes {
   attach(paneId: PaneId): PaneViewer | undefined;
   /** How many panes are open now (every project). */
   count(): number;
+  /** How many panes' programs are running now (not stopped, not ended). */
+  runningCount(): number;
+  /**
+   * Developer mode is about to be turned off and the user chose to keep running
+   * panes going (story 16.9): the next change leaves them running in the
+   * background until the server stops, instead of stopping them.
+   */
+  keepRunningOnNextDeveloperModeOff(keep?: boolean): void;
   /** Stops every pane's program and what it started (the server stopping, Developer mode turned off); the panes stay, `stopped`. */
   closeAll(cause?: 'user' | 'developer_mode_off' | 'server_stopped'): void;
   /** {@link closeAll}, and stops following Developer mode. */
@@ -184,7 +192,8 @@ export function createPanes(options: PanesOptions): Panes {
   /** Developer mode checked again on what a live viewer does; off, every pane is stopped (never typed into) and kept. */
   const developerModeOn = (entry: Entry): boolean => {
     if (installSettings.developerMode()) return true;
-    stopAll('developer_mode_off');
+    // Kept running by the user's choice: refused, but not stopped.
+    if (!keeping) stopAll('developer_mode_off');
     return false;
   };
   const safely = (fn: () => void) => {
@@ -407,14 +416,31 @@ export function createPanes(options: PanesOptions): Panes {
     }
   }
 
+  /** The user chose to keep running panes going when Developer mode is turned off (read once, by the next change). */
+  let keepOnce = false;
+  /** Developer mode is off and the running panes were kept. */
+  let keeping = false;
   let unfollow: (() => void) | undefined;
   if (events !== undefined) {
-    // Developer mode turned off: no pane may keep running unseen (story 16.9 asks the user what to do).
+    // Developer mode turned off: the user chose to stop the running panes or to keep them running in the background (story 16.9).
     unfollow = events.subscribe(events.lastSeq(), (event) => {
+      if (event.type === 'settings.developer_mode_changed' && event.payload.developerMode) keeping = false;
       if (event.type === 'settings.developer_mode_changed' && !event.payload.developerMode) {
         deferring = [];
         try {
-          closeAll('developer_mode_off');
+          if (keepOnce) {
+            // Kept: the programs run on (until the server stops), unseen: no viewer is fed, and nothing is reachable without Developer mode.
+            keepOnce = false;
+            keeping = true;
+            for (const entry of entries.values()) {
+              // Open sockets are closed (a page reconnects when Developer mode is on again), so none is left unfed or fed unseen.
+              for (const viewer of [...entry.viewers]) {
+                viewer.unbind?.();
+                viewer.unbind = undefined;
+                for (const listener of [...viewer.closes]) safely(listener);
+              }
+            }
+          } else closeAll('developer_mode_off');
         } finally {
           const held = deferring;
           deferring = undefined;
@@ -624,6 +650,7 @@ export function createPanes(options: PanesOptions): Panes {
           return entry.size;
         },
         attach(onSnapshot, onData) {
+          if (!developerModeOn(entry)) return;
           viewer.feed = { onSnapshot, onData };
           bind(entry, viewer);
         },
@@ -665,6 +692,10 @@ export function createPanes(options: PanesOptions): Panes {
     },
 
     count: () => entries.size,
+    runningCount: () => [...entries.values()].filter((entry) => entry.pane.state === 'starting' || entry.pane.state === 'running').length,
+    keepRunningOnNextDeveloperModeOff(keep = true) {
+      keepOnce = keep;
+    },
     closeAll,
     dispose() {
       disposed = true;

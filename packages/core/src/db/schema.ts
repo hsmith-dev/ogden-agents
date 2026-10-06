@@ -362,6 +362,12 @@ export const localEndpointSettings = sqliteTable('local_endpoint_settings', {
   defaultEndpointId: text('default_endpoint_id'),
 });
 
+/** The install's Terminals settings (epic 16, story 16.9): one row of JSON, written on first change. Never terminal output. */
+export const terminalsSettings = sqliteTable('terminals_settings', {
+  id: integer('id').primaryKey(),
+  settings: text('settings').notNull(),
+});
+
 /**
  * Notification webhooks (story 11.4): one row per webhook the user added. Only
  * its id, its host as it may be shown (masked) and the events it gets; the URL

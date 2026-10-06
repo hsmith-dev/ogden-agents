@@ -15,7 +15,7 @@
  * - What a pane prints and what is typed into it is never logged, evented or
  *   stored here (AD-6, AD-16); only a pane's state changes and why.
  */
-import type { Pane, PaneId, PaneState, TerminalUnavailableCode, WorkspaceId } from '@ogden-agents/shared';
+import type { NewCoreEvent, Pane, PaneId, PaneState, TerminalUnavailableCode, WorkspaceId } from '@ogden-agents/shared';
 import { MAX_PANES_PER_INSTALL, MAX_PANES_PER_PROJECT, MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS } from '@ogden-agents/shared';
 import type { TerminalSize } from './chat/types.js';
 import type { Entities } from './entities.js';
@@ -77,7 +77,7 @@ export interface Panes {
   /** How many panes are open now (every project). */
   count(): number;
   /** Stops every pane and its program (the server stopping, Developer mode turned off). */
-  closeAll(): void;
+  closeAll(cause?: 'user' | 'developer_mode_off' | 'server_stopped'): void;
   /** {@link closeAll}, and stops following Developer mode. */
   dispose(): void;
 }
@@ -85,8 +85,8 @@ export interface Panes {
 export interface PanesOptions {
   entities: Pick<Entities, 'getWorkspace'>;
   installSettings: Pick<InstallSettings, 'developerMode'>;
-  /** The log, followed for Developer mode turning off. Without it panes are stopped only by the server. */
-  events?: Pick<EventLog, 'subscribe' | 'lastSeq'> | undefined;
+  /** The log: followed for Developer mode turning off, and given the pane events (state only, never a pane's text). */
+  events?: Pick<EventLog, 'subscribe' | 'lastSeq' | 'append'> | undefined;
   /** Without a terminal port (or one without `openPane`) no pane can open. */
   terminal: TerminalPort | undefined;
   /** The program a plain shell pane runs: the user's own shell, by absolute path. */
@@ -116,7 +116,11 @@ interface Entry {
   size: TerminalSize;
   viewers: Set<ViewerEntry>;
   closed: boolean;
+  /** Whether `pane_opened` was appended: only then is a `pane_closed` (a pane never announced is never retracted). */
+  announced: boolean;
 }
+
+type PaneClosedCause = 'user' | 'developer_mode_off' | 'server_stopped';
 
 const clamp = (value: number, max: number) => Math.min(Math.max(Math.floor(value), 1), max);
 
@@ -135,7 +139,7 @@ export function createPanes(options: PanesOptions): Panes {
   /** Developer mode checked again on what a live viewer does; off, the pane is stopped (never typed into). */
   const developerModeOn = (entry: Entry): boolean => {
     if (installSettings.developerMode()) return true;
-    forget(entry);
+    forget(entry, 'developer_mode_off');
     return false;
   };
   const safely = (fn: () => void) => {
@@ -150,6 +154,17 @@ export function createPanes(options: PanesOptions): Panes {
     return terminal.available();
   };
 
+  /** Appends a pane event (state only); a failure never reaches the pane. */
+  let deferring: NewCoreEvent[] | undefined;
+  const emit = (event: NewCoreEvent) => {
+    if (events === undefined) return;
+    // Inside an event listener the log would deliver a nested append before the event being delivered: held until the listener is done.
+    if (deferring !== undefined) {
+      deferring.push(event);
+      return;
+    }
+    safely(() => void events.append(event));
+  };
   const setState = (entry: Entry, state: PaneState, exitCode: number | null = null) => {
     if (entry.pane.state === state && entry.pane.exitCode === exitCode) return;
     entry.pane = { ...entry.pane, state, exitCode };
@@ -203,7 +218,10 @@ export function createPanes(options: PanesOptions): Panes {
     });
     process.onExit(({ exitCode }) => {
       // A program replaced by Restart pane (or closed) reports its end too: only the current one counts.
-      if (entry.process === process && !entry.closed) setState(entry, 'exited', exitCode);
+      if (entry.process === process && !entry.closed) {
+        setState(entry, 'exited', exitCode);
+        emit({ type: 'terminal.pane_exited', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, exitCode } });
+      }
     });
     for (const viewer of entry.viewers) bind(entry, viewer);
   };
@@ -214,10 +232,11 @@ export function createPanes(options: PanesOptions): Panes {
     return entry;
   };
 
-  const forget = (entry: Entry) => {
+  const forget = (entry: Entry, cause: PaneClosedCause = 'user') => {
     if (entry.closed) return;
     entry.closed = true;
     entries.delete(entry.pane.id);
+    if (entry.announced) emit({ type: 'terminal.pane_closed', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, cause } });
     const process = entry.process;
     entry.process = undefined;
     process?.kill();
@@ -228,15 +247,27 @@ export function createPanes(options: PanesOptions): Panes {
     }
   };
 
-  const closeAll = () => {
-    for (const entry of [...entries.values()]) forget(entry);
+  const closeAll = (cause: PaneClosedCause = 'server_stopped') => {
+    for (const entry of [...entries.values()]) forget(entry, cause);
   };
 
   let unfollow: (() => void) | undefined;
   if (events !== undefined) {
     // Developer mode turned off: no pane may keep running unseen (story 16.9 asks the user what to do).
     unfollow = events.subscribe(events.lastSeq(), (event) => {
-      if (event.type === 'settings.developer_mode_changed' && !event.payload.developerMode) closeAll();
+      if (event.type === 'settings.developer_mode_changed' && !event.payload.developerMode) {
+        deferring = [];
+        try {
+          closeAll('developer_mode_off');
+        } finally {
+          const held = deferring;
+          deferring = undefined;
+          // After this delivery finished, so every subscriber hears the settings event first and in order.
+          queueMicrotask(() => {
+            for (const heldEvent of held) emit(heldEvent);
+          });
+        }
+      }
     });
   }
 
@@ -270,17 +301,21 @@ export function createPanes(options: PanesOptions): Panes {
         size: { cols: clamp(size.cols, MAX_TERMINAL_COLS), rows: clamp(size.rows, MAX_TERMINAL_ROWS) },
         viewers: new Set(),
         closed: false,
+        announced: false,
       };
       // The slot is taken before the program starts.
       entries.set(entry.pane.id, entry);
       try {
         await start(entry, entry.size);
       } catch (error) {
+        // It never opened: no event, only the viewers that found it meanwhile are let go.
         forget(entry);
         throw error;
       }
-      // Closed while it started (closed by the user, Developer mode turned off, the server stopping): nothing is left running.
+      // Closed while it started (closed by the user, Developer mode turned off, the server stopping): nothing is left running, and nothing was announced.
       if (entry.closed) throw new NotFoundError('pane', entry.pane.id);
+      entry.announced = true;
+      emit({ type: 'terminal.pane_opened', workspaceId, streamId: workspaceId, payload: { paneId: entry.pane.id, launcherId: entry.pane.launcherId, title: entry.pane.title } });
       return entry.pane;
     },
 
@@ -304,7 +339,10 @@ export function createPanes(options: PanesOptions): Panes {
         await start(entry, { cols: clamp(size.cols, MAX_TERMINAL_COLS), rows: clamp(size.rows, MAX_TERMINAL_ROWS) });
       } catch (error) {
         // It could not start again: the pane stays, stopped, so Restart can be tried once more.
-        if (!entry.closed) setState(entry, 'exited');
+        if (!entry.closed) {
+          setState(entry, 'exited');
+          emit({ type: 'terminal.pane_exited', workspaceId, streamId: workspaceId, payload: { paneId, exitCode: null } });
+        }
         throw error;
       }
       if (entry.closed) throw new NotFoundError('pane', paneId);

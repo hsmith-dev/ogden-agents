@@ -87,9 +87,16 @@ describe('the orchestration mode', () => {
 });
 
 describe('the team roster', () => {
-  it('stores each role, appends one event with the roster before and after, and reads it back', () => {
+  /** An endpoint the user set up (a model must sit on one). */
+  const addEndpoint = async (core: ReturnType<typeof openTestCore>) => {
+    const values = new Map<string, string>();
+    const secrets = { values, backend: 'memory' as const, get: async (name: string) => values.get(name), set: async (name: string, value: string) => void values.set(name, value), delete: async (name: string) => void values.delete(name) };
+    return (await core.localEndpoints(secrets).add({ label: 'My Mac', baseUrl: 'http://localhost:1234/v1' })).id;
+  };
+
+  it('stores each role, appends one event with the roster before and after, and reads it back', async () => {
     const { core, workspace } = setUp();
-    const roster = { manager: { kind: 'model', endpointId: ENDPOINT, model: 'a-model' }, worker: { kind: 'agent', agentId: 'some-agent' } };
+    const roster = { manager: { kind: 'model', endpointId: await addEndpoint(core), model: 'a-model' }, worker: { kind: 'agent', agentId: 'some-agent' } };
     const before = core.events.lastSeq();
     const saved = core.permissions.updateSettings(workspace.id, { orchestrationRoster: roster });
     expect(saved.orchestrationRoster).toEqual({ manager: roster.manager, planner: null, worker: roster.worker, reviewer: null });
@@ -109,6 +116,30 @@ describe('the team roster', () => {
     expect(() => core.permissions.updateSettings(workspace.id, { orchestrationRoster: { manager: 'the local one' } })).toThrow(ValidationError);
     expect(() => core.permissions.updateSettings(workspace.id, { orchestrationRoster: { worker: { kind: 'agent', agentId: 'other-agent' } } })).toThrow(UnknownAgentError);
     expect(core.permissions.updateSettings(workspace.id, { orchestrationRoster: { worker: { kind: 'agent', agentId: 'known-agent' } } }).orchestrationRoster?.worker).toEqual({ kind: 'agent', agentId: 'known-agent' });
+    expect(core.events.lastSeq()).toBe(before + 1);
+  });
+});
+
+describe('the manager role (story 15.4)', () => {
+  const addEndpoint = async (core: ReturnType<typeof openTestCore>) => {
+    const values = new Map<string, string>();
+    const secrets = { values, backend: 'memory' as const, get: async (name: string) => values.get(name), set: async (name: string, value: string) => void values.set(name, value), delete: async (name: string) => void values.delete(name) };
+    return (await core.localEndpoints(secrets).add({ label: 'My Mac', baseUrl: 'http://localhost:1234/v1' })).id;
+  };
+
+  it('is a model on a server the user has set up, never an agent, and writes nothing when refused', async () => {
+    const { core, workspace } = setUp();
+    const endpointId = await addEndpoint(core);
+    const before = core.events.lastSeq();
+    expect(() => core.permissions.updateSettings(workspace.id, { orchestrationRoster: { manager: { kind: 'agent', agentId: 'claude-code' } } })).toThrow(ValidationError);
+    try {
+      core.permissions.updateSettings(workspace.id, { orchestrationRoster: { manager: { kind: 'agent', agentId: 'claude-code' } } });
+    } catch (error) {
+      expect((error as Error).message).toBe('The manager must be a model on one of your servers, not an agent.');
+    }
+    expect(() => core.permissions.updateSettings(workspace.id, { orchestrationRoster: { manager: { kind: 'model', endpointId: ENDPOINT, model: 'a-model' } } })).toThrow('Choose a model on a server you have set up.');
+    // Another role may hold an agent; a model on a real server may take any role.
+    expect(core.permissions.updateSettings(workspace.id, { orchestrationRoster: { manager: { kind: 'model', endpointId, model: 'a-model' }, reviewer: { kind: 'agent', agentId: 'claude-code' } } }).orchestrationRoster?.manager).toEqual({ kind: 'model', endpointId, model: 'a-model' });
     expect(core.events.lastSeq()).toBe(before + 1);
   });
 });

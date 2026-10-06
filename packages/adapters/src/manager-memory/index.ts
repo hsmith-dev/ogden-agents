@@ -8,6 +8,7 @@
  * it plans one step per ready worker, in order, and dispatches them in turn.
  */
 import {
+  MANAGER_FAILURE_WORDS,
   validateDecisionFor,
   validatePlanFor,
   type ManagerContext,
@@ -28,15 +29,7 @@ export interface MemoryManagerScript {
   failWith?: ManagerFailureKind | undefined;
 }
 
-const WORDS: Readonly<Record<ManagerFailureKind, string>> = {
-  malformed: 'The manager did not answer in the shape Ogden needs.',
-  off_roster: 'The manager named an agent that is not on this team.',
-  too_large: 'The manager sent back far more than a plan needs.',
-  too_slow: 'The manager took too long to answer.',
-  context_too_small: "The manager's model cannot hold what it needs to read.",
-  host_not_confirmed: 'You have not confirmed this manager yet.',
-  unavailable: 'The manager is not available right now.',
-};
+const WORDS = MANAGER_FAILURE_WORDS;
 
 const failure = (kind: ManagerFailureKind): ManagerFailure => ({ ok: false, kind, reason: WORDS[kind] });
 

@@ -244,7 +244,7 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
     );
   };
   const localModels = createLocalModels({ onModels: rememberLocalModels, endpoints: localEndpoints(), port: localModelPort, detectPort: options.localModelPort ?? createOpenAiLocalModel({ timeoutMs: DETECT_PROBE_TIMEOUT_MS }) });
-  return { localModels, localEndpoints: localEndpoints(), claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
+  return { localModels, localModelPort, localEndpoints: localEndpoints(), claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
 }
 
 /**

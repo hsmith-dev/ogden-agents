@@ -36,7 +36,7 @@ import { readBmadPieces } from './bmad-pieces.js';
 import { readOrchestrationEnabled } from './orchestration-feature.js';
 import { readScriptsTrusted } from './bmad-script-trust.js';
 import type { Database, Orm } from './db/database.js';
-import { workspaces } from './db/schema.js';
+import { localEndpoints, workspaces } from './db/schema.js';
 import { ConfirmationRequiredError, DeveloperModeRequiredError, FeatureUnavailableError, NotFoundError, OrchestrationUnavailableError, UnknownAgentError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 
@@ -246,6 +246,10 @@ const orchestrationFields = (enabled: boolean, mode: OrchestrationMode, roster: 
   ...(sameRoster(roster, TeamRosterSchema.parse({})) ? {} : { orchestrationRoster: roster }),
 });
 
+/** The message refusing a manager that is an agent. */
+const ROSTER_MANAGER_IS_A_MODEL = 'The manager must be a model on one of your servers, not an agent.';
+/** The message refusing a model on a server the user has not set up. */
+const ROSTER_UNKNOWN_ENDPOINT = 'Choose a model on a server you have set up.';
 /** The message refusing a roster that names an agent this install doesn't have. */
 const ROSTER_UNKNOWN_AGENT = 'Choose agents this install has for each role.';
 
@@ -380,6 +384,14 @@ export function createWorkspaceSettings({
         const parsed = TeamRosterSchema.safeParse(input.orchestrationRoster);
         if (!parsed.success) throw new ValidationError('Choose who takes each role: an agent, or a model.', [{ path: ['orchestrationRoster'], message: 'not a roster' }]);
         for (const assignee of Object.values(parsed.data)) if (assignee?.kind === 'agent' && !isAgentRegistered(assignee.agentId)) throw new UnknownAgentError(ROSTER_UNKNOWN_AGENT);
+        // The manager is a model, never an agent (E15: it is a tool-free call, not a coding agent).
+        if (parsed.data.manager?.kind === 'agent') throw new ValidationError(ROSTER_MANAGER_IS_A_MODEL, [{ path: ['orchestrationRoster', 'manager'], message: 'not a model' }]);
+        // A model sits on a server the user has set up (15.4); whether it is confirmed is checked when it is called.
+        for (const [role, assignee] of Object.entries(parsed.data)) {
+          if (assignee?.kind === 'model' && orm.select({ id: localEndpoints.id }).from(localEndpoints).where(eq(localEndpoints.id, assignee.endpointId)).get() === undefined) {
+            throw new ValidationError(ROSTER_UNKNOWN_ENDPOINT, [{ path: ['orchestrationRoster', role], message: 'no such server' }]);
+          }
+        }
         orchestrationRoster = parsed.data;
       }
       if (

@@ -13,13 +13,14 @@
 import { z } from 'zod';
 import { AgentId } from './events-common.js';
 import { assigned, onWorkspaceStream } from './events-envelope.js';
-import { SessionId, OrchestrationRunId } from './ids.js';
+import { SessionId, OrchestrationRunId, RunId } from './ids.js';
 import {
   Approver,
   DecisionOutcome,
   DispatchRefusalReason,
   ManagerDecision,
   ManagerFailureKind,
+  ManagerBuildTicket,
   ManagerGoal,
   ManagerInstruction,
   ManagerReason,
@@ -224,6 +225,18 @@ export const OrchestrationRunResumedInput = z.object({
 export const OrchestrationRunResumedEvent = OrchestrationRunResumedInput.extend(assigned);
 export type OrchestrationRunResumedEvent = z.infer<typeof OrchestrationRunResumedEvent>;
 
+export const OrchestrationBuildLinkedInput = z.object({
+  type: z.literal('orchestration.build_linked'),
+  ...onWorkspaceStream,
+  payload: z.object({ ...step, ticketRef: ManagerBuildTicket, buildRunId: RunId }),
+});
+/**
+ * The person started a build in the Build dialog and the plan's build step now follows that run (15.11). It is the person's own action:
+ * the step was never approved or sent by the manager, and no event of this run starts a build.
+ */
+export const OrchestrationBuildLinkedEvent = OrchestrationBuildLinkedInput.extend(assigned);
+export type OrchestrationBuildLinkedEvent = z.infer<typeof OrchestrationBuildLinkedEvent>;
+
 /** Every orchestration event's input, for `NewCoreEvent`. */
 export const ORCHESTRATION_INPUTS = [
   OrchestrationRunStartedInput,
@@ -244,4 +257,5 @@ export const ORCHESTRATION_INPUTS = [
   OrchestrationDecisionMadeInput,
   OrchestrationQuestionAnsweredInput,
   OrchestrationRunResumedInput,
+  OrchestrationBuildLinkedInput,
 ] as const;

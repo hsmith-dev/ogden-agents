@@ -1,6 +1,7 @@
 import {
   API_ROUTES,
   apiPath,
+  ORCHESTRATION_BUILD_LINK_FAILED,
   OrchestrationRunResponse,
   OrchestrationRunsResponse,
   OrchestrationSettingsResponse,
@@ -70,6 +71,15 @@ export async function answerOrchestrationQuestion(wsId: string, runId: string, a
   return OrchestrationRunResponse.parse(json).run;
 }
 
+/**
+ * `POST …/steps/:stepId/build` (15.11): after the Build dialog started a build for a build step, tells the plan which run it was. It starts
+ * nothing: the dialog's own start already did, and the server checks the run is a build of the step's ticket in this project.
+ */
+export async function linkOrchestrationBuild(wsId: string, runId: string, stepId: string, buildRunId: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStepBuild, { wsId, runId, stepId }), postJson({ runId: buildRunId }), ORCHESTRATION_BUILD_LINK_FAILED);
+  return OrchestrationRunResponse.parse(json).run;
+}
+
 /** `POST …/stop`: Stop. The run ends and a worker turn in flight is cancelled. */
 export async function stopOrchestrationRun(wsId: string, runId: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStop, { wsId, runId }), { method: 'POST' }, "The run couldn't be stopped");
@@ -92,7 +102,8 @@ export function useOrchestrationRuns(wsId: string) {
   useEventInvalidation((event) => {
     if (event.workspaceId !== wsId) return [];
     // A run's own events, and the worker chat's state changes, which the read-back reports.
-    if (event.type.startsWith('orchestration.') || event.type === 'session.state_changed') return [['orchestration-runs', wsId]];
+    // A build a step follows (15.11) changes through its run's events.
+    if (event.type.startsWith('orchestration.') || event.type === 'session.state_changed' || event.type.startsWith('run.')) return [['orchestration-runs', wsId]];
     return [];
   });
   return useQuery({ queryKey: ['orchestration-runs', wsId], queryFn: () => fetchOrchestrationRuns(wsId), retry: false });

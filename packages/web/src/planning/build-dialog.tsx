@@ -1,8 +1,11 @@
 import {
   ATTENDED_EXPLAINED_TEXT,
+  BUILD_DIALOG_CONFIRM_BUTTON,
+  BUILD_DIALOG_CONFIRM_TEXT,
   BUILD_DIALOG_LOAD_FAILED,
   BUILD_DIALOG_READY_TEXT,
   BUILD_DIALOG_TITLE,
+  buildDialogConfirmTitle,
   DOCKER_INSTALL_URL,
   DOCKER_READY_BUT_UNSUPPORTED_TEXT,
   NO_INSTALL_FOR_YOU_TEXT,
@@ -32,14 +35,21 @@ import { fetchBuildSandbox, startBuild } from './builds-api';
  * yourself) and **Build with me watching** (an attended build: every command
  * asks you first). On Windows the server puts building with you watching
  * first, and focus lands on the first choice you can use.
+ *
+ * Epic 15, 15.11: the Orchestrate page opens the same dialog for a build the manager proposed (`confirm`). Then it says plainly that nothing
+ * starts until a button here is pressed, and with a sandbox ready it offers **Build** (an unattended build, the same `POST /builds` the
+ * board's Build sends) next to Build with me watching. The dialog's own start is the only way that build starts, and it tells the page which
+ * run it started.
  */
 export interface BuildDialogProps {
   wsId: string;
   /** The ticket the Build was for. */
   ticketRef: string;
   onClose: () => void;
-  /** The attended build started: its session. */
-  onStarted: (sessionId: string) => void;
+  /** The build started (attended, or unattended in `confirm`): its session, and its run. */
+  onStarted: (sessionId: string, runId: string) => void;
+  /** Opened for a build the manager proposed (15.11): the person confirms it here, whether or not a sandbox is ready. */
+  confirm?: boolean;
 }
 
 /** What each probe found, one plain line (a usable sandbox needs no line: the dialog would not be open). */
@@ -57,24 +67,24 @@ function ProbeList({ probes }: { probes: readonly SandboxProbe[] }) {
   );
 }
 
-export function BuildDialog({ wsId, ticketRef, onClose, onStarted }: BuildDialogProps) {
+export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = false }: BuildDialogProps) {
   const sandbox = useQuery({ queryKey: ['build-sandbox', wsId], queryFn: () => fetchBuildSandbox(wsId), retry: false, staleTime: 0, gcTime: 0 });
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<string | undefined>();
   const status: SandboxStatus | undefined = sandbox.data;
   // Until the server answers (or when it cannot), the entry's own order; a failed read never blocks building with you watching.
   const ready = status?.available === true;
-  const choices: readonly SandboxChoice[] = ready ? [] : status === undefined || status.choices.length === 0 ? SANDBOX_CHOICES : status.choices;
+  const choices: readonly SandboxChoice[] = ready ? (confirm ? ['attended'] : []) : status === undefined || status.choices.length === 0 ? SANDBOX_CHOICES : status.choices;
   const dockerReady = status?.probes.some((probe) => probe.kind === 'docker' && probe.state === 'detected') === true;
 
-  const buildAttended = () => {
+  const begin = (mode: 'attended' | 'unattended') => {
     if (starting) return;
     setStarting(true);
     setFailure(undefined);
-    startBuild(wsId, ticketRef, 'attended').then(
-      ({ session }) => {
+    startBuild(wsId, ticketRef, mode).then(
+      ({ session, run }) => {
         setStarting(false);
-        onStarted(session.id);
+        onStarted(session.id, run.id);
         onClose();
       },
       (error: unknown) => {
@@ -83,6 +93,7 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted }: BuildDialog
       },
     );
   };
+  const buildAttended = () => begin('attended');
 
   const choice = (id: SandboxChoice) => {
     const label = SANDBOX_CHOICE_LABELS[id];
@@ -131,7 +142,12 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted }: BuildDialog
 
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <DialogContent title={BUILD_DIALOG_TITLE} description={`Building ${ticketRef}.`} data-testid="build-dialog">
+      <DialogContent title={confirm && ready ? buildDialogConfirmTitle(ticketRef) : BUILD_DIALOG_TITLE} description={`Building ${ticketRef}.`} data-testid="build-dialog" data-confirm={confirm ? 'true' : undefined}>
+        {confirm ? (
+          <Text variant="body" data-testid="build-dialog-confirm-text">
+            {BUILD_DIALOG_CONFIRM_TEXT}
+          </Text>
+        ) : null}
         {sandbox.isPending ? (
           <Skeleton className="h-10 w-full" />
         ) : status === undefined ? (
@@ -156,7 +172,12 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted }: BuildDialog
             {failure}
           </Notice>
         )}
-        {ready ? <Text variant="body" data-testid="build-dialog-ready">{BUILD_DIALOG_READY_TEXT}</Text> : null}
+        {ready && !confirm ? <Text variant="body" data-testid="build-dialog-ready">{BUILD_DIALOG_READY_TEXT}</Text> : null}
+        {ready && confirm ? (
+          <Button type="button" variant="primary" aria-disabled={starting || undefined} onClick={() => begin('unattended')} data-testid="build-dialog-start">
+            {BUILD_DIALOG_CONFIRM_BUTTON}
+          </Button>
+        ) : null}
         <ul className="m-0 flex list-none flex-col gap-3 p-0" aria-label="Choices" data-testid="build-dialog-choices">
           {choices.map(choice)}
         </ul>

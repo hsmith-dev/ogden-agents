@@ -160,7 +160,7 @@ describe('a review step in a plan', () => {
     ]);
     expect(kit.shared.plans[0]!.reviewer).toBe('grok');
     const planned = kit.core.events.readAfter(0).find((event) => event.type === 'orchestration.plan_proposed');
-    expect(planned?.type === 'orchestration.plan_proposed' && planned.payload.plan.steps[1]!.review_of).toBe('s1');
+    expect(planned?.type === 'orchestration.plan_proposed' && (planned.payload.plan.steps[1] as { review_of?: string }).review_of).toBe('s1');
   });
 
   it('is refused when the reviewer is not ready or not the one on the roster: the run fails with the manager refused and nothing is stored', async () => {
@@ -323,7 +323,7 @@ describe('the reviewer is an ordinary worker chat', () => {
     const last = kit.shared.contexts.at(-1)!;
     expect(last.lastReport).toMatchObject({ step_id: 's2', truncated: true });
     expect(last.lastReport!.summary).not.toContain('sk-ant');
-    expect(last.plan.steps[1]!.review_of).toBe('s1');
+    expect((last.plan.steps[1] as { review_of?: string }).review_of).toBe('s1');
     const input = buildManagerInput('decision', last, 100_000, 0);
     expect(input.ok && input.input.prompt).toContain('a review of s1');
     // The manager suggests the next step; nothing was approved, merged or marked.

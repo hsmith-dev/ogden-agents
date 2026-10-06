@@ -452,6 +452,10 @@ export const orchestrationSteps = sqliteTable(
     sessionId: text('session_id'),
     /** The step whose result this step asks the reviewer about (15.10); NULL for an ordinary step. */
     reviewOf: text('review_of'),
+    /** The board reference of a proposed build's ticket (15.11); NULL for an ordinary step. */
+    buildRef: text('build_ref'),
+    /** The build run the person started in the Build dialog for this step (15.11); NULL until then. */
+    buildRunId: text('build_run_id'),
   },
   (t) => [primaryKey({ columns: [t.runId, t.stepId] })],
 );

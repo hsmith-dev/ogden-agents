@@ -45,7 +45,7 @@ describe('review_of on a plan step', () => {
   it('accepts a review of an earlier step by the rostered reviewer, a different agent, as a prerequisite with a short question', () => {
     const checked = checkManagerPlan(plan(step('s1', 'codex'), step('s2', 'grok', { review_of: 's1', depends_on: ['s1'], instruction: 'Is the change safe?' })), context);
     expect(checked.ok).toBe(true);
-    if (checked.ok) expect(checked.value.steps[1]!.review_of).toBe('s1');
+    if (checked.ok) expect((checked.value.steps[1] as { review_of?: string }).review_of).toBe('s1');
   });
 
   it('refuses a review step for any worker but the rostered reviewer, and when no reviewer is ready', () => {

@@ -7,6 +7,7 @@ import {
   approveOrchestrationStep,
   dispatchOrchestrationStep,
   editOrchestrationStep,
+  linkOrchestrationBuild,
   reorderOrchestrationSteps,
   skipOrchestrationStep,
   startOrchestrationRun,
@@ -16,6 +17,7 @@ import {
 } from '@/orchestrate/orchestrate-api';
 import { useOrchestrationActivity } from '@/orchestrate/mode-api';
 import { OrchestrateView } from '@/orchestrate/orchestrate-view';
+import { BuildDialog } from '@/planning/build-dialog';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
@@ -96,6 +98,8 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
   const run = listed === undefined ? fresh : fresh === undefined || fresh.run.id === listed.run.id || fresh.run.createdAt <= listed.run.createdAt ? listed : fresh;
 
   const [stopping, setStopping] = useState(false);
+  // The Build dialog, open for a build step (15.11): the person confirms the build there and nowhere else.
+  const [building, setBuilding] = useState<{ stepId: string; ticketRef: string } | undefined>(undefined);
 
   /** Runs one request and shows what came back or why it was refused; resolves true when it was kept. */
   const act = (work: () => Promise<OrchestrationRunView>): Promise<boolean> => {
@@ -143,6 +147,17 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
   }
   if (settings.data === undefined) return null;
   return (
+    <>
+    {building === undefined || run === undefined ? null : (
+      <BuildDialog
+        wsId={wsId}
+        ticketRef={building.ticketRef}
+        confirm
+        onClose={() => setBuilding(undefined)}
+        // The dialog started the build; the plan is only told which run it was (the server checks it is a build of this ticket).
+        onStarted={(_sessionId, buildRunId) => void act(() => linkOrchestrationBuild(wsId, run.run.id, building.stepId, buildRunId))}
+      />
+    )}
     <OrchestrateView
       wsId={wsId}
       managerReady={settings.data.managerReady === true}
@@ -156,6 +171,7 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
       activityError={activity.error instanceof Error ? activity.error.message : undefined}
       onStart={(goal) => void act(() => startOrchestrationRun(wsId, goal))}
       onStop={() => (run === undefined ? undefined : stop(run.run.id))}
+      onOpenBuild={(stepId, ticketRef) => setBuilding({ stepId, ticketRef })}
       onEdit={(stepId, instruction) => (run === undefined ? Promise.resolve(false) : act(() => editOrchestrationStep(wsId, run.run.id, stepId, instruction)))}
       onSkip={(stepId) => (run === undefined ? undefined : void act(() => skipOrchestrationStep(wsId, run.run.id, stepId)))}
       onReorder={(order) => (run === undefined ? undefined : void act(() => reorderOrchestrationSteps(wsId, run.run.id, order)))}
@@ -171,5 +187,6 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
       onAnswer={(answer) => (run === undefined ? Promise.resolve(false) : act(() => answerOrchestrationQuestion(wsId, run.run.id, answer)))}
       onSend={(stepId) => (run === undefined ? undefined : void act(() => dispatchOrchestrationStep(wsId, run.run.id, stepId)))}
     />
+    </>
   );
 }

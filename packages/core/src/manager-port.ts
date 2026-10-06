@@ -61,6 +61,13 @@ export interface ManagerContext {
    * review; absent means no review step is allowed.
    */
   reviewer?: string | undefined;
+  /**
+   * The board's tickets that are ready to build now (15.11): the only ones a plan may propose a build for. Absent or empty: no build step
+   * is valid. Titles are the board's own text, so the input treats them as data.
+   */
+  buildable?: ReadonlyArray<{ ref: string; title: string }> | undefined;
+  /** The agent id builds run on (15.11), so a review of a build step is checked against it. Absent: not checked. */
+  builder?: string | undefined;
   /** The last step's capped, masked report; absent before the first step. */
   lastReport?: ManagerStatusReport | undefined;
 }
@@ -148,7 +155,7 @@ export const readyWorkerIds = (context: Pick<ManagerContext, 'workers'>): string
 
 /** `value` as a plan for `context`, or the failure to return instead. The one check a manager's answer passes through. */
 export function validatePlanFor(context: ManagerContext, value: unknown): ManagerResult<ManagerPlan> {
-  const checked = checkManagerPlan(value, { roster: readyWorkerIds(context), chats: Object.fromEntries(context.workers.map((worker) => [worker.agentId, worker.chats.map((chat) => chat.sessionId)])), reviewer: context.reviewer });
+  const checked = checkManagerPlan(value, { roster: readyWorkerIds(context), chats: Object.fromEntries(context.workers.map((worker) => [worker.agentId, worker.chats.map((chat) => chat.sessionId)])), reviewer: context.reviewer, buildable: context.buildable?.map((ticket) => ticket.ref), builder: context.builder });
   return checked.ok ? { ok: true, value: checked.value } : { ok: false, kind: failureKindFor(checked.code), code: checked.code, reason: checked.reason };
 }
 

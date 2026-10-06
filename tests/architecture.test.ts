@@ -890,3 +890,90 @@ describe('E15: the manager and the reviewer have no path to approve, merge or ma
     ]);
   });
 });
+
+/**
+ * E15 (story 15.11): a build is started only by the person, in epic 5's Build dialog, and by no orchestration code. The orchestration
+ * use-case, the manager's code, the read of the board's ready tickets, the server's orchestration routes and the Orchestrate page's code name
+ * none of the builds' start use-cases (`start`, `startAll`), their request and response types, the builds route or the web client's start
+ * calls. The page opens the dialog (`BuildDialog`), whose own start path is the board's `POST /builds`; the plan is only told which run the
+ * dialog started, by a route that records a run and starts none.
+ */
+const ORCHESTRATION_BUILD_READ = /(^|[\\/])packages[\\/]core[\\/]src[\\/]orchestration-builds\.ts$/;
+const BUILD_STARTS = /\b(startBuild|startBuildAll|workspaceBuilds|createBuilds|StartBuildRequest|AllReadyBuildsResponse|BuildResponse|startAll|buildsStart|builds\.start|\.startLocked)\b/;
+export function findBuildStartReaches(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    if (!ORCHESTRATION_USE_CASE.test(path) && !MANAGER_CODE.test(path) && !ORCHESTRATION_ROUTES.test(path) && !ORCHESTRATE_PAGE.test(path) && !ORCHESTRATION_BUILD_READ.test(path)) continue;
+    for (const match of withoutComments(source).matchAll(new RegExp(BUILD_STARTS.source, 'g'))) violations.push(`${path}: names ${match[1]} (E15: a build is started only in the Build dialog, never by orchestration)`);
+  }
+  return violations;
+}
+
+describe('E15: a build is started only in the Build dialog (story 15.11)', () => {
+  it('no orchestration code, route or page names a way to start a build', () => {
+    const files = loadWorkspaceSources();
+    expect(files.some((file) => ORCHESTRATION_BUILD_READ.test(file.path))).toBe(true);
+    expect(files.some((file) => ORCHESTRATION_USE_CASE.test(file.path))).toBe(true);
+    expect(files.some((file) => ORCHESTRATION_ROUTES.test(file.path))).toBe(true);
+    expect(files.filter((file) => ORCHESTRATE_PAGE.test(file.path)).length).toBeGreaterThan(3);
+    expect(findBuildStartReaches(files)).toEqual([]);
+  });
+
+  it('the page opens the Build dialog and calls no start of its own, and the dialog is the one place a plan\'s build starts', () => {
+    const files = loadWorkspaceSources();
+    const page = files.find((file) => /workspace-orchestrate-page\.tsx$/.test(file.path))!.source;
+    expect(page).toMatch(/import \{ BuildDialog \} from '@\/planning\/build-dialog'/);
+    expect(page).toContain('confirm');
+    expect(page).not.toMatch(/builds-api|startBuild/);
+    // Only the dialog and the board's own Build button call the web client's start.
+    const callers = files.filter((file) => /packages[\\/]web[\\/]src[\\/]/.test(file.path) && /\bstartBuild(All)?\(/.test(withoutComments(file.source)) && !/builds-api\.ts$/.test(file.path)).map((file) => file.path.replace(/\\/g, '/'));
+    expect(callers.sort()).toEqual(['packages/web/src/planning/board-tickets.tsx', 'packages/web/src/planning/build-dialog.tsx']);
+  });
+
+  it('the one plan route about a build only records a run: it takes a run id, names no ticket, agent or mode, and the use-case never reads a builds start', () => {
+    const files = loadWorkspaceSources();
+    const useCase = files.find((file) => ORCHESTRATION_USE_CASE.test(file.path))!.source;
+    expect(useCase).toContain('LinkOrchestrationBuildRequest');
+    const link = useCase.slice(useCase.indexOf('async linkBuild('), useCase.indexOf('async answerQuestion('));
+    expect(link.length).toBeGreaterThan(200);
+    // It reads the run table and writes the step; it makes no run, session or chat.
+    expect(link).not.toMatch(/createRun|createSession|createChatSession|sendMessage|insert\(runsTable\)|update\(runsTable\)/);
+    const routes = files.find((file) => ORCHESTRATION_ROUTES.test(file.path))!.source;
+    expect(routes).toContain('workspaceOrchestrationStepBuild');
+    expect(routes).not.toMatch(/API_ROUTES\.workspaceBuild/);
+  });
+
+  it('the plan\'s build steps are never approved, edited or sent: the use-case refuses each before anything else', () => {
+    const useCase = loadWorkspaceSources().find((file) => ORCHESTRATION_USE_CASE.test(file.path))!.source;
+    for (const [name, marker] of [
+      ['dispatchStep', 'async dispatchStep('],
+      ['approveStep', 'async approveStep('],
+      ['editStep', 'async editStep('],
+      ['approveByMode', 'const approveByMode ='],
+    ] as const) {
+      const body = useCase.slice(useCase.indexOf(marker), useCase.indexOf(marker) + 1800);
+      expect(body, name).toMatch(/buildRef !== null/);
+    }
+    // The automatic engine waits for the person at a build, whatever the mode.
+    expect(useCase).toMatch(/if \(next\.buildRef !== null\) return waitForUser/);
+  });
+
+  it('flags a planted start of a build in the use-case, the manager code, the routes or the page', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration.ts', source: "// builds.start( is only words here\nawait builds.start(ws, { ref });" },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/model-manager.ts', source: 'await builds.startAll(ws, { all: true });' },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration-builds.ts', source: 'const made = createBuilds(deps);' },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/orchestration-routes.ts', source: 'app.post(API_ROUTES.workspaceBuilds, handler);' },
+      { pkg: '@ogden-agents/web', path: 'packages/web/src/orchestrate/orchestrate-api.ts', source: "import { startBuild } from '@/planning/builds-api';" },
+      { pkg: '@ogden-agents/web', path: 'packages/web/src/planning/build-dialog.tsx', source: 'startBuild(wsId, ticketRef);' },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/build-routes.ts', source: 'builds.startAll(a, b);' },
+    ];
+    expect(findBuildStartReaches(files)).toEqual([
+      'packages/core/src/orchestration.ts: names builds.start (E15: a build is started only in the Build dialog, never by orchestration)',
+      'packages/core/src/model-manager.ts: names startAll (E15: a build is started only in the Build dialog, never by orchestration)',
+      'packages/core/src/orchestration-builds.ts: names createBuilds (E15: a build is started only in the Build dialog, never by orchestration)',
+      'packages/server/src/orchestration-routes.ts: names workspaceBuilds (E15: a build is started only in the Build dialog, never by orchestration)',
+      'packages/web/src/orchestrate/orchestrate-api.ts: names startBuild (E15: a build is started only in the Build dialog, never by orchestration)',
+    ]);
+  });
+});

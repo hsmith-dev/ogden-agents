@@ -68,7 +68,16 @@ import {
   ORCHESTRATION_REVIEW_QUESTION_TOO_LONG_MESSAGE,
   REVIEW_LIMITS,
   buildReviewMessage,
+  buildSummaryText,
+  blockedSentence,
+  CHECKPOINT_BLOCKED_CODES,
+  isManagerBuildStep,
   isReviewMessageFor,
+  LinkOrchestrationBuildRequest,
+  ORCHESTRATION_BUILD_WORKER,
+  ORCHESTRATION_BUILD_NOT_THIS_TICKET_MESSAGE,
+  type OrchestrationBuildRunView,
+  type ManagerAnyStep,
   type OrchestrationReviewTarget,
   type ManagerStatusView,
   type ManagerDecision,
@@ -95,6 +104,7 @@ import type { ManagerSource } from './manager-source.js';
 import { isSubscription, type Team } from './team-roster.js';
 import type { Chat } from './chat/types.js';
 import { newId } from './ids.js';
+import type { BuildableTickets } from './orchestration-builds.js';
 
 /** What the use-case needs of the chat: the same calls the chat page makes, nothing else. */
 export type OrchestrationChat = Pick<Chat, 'chatAgents' | 'createChatSession' | 'sendMessage' | 'getSession' | 'listSessions' | 'renameSession' | 'removeQueuedMessage' | 'cancel'>;
@@ -145,6 +155,13 @@ export interface Orchestration {
    */
   activity(workspaceId: WorkspaceId): Promise<OrchestrationActivityEntry[]>;
   /**
+   * The user tells the plan which build the Build dialog started for a build step (15.11). Starts nothing: the build already exists. The run
+   * must be a build of the step's ticket in this project, started after this orchestration run began and not linked to another step
+   * ({@link ValidationError} otherwise); the step must still be waiting with what it needs done ({@link StepNotProposedError}) in an open run
+   * ({@link RunNotOpenError}). From then on the step follows the build run.
+   */
+  linkBuild(workspaceId: WorkspaceId, runId: string, stepId: string, request: unknown): Promise<OrchestrationRunView>;
+  /**
    * The user answers the manager's question (15.9). The answer is masked, kept as `orchestration.question_answered` and goes to the manager
    * as data with the next decision. {@link NoQuestionPendingError} when the run is not waiting for an answer, {@link RunNotOpenError} for an
    * ended run, {@link ValidationError} for bad text or a secret.
@@ -177,6 +194,10 @@ export interface OrchestrationOptions {
   limits?: (() => RunLimits) | undefined;
   /** The time in milliseconds, for a run's time limit (a test's fake clock). Absent: the real clock. */
   clock?: (() => number) | undefined;
+  /** The board's tickets ready to build now (15.11), a read only list. Absent: none, so the manager cannot propose a build. */
+  buildable?: BuildableTickets | undefined;
+  /** The agent id builds run on (15.11), from the server's wiring: core names none. Used to name a build step's worker and to keep a build's reviewer another agent. */
+  builder?: string | undefined;
 }
 
 /** The words when the project's team has no worker that can be given an instruction now. */
@@ -226,12 +247,13 @@ const stepOf = (row: StepRow): OrchestrationStep =>
     approvedBy: row.approvedBy,
     sessionId: row.sessionId,
     reviewOf: row.reviewOf,
+    build: row.buildRef === null ? null : { ticketRef: row.buildRef, runId: row.buildRunId },
   });
 
 /** Whether `content` is the instruction a step sent: the text itself, or for a review step the message core built from its question. */
 const sentAs = (content: string, instruction: string, reviewed: boolean): boolean => content === instruction || (reviewed && isReviewMessageFor(content, instruction.slice(0, REVIEW_LIMITS.maxQuestionChars)));
 
-export function createOrchestration({ db, events, feature, chat, manager: fixedManager, managers, team, limits: runLimits, clock }: OrchestrationOptions): Orchestration {
+export function createOrchestration({ db, events, feature, chat, manager: fixedManager, managers, team, limits: runLimits, clock, buildable, builder }: OrchestrationOptions): Orchestration {
   const { orm } = db;
   const nowMs = clock ?? Date.now;
   const now = () => new Date(nowMs()).toISOString();
@@ -434,9 +456,75 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
    */
   const reviewTargetOf = (runId: string, reviewedStepId: string): OrchestrationReviewTarget | null => {
     const reviewed = orm.select().from(orchestrationSteps).where(and(eq(orchestrationSteps.runId, runId), eq(orchestrationSteps.stepId, reviewedStepId))).get();
+    // A build step (15.11) is looked at on the review page of its ticket, once the build was started; it has no worker chat.
+    if (reviewed !== undefined && reviewed.buildRef !== null) return reviewed.buildRunId === null ? null : { kind: 'build_review', ticketRef: reviewed.buildRef };
     if (reviewed === undefined || reviewed.sessionId === null) return null;
     const build = orm.select({ ticketRef: runsTable.ticketRef }).from(runsTable).where(eq(runsTable.sessionId, reviewed.sessionId)).get();
     return build === undefined ? { kind: 'worker_chat', sessionId: reviewed.sessionId as SessionId } : { kind: 'build_review', ticketRef: build.ticketRef };
+  };
+
+  /**
+   * Settles a sent step once (the first read that sees it finished or failed): the step moves, `result_read` is appended with the report, and
+   * the run goes on, finishes, or fails as the step says. Read again inside the transaction, so two reads never settle it twice. Returns
+   * whether this call settled it.
+   */
+  const settleStep = (workspaceId: WorkspaceId, run: RunRow, stepId: string, to: 'done' | 'failed', report: ManagerStatusReport): boolean =>
+    events.transaction(() => {
+      const current = requireStep(run.id, stepId);
+      if (current.state !== 'dispatched' || !canMoveStep('dispatched', to)) return false;
+      orm.update(orchestrationSteps).set({ state: to }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, stepId))).run();
+      events.append({ type: 'orchestration.result_read', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], report } });
+      const runId = run.id as OrchestrationRun['id'];
+      const states = stepsOf(run.id).map((other) => other.state);
+      // A run the user stopped (or that ended another way) stays as it is: the step settles, the run is not moved again.
+      const runNow = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
+      if (runNow === undefined || isRunOver(runNow.state as OrchestrationRunState)) return true;
+      if (to === 'failed') {
+        // A failed step is final and nothing is retried yet, so the run stops here, plainly.
+        moveRun(run.id, 'failed', 'worker_error');
+        events.append({ type: 'orchestration.run_stopped', workspaceId, streamId: workspaceId, payload: { runId, reason: 'worker_error' } });
+      } else if (states.every((state) => state === 'done' || state === 'skipped')) {
+        moveRun(run.id, 'finished');
+        events.append({ type: 'orchestration.run_finished', workspaceId, streamId: workspaceId, payload: { runId } });
+      } else if (!states.includes('dispatched')) moveRun(run.id, 'awaiting_user');
+      return true;
+    });
+
+  // ---- builds the manager proposed (15.11): read only here; a build is started only by the user, in the Build dialog ----
+
+  /** The latest end checks of a build run: counts only (never output), or `null` when none ran. */
+  const checksOf = (workspaceId: WorkspaceId, sessionId: SessionId): OrchestrationBuildRunView['checks'] => {
+    const page = events.readBefore(workspaceId, events.lastSeq() + 1, REPLY_WINDOW, sessionId);
+    for (let at = page.events.length - 1; at >= 0; at--) {
+      const event = page.events[at]!;
+      if (event.type !== 'run.verification_completed') continue;
+      const results = event.payload.verification.checks.map((check) => check.result);
+      return { passed: results.filter((result) => result === 'pass').length, failed: results.filter((result) => result === 'fail').length, notRun: results.filter((result) => result === 'not_run').length };
+    }
+    return null;
+  };
+
+  /** A build run as the page and the manager read it, or `undefined` when it is not a run of this ticket in this project. */
+  const buildRunOf = (workspaceId: WorkspaceId, ticketRef: string, buildRunId: string): { view: OrchestrationBuildRunView; blockedCode: string | null; reason: string | null } | undefined => {
+    const row = orm.select().from(runsTable).where(eq(runsTable.id, buildRunId)).get();
+    if (row === undefined || row.workspaceId !== workspaceId || row.ticketRef !== ticketRef) return undefined;
+    const reason = row.outcome === 'blocked' && row.blockedCode !== null ? blockedSentence(row.blockedCode) : row.reason;
+    return {
+      view: { runId: row.id as OrchestrationBuildRunView['runId'], outcome: row.outcome, decision: row.decision, checks: checksOf(workspaceId, row.sessionId as SessionId) },
+      blockedCode: row.blockedCode,
+      reason,
+    };
+  };
+
+  /**
+   * How a step follows its build run: still going (running, or paused at the plan's own checkpoint, which only the user continues), done
+   * (the build ended verified, waiting for the user's review: nothing is merged), or failed (failed, stopped, or blocked for another reason).
+   */
+  const buildEndOf = (outcome: OrchestrationBuildRunView['outcome'], blockedCode: string | null): 'running' | 'done' | 'failed' => {
+    if (outcome === 'running') return 'running';
+    if (outcome === 'verified') return 'done';
+    if (outcome === 'blocked' && blockedCode !== null && (CHECKPOINT_BLOCKED_CODES as readonly string[]).includes(blockedCode)) return 'running';
+    return 'failed';
   };
 
   /** Reads back every dispatched step: its chat's state and a masked, capped report; settles a finished one once. */
@@ -493,34 +581,31 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         if (step.state === 'dispatched' && sessionState === 'waiting') waiting ??= { kind: 'permission_card', stepId: step.stepId, sessionId: sid };
         if (step.state === 'dispatched' && (finished || sessionState === 'error')) {
           const to = finished ? 'done' : 'failed';
-          const settled = events.transaction(() => {
-            // Read again inside the transaction: a concurrent read may have settled it, and the event goes once.
-            const current = requireStep(run.id, step.stepId);
-            if (current.state !== 'dispatched' || !canMoveStep('dispatched', to)) return false;
-            orm.update(orchestrationSteps).set({ state: to }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
-            events.append({ type: 'orchestration.result_read', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], report: report! } });
-            const runId = run.id as OrchestrationRun['id'];
-            const states = stepsOf(run.id).map((other) => other.state);
-            // A run the user stopped (or that ended another way) stays as it is: the step settles, the run is not moved again.
-            const runNow = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
-            if (runNow === undefined || isRunOver(runNow.state as OrchestrationRunState)) return true;
-            if (to === 'failed') {
-              // A failed step is final and nothing is retried yet, so the run stops here, plainly.
-              moveRun(run.id, 'failed', 'worker_error');
-              events.append({ type: 'orchestration.run_stopped', workspaceId, streamId: workspaceId, payload: { runId, reason: 'worker_error' } });
-            } else if (states.every((state) => state === 'done' || state === 'skipped')) {
-              moveRun(run.id, 'finished');
-              events.append({ type: 'orchestration.run_finished', workspaceId, streamId: workspaceId, payload: { runId } });
-            } else if (!states.includes('dispatched')) moveRun(run.id, 'awaiting_user');
-            return true;
-          });
-          if (settled) {
+          if (settleStep(workspaceId, run, step.stepId, to, report)) {
             step = { ...step, state: to };
             settledAny = true;
           }
         }
       }
-      views.push(OrchestrationStepView.parse({ ...step, workerLabel: names.get(step.worker) ?? step.worker, sessionState, report, review: step.reviewOf === null ? null : reviewTargetOf(run.id, step.reviewOf) }));
+      // 15.11: a build step follows the build run the person started in the Build dialog, read from the run itself.
+      let buildRun: OrchestrationBuildRunView | null = null;
+      if (sid === null && step.build?.runId != null) {
+        const found = buildRunOf(workspaceId, step.build.ticketRef, step.build.runId);
+        buildRun = found?.view ?? null;
+        // A run that is gone (its records were removed) reads as a build that failed.
+        const end = found === undefined ? 'failed' : buildEndOf(found.view.outcome, found.blockedCode);
+        report = makeStatusReport({
+          stepId: step.stepId,
+          worker: builder ?? ORCHESTRATION_BUILD_WORKER,
+          state: end === 'done' ? 'done' : end === 'failed' ? 'error' : 'working',
+          text: found === undefined ? 'Ogden: the build run is gone, so the build counts as failed.' : buildSummaryText({ ticketRef: step.build.ticketRef, outcome: found.view.outcome, decision: found.view.decision, checks: found.view.checks, reason: found.reason }),
+        });
+        if (step.state === 'dispatched' && end !== 'running' && settleStep(workspaceId, run, step.stepId, end, report)) {
+          step = { ...step, state: end };
+          settledAny = true;
+        }
+      }
+      views.push(OrchestrationStepView.parse({ ...step, workerLabel: names.get(step.worker) ?? step.worker, sessionState, report, buildRun, review: step.reviewOf === null ? null : reviewTargetOf(run.id, step.reviewOf) }));
     }
     const fresh = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? run;
     // A read that settled a step lets the run go on (the listener does the same when the worker's chat changes): its next decision, and the next step of an automatic run.
@@ -530,6 +615,15 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     const loop = loopOf(workspaceId, run.id);
     // A question the manager asked and the user has not answered (the run is live and waits for them).
     if (waiting === null && isLive(fresh.state) && loop.decision?.action === 'ask_user' && loop.owed === null && loop.decision.question !== undefined) waiting = { kind: 'question', question: loop.decision.question };
+    // 15.11: an automatic run at a proposed build waits for the user, who starts it in the Build dialog (it starts nothing on its own).
+    if (waiting === null && isLive(fresh.state) && fresh.mode === 'automatic' && loop.owed === null && !planning.has(fresh.id) && loop.decision?.action !== 'ask_user') {
+      const rowsNow = stepsOf(run.id);
+      if (!rowsNow.some((row) => row.state === 'dispatched')) {
+        const chosen = loop.decision?.action === 'dispatch' && loop.decision.stepId !== undefined ? rowsNow.find((row) => row.stepId === loop.decision!.stepId) : undefined;
+        const next = chosen ?? rowsNow.find((row) => row.state === 'proposed' || row.state === 'approved');
+        if (next !== undefined && next.buildRef !== null && next.state === 'proposed' && stepOf(next).dependsOn.every((id) => rowsNow.find((row) => row.stepId === id)?.state === 'done')) waiting = { kind: 'build', stepId: next.stepId, ticketRef: next.buildRef };
+      }
+    }
     return OrchestrationRunView.parse({ run: runOf(fresh), steps: views, waiting: isLive(fresh.state) ? waiting : null, decision: loop.decision, thinking: isLive(fresh.state) && planning.has(fresh.id) });
   };
 
@@ -583,13 +677,17 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     const reviewer = team === undefined ? undefined : await team.reviewer(workspaceId);
     if (team === undefined || reviewer?.agentId !== row.worker) return refuse();
     const reviewed = stepsOf(run.id).find((other) => other.stepId === row.reviewOf);
-    if (reviewed === undefined || reviewed.state !== 'done' || reviewed.sessionId === null) throw new StepNotApprovedError();
+    const reviewedBuild = reviewed !== undefined && reviewed.buildRef !== null;
+    if (reviewed === undefined || reviewed.state !== 'done' || (reviewed.sessionId === null && !reviewedBuild)) throw new StepNotApprovedError();
     // The plan check's rules again, so a row written another way is never built into a message.
     if (row.chat !== 'new' || reviewed.reviewOf !== null || !stepOf(row).dependsOn.includes(reviewed.stepId)) return refuse();
     if (reviewed.worker === row.worker && (await team.workers(workspaceId)).some((worker) => worker.ready && worker.agentId !== row.worker)) return refuse();
     const names = await labels(workspaceId);
     // The reviewed step's own words, not yet cut: code and diffs are left out first, so they cannot fill the room the prose needs.
-    const text = lastReply(workspaceId, reviewed.sessionId as SessionId, reviewed.instruction, reviewed.chat !== 'new', reviewed.reviewOf !== null);
+    // A build step's result is Ogden's own summary of the run (outcome and check counts), never the agent's output, files or the diff.
+    const found = reviewedBuild && reviewed.buildRunId !== null ? buildRunOf(workspaceId, reviewed.buildRef!, reviewed.buildRunId) : undefined;
+    if (reviewedBuild && found === undefined) throw new StepNotApprovedError();
+    const text = found !== undefined ? buildSummaryText({ ticketRef: reviewed.buildRef!, outcome: found.view.outcome, decision: found.view.decision, checks: found.view.checks, reason: found.reason }) : lastReply(workspaceId, reviewed.sessionId as SessionId, reviewed.instruction, reviewed.chat !== 'new', reviewed.reviewOf !== null);
     return buildReviewMessage({ question: row.instruction, reviewedStep: reviewed.stepId, reviewedBy: cleanForManager(names.get(reviewed.worker) ?? reviewed.worker).slice(0, 60), resultText: cleanForManager(text) });
   };
 
@@ -637,7 +735,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     });
   };
 
-  const masked = (plan: ManagerPlan): ManagerPlan => ({ ...plan, goal: redactSecrets(plan.goal), steps: plan.steps.map((step) => ({ ...step, instruction: redactSecrets(step.instruction) })) });
+  const masked = (plan: ManagerPlan): ManagerPlan => ({ ...plan, goal: redactSecrets(plan.goal), steps: plan.steps.map((step): ManagerAnyStep => (isManagerBuildStep(step) ? { ...step, reason: redactSecrets(step.reason) } : { ...step, instruction: redactSecrets(step.instruction) })) });
 
   // ---- Stop, the limits and the activity log (15.8) ----
 
@@ -828,7 +926,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, runId)).get();
       if (live === undefined || live.mode !== 'automatic' || !isOpen(live.state)) return false;
       const step = requireStep(runId, stepId);
-      if (step.state !== 'proposed' || !canMoveStep('proposed', 'approved')) return false;
+      // The mode never approves a build (15.11): only the person's own start in the Build dialog moves it.
+      if (step.buildRef !== null || step.state !== 'proposed' || !canMoveStep('proposed', 'approved')) return false;
       orm.update(orchestrationSteps).set({ state: 'approved', approvedBy: 'mode' }).where(and(eq(orchestrationSteps.runId, runId), eq(orchestrationSteps.stepId, stepId))).run();
       events.append({ type: 'orchestration.step_approved', workspaceId, streamId: workspaceId, payload: { runId: runId as OrchestrationRun['id'], stepId, by: 'mode' } });
       return true;
@@ -874,7 +973,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
   // ---- the manager's next decision (15.9) ----
 
   /** What the manager is given each turn about the workers: who is ready, their modes and their own idle chats (the same as at the start of a run). */
-  const workerContext = async (workspaceId: WorkspaceId, goal: string): Promise<ManagerContext> => {
+  const workerContext = async (workspaceId: WorkspaceId, goal: string, withBuildable = false): Promise<ManagerContext> => {
     const { agents } = await chat.chatAgents(workspaceId);
     // Only the rostered workers (15.5): the project's worker and its reviewer when that is an agent. Without a roster, every agent.
     const rostered = team === undefined ? undefined : await team.workers(workspaceId);
@@ -882,9 +981,13 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     // 15.10: the roster's reviewer, when it is an agent that is ready now: the only one a review step may go to.
     const reviewer = team === undefined ? undefined : await team.reviewer(workspaceId);
     const reviewerId = reviewer?.ready === true && addressable.some((agent) => agent.agentId === reviewer.agentId) ? reviewer.agentId : undefined;
+    // 15.11: the tickets a build may be proposed for, asked only when a plan is being made (a decision cannot add steps).
+    const tickets = withBuildable && buildable !== undefined ? await buildable(workspaceId) : [];
     return {
       goal,
       ...(reviewerId === undefined ? {} : { reviewer: reviewerId }),
+      ...(tickets.length === 0 ? {} : { buildable: tickets.map((ticket) => ({ ref: ticket.ref, title: ticket.title })) }),
+      ...(builder === undefined ? {} : { builder }),
       projectSummary: 'A software project in the folder the user opened.',
       workers: addressable.map((agent) => ({
         agentId: agent.agentId,
@@ -902,6 +1005,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     goal: run.goal,
     steps: rows.map((row) => {
       const step = stepOf(row);
+      if (step.build !== null) return { id: step.stepId, build: { ticket: step.build.ticketRef }, reason: step.instruction, depends_on: step.dependsOn };
       return { id: step.stepId, worker: step.worker, chat: step.chat, instruction: step.instruction, mode: 'ask' as const, depends_on: step.dependsOn, ...(step.reviewOf === null ? {} : { review_of: step.reviewOf }) };
     }),
   });
@@ -1049,7 +1153,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       // A worker is on a step: nothing more goes until it is done, unless the run has run out of time (then its turn is asked to stop).
       if (automatic && timeUp(run, limits)) return halt('time_limit', workersInFlight(workspaceId, run));
       // A worker waiting on a permission card pauses the run; the user answers on that card, and the run goes on once it is answered.
-      const states = dispatched.map((step) => {
+      // A build step has no worker chat (15.11): it follows its build run, which the user runs and stops in the Runs tab.
+      const states = dispatched.filter((step) => step.sessionId !== null).map((step) => {
         try {
           return { step, state: chat.getSession(workspaceId, step.sessionId as SessionId).state };
         } catch {
@@ -1120,6 +1225,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     if (timeUp(run, limits)) return halt('time_limit');
     // A step the user approved is the user's to send (their own Send button); only what the mode approved, or still waits, is sent here.
     if (next.state === 'approved' && next.approvedBy === 'user') return;
+    // A proposed build is only ever started by the user, in the Build dialog, in either mode: the run waits at it and starts nothing (15.11).
+    if (next.buildRef !== null) return waitForUser(workspaceId, run, next.stepId);
     if (rows.filter((step) => step.sessionId !== null).length >= limits.maxInstructions) return halt('instruction_limit');
     if ((stepDepths(rows.map((step) => ({ stepId: step.stepId, dependsOn: stepOf(step).dependsOn }))).get(next.stepId) ?? 1) > limits.maxDepth) return halt('depth_limit');
     // A step that needs one that is not done (one the user skipped) waits for the user, as in the default mode.
@@ -1171,6 +1278,10 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       const dispatchedOn = (sessionId: string): Array<{ runId: string }> => orm.select({ runId: orchestrationSteps.runId }).from(orchestrationSteps).where(and(eq(orchestrationSteps.sessionId, sessionId), eq(orchestrationSteps.state, 'dispatched'))).all();
       if (event.type === 'session.state_changed' && (event.payload.state !== 'working' || event.payload.previous === 'waiting')) {
         for (const step of dispatchedOn(event.payload.sessionId)) if (event.workspaceId !== null) void scheduleAdvance(event.workspaceId, step.runId);
+      } else if (event.type === 'run.outcome_changed') {
+        // A build the plan follows ended or changed (15.11): the run looks again.
+        const linked = orm.select({ runId: orchestrationSteps.runId }).from(orchestrationSteps).where(and(eq(orchestrationSteps.buildRunId, event.payload.runId), eq(orchestrationSteps.state, 'dispatched'))).all();
+        for (const step of linked) if (event.workspaceId !== null) void scheduleAdvance(event.workspaceId, step.runId);
       } else if (event.type === 'permission.resolved' && event.payload.decision === 'deny') {
         for (const step of dispatchedOn(event.payload.sessionId)) if (event.workspaceId !== null) void scheduleAdvance(event.workspaceId, step.runId);
       } else if (event.type === 'workspace.settings_changed' && (event.payload.orchestrationMode !== undefined || event.payload.orchestrationEnabled === true)) {
@@ -1199,7 +1310,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       const manager = fixedManager ?? (status.state === 'ready' ? managers?.managerFor(workspaceId) : undefined);
       if (manager === undefined) throw new ManagerUnavailableError(status.state === 'ready' ? ORCHESTRATION_NO_MANAGER_MESSAGE : status.message);
 
-      const context = await workerContext(workspaceId, goal);
+      const context = await workerContext(workspaceId, goal, true);
       if (team !== undefined && !context.workers.some((worker) => worker.ready)) throw new ManagerUnavailableError(NO_READY_WORKER);
       const runId = newId('orc') as OrchestrationRun['id'];
       const at = now();
@@ -1240,9 +1351,13 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       events.transaction(() => {
         noteReply(workspaceId, runId, result.record);
         plan.steps.forEach((step, position) => {
+          // A build step has no worker chat and no instruction: the agent builds run on is its worker in name only, the chat is nothing, the reason is its text.
+          const values = isManagerBuildStep(step)
+            ? { worker: builder ?? ORCHESTRATION_BUILD_WORKER, chat: 'new', instruction: step.reason, reviewOf: null, buildRef: step.build.ticket }
+            : { worker: step.worker, chat: step.chat, instruction: step.instruction, reviewOf: step.review_of ?? null, buildRef: null };
           orm
             .insert(orchestrationSteps)
-            .values({ runId, stepId: step.id, position, worker: step.worker, chat: step.chat, instruction: step.instruction, dependsOn: JSON.stringify(step.depends_on), state: 'proposed', approvedBy: null, sessionId: null, reviewOf: step.review_of ?? null })
+            .values({ runId, stepId: step.id, position, ...values, dependsOn: JSON.stringify(step.depends_on), state: 'proposed', approvedBy: null, sessionId: null, buildRunId: null })
             .run();
         });
         moveRun(runId, 'awaiting_user');
@@ -1279,7 +1394,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         const open = isOpen(orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get()?.state ?? run.state);
         // When the page says which text the user read, a step edited since (another tab) is not approved: the user approves what they saw.
         const sameText = expectedInstruction === undefined || expectedInstruction === step.instruction;
-        if (step.state !== 'proposed' || !canMoveStep('proposed', 'approved') || !needsDone || !open || !sameText) throw new StepNotProposedError();
+        // A build step is not approved like an instruction: the person starts it in the Build dialog and the plan follows (15.11).
+        if (step.buildRef !== null || step.state !== 'proposed' || !canMoveStep('proposed', 'approved') || !needsDone || !open || !sameText) throw new StepNotProposedError();
         orm.update(orchestrationSteps).set({ state: 'approved', approvedBy: 'user' }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
         events.append({ type: 'orchestration.step_approved', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], stepId: step.stepId, by: 'user' } });
       });
@@ -1298,6 +1414,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       const text = parsed.data.instruction;
       events.transaction(() => {
         const step = requireStep(run.id, stepId);
+        // A build step has a short reason and nothing to edit: it is a reference to a ticket (15.11).
+        if (step.buildRef !== null) throw new StepNotChangeableError();
         // A question for the reviewer stays bounded (15.10), whoever writes it.
         if (step.reviewOf !== null && text.length > REVIEW_LIMITS.maxQuestionChars) throw new ValidationError(ORCHESTRATION_REVIEW_QUESTION_TOO_LONG_MESSAGE, []);
         const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
@@ -1386,6 +1504,34 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       return activityOf(workspaceId);
     },
 
+    async linkBuild(workspaceId, runId, stepId, request) {
+      feature.requireOrchestration(workspaceId);
+      const run = requireRun(workspaceId, runId);
+      const parsed = LinkOrchestrationBuildRequest.safeParse(request);
+      if (!parsed.success) throw new ValidationError(ORCHESTRATION_BUILD_NOT_THIS_TICKET_MESSAGE, parsed.error.issues);
+      events.transaction(() => {
+        const step = requireStep(run.id, stepId);
+        const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
+        if (live === undefined || !isOpen(live.state)) throw new RunNotOpenError();
+        const all = stepsOf(run.id);
+        const needsDone = stepOf(step).dependsOn.every((id) => all.find((other) => other.stepId === id)?.state === 'done');
+        if (step.buildRef === null || step.state !== 'proposed' || !canMoveStep('proposed', 'approved') || !canMoveStep('approved', 'dispatched') || !needsDone) throw new StepNotProposedError();
+        // The run must be the build the person started for this ticket here: a run of this project, of this ticket, begun after this plan,
+        // and not the run of another step. Nothing is started and nothing is decided by this.
+        const build = orm.select().from(runsTable).where(eq(runsTable.id, parsed.data.runId)).get();
+        const taken = orm.select({ stepId: orchestrationSteps.stepId }).from(orchestrationSteps).where(eq(orchestrationSteps.buildRunId, parsed.data.runId)).get();
+        if (build === undefined || build.workspaceId !== workspaceId || build.ticketRef !== step.buildRef || Date.parse(build.createdAt) < Date.parse(live.createdAt) || taken !== undefined) {
+          throw new ValidationError(ORCHESTRATION_BUILD_NOT_THIS_TICKET_MESSAGE, []);
+        }
+        orm.update(orchestrationSteps).set({ state: 'dispatched', approvedBy: 'user', buildRunId: build.id }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
+        moveRun(run.id, 'running');
+        events.append({ type: 'orchestration.build_linked', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], stepId: step.stepId, ticketRef: step.buildRef, buildRunId: build.id as OrchestrationBuildRunView['runId'] } });
+      });
+      // A build that already ended settles at once; the run goes on from its result.
+      void scheduleAdvance(workspaceId, run.id);
+      return readBack(workspaceId, requireRun(workspaceId, runId));
+    },
+
     async answerQuestion(workspaceId, runId, request) {
       feature.requireOrchestration(workspaceId);
       const run = requireRun(workspaceId, runId);
@@ -1443,6 +1589,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       // The mode is the project's own as it is now: a run switched back to Approve each instruction no longer takes the mode's approvals.
       const run = syncMode(workspaceId, requireRun(workspaceId, runId));
       const row = requireStep(run.id, stepId);
+      // No orchestration path sends a build (15.11): it is started only in the Build dialog, whoever asks and in either mode.
+      if (row.buildRef !== null) throw new StepNotApprovedError();
       // The rule that matters, in code: only a step the user approved is ever sent. Checked before anything is created.
       if (row.state !== 'approved' || row.approvedBy === null || !isOpen(run.state)) throw new StepNotApprovedError();
       // In the default mode only the user's own approval counts, and what a step needs must be done (belt and braces: approval checked both).

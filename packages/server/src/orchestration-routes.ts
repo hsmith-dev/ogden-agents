@@ -236,6 +236,26 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
     return tooLong ?? answer!;
   });
 
+  // The person's own call, after the Build dialog started a build for a build step (15.11): it names the run the dialog started. It starts
+  // nothing and approves nothing: it records which run the step follows. No route of orchestration starts a build; the dialog's own start
+  // is `POST /builds`, and nothing the manager's code can reach calls either (an architecture test).
+  routes.post(API_ROUTES.workspaceOrchestrationStepBuild, async (c, { workspaceId }) => {
+    let answer: Response | undefined;
+    const tooLong = await reviewLimit(c, async () => {
+      const body = await readJson(c);
+      if (!body.ok) {
+        answer = body.response;
+        return;
+      }
+      answer = await run(c, async (use) => {
+        const view = await use.linkBuild(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '', body.value);
+        log.info('orchestration build step linked to the build the user started', { workspaceId, runId: c.req.param('runId'), stepId: c.req.param('stepId') });
+        return c.json(OrchestrationRunResponse.parse({ run: view }));
+      });
+    });
+    return tooLong ?? answer!;
+  });
+
   routes.post(API_ROUTES.workspaceOrchestrationStepSkip, (c, { workspaceId }) =>
     run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.skipStep(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '') }))),
   );

@@ -13,7 +13,7 @@ import type { BuildCtx } from './build-context.js';
 
 export function createOutcome(ctx: BuildCtx) {
   const {
-    trust, entities, events, tickets, vcs, sandbox, runner, chat, buildSessions, dataDir, settings, commandEnv, mask, report,
+    trust, entities, events, tickets, vcs, sandbox, runnerOf, chat, buildSessions, dataDir, settings, commandEnv, mask, report,
     writeResult, generation, state, disarmDeadline, release, rerunSignal, fn
   } = ctx;
 
@@ -113,7 +113,7 @@ export function createOutcome(ctx: BuildCtx) {
         outcome = 'blocked';
         const said = ticket.blocked_reason === null || ticket.blocked_reason.trim() === '' ? RUN_REASON_NOT_BUILT(status) : ticket.blocked_reason;
         // The halt's code is the runner's to say (AD-12; story 5.3): core never reads the skill's words.
-        blockedCode = runner.blockedCode(ticket.blocked_reason ?? '');
+        blockedCode = runnerOf(run)?.blockedCode(ticket.blocked_reason ?? '') ?? 'other';
         reason = `${said} ${RUN_REASON_NO_NETWORK}`;
       } else {
         outcome = 'failed';
@@ -157,7 +157,7 @@ export function createOutcome(ctx: BuildCtx) {
   const resultHolds = async (run: Run, checkedHead: string | null): Promise<boolean> => {
     const short = runShortOf(run);
     if (short === undefined || checkedHead === null) return false;
-    const result = await runner.readResult(runFolderOf(dataDir, short), { runId: run.id, ticketRef: run.ticketRef }).catch(() => undefined);
+    const result = await (runnerOf(run)?.readResult(runFolderOf(dataDir, short), { runId: run.id, ticketRef: run.ticketRef }) ?? Promise.resolve(undefined)).catch(() => undefined);
     return result !== undefined && result.status === 'built' && result.commit === checkedHead && result.baseRevision === run.baseRevision;
   };
 

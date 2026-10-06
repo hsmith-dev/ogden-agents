@@ -63,6 +63,38 @@ export interface AcpStartOptions {
   guardsPaths: boolean;
 }
 
+/**
+ * How an agent starts an unattended build session (epic 17): its own sandbox
+ * and approval policy given at start, in the places it takes them (a process
+ * variable, session parameters), with only the run's writable roots. Core's
+ * permission policy still answers every request it sends. Absent: the agent
+ * cannot run an unattended build, and a start with a sandbox is refused (fail
+ * closed).
+ */
+export interface AcpBuildSessionQuirk {
+  /**
+   * Whether the agent's own sandbox is known to keep the protected paths and
+   * the denied paths of the run's sandbox out of reach of its commands and
+   * its edits. Until a live check shows it (RELEASING.md), `false`: the start
+   * is refused, so an unattended build never runs on a guess.
+   */
+  verified: boolean;
+  /** What the sandbox gives at start. Throws (a wiring bug) when it cannot be given. */
+  start(sandbox: AgentSandbox): AcpBuildStart;
+}
+
+/** What an unattended build start adds to the process and to the session requests. */
+export interface AcpBuildStart {
+  /** Added to the process's environment (core's own variables still win). */
+  addEnv: Readonly<Record<string, string>>;
+  /** Spread into `session/new`, `resume` and `load` (for example `additionalDirectories`). */
+  sessionParams?: Record<string, unknown> | undefined;
+  /** The `_meta` of those requests, if the agent takes the sandbox there. */
+  meta?: Record<string, unknown> | undefined;
+  /** The session's own mode ids this start puts it in: they count as asking as much as a build needs, so core never lowers them. */
+  modeIds: readonly string[];
+}
+
 /** What is an agent's own, beside its descriptor (E6-R3). */
 export interface AcpAgentQuirks {
   /**
@@ -80,6 +112,8 @@ export interface AcpAgentQuirks {
   sessionMeta?: ((protectedPaths: ProtectedPaths | undefined, sandbox?: AgentSandbox | undefined, attended?: boolean) => Record<string, unknown> | undefined) | undefined;
   /** The raw-input fields of its tools that name paths. */
   toolInputPaths: AcpToolInputPaths;
+  /** How it starts an unattended build session with its own sandbox (epic 17); absent for an agent that takes the sandbox through `sessionMeta` (Claude Code) or cannot. */
+  buildSession?: AcpBuildSessionQuirk | undefined;
   /** Its session modes that ask as much as Ask (or more); any other, known or not, asks less. */
   askingModeIds: readonly string[];
   /** Its own CLI on its sessions (CAP-5), when that CLI can resume them. */

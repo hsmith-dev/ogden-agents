@@ -13,6 +13,8 @@ export {
   type AcpAgentOptions,
   type AcpAgentQuirks,
   type AcpAuthChoice,
+  type AcpBuildSessionQuirk,
+  type AcpBuildStart,
   type AcpLaunch,
   type AcpLaunchInput,
   type AcpStartOptions,

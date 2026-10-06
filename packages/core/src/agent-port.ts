@@ -275,6 +275,11 @@ export interface AgentPort {
   /** The agent takes its permission mode only when a chat starts (the descriptor's `modeFixedAtStart`, epic 12). */
   readonly modeFixedAtStart?: boolean | undefined;
   /**
+   * Whether the agent can run an unattended build here: it takes the build's sandbox at start and that is verified
+   * (epic 17). Absent or `false`: it builds only with the user watching. Core never reads it; the server's sandbox check does.
+   */
+  readonly unattendedBuild?: boolean | undefined;
+  /**
    * Starts the agent and a new session in `cwd`. Rejects with an
    * {@link AgentError} (code `agent_unavailable` when it can't be started).
    */

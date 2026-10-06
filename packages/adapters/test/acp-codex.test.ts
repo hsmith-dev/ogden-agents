@@ -177,4 +177,46 @@ describe("Codex's chat port (epic 12 entry 5)", () => {
     expect(limit('insufficient_quota')).toBe(true);
     expect(limit('network error')).toBe(false);
   });
+
+  describe('an unattended build start (epic 17)', () => {
+    const sandboxOf = (worktree: string) => ({ kind: 'test', writableRoots: [worktree, join(worktree, '..', 'store')], deniedPaths: [], deniedReads: [], allowedReads: [worktree] });
+
+    it('is refused until the live checks have shown its sandbox holds (fail closed), and the same session starts nothing', async () => {
+      const cwd = tempDir();
+      const failure = await agentOf().startSession({ cwd, env: envOf({ CODEX_API_KEY: KEY }), sandbox: sandboxOf(cwd) }).catch((error: unknown) => error);
+      expect(failure).toMatchObject({ code: 'agent_unavailable' });
+      expect(String((failure as Error).message)).toContain('Build with you watching');
+    });
+
+    it('when verified, starts in workspace-write with only the run roots as added directories, never a mode that skips the rule', async () => {
+      const cwd = tempDir();
+      const agent = createCodexAgent({ dataDir: tempDir(), server: () => ({ command: process.execPath, args: [FAKE_CODEX] }), unattendedVerified: true });
+      const env = envOf({ CODEX_API_KEY: KEY });
+      const session = await agent.startSession({ cwd, env, sandbox: sandboxOf(cwd) });
+      sessions.push(session);
+      const events: AgentEvent[] = [];
+      session.onEvent((event) => events.push(event));
+      await session.prompt('mode');
+      expect(replyText(events)).toBe('mode=workspace-write');
+      // Core cannot move a build session to another mode.
+      expect(session.permissionModes).toEqual(['ask']);
+      await expect(session.setPermissionMode!('skip_all')).rejects.toBeInstanceOf(AgentError);
+    });
+
+    it('never uses a session that opened in another mode, and stops one that moves itself out of the build mode', async () => {
+      const cwd = tempDir();
+      const agent = createCodexAgent({ dataDir: tempDir(), server: () => ({ command: process.execPath, args: [FAKE_CODEX] }), unattendedVerified: true });
+      // The agent ignored the start mode (here: told to open in Auto review): fail closed, nothing is used.
+      const wrong = await agent.startSession({ cwd, env: envOf({ CODEX_API_KEY: KEY, FAKE_ACP_START_MODE: 'agent' }), sandbox: sandboxOf(cwd) }).catch((error: unknown) => error);
+      expect(wrong).toMatchObject({ code: 'agent_unavailable' });
+      expect(String((wrong as Error).message)).toContain('did not start in the mode a build needs');
+      // One that moves itself to Full access during the build is stopped, not trusted.
+      const session = await agent.startSession({ cwd, env: envOf({ CODEX_API_KEY: KEY }), sandbox: sandboxOf(cwd) });
+      sessions.push(session);
+      const events: AgentEvent[] = [];
+      session.onEvent((event) => events.push(event));
+      await session.prompt('mode-switch agent-full-access').catch(() => undefined);
+      expect(events.some((event) => event.type === 'state' && event.state === 'error' && 'fatal' in event && event.fatal === true)).toBe(true);
+    });
+  });
 });

@@ -7,13 +7,16 @@
  */
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { createAcpBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, createCodexBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
-import { createBuilds, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type VcsPort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
+import { createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type VcsPort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import type { Logger } from './log.js';
 import { agentEnvironment, withoutAgentKeys } from './start-env.js';
 import type { StartOptions } from './start-types.js';
 import type { TestHooks } from './test-hooks.js';
+
+/** Why an agent that cannot take the build's sandbox here is refused an unattended build (plain words, no dashes). */
+export const AGENT_ATTENDED_ONLY_REASON = "This agent can't build unattended on this computer yet. It can build with you watching.";
 
 /** The empty folder every git call gets as `core.hooksPath`, so no repo or agent-written hook runs (story 5.2). */
 export function gitHooksDir(dataDir: string): string {
@@ -41,6 +44,8 @@ export function createBuildsWiring({
   source,
   hooks,
   vcs: sharedVcs,
+  registeredAgents,
+  unattendedAgents,
 }: {
   vcs?: VcsPort;
   options: StartOptions;
@@ -53,16 +58,36 @@ export function createBuildsWiring({
   runAwareTickets: TicketStorePort;
   source: Pick<BmadSourceUseCases, 'requireReady'>;
   hooks: Pick<TestHooks, 'sandbox'>;
+  /** The agents a chat can start with: a runner for an agent that is not wired is never offered. */
+  registeredAgents: (agentId: string) => boolean;
+  /** Whether an agent can run an unattended build here (its port says so; `AgentPort.unattendedBuild`). */
+  unattendedAgents: (agentId: string) => boolean;
 }): BuildsUseCases {
   // Git runs as the user, with the agents' allowlist and never an API key (AD-16).
   // Removals only ever in `<data>/w` (story 5.5).
   const vcs = sharedVcs ?? createServerVcs(options, dataDir);
-  const sandbox = options.sandbox ?? (hooks.sandbox === undefined
+  const machineSandbox = options.sandbox ?? (hooks.sandbox === undefined
       ? // The chain (story 5.6): Claude Code's own sandbox, then Docker if it is already there; probes only, nothing installed.
         createSandboxChain({
           steps: [createNativeSandboxStep({ path: () => agentEnvironment().PATH ?? agentEnvironment().Path }), createDockerStep({ env: () => withoutAgentKeys(agentEnvironment()) })],
         })
       : createFixedSandbox(hooks.sandbox));
+  // The sandbox answer is per agent (epic 17): an agent that cannot take the build's sandbox at start, or whose own sandbox is
+  // not verified yet, builds only with the user watching, whatever this computer's sandbox is. Never a guess that it can.
+  const sandbox: SandboxPort = {
+    async check(request) {
+      const agent = request?.agent;
+      if (agent !== undefined && !unattendedAgents(agent)) return { available: false, reason: AGENT_ATTENDED_ONLY_REASON, choices: ['attended', 'other_agent'] };
+      return machineSandbox.check(request);
+    },
+    async status(request) {
+      const agent = request?.agent;
+      const status = await machineSandbox.status(request);
+      if (agent === undefined || unattendedAgents(agent)) return status;
+      return { ...status, available: false, kind: null, summary: AGENT_ATTENDED_ONLY_REASON, choices: ['attended', 'other_agent'], installHint: null };
+    },
+    run: (request) => machineSandbox.run(request),
+  };
   return createBuilds({
     settings: core.buildSettings,
     // The re-run of a project's tests gets the agents' allowlist and never an API key (AD-16).
@@ -77,6 +102,8 @@ export function createBuildsWiring({
     vcs,
     sandbox,
     runner: options.buildRunner ?? createAcpBuildRunner(),
+    // The other agents that can build (epic 17); a test's own list replaces them.
+    runners: (options.buildRunners ?? [createCodexBuildRunner()]).filter((each) => registeredAgents(each.agent)),
     chat,
     buildSessions: core.buildSessions,
     dataDir,

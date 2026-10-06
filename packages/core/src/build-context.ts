@@ -11,6 +11,7 @@ import { createObjectStore, ObjectStoreError, objectStoreEnv } from './build-obj
 import { removeRunWorktree } from './build-worktrees.js';
 import type { BuildSessionSetup } from './build-sessions.js';
 import { BuildRefusedError, NotFoundError } from './errors.js';
+import type { BuildRunnerPort } from './build-runner-port.js';
 import { PROTECTED_PATHS } from './permission-matching.js';
 import { workspaceRepoPath } from './planning.js';
 import { serializedByRepo } from './repo-serialization.js';
@@ -29,6 +30,10 @@ export interface BuildFns {
 export function createBuildContext(deps: BuildsDeps) {
   const { bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, chat, buildSessions, dataDir, settings } = deps;
   const commandEnv = deps.commandEnv ?? (() => ({}));
+  /** The runner that builds with `agent` (epic 17: one per agent, found by id); `undefined` for an agent that cannot build. */
+  const runnerFor = (agent: BuildAgent): BuildRunnerPort | undefined => [runner, ...(deps.runners ?? [])].find((each) => each.agent === agent);
+  /** The runner of a run's agent (an old run has none stored: the default build agent's); `undefined` when its agent can no longer build (never another agent's runner). */
+  const runnerOf = (run: Pick<Run, 'agent'>): BuildRunnerPort | undefined => runnerFor(run.agent ?? runner.agent);
   const aware = deps.runAwareTickets ?? tickets;
   const paths = deps.paths ?? nodePathNormalizer();
   const mask = deps.mask ?? redactApiKeys;
@@ -202,7 +207,8 @@ export function createBuildContext(deps: BuildsDeps) {
     reruns.clear();
   };
   /** Workspaces with Build all ready going: the tickets already tried, so a failed one is not tried again. */
-  const draining = new Map<WorkspaceId, Set<string>>();
+  /** The workspaces with Build all ready going: the tickets tried so far, and the agent the request named (epic 17). */
+  const draining = new Map<WorkspaceId, Set<string> & { agent: BuildAgent }>();
   const state = { closed: false };
 
   /** The run's agent and its session's setup go (Stop). */
@@ -255,7 +261,7 @@ export function createBuildContext(deps: BuildsDeps) {
   const fn: BuildFns = { armDeadline: () => undefined, scheduleDrain: () => undefined };
 
   return {
-    deps, bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, chat, buildSessions, dataDir, settings, commandEnv,
+    deps, bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, runnerFor, runnerOf, chat, buildSessions, dataDir, settings, commandEnv,
     aware, paths, mask, report, recorder, writeResult, guarded, uncommittedPlanFiles, requirePlanCommitted, requireGit, cleanupDeps,
     sandboxFor, requireSandbox, unattendedSetup, hasCapacity, deadlineFromNow, inDispatch, setTimer, timers, pendingNotes, generation,
     bump, draining, state, rerunSignal, abortRerun, abortAllReruns, stopAgent, disarmDeadline, verificationOf, latestRun, release, cleanUp, requireCleanCheckout, fn

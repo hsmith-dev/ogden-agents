@@ -66,7 +66,7 @@
  * Core names no skill, VCS, sandbox or agent (AD-1, AD-12).
  */
 import { existsSync } from 'node:fs';
-import { ATTENDED_SANDBOX, ALREADY_MERGED_MESSAGE, ApproveBuildRequest, RetryRunRequest, RETRY_NOT_AVAILABLE_MESSAGE, RUN_NOT_ACTIVE_MESSAGE, CHECKOUT_BUSY_MESSAGE, CHECKOUT_MOVED_MESSAGE, CHECKS_FAILED_MESSAGE, MERGE_CONFLICT_MESSAGE, MERGE_REFUSED_MESSAGE, REVIEW_STALE_MESSAGE, RUN_ACTIVE_MESSAGE, OBJECTS_NOT_IMPORTED_MESSAGE, StartBuildRequest, UNKNOWN_BUILD_AGENT_MESSAGE, VCS_UNAVAILABLE_MESSAGE, type WorkspaceId, ALL_READY_ASK_MESSAGE, RUN_REASON_STOPPED, RejectBuildRequest } from '@ogden-agents/shared';
+import { type BuildAgent, ATTENDED_SANDBOX, ALREADY_MERGED_MESSAGE, ApproveBuildRequest, RetryRunRequest, RETRY_NOT_AVAILABLE_MESSAGE, RUN_NOT_ACTIVE_MESSAGE, CHECKOUT_BUSY_MESSAGE, CHECKOUT_MOVED_MESSAGE, CHECKS_FAILED_MESSAGE, MERGE_CONFLICT_MESSAGE, MERGE_REFUSED_MESSAGE, REVIEW_STALE_MESSAGE, RUN_ACTIVE_MESSAGE, OBJECTS_NOT_IMPORTED_MESSAGE, StartBuildRequest, UNKNOWN_BUILD_AGENT_MESSAGE, VCS_UNAVAILABLE_MESSAGE, type WorkspaceId, ALL_READY_ASK_MESSAGE, RUN_REASON_STOPPED, RejectBuildRequest } from '@ogden-agents/shared';
 import { runShortOf } from './build-run-folder.js';
 import { objectStoreOf } from './build-object-store.js';
 import { sweepObjectStores, sweepRunBranches, sweepWorktrees } from './build-worktrees.js';
@@ -92,7 +92,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
   const dispatch = createDispatcher(ctx, start, outcome);
   const reviewer = createReviewer(ctx);
   const {
-    bmad, trust, entities, tickets, vcs, sandbox, runner, chat, dataDir, report, recorder, writeResult, guarded, uncommittedPlanFiles,
+    bmad, trust, entities, tickets, vcs, sandbox, runner, runnerFor, chat, dataDir, report, recorder, writeResult, guarded, uncommittedPlanFiles,
     requireGit, cleanupDeps, requireSandbox, inDispatch, timers, pendingNotes, bump, draining, state, disarmDeadline, verificationOf,
     latestRun, release, cleanUp, requireCleanCheckout
   } = ctx;
@@ -112,9 +112,9 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       // Every ready ticket is `startAll` (story 5.8), which answers with the runs and the queue.
       if (parsed.data.ref === undefined) throw new ValidationError(ALL_READY_ASK_MESSAGE, [{ path: ['all'], message: ALL_READY_ASK_MESSAGE }]);
       const ref = checkedRef(parsed.data.ref);
-      // Each agent builds through its own runner (epic 6 adds runners, not core); v1 has Claude Code's.
+      // Each agent builds through its own runner (epic 17): one with none is refused.
       const agent = parsed.data.agent ?? runner.agent;
-      if (agent !== runner.agent) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
+      if (runnerFor(agent) === undefined) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
       return inDispatch(() => serializedByRepo(repoPath, () => startLocked(workspaceId, repoPath, ref, agent, parsed.data.mode)));
     },
 
@@ -123,14 +123,14 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       const parsed = StartBuildRequest.safeParse(request);
       if (!parsed.success || parsed.data.all !== true) throw new ValidationError(ALL_READY_ASK_MESSAGE, [{ path: ['all'], message: ALL_READY_ASK_MESSAGE }]);
       const agent = parsed.data.agent ?? runner.agent;
-      if (agent !== runner.agent) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
+      if (runnerFor(agent) === undefined) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
       // Every ready ticket goes unattended: a build with the user watching is one ticket at a time.
       if (parsed.data.mode === 'attended') throw new ValidationError(ALL_READY_ASK_MESSAGE, [{ path: ['mode'], message: ALL_READY_ASK_MESSAGE }]);
       return inDispatch(() =>
         serializedByRepo(repoPath, async () => {
           await requireSandbox(agent);
           // Each request tries every ready ticket afresh (one refused before may be ready now).
-          const tried = new Set<string>();
+          const tried = Object.assign(new Set<string>(), { agent });
           draining.set(workspaceId, tried);
           const runs = await extendAll(workspaceId, repoPath, tried);
           return { runs, queue: entities.queueOf(workspaceId) };
@@ -267,6 +267,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       const parsed = RejectBuildRequest.safeParse(request ?? {});
       if (!parsed.success) throw new ValidationError('That is not a reject request.', parsed.error.issues.map((each) => ({ path: each.path, message: each.message })));
       let attended = false;
+      // Reject and retry builds with the agent the rejected run used (an old run has none stored: the default's).
+      let retryAgent: BuildAgent = runner.agent;
       const rejected = await serializedByRepo(repoPath, async () => {
         await guarded(workspaceId);
         const run = latestRun(workspaceId, checked);
@@ -279,9 +281,11 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         // A run already rejected stays as it is: a repeat Reject writes nothing (review, story 5.3); with retry it builds the ticket again (a start that was refused the first time).
         if (run.decision === 'rejected') {
           attended = run.sandbox === ATTENDED_SANDBOX;
+          retryAgent = run.agent ?? runner.agent;
           return { review: await reviewOf(repoPath, run), fresh: parsed.data.retry };
         }
         attended = run.sandbox === ATTENDED_SANDBOX;
+        retryAgent = run.agent ?? runner.agent;
         await release(run);
         entities.setRunOutcome(run.id, 'stopped', run.reason);
         const decided = entities.setRunDecision(run.id, 'rejected');
@@ -294,7 +298,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       // Reject and retry (story 5.9): the same ticket, built again from a new worktree, the note in its first message.
       return inDispatch(() =>
         serializedByRepo(repoPath, async () => {
-          const started = await startLocked(workspaceId, repoPath, checked, runner.agent, attended ? 'attended' : 'unattended', parsed.data.note);
+          const started = await startLocked(workspaceId, repoPath, checked, retryAgent, attended ? 'attended' : 'unattended', parsed.data.note);
           return reviewOf(repoPath, started.run);
         }),
       );

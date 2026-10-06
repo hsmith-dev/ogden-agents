@@ -61,9 +61,23 @@ export interface CodexAgentOptions {
    * from it means not installed.
    */
   server?: (() => CodexServerCommand | undefined) | undefined;
+  /**
+   * Whether an unattended build may start Codex with its own sandbox (epic 17). Default
+   * {@link CODEX_UNATTENDED_VERIFIED}: off until the user's live checks (RELEASING.md) show the
+   * sandbox keeps the protected paths and lets a commit through; a test turns it on.
+   */
+  unattendedVerified?: boolean | undefined;
   /** Called with protocol notes, for the log. Never includes the environment. */
   onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
 }
+
+/**
+ * Codex's own sandbox for an unattended build is not yet known to keep Ogden's protected paths out of reach
+ * of its edits inside the worktree (in `workspace-write` an edit in the workspace asks nothing, so core's rule never
+ * sees it) or to let a `git commit` through (spike 17.1, live checks 1 to 3). Until the user's checks show both, an
+ * unattended Codex build is refused and Codex builds with the user watching (user decision 2026-10-06).
+ */
+export const CODEX_UNATTENDED_VERIFIED = false;
 
 const hasKey = (env: Readonly<Record<string, string>>) => [CODEX_API_KEY_ENV, OPENAI_API_KEY_ENV].some((name) => (env[name] ?? '') !== '');
 
@@ -94,6 +108,17 @@ export function createCodexAgent(options: CodexAgentOptions): AgentPort {
         addEnv: { [CODEX_INITIAL_MODE_ENV]: CODEX_MODE_IDS.ask },
         logFields: { server: server.command },
       };
+    },
+    // An unattended build (epic 17): `workspace-write` with only the run's roots writable, as the adapter's own
+    // start mode and the session's additional directories (the sandbox follows the mode and allows no network,
+    // 2.1.1 source). Refused unless verified; core's policy answers every request that still reaches it.
+    buildSession: {
+      verified: options.unattendedVerified ?? CODEX_UNATTENDED_VERIFIED,
+      start: (sandbox) => ({
+        addEnv: { [CODEX_INITIAL_MODE_ENV]: CODEX_MODE_IDS.workspaceWrite },
+        sessionParams: { additionalDirectories: [...sandbox.writableRoots] },
+        modeIds: [CODEX_MODE_IDS.workspaceWrite],
+      }),
     },
     toolInputPaths: TOOL_INPUT_PATHS,
     // Only `read-only` asks as much as Ask: `workspace-write` and `agent` ask less, so core tells it Ask.

@@ -136,7 +136,13 @@ export interface BuildsDeps {
   runAwareTickets?: TicketStorePort;
   vcs: VcsPort;
   sandbox: SandboxPort;
+  /** The runner of the default build agent (Claude Code's); a request that names no agent builds with it. */
   runner: BuildRunnerPort;
+  /**
+   * The runners of the other agents that can build (epic 17): one per agent id, found by the run's agent. An agent
+   * with none is refused (`UNKNOWN_BUILD_AGENT_MESSAGE`). Core names no agent: each runner says which it is.
+   */
+  runners?: readonly BuildRunnerPort[];
   chat: Pick<Chat, 'createChatSession' | 'sendMessage' | 'releaseAgent'>;
   buildSessions: BuildSessions;
   /** Ogden Agents' data folder: worktrees go in `<dataDir>/w/`. */

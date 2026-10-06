@@ -227,8 +227,9 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
         kind: options.kind ?? 'chat',
         agentId,
         model,
-        permissionMode: start.mode,
-        ...(start.note === undefined ? {} : { permissionModeNote: start.note }),
+        // A build session is always Ask (epic 17): the project's default mode (Auto, Skip all) never reaches a build's agent, and a build session's mode never changes.
+        permissionMode: options.kind === 'build' ? 'ask' : start.mode,
+        ...(start.note === undefined || options.kind === 'build' ? {} : { permissionModeNote: start.note }),
         ...(options.autoTitle === undefined ? {} : { autoTitle: options.autoTitle }),
       });
     },

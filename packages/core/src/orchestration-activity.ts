@@ -64,4 +64,3 @@ export function createActivity({ orm, feature, labels }: Base & ManagerIoApi) {
   return { activity };
 }
 
-export type ActivityApi = ReturnType<typeof createActivity>;

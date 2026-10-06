@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AgentId } from './events-common.js';
-import { OrchestrationMode } from './orchestration.js';
+import { OrchestrationMode } from './orchestration-run.js';
 import { TEAM_ROLES, TeamAssignee, TeamRole, TeamRoster } from './team.js';
 
 /**

@@ -23,6 +23,8 @@ export * from './tab-token.js';
 export * from './team.js';
 export * from './roster.js';
 export * from './orchestration.js';
+export * from './orchestration-run.js';
+export * from './orchestration-build-review.js';
 export * from './terminal.js';
 export * from './updates.js';
 export * from './toolchain.js';

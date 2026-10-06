@@ -834,6 +834,9 @@ describe('E15: orchestration code is tool-free and names no model product (story
         'packages/shared/src/roster.ts',
         'packages/shared/src/events-orchestration.ts',
         'packages/shared/src/orchestration.ts',
+        'packages/shared/src/orchestration-run.ts',
+        'packages/shared/src/orchestration-build-review.ts',
+        'packages/shared/src/orchestration-text.ts',
         'packages/adapters/src/manager-memory/index.ts',
       ]),
     );

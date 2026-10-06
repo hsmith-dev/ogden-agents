@@ -205,4 +205,3 @@ export function createActions(k: Base & RowsApi & LoopStateApi & RunApi & ReadBa
   return { approveStep, editStep, skipStep, reorderSteps, stopRun, linkBuild, answerQuestion };
 }
 
-export type ActionsApi = ReturnType<typeof createActions>;

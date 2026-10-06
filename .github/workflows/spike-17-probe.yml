@@ -1,0 +1,25 @@
+name: Spike 17.1 probe (temporary)
+on:
+  push:
+    branches: [spike/17.1-build-agents]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Probe
+        shell: bash
+        run: pnpm vitest run packages/adapters/test/spike-17-probe.test.ts --silent=false 2>&1 | tee probe.log; grep -c PROBE17 probe.log

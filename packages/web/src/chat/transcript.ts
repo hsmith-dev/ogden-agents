@@ -33,7 +33,7 @@ export interface TranscriptMessage {
    * `terminal` was typed in the agent's own terminal (shown "from terminal"),
    * `deny_reason` was a Deny's reason core sent. Absent otherwise.
    */
-  origin?: 'deny_reason' | 'terminal' | 'manager';
+  origin?: 'deny_reason' | 'terminal' | 'manager' | 'manager_auto';
   /**
    * The agent that wrote an agent message, when the chat named it (handoff:
    * a chat continued with another agent keeps each reply labelled by its

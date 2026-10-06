@@ -1,4 +1,14 @@
-import { MANAGER_LIMITS, ORCHESTRATION_NO_MANAGER_MESSAGE, type OrchestrationRunView, type OrchestrationStepView } from '@ogden-agents/shared';
+import {
+  MANAGER_LIMITS,
+  ORCHESTRATION_MODE_INFO,
+  ORCHESTRATION_NEEDS_YOUR_APPROVAL,
+  ORCHESTRATION_NO_MANAGER_MESSAGE,
+  orchestrationStopWords,
+  type OrchestrationActivityEntry,
+  type OrchestrationMode,
+  type OrchestrationRunView,
+  type OrchestrationStepView,
+} from '@ogden-agents/shared';
 import { Link } from '@tanstack/react-router';
 import { useState, type FormEvent } from 'react';
 import { Badge } from '@/ui/badge';
@@ -22,7 +32,7 @@ import { Text } from '@/ui/typography';
  */
 
 /** What the page says first: every instruction waits for the user (the mode is fixed to this for now). */
-const ORCHESTRATE_INTRO = 'A manager turns your goal into steps. You see every instruction and approve it before an agent gets it.';
+const ORCHESTRATE_INTRO = 'A manager turns your goal into steps for your agents. You see every instruction here, and you can stop at any time.';
 
 /** What the page says while the manager works: nothing else on the page, and none of the workers' chats, waits for it. */
 const THINKING_WORDS = 'The manager is thinking. A small model on a modest computer can take a minute. Your chats keep working, and you can leave this page.';
@@ -80,6 +90,12 @@ export interface OrchestrateViewProps {
   onStop: () => void;
   /** A stop request is in flight. */
   stopping: boolean;
+  /** The project's mode now (15.8). Absent from an older server: Approve each instruction. */
+  mode?: OrchestrationMode | undefined;
+  /** The activity log, newest first (15.8); `undefined` while it loads. */
+  activity?: readonly OrchestrationActivityEntry[] | undefined;
+  /** Why the activity log could not be read. */
+  activityError?: string | undefined;
 }
 
 /** The actions the plan review gives each step. */
@@ -92,7 +108,7 @@ interface StepActions {
   onMove: (stepId: string, by: -1 | 1) => void;
 }
 
-export function OrchestrateView({ wsId, managerReady, managerMessage, run, busy, error, onStart, onApprove, onSend, onEdit, onSkip, onReorder, onStop, stopping }: OrchestrateViewProps) {
+export function OrchestrateView({ wsId, managerReady, managerMessage, run, busy, error, onStart, onApprove, onSend, onEdit, onSkip, onReorder, onStop, stopping, mode = 'approve_each', activity, activityError }: OrchestrateViewProps) {
   const [goal, setGoal] = useState('');
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -103,6 +119,9 @@ export function OrchestrateView({ wsId, managerReady, managerMessage, run, busy,
     <div className="flex flex-col gap-6" data-testid="orchestrate">
       <PageSection title="Goal">
         <Text>{ORCHESTRATE_INTRO}</Text>
+        <Text variant="caption" data-testid="orchestrate-mode" data-mode={mode}>
+          Mode: {ORCHESTRATION_MODE_INFO[mode].label}. {ORCHESTRATION_MODE_INFO[mode].sentence} You can change it in the project settings.
+        </Text>
         {managerReady ? (
           managerMessage === undefined ? null : (
             <Text variant="caption" data-testid="orchestrate-manager" data-manager="ready">
@@ -130,6 +149,7 @@ export function OrchestrateView({ wsId, managerReady, managerMessage, run, busy,
         )}
       </PageSection>
       {run === undefined ? null : <RunSection wsId={wsId} view={run} where={managerReady ? managerMessage : undefined} busy={busy} stopping={stopping} onApprove={onApprove} onSend={onSend} onEdit={onEdit} onSkip={onSkip} onReorder={onReorder} onStop={onStop} />}
+      <ActivityLog wsId={wsId} entries={activity} error={activityError} />
     </div>
   );
 }
@@ -161,6 +181,8 @@ function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEd
   const { run, steps } = view;
   const live = isLive(run.state);
   const stateOf = new Map(steps.map((step) => [step.stepId, step.state]));
+  // The instruction counter: what was sent, nothing about money.
+  const sent = steps.filter((step) => step.sessionId !== null).length;
   const move = (stepId: string, by: -1 | 1) => {
     const ids = steps.map((step) => step.stepId);
     const at = ids.indexOf(stepId);
@@ -184,15 +206,29 @@ function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEd
           </Button>
         ) : null}
       </div>
+      <Text variant="caption" data-testid="orchestrate-run-counter">
+        {sent} of {run.limits.maxInstructions} {run.limits.maxInstructions === 1 ? 'instruction' : 'instructions'} sent
+        {run.mode === 'automatic' ? '. Dispatching automatically.' : '.'}
+      </Text>
       {where === undefined ? null : (
         <Text variant="caption" data-testid="orchestrate-run-where">
           {where}
         </Text>
       )}
       {run.state === 'planning' ? <Thinking /> : null}
-      {run.state === 'stopped' ? (
+      {run.stopReason === 'user' && run.state === 'stopped' ? (
         <Text variant="caption" data-testid="orchestrate-stopped-note">
-          You stopped this run. Nothing more will be approved or sent. A worker that was in the middle of a turn was asked to stop; its chat is still there.
+          {orchestrationStopWords('user', run.limits)}
+        </Text>
+      ) : null}
+      {run.stopReason !== null && run.stopReason !== 'user' && run.stopReason !== 'worker_error' && (run.state === 'stopped' || run.state === 'failed') ? (
+        <Notice variant="info" infoGlyph role="status" data-testid="orchestrate-stop-reason" data-stop-reason={run.stopReason}>
+          {orchestrationStopWords(run.stopReason, run.limits)}
+        </Notice>
+      ) : null}
+      {run.mode === 'automatic' && run.state === 'awaiting_user' && steps.some((step) => step.state === 'proposed' && step.dependsOn.every((id) => stateOf.get(id) === 'done')) ? (
+        <Text variant="caption" data-testid="orchestrate-needs-approval">
+          {ORCHESTRATION_NEEDS_YOUR_APPROVAL}
         </Text>
       ) : null}
       <ol className="m-0 flex list-none flex-col gap-3 p-0" data-testid="orchestrate-steps">
@@ -252,6 +288,11 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, actions }: S
           {step.workerLabel}
         </Badge>
         <Badge data-testid="orchestrate-step-state">{stateWords}</Badge>
+        {step.approvedBy === 'mode' && step.state !== 'proposed' ? (
+          <Badge variant="outline" data-testid="orchestrate-step-approver">
+            Sent automatically
+          </Badge>
+        ) : null}
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1">
         <Text variant="caption" data-testid="orchestrate-step-target">
@@ -374,5 +415,78 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, actions }: S
         </div>
       )}
     </li>
+  );
+}
+
+const ACTIVITY_RESULT_WORDS: Readonly<Record<OrchestrationActivityEntry['result'], string>> = {
+  working: 'The worker is on it',
+  finished: 'Finished',
+  failed: 'Failed',
+  refused: 'Not sent',
+  stopped: 'Stopped before it finished',
+};
+
+/** When something happened, in the reader's own time zone, to the minute. */
+const whenWords = (iso: string): string => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+export interface ActivityLogProps {
+  wsId: string;
+  /** Newest first; `undefined` while loading. */
+  entries: readonly OrchestrationActivityEntry[] | undefined;
+  error?: string | undefined;
+}
+
+/**
+ * The activity log (epic 15, 15.8): every instruction that was sent or refused in this project, read from the events: when, which
+ * worker, which chat, who approved it and how it stands. Instructions only; nothing here counts money.
+ */
+export function ActivityLog({ wsId, entries, error }: ActivityLogProps) {
+  return (
+    <PageSection title="Activity" data-testid="orchestrate-activity">
+      <Text variant="caption">Every instruction that was sent, or could not be, in this project.</Text>
+      {error === undefined ? null : (
+        <Notice variant="blocked" role="alert" data-testid="orchestrate-activity-error">
+          {error}
+        </Notice>
+      )}
+      {entries === undefined || entries.length > 0 ? null : (
+        <Text variant="caption" data-testid="orchestrate-activity-empty">
+          Nothing has been sent yet.
+        </Text>
+      )}
+      <ol className="m-0 flex list-none flex-col gap-2 p-0" data-testid="orchestrate-activity-list">
+        {(entries ?? []).map((entry) => (
+          <li key={`${entry.runId}:${entry.stepId}:${entry.kind}:${entry.at}`} className="flex flex-col gap-1 rounded-lg border border-border p-(--panel-padding)" data-testid="orchestrate-activity-entry" data-kind={entry.kind} data-result={entry.result}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Text variant="label">Step {entry.stepId}</Text>
+              <Badge variant="outline" data-testid="orchestrate-activity-worker">
+                {entry.workerLabel}
+              </Badge>
+              <Badge data-testid="orchestrate-activity-result">{ACTIVITY_RESULT_WORDS[entry.result]}</Badge>
+              <Text variant="caption" data-testid="orchestrate-activity-when">
+                {whenWords(entry.at)}
+              </Text>
+            </div>
+            <Text variant="caption" data-testid="orchestrate-activity-who">
+              {entry.kind === 'refused' ? 'Not sent' : `Approved by ${entry.approvedBy === 'mode' ? 'the mode, automatically' : entry.approvedBy === 'user' ? 'you' : 'someone'}`}
+              {entry.kind === 'refused' ? '' : `, sent to ${entry.chat === 'new' ? 'a new chat' : 'an existing chat'}`}
+            </Text>
+            <Text className="whitespace-pre-wrap" data-testid="orchestrate-activity-instruction">
+              {entry.instruction}
+            </Text>
+            {entry.note === '' ? null : (
+              <Text variant="caption" data-testid="orchestrate-activity-note">
+                {entry.note}
+              </Text>
+            )}
+            {entry.sessionId === null ? null : (
+              <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId: entry.sessionId }} className="text-label underline" data-testid="orchestrate-activity-chat">
+                Open the chat
+              </Link>
+            )}
+          </li>
+        ))}
+      </ol>
+    </PageSection>
   );
 }

@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { keepSaved } from '@/api/keep-saved';
 import { updateOrchestrationEnabled } from '@/orchestrate/orchestrate-api';
+import { ProjectMode } from '@/orchestrate/mode-section';
 import { ProjectRoster } from '@/orchestrate/roster-editor';
 import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
@@ -26,7 +27,7 @@ export interface OrchestrationSectionViewProps {
 export function OrchestrationSectionView({ enabled, saving, error, onChange, manager }: OrchestrationSectionViewProps) {
   return (
     <PageSection title={ORCHESTRATION_PIECE.label} data-testid="orchestration-section">
-      <Text>An advanced feature. A manager model plans the work and tells your other agents what to do, and you approve each instruction. Choose who takes each role below. Turn it off and the project stays a plain set of chats.</Text>
+      <Text>An advanced feature. A manager model plans the work and tells your other agents what to do. You approve each instruction, or let it dispatch automatically. Choose who takes each role and how instructions are sent below. Turn it off and the project stays a plain set of chats.</Text>
       {enabled === undefined ? null : (
         <Field id="orchestration-use" layout="inline" label="Use Orchestration in this project" description={ORCHESTRATION_PIECE.sentence}>
           <Switch id="orchestration-use" data-testid="orchestration-use" aria-describedby="orchestration-use-description" checked={enabled} disabled={saving} onCheckedChange={onChange} />
@@ -68,7 +69,12 @@ export function OrchestrationSection({ wsId }: { wsId: string }) {
       saving={saving}
       error={error ?? (settings.error instanceof Error ? settings.error.message : undefined)}
       onChange={onChange}
-      manager={<ProjectRoster wsId={wsId} />}
+      manager={
+        <>
+          <ProjectRoster wsId={wsId} />
+          <ProjectMode wsId={wsId} />
+        </>
+      }
     />
   );
 }

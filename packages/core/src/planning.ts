@@ -18,6 +18,7 @@ import {
   DOCUMENT_INVALID_PATH_MESSAGE,
   PlanningIdea,
   SKILL_NAME_PATTERN,
+  type BmadPiece,
   type Catalog,
   type PlanningDocument,
   type Session,
@@ -29,13 +30,22 @@ import type { BmadFeatures } from './bmad-pieces.js';
 import type { BmadModulesSeen } from './bmad-modules-seen.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
-import { NotFoundError, ValidationError } from './errors.js';
+import { FeatureOffError, NotFoundError, ValidationError } from './errors.js';
 import { DOCUMENT_PIECES, documentPath, insideOutputFolder } from './planning-documents.js';
+
+/** The pieces that read the catalog: Planning, and Retrospectives for the look-back's epic-scoped action (epic 7). */
+const CATALOG_PIECES: readonly BmadPiece[] = ['planning', 'retrospectives'];
+
+/** The catalog a Retrospectives-only project gets: its epic-scoped actions alone, no modules, entry action, agents or other skills. */
+function epicActionsOnly(catalog: Catalog): Catalog {
+  return { ...catalog, modules: [], skills: catalog.skills.filter((skill) => skill.scope === 'epic').map((skill) => ({ ...skill, module: null, installedAt: null })), agents: [], entryAction: null };
+}
 
 export interface PlanningUseCases {
   /**
-   * The project's catalog. `FeatureOffError` with Planning off (nothing is
-   * scanned), `NotFoundError` for an unknown workspace.
+   * The project's catalog. `FeatureOffError` with Planning and Retrospectives
+   * both off (nothing is scanned); with only Retrospectives on, only the
+   * epic-scoped actions, `NotFoundError` for an unknown workspace.
    */
   catalog(workspaceId: WorkspaceId): Promise<Catalog>;
   /**
@@ -83,6 +93,16 @@ export function workspaceRepoPath(entities: Pick<Entities, 'getWorkspace'>, work
 }
 
 export function createPlanning({ bmad, entities, catalog, chat, agent, agentOf, modulesSeen }: PlanningDeps): PlanningUseCases {
+  /** Whether Planning is on now (the catalog is also read for Retrospectives alone). */
+  const planningOn = (workspaceId: WorkspaceId): boolean => {
+    try {
+      bmad.requireBmadFeature(workspaceId, 'planning');
+      return true;
+    } catch (error) {
+      if (error instanceof FeatureOffError) return false;
+      throw error;
+    }
+  };
   // Rebuilt from the repo on every read (story 4.4): a module copied in shows without a restart.
   const catalogOf = async (workspaceId: WorkspaceId): Promise<Catalog> => {
     const read = await catalog.catalog(workspaceRepoPath(entities, workspaceId));
@@ -93,8 +113,13 @@ export function createPlanning({ bmad, entities, catalog, chat, agent, agentOf, 
   };
   return {
     async catalog(workspaceId) {
-      bmad.requireBmadFeature(workspaceId, 'planning');
-      return catalogOf(workspaceId);
+      // Planning, or Retrospectives (epic 7): with only Retrospectives on, only the epic-scoped actions are given.
+      bmad.requireAnyBmadFeature(workspaceId, CATALOG_PIECES);
+      if (planningOn(workspaceId)) return catalogOf(workspaceId);
+      // Retrospectives alone: narrowed before anything else, and no module baseline is recorded for a Planning that is off.
+      const read = epicActionsOnly(await catalog.catalog(workspaceRepoPath(entities, workspaceId)));
+      bmad.requireAnyBmadFeature(workspaceId, CATALOG_PIECES);
+      return read;
     },
 
     async start(workspaceId, skill, idea) {
@@ -113,7 +138,8 @@ export function createPlanning({ bmad, entities, catalog, chat, agent, agentOf, 
       }
       const { skills } = await catalogOf(workspaceId);
       const entry = skills.find((candidate) => candidate.name === skill);
-      if (entry === undefined) throw new NotFoundError('skill', skill);
+      // An epic-scoped action needs an epic's folder: it starts from the board, never from here (epic 7).
+      if (entry === undefined || entry.scope === 'epic') throw new NotFoundError('skill', skill);
       // Checked again after the (async) scan: a piece turned off meanwhile starts nothing.
       bmad.requireBmadFeature(workspaceId, 'planning');
       // The chat is named after the action as the Plan page shows it (backlog story 12: its label, else its description), not its skill invocation.

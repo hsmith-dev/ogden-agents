@@ -57,7 +57,7 @@ async function setup({ pieces = RETRO_PIECES, trust = true, skills = ['bmad-retr
   const ticketStore = createMemoryTicketStore({ repos: { [real]: { tickets: [], folder: 'initiative-demo', epics: [EPIC] } } });
   const bmadCatalog = createMemoryBmadCatalog(
     { [real]: { hasBmad: true, hasOutput: true } },
-    { [real]: skills.map((name) => ({ name, description: SKILL_FILE })) },
+    { [real]: skills.map((name) => ({ name, description: SKILL_FILE, ...(name === 'bmad-retrospective' ? { scope: 'epic' as const } : {}) })) },
     {
       setup: { [real]: { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] } },
       documents: { [real]: { '_bmad-output/initiative-demo/epic-one/epic-epic-one-retrospective.md': '# Retrospective\n' } },
@@ -148,6 +148,23 @@ describe('look back on an epic over REST (story 7.1)', () => {
     expect(DocumentResponse.parse(await opened.json()).document.content).toBe('# Retrospective\n');
     expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId: workspace.id }), { bmadPieces: [] })).status).toBe(200);
     expect((await request(server, tab, 'GET', url)).status).toBe(409);
+  });
+});
+
+describe('the catalog for Retrospectives alone (story 7.3)', () => {
+  it('answers the epic-scoped action to a project with only Retrospectives on, with no trust; Plan stays off', async () => {
+    const { server, tab, workspace } = await setup({ trust: false });
+    const catalogPath = apiPath(API_ROUTES.workspaceCatalog, { wsId: workspace.id });
+    const reply = await request(server, tab, 'GET', catalogPath);
+    expect(reply.status).toBe(200);
+    const body = (await reply.json()) as { skills: Array<{ name: string; scope: string | null }>; entryAction: string | null };
+    expect(body.skills.map((skill) => [skill.name, skill.scope])).toEqual([['bmad-retrospective', 'epic']]);
+    expect(body.entryAction).toBeNull();
+    const start = await request(server, tab, 'POST', apiPath(API_ROUTES.workspacePlanningSessions, { wsId: workspace.id }), { skill: 'bmad-retrospective' });
+    expect(start.status).toBe(409);
+    expect((await errorOf(start)).code).toBe('feature_off');
+    const off = await setup({ pieces: [] });
+    expect((await request(off.server, off.tab, 'GET', apiPath(API_ROUTES.workspaceCatalog, { wsId: off.workspace.id }))).status).toBe(409);
   });
 });
 

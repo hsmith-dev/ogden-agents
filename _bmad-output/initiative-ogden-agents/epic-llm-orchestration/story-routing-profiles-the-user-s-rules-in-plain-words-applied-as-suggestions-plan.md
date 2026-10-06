@@ -3,12 +3,12 @@ title: "Routing profiles: the user's rules in plain words, applied as suggestion
 type: 'feature'
 ticket: '15.12'
 created: '2026-10-06'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '4b9841aee1da11e1525939a6c799cb0f92340d6b'
 context:
@@ -101,8 +101,10 @@ None yet.
 
 ## Review Triage Log
 
-Not yet reviewed.
+2026-10-06, security and correctness reviewers (2 lenses), no critical or high findings. Patched: a rule id could be given again after the highest rule was deleted in an earlier save, so the same id meant two rules in old steps and in the events (medium correctness, low security), now the column keeps a counter of ids given (`{ next, rules }`, a plain list from before still reads) that only grows, with a test across saves; a rule error stayed on screen while the person fixed the text (low), now cleared on the next edit. Not changed: a rule deleted while the manager is still thinking is still shown on the plan it helped make (low, display only, the step keeps the words it followed and the person approves every step); the schema offers `rule` even with no rules, so a made up id costs one repair ask (low, by design); ids stop at r9999 (low, not reachable with 10 rules and a counter that moves only on a new rule).
 
 ## Verification
 
-Not yet run.
+**Results:** `pnpm typecheck` clean; `pnpm test` 351 files, 4442 passed, 8 skipped; Playwright `orchestrate` and `local-endpoints` (21 in the first two files) passed; `PROVENANCE_BASE=origin/main pnpm provenance` passes.
+
+**Commands:** `pnpm typecheck`, `pnpm test`, `npx playwright test tests/e2e/orchestrate.spec.ts` (after `pnpm run build`), `PROVENANCE_BASE=origin/main pnpm provenance`.

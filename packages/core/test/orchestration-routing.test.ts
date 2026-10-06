@@ -109,6 +109,15 @@ describe('saving the rules', () => {
     expect(saved.map((rule) => rule.id)).toEqual(['r2', 'r3', 'r4', 'r5']);
   });
 
+  it('never gives a deleted rule\'s id to another rule, even across saves', () => {
+    const kit = setUp();
+    save(kit, [{ text: 'One' }, { text: 'Two' }, { text: 'Three' }]);
+    save(kit, [{ id: 'r1', text: 'One' }]);
+    expect(save(kit, [{ id: 'r1', text: 'One' }, { text: 'Four' }]).map((rule) => rule.id)).toEqual(['r1', 'r4']);
+    save(kit, []);
+    expect(save(kit, [{ text: 'Five' }]).map((rule) => rule.id)).toEqual(['r5']);
+  });
+
   it('folds white space and trims, and refuses too many rules, a long rule, an empty rule and hidden characters, storing nothing', () => {
     const kit = setUp();
     expect(texts(save(kit, [{ text: '  Tests   go\tto   Codex  ' }]))).toEqual(['Tests go to Codex']);

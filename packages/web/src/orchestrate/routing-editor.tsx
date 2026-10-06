@@ -175,6 +175,7 @@ export function ProjectRoutingRules({ wsId }: { wsId: string }) {
       justSaved={justSaved}
       onChange={(next) => {
         setJustSaved(false);
+        setError(undefined);
         setRows(next);
       }}
       onSave={onSave}

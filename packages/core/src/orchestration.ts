@@ -99,7 +99,7 @@ import { AgentNotReadyError, BadOrderError, DispatchRefusedError, DriverIsTermin
 import type { EventLog } from './event-log.js';
 import type { OrchestrationFeature } from './orchestration-feature.js';
 import { cleanForManager } from './manager-input.js';
-import { checkRoutingRequest, readRoutingRules, sameRules, writeRoutingRules } from './orchestration-routing.js';
+import { checkRoutingRequest, readRoutingNext, readRoutingRules, sameRules, writeRoutingRules } from './orchestration-routing.js';
 import { dispatchableSteps, MANAGER_FAILURE_WORDS, type ManagerContext, type ManagerDecisionContext, type ManagerPort, type ManagerRecord } from './manager-port.js';
 import { RESTARTED_REASON } from './chat/constants.js';
 import type { ManagerSource } from './manager-source.js';
@@ -1403,9 +1403,9 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       feature.requireOrchestration(workspaceId);
       return events.transaction(() => {
         const current = readRoutingRules(orm, workspaceId) ?? [];
-        const next = checkRoutingRequest(request, current);
+        const { rules: next, next: counter } = checkRoutingRequest(request, current, readRoutingNext(orm, workspaceId));
         if (!sameRules(current, next)) {
-          writeRoutingRules(orm, workspaceId, next);
+          writeRoutingRules(orm, workspaceId, next, counter);
           events.append({ type: 'orchestration.routing_changed', workspaceId, streamId: workspaceId, payload: { ruleIds: next.map((rule) => rule.id), previousRuleIds: current.map((rule) => rule.id) } });
         }
         return next;

@@ -10,35 +10,51 @@ import type { Orm } from './db/database.js';
 import { workspaces } from './db/schema.js';
 import { ValidationError } from './errors.js';
 
-/** The project's rules in the person's order. A damaged value, or one rule that is not clean, is left out and the others stay; `undefined` for an unknown project. */
-export function readRoutingRules(orm: Orm, workspaceId: string): RoutingRule[] | undefined {
+/** What the column holds: the rules and the number the next new rule's id takes, which only grows so an id is never given to two rules. */
+interface Stored {
+  rules: RoutingRule[];
+  next: number;
+}
+
+function readStored(orm: Orm, workspaceId: string): Stored | undefined {
   const row = orm.select({ routing: workspaces.orchestrationRouting }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
   if (row === undefined) return undefined;
-  if (row.routing === null) return [];
+  if (row.routing === null) return { rules: [], next: 1 };
   let parsed: unknown;
   try {
     parsed = JSON.parse(row.routing);
   } catch {
-    return [];
+    return { rules: [], next: 1 };
   }
-  if (!Array.isArray(parsed)) return [];
+  // A list is the plain form; an object also carries the counter.
+  const list: unknown = Array.isArray(parsed) ? parsed : (parsed as { rules?: unknown } | null)?.rules;
+  const counter = !Array.isArray(parsed) && typeof (parsed as { next?: unknown } | null)?.next === 'number' ? (parsed as { next: number }).next : 1;
   const seen = new Set<string>();
   const rules: RoutingRule[] = [];
-  for (const each of parsed) {
-    const rule = RoutingRuleSchema.safeParse(each);
-    if (!rule.success || seen.has(rule.data.id)) continue;
-    seen.add(rule.data.id);
-    rules.push(rule.data);
-    if (rules.length === ROUTING_LIMITS.maxRules) break;
+  if (Array.isArray(list)) {
+    for (const each of list) {
+      const rule = RoutingRuleSchema.safeParse(each);
+      if (!rule.success || seen.has(rule.data.id)) continue;
+      seen.add(rule.data.id);
+      rules.push(rule.data);
+      if (rules.length === ROUTING_LIMITS.maxRules) break;
+    }
   }
-  return rules;
+  const highest = Math.max(0, ...rules.map((rule) => Number(rule.id.slice(1))));
+  return { rules, next: Math.max(Number.isFinite(counter) ? Math.floor(counter) : 1, highest + 1) };
 }
 
-/** Stores `rules` for the project. The caller has checked them. */
-export function writeRoutingRules(orm: Orm, workspaceId: string, rules: readonly RoutingRule[]): void {
+/** The project's rules in the person's order. A damaged value, or one rule that is not clean, is left out and the others stay; `undefined` for an unknown project. */
+export const readRoutingRules = (orm: Orm, workspaceId: string): RoutingRule[] | undefined => readStored(orm, workspaceId)?.rules;
+
+/** The number the next new rule's id takes. It never goes down, so a deleted rule's id is not given to another rule. */
+export const readRoutingNext = (orm: Orm, workspaceId: string): number => readStored(orm, workspaceId)?.next ?? 1;
+
+/** Stores `rules` for the project, with the counter of ids given so far. The caller has checked them. */
+export function writeRoutingRules(orm: Orm, workspaceId: string, rules: readonly RoutingRule[], next: number): void {
   orm
     .update(workspaces)
-    .set({ orchestrationRouting: rules.length === 0 ? null : JSON.stringify(rules.map((rule) => ({ id: rule.id, text: rule.text }))) })
+    .set({ orchestrationRouting: rules.length === 0 && next <= 1 ? null : JSON.stringify({ next, rules: rules.map((rule) => ({ id: rule.id, text: rule.text })) }) })
     .where(eq(workspaces.id, workspaceId))
     .run();
 }
@@ -47,26 +63,18 @@ const refuse = (message: string, path: string): never => {
   throw new ValidationError(message, [{ path: ['rules', path], message }]);
 };
 
-/** The id a new rule gets: `r` and the next number after the highest one the project has (or had in this list). */
-function nextId(taken: ReadonlySet<string>, highest: number): { id: string; highest: number } {
-  let n = highest + 1;
-  while (taken.has(`r${n}`)) n += 1;
-  return { id: `r${n}`, highest: n };
-}
-
 /**
  * The rules a `PUT` asks for, checked: at most {@link ROUTING_LIMITS.maxRules}, each one clean line of at most
  * {@link ROUTING_LIMITS.maxRuleChars} characters (trimmed, inner white space folded) that holds no secret. An item with the id of a rule
- * `current` has keeps it; every other item gets a fresh id. {@link ValidationError} in plain words otherwise, and nothing is stored.
+ * `current` has keeps it; every other item gets the next id from the counter, which never goes down. {@link ValidationError} in plain words otherwise, and nothing is stored.
  */
-export function checkRoutingRequest(request: unknown, current: readonly RoutingRule[]): RoutingRule[] {
+export function checkRoutingRequest(request: unknown, current: readonly RoutingRule[], next: number): { rules: RoutingRule[]; next: number } {
   const parsed = SetOrchestrationRoutingRequest.safeParse(request);
   if (!parsed.success) return refuse(ORCHESTRATION_ROUTING_WORDS.badText, 'shape');
   if (parsed.data.rules.length > ROUTING_LIMITS.maxRules) return refuse(ORCHESTRATION_ROUTING_WORDS.tooMany, 'count');
   const known = new Set(current.map((rule) => rule.id));
   const used = new Set<string>();
-  const taken = new Set<string>(known);
-  let highest = Math.max(0, ...current.map((rule) => Number(rule.id.slice(1))));
+  let counter = next;
   const out: RoutingRule[] = [];
   for (const [index, item] of parsed.data.rules.entries()) {
     const text = item.text.replace(/\s+/g, ' ').trim();
@@ -74,17 +82,15 @@ export function checkRoutingRequest(request: unknown, current: readonly RoutingR
     if (redactSecrets(text) !== text) return refuse(ORCHESTRATION_ROUTING_WORDS.secret, String(index));
     let id = item.id !== undefined && RoutingRuleIdSchema.safeParse(item.id).success && known.has(item.id) && !used.has(item.id) ? item.id : undefined;
     if (id === undefined) {
-      const fresh = nextId(taken, highest);
-      id = fresh.id;
-      highest = fresh.highest;
-      taken.add(id);
+      id = `r${counter}`;
+      counter += 1;
     }
     used.add(id);
     const rule = RoutingRuleSchema.safeParse({ id, text });
     if (!rule.success) return refuse(ORCHESTRATION_ROUTING_WORDS.badText, String(index));
     out.push(rule.data);
   }
-  return out;
+  return { rules: out, next: counter };
 }
 
 /** Whether two lists say the same, rule for rule and in order. */

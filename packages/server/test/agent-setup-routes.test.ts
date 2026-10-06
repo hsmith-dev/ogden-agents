@@ -729,6 +729,18 @@ describe('onboarding routes (story 9.5)', () => {
     expect(await onboardingOf(second, await signIn(second))).toEqual({ welcomeCompleted: true });
   });
 
+  it('answers a read that throws with the plain 500 and logs only a code', async () => {
+    const lines: string[] = [];
+    const app = new Hono();
+    const failing = { get: () => { throw Object.assign(new Error('/secret/path'), { code: 'EACCES' }); }, set: () => ({ welcomeCompleted: true }) } as never;
+    registerAgentSetupRoutes(app, { onboarding: failing, log: createLogger((line) => lines.push(line)) });
+    const reply = await app.request(API_ROUTES.onboarding);
+    expect(reply.status).toBe(500);
+    expect(ApiErrorBody.parse(await reply.json()).error).toEqual({ code: 'internal_error', message: "Ogden Agents couldn't check whether Welcome is done. Try again." });
+    expect(lines.join('')).toContain('EACCES');
+    expect(lines.join('')).not.toContain('/secret/path');
+  });
+
   it('answer 501 without the use-case, and never read the body', async () => {
     const lines: string[] = [];
     const app = new Hono();

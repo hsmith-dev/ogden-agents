@@ -27,9 +27,9 @@ export interface NotificationText {
  * the project, the chat and the kind: never a command, a file, a path or what
  * the agent said.
  */
-export function notificationText(need: Pick<NeedsYouEntry, 'kind' | 'workspaceName' | 'chatName' | 'keyRejected'>): NotificationText {
+export function notificationText(need: Pick<NeedsYouEntry, 'kind' | 'workspaceName' | 'chatName' | 'keyRejected' | 'keyName'>): NotificationText {
   // An agent with only an API key has no sign in: its key was rejected.
-  const title = need.keyRejected === true ? 'API key rejected' : need.kind === 'pane' ? 'A terminal may need you' : NEED_KIND_LABELS[need.kind];
+  const title = need.keyRejected === true ? `${need.keyName ?? 'API key'} rejected` : need.kind === 'pane' ? 'A terminal may need you' : NEED_KIND_LABELS[need.kind];
   return { title, body: `${need.workspaceName}: ${need.chatName}` };
 }
 

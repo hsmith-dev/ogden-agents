@@ -95,6 +95,12 @@ export const AgentSetupStatus = z.object({
 });
 export type AgentSetupStatus = z.infer<typeof AgentSetupStatus>;
 
+/**
+ * The one word an agent's key goes by in plain sentences: "key" for an API key, the last word of its own name for it
+ * otherwise (Grok's "xAI API access token" is a "token").
+ */
+export const keyWordOf = (apiKeyName: string | undefined): string => apiKeyName?.trim().split(/\s+/).at(-1) ?? 'key';
+
 /** `GET /api/v1/agents`: every supported agent and its setup. */
 export const AgentsResponse = z.object({ agents: z.array(AgentSetupStatus) });
 export type AgentsResponse = z.infer<typeof AgentsResponse>;

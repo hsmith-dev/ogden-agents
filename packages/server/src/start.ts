@@ -31,6 +31,7 @@ import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLega
 import { createGate, launchUrl as launchUrlFor } from './gate.js';
 import { acquireInstanceLock, type InstanceLock } from './instance-lock.js';
 import { createLauncherToken, type LauncherToken } from './launcher-token.js';
+import { logInternalError } from './internal-error-log.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
 import { removePortFile, writePortFile } from './port-file.js';
 import { createTerminalAvailability } from './terminal-availability.js';
@@ -346,7 +347,7 @@ async function listenAndAnnounce({
     agentModels: core.agentModels,
     // The event carries the plain reason; the log also gets the details (never the environment).
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
-    onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
+    onInternalError: (sessionId, error) => logInternalError(log, sessionId, error),
     onToolCallCompleted: (sessionId, toolCallId, diffs) => planningDocuments.toolCallCompleted(sessionId, toolCallId, diffs),
     // Unattended build sessions (story 5.2): their worktree, sandbox and permission policy, registered by the builds use-cases.
     buildSessions: core.buildSessions,

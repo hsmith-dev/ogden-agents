@@ -49,6 +49,8 @@ export function createOnboarding(options: OnboardingOptions): Onboarding {
 
   /** Whether the record's corruption was reported: once per run while it stays corrupt (nothing rewrites it until Welcome ends). */
   let corruptReported = false;
+  /** The code of the unreadable record last reported: the same one is not reported again on every read (as `preferences.ts` does). */
+  let unreadableReported: string | undefined;
 
   /** The kept record, or `undefined` when there is none or it can't be used. */
   const read = (): OnboardingState | undefined => {
@@ -58,11 +60,16 @@ export function createOnboarding(options: OnboardingOptions): Onboarding {
     } catch (error) {
       corruptReported = false;
       const code = (error as NodeJS.ErrnoException).code ?? 'unreadable';
-      if (code !== 'ENOENT') options.onError?.(code);
+      if (code === 'ENOENT') unreadableReported = undefined;
+      else if (unreadableReported !== code) {
+        unreadableReported = code;
+        options.onError?.(code);
+      }
       return undefined;
     }
     try {
       const parsed = OnboardingState.safeParse(JSON.parse(text));
+      unreadableReported = undefined;
       if (parsed.success) {
         corruptReported = false;
         return parsed.data;

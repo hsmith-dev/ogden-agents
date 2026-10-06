@@ -199,11 +199,12 @@ function memoryStore(initial: Record<string, string> = {}) {
 }
 
 /** A port that can use an API key, whose subscription and verify outcome the test sets. */
-function keyPort(options: { subscription?: AgentSubscriptionState; verify?: ApiKeyVerification | (() => Promise<ApiKeyVerification>) } = {}) {
+function keyPort(options: { subscription?: AgentSubscriptionState; verify?: ApiKeyVerification | (() => Promise<ApiKeyVerification>); keyName?: string } = {}) {
   let subscription: AgentSubscriptionState | 'throws' = options.subscription ?? 'signed_out';
   const verified: string[] = [];
   const apiKey: AgentApiKeySupport = {
     envName: 'FAKE_API_KEY',
+    ...(options.keyName === undefined ? {} : { keyName: options.keyName }),
     check: (value) => (/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(value) ? undefined : "That doesn't look like an Anthropic API key."),
     verify: async (value) => {
       verified.push(value);
@@ -345,6 +346,10 @@ describe('agent setup: API keys (story 9.2)', () => {
     const setup = createAgentSetup(core.events, [refusing.port], { secrets: secrets.store });
     await expect(setup.setApiKey('claude-code', API_KEY)).rejects.toBeInstanceOf(ApiKeyRefusedError);
     expect(secrets.values.size).toBe(0);
+    // An agent that calls its key a token (Grok) is told so.
+    const token = keyPort({ verify: 'refused', keyName: 'xAI API access token' });
+    const tokenSetup = createAgentSetup(core.events, [token.port], { secrets: memoryStore().store });
+    await expect(tokenSetup.setApiKey('claude-code', API_KEY)).rejects.toThrow('That token was refused. Check it and paste it again.');
 
     for (const bad of ['', '   ', 'not-a-key-at-all-but-long-enough', 'sk-ant-short']) {
       const error = await setup.setApiKey('claude-code', bad).catch((caught: unknown) => caught);

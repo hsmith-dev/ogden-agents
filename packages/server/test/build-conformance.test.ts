@@ -58,6 +58,8 @@ interface Row {
   unattended: boolean;
   /** The folder of the repo where its build skill must be, or `null` when no check applies (the default agent). */
   skillFolder: string | null;
+  /** How this agent says it hit its usage limit (the words its descriptor's patterns know). */
+  usageText: string;
   /** The skill command prefix. */
   prefix: string;
   /** Whether the agent asks before writing a protected file inside the worktree (Codex in its workspace mode does not, as the real sandbox: the end check is its backstop). */
@@ -67,7 +69,7 @@ interface Row {
 const PINNED = ANTIGRAVITY_PINS.archives[`${process.platform}-${process.arch}` as keyof typeof ANTIGRAVITY_PINS.archives];
 
 const ROWS: Row[] = [
-  { id: 'claude-code', name: 'Claude Code', wire: () => undefined, unattended: true, skillFolder: null, prefix: '/', asksForProtected: true },
+  { id: 'claude-code', name: 'Claude Code', wire: () => undefined, unattended: true, skillFolder: null, prefix: '/', asksForProtected: true, usageText: 'You have hit your usage limit reached' },
   {
     id: 'codex',
     name: 'Codex',
@@ -76,6 +78,7 @@ const ROWS: Row[] = [
     skillFolder: '.agents/skills',
     prefix: '$',
     asksForProtected: false,
+    usageText: 'You hit your usage limit',
   },
   {
     id: 'grok',
@@ -85,6 +88,7 @@ const ROWS: Row[] = [
     skillFolder: '.claude/skills',
     prefix: '/',
     asksForProtected: true,
+    usageText: 'You have exhausted your credits',
   },
   ...(PINNED === undefined
     ? []
@@ -109,6 +113,7 @@ const ROWS: Row[] = [
           skillFolder: '.agents/skills',
           prefix: '/',
           asksForProtected: true,
+          usageText: 'RESOURCE_EXHAUSTED: quota exceeded',
         },
       ] as Row[])),
 ];
@@ -279,6 +284,38 @@ describe.each(ROWS)('every agent that builds: $id', { timeout: 90_000 }, (row) =
     expect(ended.run.blockedCode).toBe('unclear_intent');
   });
 
+  it("a rejected key or an expired sign in ends the run blocked in that agent's own words, never retried by itself, and Retry is offered", async () => {
+    const s = await setup(row, { env: { FAKE_ACP_BUILD_FAIL: 'auth' } });
+    const { run, session } = await go(s, 0);
+    const ended = await s.settled();
+    expect(ended.outcome).toBe('blocked');
+    expect(ended.run.blockedCode).toBe('auth_required');
+    // The agent's own plain reason: it names the agent, and says nothing of its raw error.
+    expect(ended.run.reason).toContain(row.name);
+    expect(ended.run.reason).not.toContain('Authentication required');
+    expect(ended.run.reason).not.toMatch(/[\u2013\u2014]/);
+    // Asked once, and left for the person: no second prompt goes to the agent by itself.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const prompts = s.server.core.events.readAfter(0).filter((event) => event.streamId === session.id && event.type === 'session.message_completed' && event.payload.role === 'user');
+    expect(prompts).toHaveLength(1);
+    expect(s.server.core.entities.getRun(run.id)!.outcome).toBe('blocked');
+    // Retry is the person's, and is offered.
+    const retry = await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.runRetry, { wsId: s.wsId, runId: run.id }), {});
+    expect(retry.status).toBe(200);
+  });
+
+  it('a usage limit ends the run blocked in that agent\'s words, with the limit named', async () => {
+    const s = await setup(row, { env: { FAKE_ACP_BUILD_FAIL: 'usage', FAKE_ACP_BUILD_FAIL_TEXT: row.usageText } });
+    const { answered } = await go(s, 0);
+    await answered;
+    const ended = await s.settled();
+    expect(ended.outcome).toBe('blocked');
+    expect(ended.run.blockedCode).toBe('usage_limit');
+    expect(ended.run.reason).toContain(row.name);
+    expect(ended.run.reason).toContain('usage limit');
+    expect(ended.run.reason).not.toContain(row.usageText);
+  });
+
   it('Stop ends the run and kills the agent and the command it left running', async () => {
     const pids = join(temp('p-pids-'), 'pids.txt');
     const s = await setup(row, { env: { FAKE_ACP_BUILD_CHILD: pids, FAKE_ACP_BUILD_DELAY_MS: '60000' } });
@@ -377,6 +414,32 @@ describe('limits are shared by every agent', () => {
     const queued = BuildResponse.parse(await second.json());
     expect(queued.run.agent).toBe('codex');
     expect(queued.run.queuePosition).toBe(1);
+  });
+});
+
+describe('after a usage limit, build it again with another agent', () => {
+  it('Reject and retry takes the other agent: a fresh run with it, in a new copy, and the first stays rejected', async () => {
+    const codex = ROWS.find((row) => row.id === 'codex')!;
+    const claude = ROWS.find((row) => row.id === 'claude-code')!;
+    const s = await setup(claude, { wiring: codex.wire() ?? {}, env: { FAKE_ACP_BUILD_FAIL: 'usage', FAKE_ACP_BUILD_FAIL_TEXT: claude.usageText, CODEX_API_KEY: KEYS.codex[1] } });
+    // The Codex skill must be in the project for its build.
+    const skill = join(s.repo.path, '.agents', 'skills', 'bmad-build-auto');
+    mkdirSync(skill, { recursive: true });
+    writeFileSync(join(skill, 'SKILL.md'), '# Build\n');
+    const { fixtureGit } = await import('../../../tests/fixtures/fake-bmad-repo.js');
+    fixtureGit(s.repo.path, 'add', '-A');
+    fixtureGit(s.repo.path, 'commit', '--quiet', '--no-verify', '-m', 'skills');
+    const first = BuildResponse.parse(await (await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: s.wsId }), { ref: '1.1', agent: 'claude-code', mode: 'attended' })).json());
+    const blocked = await s.settled();
+    expect(blocked.run.blockedCode).toBe('usage_limit');
+    // The agent named must be able to build; one that cannot is refused.
+    const nobody = await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuildReject, { wsId: s.wsId, ref: '1.1' }), { retry: true, agent: 'grok' });
+    expect(nobody.status).toBe(400);
+    const again = await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuildReject, { wsId: s.wsId, ref: '1.1' }), { retry: true, agent: 'codex' });
+    expect(again.status).toBe(200);
+    const runs = s.server.core.entities.listRuns(s.wsId).filter((run) => run.ticketRef === '1.1');
+    expect(runs.map((run) => [run.agent, run.decision])).toEqual(expect.arrayContaining([['claude-code', 'rejected'], ['codex', null]]));
+    expect(runs.find((run) => run.agent === 'codex')!.worktreePath).not.toBe(first.run.worktreePath);
   });
 });
 

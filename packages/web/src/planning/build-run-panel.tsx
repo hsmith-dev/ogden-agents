@@ -1,5 +1,7 @@
 import {
   APPLY_FIX_LABEL,
+  BUILD_AGAIN_EXPLAINED_TEXT,
+  buildAgainWithLabel,
   blockedSentence,
   HIDE_DETAILS_LABEL,
   REVIEW_CHECKS_TITLE,
@@ -12,13 +14,14 @@ import {
   runPhase,
   type Run,
 } from '@ogden-agents/shared';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useAppearance } from '@/appearance/appearance-provider';
 import { agentNameOf } from '@/chat/chat-api';
 import { useChatAgents } from '@/chat/use-chat-agents';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
-import { useRunAction, useRunDetail } from './builds-api';
+import { fetchBuildAgents, rejectBuild, useRunAction, useRunDetail } from './builds-api';
 import { CheckAgainButton, VerificationChecks } from './verification-checks';
 
 /** The words on the run view's Retry buttons. */
@@ -30,6 +33,8 @@ export function runSentence(run: Pick<Run, 'blockedCode' | 'reason' | 'outcome'>
   if (run.outcome === 'blocked' && run.blockedCode !== null) {
     // The time limit's own sentence names the run's minutes (the reason stored it).
     if (run.blockedCode === 'time_limit') return run.reason ?? blockedSentence('time_limit');
+    // A rejected key, an expired sign in or a usage limit: the agent's own plain reason (its name, its key), stored on the run.
+    if (run.blockedCode === 'auth_required' || run.blockedCode === 'usage_limit') return run.reason ?? blockedSentence(run.blockedCode);
     return blockedSentence(run.blockedCode);
   }
   return run.reason;
@@ -65,6 +70,11 @@ export function BuildRunPanel({ wsId, run }: { wsId: string; run: Run | undefine
   const detail = useRunDetail(wsId, run?.id);
   // A refusal from an earlier action says nothing once the run has moved on.
   useEffect(() => setFailure(undefined), [run?.id, run?.outcome]);
+  // After a usage limit (epic 17) the other agents that can build are listed: read only then (hooks stay above the early return).
+  const queryClient = useQueryClient();
+  const [again, setAgain] = useState(false);
+  const usageLimited = run?.outcome === 'blocked' && run.blockedCode === 'usage_limit';
+  const others = useQuery({ queryKey: ['build-agents', wsId], queryFn: () => fetchBuildAgents(wsId), retry: false, enabled: usageLimited });
   const running = run?.outcome === 'running' && run.queuePosition === null;
   const now = useNow(running, 10_000);
   if (run === undefined) return null;
@@ -72,7 +82,25 @@ export function BuildRunPanel({ wsId, run }: { wsId: string; run: Run | undefine
   const paused = phase === 'checkpoint';
   const retryable = run.worktreePath !== null && (run.decision ?? null) === null && (run.outcome === 'failed' || run.outcome === 'stopped' || (run.outcome === 'blocked' && run.blockedCode !== 'merge_conflict'));
   const fixable = retryable && run.blockedCode === 'intent_gap';
-  const acting = retry.isPending || applyFix.isPending;
+  // After a usage limit, the other agents that can build here: build it again with one of them (a fresh copy, the first discarded).
+  const limited = retryable && run.blockedCode === 'usage_limit';
+  const otherAgents = limited ? (others.data?.agents ?? []).filter((agent) => agent.agentId !== (run.agent ?? undefined) && agent.way !== 'unavailable') : [];
+  const buildAgain = (agent: string) => {
+    if (again) return;
+    setAgain(true);
+    setFailure(undefined);
+    rejectBuild(wsId, run.ticketRef, { retry: true, agent }).then(
+      () => {
+        setAgain(false);
+        return Promise.all(['session-run', 'runs', 'run', 'review', 'tickets'].map((key) => queryClient.invalidateQueries({ queryKey: [key, wsId] })));
+      },
+      (error: unknown) => {
+        setAgain(false);
+        setFailure(error instanceof Error ? error.message : String(error));
+      },
+    );
+  };
+  const acting = retry.isPending || applyFix.isPending || again;
   const act = (action: typeof retry) => {
     if (acting) return;
     setFailure(undefined);
@@ -131,6 +159,11 @@ export function BuildRunPanel({ wsId, run }: { wsId: string; run: Run | undefine
                   {APPLY_FIX_LABEL}
                 </Button>
               ) : null}
+              {otherAgents.map((agent) => (
+                <Button key={agent.agentId} variant="outline" size="sm" title={BUILD_AGAIN_EXPLAINED_TEXT} data-testid={`build-run-again-${agent.agentId}`} aria-disabled={acting || undefined} onClick={() => buildAgain(agent.agentId)}>
+                  {buildAgainWithLabel(agent.displayName)}
+                </Button>
+              ))}
               {retryable ? (
                 <Button variant="outline" size="sm" data-testid="build-run-retry" aria-disabled={acting || undefined} onClick={() => act(retry)}>
                   {paused ? CONTINUE_LABEL : RETRY_LABEL}

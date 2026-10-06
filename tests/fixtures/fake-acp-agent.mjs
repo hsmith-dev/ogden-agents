@@ -129,7 +129,8 @@
 //                  long-lived child process (a build's command still running)
 //                  and writes "<agent pid> <child pid>" to <file> (story 5.4:
 //                  stopping the session must stop both). Story 5.7:
-//                  FAKE_ACP_BUILD_PROTECTED=1 also asks to write AGENTS.md in the
+//                  FAKE_ACP_BUILD_FAIL=auth|usage makes the build's prompt fail as the agent's rejected key or sign in (-32000) or
+//                  its usage limit (the words in FAKE_ACP_BUILD_FAIL_TEXT); FAKE_ACP_BUILD_PROTECTED=1 also asks to write AGENTS.md in the
 //                  worktree (epic 17; a protected file); FAKE_ACP_BUILD_ENV_DUMP=<file> writes the agent's whole
 //                  environment there (`NAME=value` per line);
 //                  FAKE_ACP_BUILD_ECHO_KEY=1 says ANTHROPIC_API_KEY in a message.
@@ -825,6 +826,10 @@ async function runPrompt(params, client, session) {
         await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: allowed ? 'completed' : 'failed' });
         return allowed;
       };
+      // Epic 17: the agent could not go on. `auth`: a rejected key or an expired sign in (ACP's -32000); `usage`: its usage limit, in
+      // the words FAKE_ACP_BUILD_FAIL_TEXT gives (each agent says it its own way).
+      if (process.env.FAKE_ACP_BUILD_FAIL === 'auth') throw acp.RequestError.authRequired(undefined, 'Authentication required');
+      if (process.env.FAKE_ACP_BUILD_FAIL === 'usage') throw acp.RequestError.internalError(undefined, process.env.FAKE_ACP_BUILD_FAIL_TEXT ?? 'usage limit reached');
       await say(client, params.sessionId, `Building ${ref}. `);
       // Story 5.7: what the build's agent was started with, for the secrets and allowlist tests.
       if (process.env.FAKE_ACP_BUILD_ENV_DUMP) {

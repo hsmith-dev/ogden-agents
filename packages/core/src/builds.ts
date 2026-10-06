@@ -289,6 +289,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       let attended = false;
       // Reject and retry builds with the agent the rejected run used (an old run has none stored: the default's).
       let retryAgent: BuildAgent = runner.agent;
+      // The person may name another agent to build it again with (after a usage limit): it needs a runner here.
+      if (parsed.data.agent !== undefined && runnerFor(parsed.data.agent) === undefined) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
       const rejected = await serializedByRepo(repoPath, async () => {
         await guarded(workspaceId);
         const run = latestRun(workspaceId, checked);
@@ -301,11 +303,11 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         // A run already rejected stays as it is: a repeat Reject writes nothing (review, story 5.3); with retry it builds the ticket again (a start that was refused the first time).
         if (run.decision === 'rejected') {
           attended = run.sandbox === ATTENDED_SANDBOX;
-          retryAgent = run.agent ?? runner.agent;
+          retryAgent = parsed.data.agent ?? run.agent ?? runner.agent;
           return { review: await reviewOf(repoPath, run), fresh: parsed.data.retry };
         }
         attended = run.sandbox === ATTENDED_SANDBOX;
-        retryAgent = run.agent ?? runner.agent;
+        retryAgent = parsed.data.agent ?? run.agent ?? runner.agent;
         await release(run);
         entities.setRunOutcome(run.id, 'stopped', run.reason);
         const decided = entities.setRunDecision(run.id, 'rejected');

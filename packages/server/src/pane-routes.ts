@@ -161,7 +161,7 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
     const body = await readBody(c, RestartPaneRequest);
     if (!body.ok) return body.response;
     try {
-      const pane = await panes.restart(ids.workspaceId, ids.paneId, body.value);
+      const pane = await panes.restart(ids.workspaceId, ids.paneId, { cols: body.value.cols, rows: body.value.rows }, body.value.args);
       log.info('terminal pane restarted', { paneId: pane.id });
       return c.json(PaneResponse.parse({ pane }));
     } catch (error) {

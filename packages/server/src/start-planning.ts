@@ -17,6 +17,7 @@ import {
   createPlanning,
   createBuildSummaries,
   createRetrospectives,
+  type VcsPort,
   createPlanningDocuments,
   createTicketWatcher,
   type AgentPort,
@@ -144,7 +145,10 @@ export function createPlanAndBoard({
   agentOf,
   uvToolchain,
   uvChildEnv,
+  vcs,
 }: {
+  /** The server's git, for Save the lessons (epic 7). */
+  vcs: VcsPort;
   options: StartOptions;
   core: Core;
   dataDir: string;
@@ -197,7 +201,7 @@ export function createPlanAndBoard({
   });
   const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: bmadCatalog, tickets: boardTickets });
   // Looking back on an epic (story 7.1): a planning session on the retrospective skill, behind the Retrospectives piece; it reads the board's tree.
-  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog: bmadCatalog, chat, agent, agentOf, summaries: createBuildSummaries({ entities: core.entities }), offers: core.lookBackOffers });
+  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog: bmadCatalog, chat, agent, agentOf, summaries: createBuildSummaries({ entities: core.entities }), offers: core.lookBackOffers, vcs });
   // One watch per project with Board on, trusted and BMad Method set up (story 4.8; the setup status is entry 4.3's):
   // an agent's ticket write reaches the board as `ticket.changed`.
   const ticketWatcher = createTicketWatcher({

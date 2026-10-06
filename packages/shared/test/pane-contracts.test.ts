@@ -55,7 +55,7 @@ describe('launcher data is checked (security review of 16.3)', () => {
     expect(PaneLauncher.safeParse({ ...ok, installUrl: 'javascript:alert(1)' }).success).toBe(false);
     expect(PaneLauncher.safeParse({ ...ok, installUrl: 'http://example.com' }).success).toBe(false);
     expect(PaneLauncher.safeParse({ ...ok, promptPatterns: [{ name: 'q', pattern: '(', depth: 1 }] }).success).toBe(false);
-    expect(PaneLauncher.safeParse({ ...ok, promptPatterns: [{ name: 'q', pattern: '(a+)+$', depth: 1 }] }).success).toBe(false);
+    for (const runaway of ['(a+)+$', '(a|aa)+$', '(a{1,5}){1,5}$', '(\\w+\\s?)*$']) expect(PaneLauncher.safeParse({ ...ok, promptPatterns: [{ name: 'q', pattern: runaway, depth: 1 }] }).success, runaway).toBe(false);
     expect(PaneLauncher.safeParse({ ...ok, promptPatterns: [{ name: 'q', pattern: 'do you want to (proceed|continue)', depth: 5 }] }).success).toBe(true);
   });
 

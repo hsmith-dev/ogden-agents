@@ -22,7 +22,8 @@ export const CLI_PROMPT_PATTERNS: readonly PanePromptPattern[] = [
   { name: 'yes-no', pattern: '\\((y/n|Y/n|y/N)\\)|\\[(y/n|Y/n|y/N)\\]', depth: 1 },
   { name: 'press-enter', pattern: 'press (enter|return) to continue', depth: 1 },
   { name: 'menu-yes', pattern: '[❯>]\\s*1\\.\\s*yes', depth: 4 },
-  { name: 'proceed', pattern: 'do you want to (proceed|continue|allow|make this edit)', depth: 5 },
+  // On the last line only: older text above an answered question is not a question any more. A menu under it is the `menu-yes` pattern.
+  { name: 'proceed', pattern: 'do you want to (proceed|continue|allow|make this edit)', depth: 1 },
 ];
 
 const cli = (data: Record<string, unknown>) => PaneLauncher.parse({ kind: 'cli', promptPatterns: CLI_PROMPT_PATTERNS, ...data });

@@ -94,6 +94,7 @@ export function createPtyTerminalPort(loadPty: PtyLoader = defaultLoadPty, mirro
             data.delete(listener);
           };
         },
+        screenLines: (count) => new Promise<string[]>((resolve) => mirror.lastLines(count, resolve)),
         write: (text) => pty.write(text),
         resize(columns, lines) {
           pty.resize?.(columns, lines);

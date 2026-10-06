@@ -240,12 +240,10 @@ describe('the rest of epic 7\'s routes (story 7.2)', () => {
     expect((await request(server, tab, 'DELETE', r.dismiss('-x'))).status).toBe(400);
   });
 
-  it('the retrospective step and Save the lessons answer 501 until story 7.5, a bad body 400', async () => {
+  it('the retrospective step and Save the lessons refuse a malformed epic or body with 400 before anything else', async () => {
     const { server, tab, workspace } = await setup();
     const r = routes(workspace.id);
-    expect((await request(server, tab, 'POST', r.step('epic-one'), { skill: 'bmad-project-context' })).status).toBe(501);
     expect((await request(server, tab, 'POST', r.step('epic-one'), { skill: '../x' })).status).toBe(400);
-    expect((await request(server, tab, 'POST', r.save('epic-one'))).status).toBe(501);
     expect((await request(server, tab, 'POST', r.step('-x'), { skill: 'bmad-project-context' })).status).toBe(400);
     expect((await request(server, tab, 'POST', r.save('-x'))).status).toBe(400);
     expect(server.core.entities.listSessions(workspace.id)).toEqual([]);

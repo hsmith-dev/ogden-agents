@@ -23,13 +23,25 @@ export const MAX_PANES_PER_INSTALL = 16;
  *   ConPTY can hold the first output back; the page offers Restart pane).
  * - `running`: it has printed.
  * - `exited`: the program ended, by itself or by Restart or close.
+ * - `stopped` (story 16.7): the pane came back after the server stopped, or Developer mode was
+ *   turned off: it is kept as a shape and starts a fresh program when the user presses Start.
  */
-export const PaneState = z.enum(['starting', 'running', 'exited']);
+export const PaneState = z.enum(['starting', 'running', 'exited', 'stopped']);
 export type PaneState = z.infer<typeof PaneState>;
 
 /** The launchers a pane can run. The tracer has only the user's own shell; story 16.5 adds the CLIs as data. */
 export const PaneLauncherId = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/);
 export type PaneLauncherId = z.infer<typeof PaneLauncherId>;
+
+/**
+ * What a pane seems to be doing, a guess (story 16.6; E16-R6): derived in
+ * memory from the pane's activity and a launcher's prompt patterns, never from
+ * stored output. `working` while it prints, `needs_attention` at a prompt
+ * waiting for the user (silence alone never says it), `idle` after it has been
+ * quiet, `exited` once its program ended.
+ */
+export const PaneStatus = z.enum(['working', 'needs_attention', 'idle', 'exited']);
+export type PaneStatus = z.infer<typeof PaneStatus>;
 
 /** A pane's or tab's name: plain words with no control or format characters. It is stored and broadcast, so it is never taken from terminal output. */
 export const PaneTitle = z.string().min(1).max(80).regex(/^[^\p{Cc}\p{Cf}]+$/u, 'a name has no control characters');
@@ -41,20 +53,13 @@ export const Pane = z.object({
   /** What the pane is called in the page (plain words). */
   title: PaneTitle,
   state: PaneState,
+  /** A guess at what it is doing (story 16.6). Never certain: the page says so. */
+  status: PaneStatus.default('working'),
   /** The program's own exit code once `exited`; `null` while it runs or when it was stopped. */
   exitCode: z.number().int().nullable(),
 });
 export type Pane = z.infer<typeof Pane>;
 
-/**
- * What a pane seems to be doing, a guess (story 16.6; E16-R6): derived in
- * memory from the pane's activity and a launcher's prompt patterns, never from
- * stored output. `working` while it prints, `needs_attention` at a prompt
- * waiting for the user (silence alone never says it), `idle` after it has been
- * quiet, `exited` once its program ended.
- */
-export const PaneStatus = z.enum(['working', 'needs_attention', 'idle', 'exited']);
-export type PaneStatus = z.infer<typeof PaneStatus>;
 
 /**
  * One prompt pattern of a launcher, as data so a change in a CLI's wording
@@ -77,8 +82,8 @@ export const PanePromptPattern = z.object({
         return false;
       }
     }, 'not a valid pattern')
-    // Nested quantifiers are the usual way to a runaway match: a pattern is data, so it is refused here.
-    .refine((source) => !/\([^)]*[+*][^)]*\)[+*{]/.test(source), 'a pattern may not repeat a repeated group'),
+    // A repeated group is the usual way to a runaway match, so none is allowed (a heuristic: the launcher list is the adapters' own data, and a pattern is also cut to short lines when matched).
+    .refine((source) => !/(?<!\\)\)[+*{]/.test(source), 'a pattern may not repeat a group'),
   depth: z.number().int().min(1).max(20),
 });
 export type PanePromptPattern = z.infer<typeof PanePromptPattern>;
@@ -216,7 +221,7 @@ export const OpenPaneRequest = z.object({ ...size, placement: PanePlacement.opti
 export type OpenPaneRequest = z.infer<typeof OpenPaneRequest>;
 
 /** `POST` pane restart: the size to start at. */
-export const RestartPaneRequest = z.object({ ...size });
+export const RestartPaneRequest = z.object({ ...size, /** What the user typed in the launcher's field (a stopped pane is started again with them). */ args: PaneLauncherArgs.optional() });
 export type RestartPaneRequest = z.infer<typeof RestartPaneRequest>;
 
 export const PaneResponse = z.object({ pane: Pane });
@@ -241,7 +246,7 @@ export const RenamePaneRequest = z.object({ title: PaneTitle });
 export type RenamePaneRequest = z.infer<typeof RenamePaneRequest>;
 
 /** Server → client on the pane socket: the pane's state now (sent on attach and on every change). */
-export const PaneStateFrame = z.object({ type: z.literal('state'), state: PaneState });
+export const PaneStateFrame = z.object({ type: z.literal('state'), state: PaneState, /** The pane's status guess (story 16.6), sent with every change so its chip needs no refetch. */ status: PaneStatus.optional() });
 /**
  * Server → client: what follows is the pane's screen as it is now, not more
  * output: the viewer resets its terminal, then writes the next binary frame

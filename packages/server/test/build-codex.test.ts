@@ -62,7 +62,8 @@ async function setup(options: { sandbox?: boolean; verified?: boolean; env?: Rec
   return { repo, server, tab, wsId, review, settled };
 }
 
-// Each test starts a server, a git repo and a fake agent: slow on a loaded Windows runner, so a long timeout.
+// Each test starts a server, a git repo and a fake agent. On a loaded Windows runner the file's setup took 27 to 28 s per test
+// (Node 24 and 26, story 17.5's first CI run, 2026-10-06), past that platform's 20 s limit, so the file gets a long one.
 describe('a second agent builds (epic 17 tracer): Codex against its fake personality', { timeout: 120_000 }, () => {
   it('an attended Codex build asks a card for each write, runs in the run worktree, and ends as a Claude Code build does', async () => {
     const { repo, server, tab, wsId, settled } = await setup();

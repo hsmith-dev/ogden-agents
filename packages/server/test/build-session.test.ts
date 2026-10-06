@@ -139,7 +139,14 @@ function alive(pid: number): boolean {
   }
 }
 
-describe('the headless build session (story 5.4)', () => {
+/**
+ * Each test here runs a whole build: a server, a fixture repo, a worktree and the fake agent with its commands, and real `git`
+ * (some also stop the server mid-turn). On a loaded Windows runner one took longer than that platform's 20 s limit (Node 26,
+ * the reruns of #216, 2026-10-06, with the rest of the file green), so these tests get a named, longer limit.
+ */
+const BUILD_SESSION_TEST_TIMEOUT_MS = 60_000;
+
+describe('the headless build session (story 5.4)', { timeout: BUILD_SESSION_TEST_TIMEOUT_MS }, () => {
   it("writes the run's NDJSON activity and per-run result in its folder in the data folder, and nothing new in the repo", async () => {
     const pids = join(removeAfterTest(mkdtempSync(join(tmpdir(), 'ogden-agents-pids-'))), 'pids.txt');
     const s = await setup({ env: { FAKE_ACP_BUILD_CHILD: pids } });

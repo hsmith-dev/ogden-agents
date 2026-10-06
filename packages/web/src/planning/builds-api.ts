@@ -98,10 +98,10 @@ export async function approveBuild(wsId: string, ref: string, revision: string, 
 }
 
 /** `POST …/builds/:ref/reject`: removes the run's worktree and stops it; with `retry`, builds the ticket again with the optional `note` (Reject and retry, story 5.9). */
-export async function rejectBuild(wsId: string, ref: string, options: { retry?: boolean; note?: string; agent?: string } = {}, auth: Auth = tabAuth): Promise<ReviewResponse> {
+export async function rejectBuild(wsId: string, ref: string, options: { retry?: boolean; note?: string; agent?: string; mode?: 'attended' | 'unattended' } = {}, auth: Auth = tabAuth): Promise<ReviewResponse> {
   const note = options.note?.trim();
   // `agent` (epic 17): build it again with another agent, after a usage limit.
-  const body = { ...(options.retry === true ? { retry: true } : {}), ...(options.agent === undefined ? {} : { agent: options.agent }), ...(note === undefined || note === '' ? {} : { note }) };
+  const body = { ...(options.retry === true ? { retry: true } : {}), ...(options.agent === undefined ? {} : { agent: options.agent }), ...(options.mode === undefined ? {} : { mode: options.mode }), ...(note === undefined || note === '' ? {} : { note }) };
   const json = await call(auth, apiPath(API_ROUTES.workspaceBuildReject, { wsId, ref }), postJson(body), REJECT_FAILED);
   return ReviewResponse.parse(json);
 }

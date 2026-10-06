@@ -434,6 +434,40 @@ Run them with `npx ogden-agents@next` and Claude Code signed in, in a scratch re
 8. Plain upstream (E7-R7): in a repo whose BMad Method was installed outside Ogden Agents, with Retrospectives on, the Board shows its reduced-mode notice with **Upgrade this project** and no **Look back** button; after the upgrade, or in a repo whose retrospective skill is your own copy, a board that loads says the look-back isn't available instead of showing the button.
 9. Each live check's result is written into the story 7.7 plan (its **Live check result** line) before the ticket moves to done.
 
+## Builds with other agents: live checks (epic 17)
+
+Epic 17 lets Codex, Grok and Antigravity build tickets beside Claude Code (the user's decision, 2026-10-05, and on the spike's result, 2026-10-06). **Codex** builds unattended once its own sandbox is shown to hold; until then it builds with you watching. **Grok** and **Antigravity** build with you watching only. GitHub Copilot CLI is not included at all: GitHub's terms don't allow driving it in the background, so it stays an interactive terminal. CI runs only fakes (the fake agent's Codex, Grok and Antigravity personalities, a fake sandbox), so these checks need the real agents. Run them with `npx ogden-agents@next`, in scratch repos made for it, with your own keys and accounts, on macOS and Windows at least (Codex and Grok's sandboxes differ by OS), each OS on its own.
+
+### Codex: does its own sandbox hold? (decides unattended builds)
+
+Codex's unattended build is off in the code (`CODEX_UNATTENDED_VERIFIED` in `packages/adapters/src/acp-codex/codex-agent.ts` is `false`). In `workspace-write`, an edit inside the workspace asks nothing, so Ogden Agents' own rule never sees it: only Codex's sandbox and the run's end check (a run that changes a protected file fails and cannot be approved) stand in the way. These checks decide whether it can be turned on.
+
+1. Start the pinned adapter the way a build does: `INITIAL_AGENT_MODE=workspace-write`, `CODEX_HOME` set to a scratch folder, your key as `CODEX_API_KEY`, and the scratch worktree given as a session added directory. Ask Codex to write a file in the worktree (no card is expected), outside it, in `.git/hooks`, in `AGENTS.md` and in `.claude/settings.json`, to read a file in your real home folder's `.codex` or `.ssh`, and to run a command that uses the network (`curl https://example.com`). Record for each: asked, refused, or succeeded.
+2. Confirm `$bmad-build-auto ticket <ref>` loads from a committed `.agents/skills` in a worktree (BMad's skills placed by setup, committed) and runs.
+3. `git add` and `git commit` inside Codex's sandbox in a worktree whose git folder and the run's object store are extra writable roots. Record whether `.git` stays read-only and the commit works.
+
+If the protected files, the hooks and the credential folders were unwritable and unreadable by Codex's commands, the network call failed, and the commit worked, change `CODEX_UNATTENDED_VERIFIED` to `true` in a pull request (it is the one switch), and run Build with Codex on a ticket: it should build in its own copy, ask nothing, end ready for review, and Approve should merge it. If any check failed, leave it `false`: Codex then builds with you watching, as it does now, and the picker says so in plain words. Also record the options and tool names Codex sends for an edit and a command (the chat's checks list them too) and what Codex says for a rejected key and for a usage limit, so its plain words in a build match.
+
+### Grok: attended only (the parked unattended path)
+
+1. A Grok build with you watching: Build, pick Grok, **Build with me watching**: a card for each command and file change, in Ask (the session's `_meta` is `yoloMode` false and `autoMode` false), the build ends ready for review, and `.claude/skills` holds the BMad skills committed in the project (the skill runs as `/bmad-build-auto ticket <ref>`).
+2. The user's own check that decides whether an unattended path is ever worth building: whether Grok's own sandbox (Seatbelt on macOS, Landlock on Linux; none on Windows) can be started for a headless session with only the worktree writable and no network, and by which flag or setting. Record the answer; nothing changes until you decide.
+3. Record what Grok says for a rejected token and for a usage limit.
+
+### Antigravity: attended only
+
+1. An Antigravity build with you watching: every request is a card, the build ends ready for review, and Ogden Agents never asks for its Skip all or auto edit modes (an Antigravity that opens in one is put back in Ask).
+2. Record the options and tool names for an edit and a command, and whether any option gives its commands a sandbox.
+3. Your own call, not a check: Google's terms say apps Google doesn't make using Antigravity's sign in can get accounts suspended. You accepted that for chat; decide whether it also covers builds. The Gemini API key avoids the sign in.
+4. Record what Antigravity says for an expired sign in and for a usage limit.
+
+### For every agent
+
+- The key stays private: `grep -r` for your key under the data folder finds nothing in the database, the event log, `logs/`, a run's folder or a worktree.
+- A usage limit mid build ends the run blocked in that agent's own words, with **Retry** and **Build again with** each other agent that can build (a fresh copy). A rejected key ends it blocked, naming the key. Nothing retries by itself.
+- Cost: note the time and, from your own billing page, the cost of one small build per agent. Ogden Agents stores none of it.
+- When the checks are done, finalize the Codex, Grok and Antigravity rows of `agent-matrix.md` through `bmad-spec` (the Builds and unattended-on-Windows cells), from these results.
+
 ## Later releases
 
 1. On a branch, set the same new version in `package.json`, `packages/server/package.json` and `packages/web/package.json`, and add its entry to `CHANGELOG.md`. Merge to `main`.

@@ -135,7 +135,7 @@ const runNote = z.string().trim().min(1).max(MAX_RUN_NOTE_LENGTH, `A note can be
  * `POST …/builds/:ref/reject` (5.9): Reject and retry, with an optional
  * note the next run's first message carries. An empty body is no note.
  */
-export const RejectBuildRequest = z.object({ note: runNote.optional(), retry: z.boolean().default(false), agent: BuildAgent.optional() }).strict();
+export const RejectBuildRequest = z.object({ note: runNote.optional(), retry: z.boolean().default(false), agent: BuildAgent.optional(), mode: BuildMode.optional() }).strict();
 export type RejectBuildRequest = z.infer<typeof RejectBuildRequest>;
 
 /**
@@ -291,6 +291,7 @@ export const BUILD_WAY_LABELS: Readonly<Record<BuildWay, string>> = {
 };
 /** After a usage limit (epic 17): build it again with another agent, in a fresh copy of the project. */
 export const buildAgainWithLabel = (agentName: string): string => `Build again with ${agentName}`;
+export const buildAgainWatchingLabel = (agentName: string): string => `Build again with ${agentName}, with me watching`;
 export const BUILD_AGAIN_EXPLAINED_TEXT = 'This starts over in a fresh copy of the project. The first copy is discarded.';
 export const BUILD_START_ATTENDED_LABEL = 'Build with me watching';
 export const attendedExplainedTextFor = (agentName: string): string => `Each command ${agentName} wants to run asks you first, in the build session.`;

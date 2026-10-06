@@ -446,6 +446,44 @@ describe('after a usage limit, build it again with another agent', () => {
   });
 });
 
+describe('building again from an unattended run with an agent that builds with you watching', () => {
+  it('names the mode: Codex is built again attended, though the first run was unattended, and never unattended', async () => {
+    const claude = ROWS.find((row) => row.id === 'claude-code')!;
+    // Codex as it ships: its own sandbox is not verified yet.
+    const codex = { codex: { agent: createCodexAgent({ dataDir: temp('p-codex-'), server: () => ({ command: process.execPath, args: [fixture('fake-codex.mjs')] }) }), setup: apiKeySetup('codex', 'Codex', 'CODEX_API_KEY') } satisfies CodexPorts };
+    const s = await setup(claude, { wiring: codex, env: { FAKE_ACP_BUILD_FAIL: 'usage', FAKE_ACP_BUILD_FAIL_TEXT: claude.usageText, CODEX_API_KEY: KEYS.codex[1] } });
+    const skill = join(s.repo.path, '.agents', 'skills', 'bmad-build-auto');
+    mkdirSync(skill, { recursive: true });
+    writeFileSync(join(skill, 'SKILL.md'), '# Build\n');
+    const { fixtureGit } = await import('../../../tests/fixtures/fake-bmad-repo.js');
+    fixtureGit(s.repo.path, 'add', '-A');
+    fixtureGit(s.repo.path, 'commit', '--quiet', '--no-verify', '-m', 'skills');
+    expect((await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: s.wsId }), { ref: '1.1', agent: 'claude-code' })).status).toBe(201);
+    expect((await s.settled()).run.blockedCode).toBe('usage_limit');
+    const reject = (body: unknown) => request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuildReject, { wsId: s.wsId, ref: '1.1' }), body);
+    // Unattended Codex is refused before anything is discarded.
+    expect((await reject({ retry: true, agent: 'codex' })).status).toBe(409);
+    expect(s.server.core.entities.listRuns(s.wsId).filter((run) => run.ticketRef === '1.1').map((run) => run.decision)).toEqual([null]);
+    // With you watching it is built, in a fresh run.
+    expect((await reject({ retry: true, agent: 'codex', mode: 'attended' })).status).toBe(200);
+    const runs = s.server.core.entities.listRuns(s.wsId).filter((run) => run.ticketRef === '1.1');
+    expect(runs.find((run) => run.agent === 'codex')).toMatchObject({ sandbox: 'attended' });
+  });
+});
+
+describe('building again unattended with no sandbox changes nothing', () => {
+  it('an attended run asked to be built again unattended, with no sandbox here, is refused before anything is discarded', async () => {
+    const claude = ROWS.find((row) => row.id === 'claude-code')!;
+    const s = await setup(claude, { sandbox: false, env: { FAKE_ACP_BUILD_FAIL: 'usage', FAKE_ACP_BUILD_FAIL_TEXT: claude.usageText } });
+    const first = BuildResponse.parse(await (await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: s.wsId }), { ref: '1.1', mode: 'attended' })).json());
+    expect((await s.settled()).run.blockedCode).toBe('usage_limit');
+    const again = await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuildReject, { wsId: s.wsId, ref: '1.1' }), { retry: true, mode: 'unattended' });
+    expect(again.status).toBe(409);
+    expect(s.server.core.entities.getRun(first.run.id)).toMatchObject({ outcome: 'blocked', decision: null });
+    expect(existsSync(first.run.worktreePath!)).toBe(true);
+  });
+});
+
 describe('building again with another agent that cannot build changes nothing', () => {
   it('a skill that is not in the project refuses it before anything is discarded: the blocked run, its copy and its work stay', async () => {
     const codex = ROWS.find((row) => row.id === 'codex')!;

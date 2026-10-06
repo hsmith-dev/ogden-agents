@@ -1,6 +1,7 @@
 import {
   APPLY_FIX_LABEL,
   BUILD_AGAIN_EXPLAINED_TEXT,
+  buildAgainWatchingLabel,
   buildAgainWithLabel,
   blockedSentence,
   HIDE_DETAILS_LABEL,
@@ -85,11 +86,11 @@ export function BuildRunPanel({ wsId, run }: { wsId: string; run: Run | undefine
   // After a usage limit, the other agents that can build here: build it again with one of them (a fresh copy, the first discarded).
   const limited = retryable && run.blockedCode === 'usage_limit';
   const otherAgents = limited ? (others.data?.agents ?? []).filter((agent) => agent.agentId !== (run.agent ?? undefined) && agent.way !== 'unavailable') : [];
-  const buildAgain = (agent: string) => {
+  const buildAgain = (agent: string, mode: 'attended' | 'unattended') => {
     if (again) return;
     setAgain(true);
     setFailure(undefined);
-    rejectBuild(wsId, run.ticketRef, { retry: true, agent }).then(
+    rejectBuild(wsId, run.ticketRef, { retry: true, agent, mode }).then(
       () => {
         setAgain(false);
         return Promise.all(['session-run', 'runs', 'run', 'review', 'tickets'].map((key) => queryClient.invalidateQueries({ queryKey: [key, wsId] })));
@@ -160,8 +161,8 @@ export function BuildRunPanel({ wsId, run }: { wsId: string; run: Run | undefine
                 </Button>
               ) : null}
               {otherAgents.map((agent) => (
-                <Button key={agent.agentId} variant="outline" size="sm" title={BUILD_AGAIN_EXPLAINED_TEXT} data-testid={`build-run-again-${agent.agentId}`} aria-disabled={acting || undefined} onClick={() => buildAgain(agent.agentId)}>
-                  {buildAgainWithLabel(agent.displayName)}
+                <Button key={agent.agentId} variant="outline" size="sm" title={BUILD_AGAIN_EXPLAINED_TEXT} data-testid={`build-run-again-${agent.agentId}`} aria-disabled={acting || undefined} onClick={() => buildAgain(agent.agentId, agent.way === 'attended_only' ? 'attended' : run.sandbox === 'attended' ? 'attended' : 'unattended')}>
+                  {agent.way === 'attended_only' ? buildAgainWatchingLabel(agent.displayName) : buildAgainWithLabel(agent.displayName)}
                 </Button>
               ))}
               {retryable ? (

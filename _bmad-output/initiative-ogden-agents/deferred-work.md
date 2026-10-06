@@ -109,6 +109,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 16.4 (proposed): a stored layout must also refuse duplicate pane ids and an active tab that does not exist; the memory terminal stub's pane freezes its exit getters. From 16.3 reviews. (log: "16.3 review: layout duplicate ids and dangling active tab")
 - 16.9 (proposed): `PaneLayout` hard codes the cap of panes per project though core's limit is a constant it could change, and two windows arranging at once are last writer wins. From 16.4 reviews. (log: "16.4 review: the layout schema holds the pane cap")
 - 16.11 (proposed): the fake program folder has no space in its path and no test hangs a probe for real; add both to the end to end suite. From 16.5 reviews. (log: "16.5 review: the fake program folder has no space")
+- 16.8b (proposed): send a pane's opted in needs attention and exit to epic 11's webhooks through `NotifierPort` (payload event, project and pane name only, never text) once 11.4's webhook store is on main; the status event already carries the opt in. From 16.8. (log: "16.8: the webhook send for panes waits for epic 11's webhook story")
 - 16.7 (proposed): closing a pane stops its process group only, so an interactive shell's background jobs (`cmd &`, stopped jobs) survive Close, Restart, Developer mode off and the server stopping; walk descendants or HUP the shell first. From 16.2 security review. (log: "16.2 review: a pane's POSIX tree kill signals only the shell's own process group")
 - 16.9 (proposed): a pane's pty is never paused under a flood, the screen mirror's memory grows with the terminal width, and a pane route's 403 comes after a bad id or body is refused. From 16.2 reviews. (log: "16.2 review: low findings, no pty backpressure")
 - 16.2 (proposed): a server killed hard leaves a pane whose program ignores hangup running on macOS and Windows; record each pane's pid and start time and sweep only those on the next start. From spike 16.1. (log: "Spike 16.1: a server killed hard leaves a pane")
@@ -128,6 +129,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 14.10 (proposed): The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one. From 14.3 review. (log: "The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one")
 - 14.10 (proposed): Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry). From 14.3 review. (log: "Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry)")
 - 14.10 (proposed): shared/src/events.ts is over 600 lines and shared compiles with DOM types. From 14.3 review. (log: "shared/src/events.ts is over 600 lines and shared compiles with DOM types")
+- 14.11 (live check): The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model. From 14.9 review. (log: "The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model")
 
 ## Log
 
@@ -800,6 +802,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-tracer-bullet-one-plain-shell-pane-in-developer-mode-end-to-end-plan.md`
   summary: 16.2 review: a pane's POSIX tree kill signals only the shell's own process group, so background jobs of an interactive shell outlive Close and Restart.
   evidence: security review; `process-tree.ts` `killGroup`, `terminal-pty/index.ts` `killTerminalTree`; the fixture's grandchild stays in the shell's group so no test covers it.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-pane-notifications-through-the-existing-notifier-opt-in-plan.md`
+  summary: 16.8: the webhook send for panes waits for epic 11's webhook story (11.4 is not on main); the browser opt in is built.
+  evidence: `NotifierPort` exists on main but the webhook store and the strict `WebhookPayload` are 11.4's.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-cli-launcher-and-install-detection-claude-code-codex-grok-antigravity-copilot-and-a-plain-shell-plan.md`
   summary: 16.5 review: the fake program folder has no space in its path, and no test hangs a probe for real.
   evidence: `tests/fixtures/fake-cli-folder.ts`; `detect.ts` probe.
@@ -876,3 +881,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-epic-contracts-and-stubs-endpoint-localmodelport-no-account-descriptor-and-the-fake-server-plan.md`
   summary: shared/src/events.ts is over 600 lines and shared compiles with DOM types: events.ts grew from 615 to 621 lines with the endpoint event and shared's tsconfig gained the DOM lib only for URL; a narrower URL declaration and a split of events.ts are the sweep's.
   evidence: 14.3 correctness review.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-bmad-skills-reach-the-local-model-where-planning-is-on-nothing-where-it-is-off-plan.md`
+  summary: The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model: spike 14.1 says it reads `.opencode/skills` unless project config is disabled and walks up from the project folder; whether `OPENCODE_DISABLE_PROJECT_CONFIG` covers `.opencode/skills` is a live check on the real harness.
+  evidence: 14.9 review; spike 14.1 report.

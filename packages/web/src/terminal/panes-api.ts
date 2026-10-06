@@ -31,6 +31,11 @@ export async function arrangeLayout(wsId: string, layout: PaneLayout, auth: Auth
   return PanesResponse.parse(await call(auth, apiPath(API_ROUTES.workspacePaneLayout, { wsId }), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ layout }) }, "Ogden Agents couldn't save the layout"));
 }
 
+/** `PATCH /api/v1/workspaces/:wsId/panes/:paneId`: turn a pane's notifications on or off (the user's opt in). */
+export async function setPaneNotify(wsId: string, paneId: string, notify: boolean, auth: Auth = tabAuth): Promise<Pane> {
+  return PaneResponse.parse(await call(auth, apiPath(API_ROUTES.workspacePane, { wsId, paneId }), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ notify }) }, "Ogden Agents couldn't change that setting")).pane;
+}
+
 /** `PATCH /api/v1/workspaces/:wsId/panes/:paneId`: rename a pane. */
 export async function renamePane(wsId: string, paneId: string, title: string, auth: Auth = tabAuth): Promise<Pane> {
   return PaneResponse.parse(await call(auth, apiPath(API_ROUTES.workspacePane, { wsId, paneId }), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title }) }, "Ogden Agents couldn't rename that terminal")).pane;
@@ -42,8 +47,9 @@ export async function closePane(wsId: string, paneId: string, auth: Auth = tabAu
 }
 
 /** `POST /api/v1/workspaces/:wsId/panes/:paneId/restart`: Restart pane. */
-export async function restartPane(wsId: string, paneId: string, size: { cols: number; rows: number }, auth: Auth = tabAuth): Promise<Pane> {
-  return PaneResponse.parse(await call(auth, apiPath(API_ROUTES.workspacePaneRestart, { wsId, paneId }), postJson(size), "Ogden Agents couldn't restart that terminal")).pane;
+export async function restartPane(wsId: string, paneId: string, size: { cols: number; rows: number }, args?: string, auth: Auth = tabAuth): Promise<Pane> {
+  const body = args === undefined || args.trim() === '' ? size : { ...size, args };
+  return PaneResponse.parse(await call(auth, apiPath(API_ROUTES.workspacePaneRestart, { wsId, paneId }), postJson(body), "Ogden Agents couldn't restart that terminal")).pane;
 }
 
 export const launchersQueryKey = ['terminal-launchers'] as const;
@@ -82,6 +88,7 @@ export function usePaneActions(wsId: string, auth: Auth = tabAuth) {
       // A program that would not start may be gone: the list is read again.
       void queryClient.invalidateQueries({ queryKey: launchersQueryKey });
     }, mutationFn: (input: { size: { cols: number; rows: number }; placement?: PanePlacement; launch?: { launcherId: string; args: string } }) => openPane(wsId, input.size, input.placement, input.launch, auth), onSettled: refresh });
+  const notify = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (input: { paneId: string; notify: boolean }) => setPaneNotify(wsId, input.paneId, input.notify, auth), onSettled: refresh });
   const close = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (paneId: string) => closePane(wsId, paneId, auth), onSettled: refresh });
   const rename = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (input: { paneId: string; title: string }) => renamePane(wsId, input.paneId, input.title, auth), onSettled: refresh });
   const arrangeKey = ['pane-arrange', wsId] as const;
@@ -102,5 +109,5 @@ export function usePaneActions(wsId: string, auth: Auth = tabAuth) {
       refresh();
     },
   });
-  return { open, close, rename, arrange, error };
+  return { open, close, rename, arrange, notify, error };
 }

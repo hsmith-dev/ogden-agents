@@ -27,6 +27,7 @@ export * from './secrets-keyring/index.js';
 export * from './notify-memory/index.js';
 export * from './notify-webhook/index.js';
 export * from './pane-launchers/index.js';
+export * from './pane-pids/index.js';
 export * from './sandbox-chain/index.js';
 export * from './sandbox-claude-native/index.js';
 export * from './sandbox-docker/index.js';

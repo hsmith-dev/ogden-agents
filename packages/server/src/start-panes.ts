@@ -3,7 +3,7 @@
  * the `terminal-pty` port, the user's own shell and the pane environment.
  * Split out of `start.ts` to keep it short.
  */
-import { createPaneLaunchers, defaultPaneShell, nodeDetectSystem, PANE_LAUNCHERS, paneEnvironment, type PaneShell } from '@ogden-agents/adapters';
+import { createPaneLaunchers, createPanePidRecords, defaultPaneShell, sweepPanePids, nodeDetectSystem, PANE_LAUNCHERS, paneEnvironment, type PaneShell } from '@ogden-agents/adapters';
 import type { PaneLaunchers } from '@ogden-agents/core';
 import { createPanes, type Core, type Panes, type TerminalPort } from '@ogden-agents/core';
 import { isAbsolute, relative } from 'node:path';
@@ -19,12 +19,20 @@ const inside = (folder: string, path: string): boolean => {
 export interface PanesWiringOptions {
   options: Pick<StartOptions, 'paneShell' | 'paneLaunchers'>;
   hooks: Pick<TestHooks, 'paneShell' | 'panePath'>;
-  core: Pick<Core, 'entities' | 'installSettings' | 'events'>;
+  core: Pick<Core, 'entities' | 'installSettings' | 'events' | 'paneStore'>;
+  /** The data folder: the pids of the panes' programs are recorded in it. */
+  dataDir: string;
   terminal: TerminalPort;
   onError: (error: unknown) => void;
+  /** Told how many programs the sweep stopped and how many records it dropped (counts only). */
+  onSweep: (result: { stopped: number; dropped: number }) => void;
 }
 
-export function createPanesWiring({ options, hooks, core, terminal, onError }: PanesWiringOptions): Panes {
+export function createPanesWiring({ options, hooks, core, terminal, onError, onSweep, dataDir }: PanesWiringOptions): Panes {
+  const pids = createPanePidRecords(dataDir);
+  // A hard stop of the server last time may have left a pane's program running: only the pids Ogden Agents recorded itself, and only if still the same process.
+  const swept = sweepPanePids(pids);
+  if (swept.stopped + swept.dropped > 0) onSweep(swept);
   const shell = (): PaneShell => {
     // A test's fake shell (a Node script), else the user's own shell by absolute path (spike 16.1 finding 9).
     if (options.paneShell !== undefined) return options.paneShell;
@@ -49,6 +57,8 @@ export function createPanesWiring({ options, hooks, core, terminal, onError }: P
             }))(hooks.panePath),
     });
   return createPanes({
+    store: core.paneStore,
+    pids,
     launchers,
     entities: core.entities,
     installSettings: core.installSettings,

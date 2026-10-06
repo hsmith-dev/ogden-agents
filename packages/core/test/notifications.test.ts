@@ -91,6 +91,13 @@ describe('the webhooks (story 11.4)', () => {
     await expect(ok.addWebhook({ url: URL_A, events: [] })).rejects.toBeInstanceOf(ValidationError);
   });
 
+  it('adds at most 10 webhooks even when asked at once', async () => {
+    const { notifications } = await setup();
+    const results = await Promise.allSettled(Array.from({ length: 12 }, (_, index) => notifications.addWebhook({ url: `https://hooks.example.com/${index}`, events: ['blocked'] })));
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(10);
+    expect(notifications.settings().webhooks).toHaveLength(10);
+  });
+
   it('Send test posts a test payload to that webhook and answers its result, failures included', async () => {
     const { p, notifications } = await setup();
     const id = (await notifications.addWebhook({ url: URL_A, events: ['blocked'] })).webhooks[0]!.id;

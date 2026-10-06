@@ -39,9 +39,11 @@ export function AttentionNotifier() {
           const notification = new Notification(text.title, { body: text.body, tag: need.id });
           notification.onclick = () => {
             window.focus();
-            void (need.reviewRef === undefined
-              ? router.navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: need.wsId, sesId: need.sesId } })
-              : router.navigate({ to: '/w/$wsId/review/$ref', params: { wsId: need.wsId, ref: need.reviewRef } }));
+            if (need.paneId !== undefined) void router.navigate({ to: '/w/$wsId/terminals' as never, params: { wsId: need.wsId } as never });
+            else
+              void (need.reviewRef === undefined
+                ? router.navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: need.wsId, sesId: need.sesId } })
+                : router.navigate({ to: '/w/$wsId/review/$ref', params: { wsId: need.wsId, ref: need.reviewRef } }));
             notification.close();
           };
           return notification;
@@ -60,8 +62,7 @@ export function AttentionNotifier() {
 
   const sessions = useMemo(() => new Set(model.groups.flatMap((group) => [...group.rows, ...group.earlier].map((row) => row.sesId))), [model.groups]);
   useEffect(() => {
-    // A terminal pane's attention is opt in per pane (story 16.8): it never makes a sound or a desktop notification by itself.
-    notifier.current?.update(model.needsYou.filter((need) => need.kind !== 'pane'), settings, caughtUp, sessions);
+    notifier.current?.update(model.needsYou, settings, caughtUp, sessions);
   }, [model.needsYou, settings, caughtUp, sessions]);
 
   return null;

@@ -34,7 +34,7 @@ const FOCUS_KEYS: Readonly<Record<string, FocusDirection>> = { ArrowLeft: 'left'
  */
 export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId: string; developerMode: boolean; screenReaderMode: boolean }) {
   const panes = usePanes(wsId, developerMode);
-  const { open, close, rename, arrange, error: mutationError } = usePaneActions(wsId);
+  const { open, close, rename, arrange, notify, error: mutationError } = usePaneActions(wsId);
   const launchers = useLaunchers(developerMode);
   // A pane's status and the layout change through the event log: every tab follows (AD-7).
   useEventInvalidation((event) => (event.type.startsWith('terminal.') && event.workspaceId === wsId ? [panesQueryKey(wsId)] : []));
@@ -191,7 +191,9 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
                   onClose={(id) => close.mutate(id)}
                   onSplit={(id, direction) => openPane({ kind: 'split', paneId: id as PaneId, direction })}
                   focusOnOpen={pane.id === focusId}
+                  resumeHint={launchers.list.data?.launchers.find((one) => one.launcher.id === pane.launcherId)?.launcher.resumeHint}
                   onRename={(id, title) => rename.mutate({ paneId: id, title })}
+                  onNotify={(id, on) => notify.mutate({ paneId: id, notify: on })}
                   splitDisabledReason={full ? PANE_LIMIT_REACHED(limit) : open.isPending ? 'Opening a terminal' : undefined}
                 />
               );

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { EpicRetrospective } from './retrospectives.js';
 
 /**
  * The board (story 4.1, frozen by 4.2): the project's tickets as
@@ -72,6 +73,12 @@ export const TicketEpic = z.object({
   status: z.string(),
   after: z.array(TicketLink),
   blocks: z.array(TicketLink),
+  /**
+   * The epic's retrospective file, when one exists beside it (epic 7; read
+   * by `tickets-v7` from the file's frontmatter, story 7.4); `null` when
+   * there is none, and for every tree from before it.
+   */
+  retrospective: EpicRetrospective.nullable().default(null),
 });
 export type TicketEpic = z.infer<typeof TicketEpic>;
 

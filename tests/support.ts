@@ -103,6 +103,8 @@ export async function startServer(
     codex: false,
     // Grok likewise (epic 12): only where a test wires it.
     grok: false,
+    // The Local model likewise (epic 14): only where a test wires it.
+    local: false,
     // The "newer version" check (story 13.7) never reaches npm from a test: a test that wants it passes a fake registry.
     updates: false,
     extraAgentEnv: { FAKE_LOGIN_STATE: loginState, ...extraAgentEnv },

@@ -579,6 +579,8 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspacePanes}`,
   `POST ${API_ROUTES.workspacePanes}`,
   `DELETE ${API_ROUTES.workspacePane}`,
+  `GET ${API_ROUTES.terminalSettings}`,
+  `PUT ${API_ROUTES.terminalSettings}`,
   `GET ${API_ROUTES.terminalLaunchers}`,
   `POST ${API_ROUTES.terminalLaunchers}`,
   `PUT ${API_ROUTES.workspacePaneLayout}`,

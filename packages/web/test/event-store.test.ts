@@ -286,3 +286,26 @@ describe('event store at scale (story 2.10)', () => {
     expect(trimWorkspaces(few, keep, 5)).toBe(few);
   });
 });
+
+describe('terminal pane events survive trimming while the pane lives (epic 16, story 16.6)', () => {
+  it('keeps a live pane\'s open and newest status however many chat events follow, and lets a closed pane go', async () => {
+    const { applyEvents: apply, emptyStore: empty, MAX_LIVE_EVENTS: MAX, streamEvents: streams, trimWorkspaces: trim } = await import('../src/events/event-store');
+    const WS = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
+    const paneEvent = (seq: number, type: string, payload: Record<string, unknown>) =>
+      ({ id: `evt_01J9Z3K4M5N6P7Q8R9S0T1V2W${seq % 10}`, seq, at: '2026-10-05T12:00:00.000Z', type, workspaceId: WS, streamId: WS, payload }) as never;
+    const chat = (seq: number) =>
+      ({ id: `evt_01J9Z3K4M5N6P7Q8R9S0T1V2X${seq % 10}`, seq, at: '2026-10-05T12:00:00.000Z', type: 'session.message_delta', workspaceId: WS, streamId: 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3', payload: { messageId: 'msg_1', text: 'x' } }) as never;
+    const live = 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
+    const gone = 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W4';
+    const batch = [
+      paneEvent(1, 'terminal.pane_opened', { paneId: live, launcherId: 'a', title: 'One' }),
+      paneEvent(2, 'terminal.pane_status_changed', { paneId: live, status: 'needs_attention', previous: 'working' }),
+      paneEvent(3, 'terminal.pane_opened', { paneId: gone, launcherId: 'a', title: 'Two' }),
+      paneEvent(4, 'terminal.pane_closed', { paneId: gone, cause: 'user' }),
+      ...Array.from({ length: MAX + 50 }, (_, i) => chat(10 + i)),
+    ];
+    const kept = streams(trim(apply(empty(), batch)), WS, WS).map((e) => e.seq);
+    expect(kept).toEqual(expect.arrayContaining([1, 2]));
+    expect(kept).not.toContain(3);
+  });
+});

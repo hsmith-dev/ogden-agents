@@ -74,6 +74,7 @@ describe('a build session in the chat core (story 5.2)', () => {
       await chat.settled();
       expect(agent.starts).toHaveLength(1);
       expect(agent.starts[0]).toMatchObject({ cwd: '/w/x', sandbox });
+      expect(agent.starts[0]!.attended).toBeUndefined();
       expect(agent.decisions).toEqual([{ outcome: 'allow_once' }]);
       // No card: no permission event in the session's stream.
       expect(core.events.readAfter(0).filter((event) => event.streamId === session.id && event.type.startsWith('permission.'))).toEqual([]);
@@ -100,6 +101,8 @@ describe('a build session in the chat core (story 5.2)', () => {
       expect(agent.starts).toHaveLength(1);
       expect(agent.starts[0]).toMatchObject({ cwd: '/w/y' });
       expect(agent.starts[0]!.sandbox).toBeUndefined();
+      // The agent is told it is an attended build, so its own policy tier can keep the user's settings from skipping a card.
+      expect(agent.starts[0]).toMatchObject({ attended: true });
       // The request waits for the user as a card, at the ask_every_time level.
       const requested = () => core.events.readAfter(0).filter((event) => event.streamId === session.id && event.type === 'permission.requested');
       for (let tries = 0; tries < 50 && requested().length === 0; tries++) await new Promise((resolve) => setTimeout(resolve, 10));

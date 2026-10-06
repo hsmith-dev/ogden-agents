@@ -19,6 +19,7 @@ import {
   ValidationError,
   WorkspaceBusyError,
   type BmadFeatures,
+  type BuildsUseCases,
   type Chat,
   type Permissions,
   type Team,
@@ -65,11 +66,13 @@ export interface WorkspaceRoutesOptions {
   bmadProbe?: boolean;
   /** Core's team roster (epic 15, 15.5): a roster in a settings change is checked against what is ready before it is saved. */
   team?: Team | undefined;
+  /** The builds, so a project whose Unattended builds piece is turned back on starts its queued runs (story 5.8 review). */
+  builds?: Pick<BuildsUseCases, 'dispatchQueued'> | undefined;
   log: Logger;
 }
 
 export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptions): void {
-  const { chat, permissions, bmad, bmadProbe, team, log } = options;
+  const { chat, permissions, bmad, bmadProbe, team, builds, log } = options;
   const limit = bodyLimit({
     maxSize: MAX_BODY_BYTES,
     onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.'),
@@ -149,6 +152,8 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
           defaultPermissionMode: settings.defaultPermissionMode ?? 'ask',
           orchestrationMode: settings.orchestrationMode ?? 'approve_each',
         });
+        // Runs queued while the builds piece was off start now it is on (the queue also drains when another run ends).
+        if (settings.bmadPieces.includes('builds')) void builds?.dispatchQueued().catch(() => undefined);
         return c.json(WorkspaceSettingsResponse.parse({ settings }));
       } catch (error) {
         return refusal(c, error);

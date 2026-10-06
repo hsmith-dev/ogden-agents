@@ -167,7 +167,7 @@ export const REVIEW_SHOW_CHANGES_LABEL = (count: number) => `Show the code chang
 export const REJECT_NOTE_LABEL = 'A note for the next try (optional)';
 export const RUN_ACTIVE_MESSAGE = 'This ticket is already being built.';
 export const SANDBOX_UNAVAILABLE_MESSAGE = "Unattended builds need a sandbox, and this computer doesn't have one Ogden Agents can use, so nothing was started.";
-export const CHECKOUT_DIRTY_MESSAGE = 'Your project has uncommitted changes outside the BMad output folder. Commit or stash them, then approve again.';
+export const CHECKOUT_DIRTY_MESSAGE = 'Your project has uncommitted changes outside the BMad output folder and AGENTS.md. Commit or stash them, then approve again.';
 export const MERGE_CONFLICT_MESSAGE = "The build's changes conflict with your project, so nothing was merged. The run needs a rebase.";
 export const CHECKS_FAILED_MESSAGE = "This run didn't pass its checks, so it can't be approved.";
 export const ALREADY_MERGED_MESSAGE = 'This run is already merged.';

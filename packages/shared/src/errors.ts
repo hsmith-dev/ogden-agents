@@ -32,6 +32,8 @@ export const API_ERROR_CODES = [
   'developer_mode_required',
   /** Skip all was asked for without the user's confirmation of its warning (400): nothing changed. */
   'confirmation_required',
+  /** Developer mode was asked to turn off while terminal panes' programs are running and no choice was given (409; epic 16, 16.9): `details.running` says how many. Nothing changed; ask again with `panes: 'stop'` or `'keep'`. */
+  'panes_running',
   /** A permission mode the chat's agent, or its session, doesn't offer (409): nothing changed. */
   'mode_unavailable',
   /** A model the chat's agent, or its session, doesn't list (409; story 11): nothing changed. */

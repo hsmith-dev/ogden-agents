@@ -148,6 +148,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         if (run.outcome !== 'running') throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
         disarmDeadline(run.id);
         bump(run.id);
+        // A test re-run in progress stops with the run (its whole process tree).
+        ctx.abortRerun(run.id);
         pendingNotes.delete(run.id);
         if (run.queuePosition !== null) {
           entities.leaveQueue(run.id);
@@ -395,6 +397,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       state.closed = true;
       for (const timer of timers.values()) timer.cancel();
       timers.clear();
+      ctx.abortAllReruns();
       unsubscribe();
       recorder.close();
     },

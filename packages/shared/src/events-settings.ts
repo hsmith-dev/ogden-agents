@@ -96,3 +96,13 @@ export const AppUpdateRequestedInput = z.object({
  */
 export const AppUpdateRequestedEvent = AppUpdateRequestedInput.extend(assigned);
 export type AppUpdateRequestedEvent = z.infer<typeof AppUpdateRequestedEvent>;
+
+export const SettingsTerminalsChangedInput = z.object({
+  type: z.literal('settings.terminals_changed'),
+  ...onSettingsStream,
+  /** Which part changed, not what it was set to (a launcher's arguments are the user's own text). */
+  payload: z.object({ hidden: z.boolean() }),
+});
+/** The Terminals settings changed (story 16.9); every tab reads them again. `hidden` says whether the surface is hidden now. */
+export const SettingsTerminalsChangedEvent = SettingsTerminalsChangedInput.extend(assigned);
+export type SettingsTerminalsChangedEvent = z.infer<typeof SettingsTerminalsChangedEvent>;

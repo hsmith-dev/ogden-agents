@@ -23,7 +23,7 @@ export type TerminalPaneOpenedEvent = z.infer<typeof TerminalPaneOpenedEvent>;
 export const TerminalPaneStatusChangedInput = z.object({
   type: z.literal('terminal.pane_status_changed'),
   ...onWorkspaceStream,
-  payload: z.object({ paneId: PaneId, status: PaneStatus, previous: PaneStatus }),
+  payload: z.object({ paneId: PaneId, status: PaneStatus, previous: PaneStatus, /** The pane's name, so a row in the sidebar names it without the rest of its history. */ title: PaneTitle.optional(), /** Whether this pane's notifications are on (the pane's own opt in, or its launcher's): the page makes a sound or a notice only then (story 16.8). */ notify: z.boolean().optional() }),
 });
 /** A pane's guessed status changed (story 16.6): working, needs attention, idle or exited. */
 export const TerminalPaneStatusChangedEvent = TerminalPaneStatusChangedInput.extend(assigned);
@@ -50,9 +50,9 @@ export type TerminalPaneClosedEvent = z.infer<typeof TerminalPaneClosedEvent>;
 export const TerminalPaneRenamedInput = z.object({
   type: z.literal('terminal.pane_renamed'),
   ...onWorkspaceStream,
-  payload: z.object({ paneId: PaneId, title: PaneTitle }),
+  payload: z.object({ paneId: PaneId, title: PaneTitle, /** Present when the pane's own notification opt in changed (story 16.8): the page's other windows follow it. */ notify: z.boolean().optional() }),
 });
-/** A pane was renamed (story 16.4). */
+/** A pane was renamed (story 16.4), or its notification opt in changed (story 16.8; `notify` is then set). */
 export const TerminalPaneRenamedEvent = TerminalPaneRenamedInput.extend(assigned);
 export type TerminalPaneRenamedEvent = z.infer<typeof TerminalPaneRenamedEvent>;
 

@@ -164,6 +164,12 @@ export interface StartAgentSession {
    * life. Absent for every chat.
    */
   sandbox?: AgentSandbox | undefined;
+  /**
+   * An attended build session (story 5.6): the user watches, and every tool call is a card. An agent that can
+   * take policy it does not let the user's or project's own settings override (Claude Code's managed settings)
+   * gets it, so no allow rule, hook or bypass in them skips a card. Absent for every chat and unattended build.
+   */
+  attended?: true | undefined;
 }
 
 /** How a reopened session got its context back: the agent resumed it, loaded it, or had to start a new one. */

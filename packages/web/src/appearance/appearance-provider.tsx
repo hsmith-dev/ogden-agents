@@ -41,3 +41,8 @@ export function useAppearance(): AppearanceContextValue {
   if (context === null) throw new Error('useAppearance must be used inside <AppearanceProvider>');
   return context;
 }
+
+/** Whether Developer mode is on, or `false` outside the provider (a part that only hides an entry for a simple user needs no error). */
+export function useDeveloperModeOn(): boolean {
+  return useContext(AppearanceContext)?.appearance.developerMode === true;
+}

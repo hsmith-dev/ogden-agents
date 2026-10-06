@@ -25,6 +25,7 @@ const fakes = vi.hoisted(() => ({
   terminal: { available: true } as unknown,
   denied: false,
   launchers: [] as unknown[],
+  settings: { notifyNeedsAttention: false, notifyExited: false, notifyLaunchers: [] as string[], passProxies: false, passSshAgent: false, launcherArgs: {} as Record<string, string>, hidden: false },
 }));
 
 vi.mock('@xterm/xterm', () => ({
@@ -64,6 +65,7 @@ vi.mock('@xterm/xterm', () => ({
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
 vi.mock('@xterm/addon-unicode11', () => ({ Unicode11Addon: class {} }));
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
+vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [], store: undefined, caughtUp: true }) }));
 vi.mock('../src/terminal/pane-socket', () => ({
   connectPane: (_paneId: string, handlers: PaneSocketHandlers) => {
     const connection = { handlers, closed: false, typed: [] as string[] };
@@ -76,6 +78,7 @@ vi.mock('@/auth/tab-token', () => ({
     fetch: async (path: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       fakes.requests.push({ method, path, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+      if (path.endsWith('/settings/terminals')) return new Response(JSON.stringify({ settings: fakes.settings }));
       if (path.endsWith('/terminals/launchers')) return new Response(JSON.stringify({ launchers: fakes.launchers }));
       if (fakes.denied) return new Response(JSON.stringify({ error: { code: 'developer_mode_required', message: 'Terminals are only offered in Developer mode.' } }), { status: 403 });
       if (method === 'GET') {
@@ -135,6 +138,7 @@ beforeEach(() => {
   fakes.terminal = { available: true };
   fakes.denied = false;
   fakes.launchers = [];
+  fakes.settings = { notifyNeedsAttention: false, notifyExited: false, notifyLaunchers: [], passProxies: false, passSshAgent: false, launcherArgs: {}, hidden: false };
 });
 afterEach(() => {
   cleanup();
@@ -259,6 +263,94 @@ const two = () => {
   fakes.panes.push(pane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WC', title: 'Terminal 3', state: 'running' }));
 };
 const puts = () => fakes.requests.filter((r) => r.method === 'PUT').map((r) => JSON.parse(r.body!).layout);
+
+describe('Terminals settings on the page (story 16.9)', () => {
+  it('hidden says so in one sentence, with no list and no New terminal', async () => {
+    fakes.settings = { ...fakes.settings, hidden: true };
+    await mount();
+    expect(screen.getByTestId('terminals-hidden-notice').textContent).toContain('Terminals are hidden');
+    expect(screen.queryByTestId('terminals-new')).toBeNull();
+  });
+
+  it('a program\'s own arguments from Settings fill its field, and Start sends them', async () => {
+    fakes.launchers = [launcher('claude-code', 'Claude Code', 'found')];
+    fakes.settings = { ...fakes.settings, launcherArgs: { 'claude-code': '--model big' } };
+    await mount();
+    expect((screen.getByTestId('launcher-args') as HTMLInputElement).value).toBe('--model big');
+    fireEvent.click(screen.getByTestId('launcher-start'));
+    await settle();
+    expect(JSON.parse(fakes.requests.find((r) => r.method === 'POST')!.body!)).toMatchObject({ launcherId: 'claude-code', args: '--model big' });
+  });
+});
+
+describe('notifications are the user\'s opt in (story 16.8)', () => {
+  it('each pane has a Notify me switch, off by default, that asks the server and says what it shows', async () => {
+    fakes.panes = [pane({ state: 'running' })];
+    await mount();
+    const box = screen.getByTestId('pane-notify') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(box.closest('label')!.getAttribute('title')).toContain('never what it printed');
+    fireEvent.click(box);
+    await settle();
+    const patch = fakes.requests.find((r) => r.method === 'PATCH')!;
+    expect(JSON.parse(patch.body!)).toEqual({ notify: true });
+  });
+
+  it('shows the opt in the server has, with a name for screen readers', async () => {
+    fakes.panes = [pane({ state: 'running', notify: true })];
+    await mount();
+    const box = screen.getByTestId('pane-notify') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(box.getAttribute('aria-label')).toBe('Notify me when Terminal 1 may need me');
+  });
+});
+
+describe('stopped panes after a restart (story 16.7)', () => {
+  it('says it is stopped and offers Start, with the program\'s own resume words and an arguments field for a CLI', async () => {
+    fakes.launchers = [launcher('example', 'Example CLI', 'found', { resumeHint: 'Run example --resume to pick up an earlier session.' })];
+    fakes.panes = [pane({ launcherId: 'example', state: 'stopped', status: 'idle' })];
+    await mount();
+    expect(screen.getByTestId('pane-status-chip').textContent).toBe('Stopped');
+    const connection = fakes.connections[0]!;
+    await act(async () => connection.handlers.onOpen());
+    expect(screen.getByTestId('pane-status').textContent).toContain('Press Start to run it again.');
+    expect(screen.getByTestId('pane-status').textContent).toContain('Run example --resume');
+    fireEvent.change(screen.getByTestId('pane-start-args'), { target: { value: '--model big' } });
+    fireEvent.click(screen.getByTestId('pane-restart'));
+    await settle();
+    expect(screen.getByTestId('pane-restart').textContent).toBe('Start');
+    expect(JSON.parse(fakes.requests.find((r) => r.path.endsWith('/restart'))!.body!)).toEqual({ cols: 80, rows: 24, args: '--model big' });
+  });
+
+  it('a stopped shell has no arguments field and no resume words', async () => {
+    fakes.panes = [pane({ state: 'stopped', status: 'idle' })];
+    await mount();
+    await act(async () => fakes.connections[0]!.handlers.onOpen());
+    expect(screen.queryByTestId('pane-start-args')).toBeNull();
+    expect(screen.getByTestId('pane-restart').textContent).toBe('Start');
+  });
+});
+
+describe('status (story 16.6)', () => {
+  it('shows each pane\'s status in plain words, says it is a guess, and marks a tab that has a pane needing attention', async () => {
+    two();
+    fakes.panes = (fakes.panes as Array<Record<string, unknown>>).map((p, i) => ({ ...p, status: ['needs_attention', 'idle', 'working'][i] }));
+    await mount();
+    const chips = screen.getAllByTestId('pane-status-chip');
+    expect(chips.map((chip) => [chip.getAttribute('data-status'), chip.textContent])).toEqual([['needs_attention', 'Needs attention'], ['idle', 'Idle']]);
+    expect(screen.getByTestId('status-guess').textContent).toContain('a guess');
+    // The tab of the pane that needs attention says so; the other tab does not.
+    const tabs = screen.getAllByTestId('terminal-tab');
+    expect(tabs[0]!.textContent).toContain('Needs attention');
+    expect(tabs[1]!.textContent).not.toContain('Needs attention');
+  });
+
+  it('an ended program reads Ended', async () => {
+    fakes.panes = [pane({ state: 'exited', status: 'exited', exitCode: 0 })];
+    await mount();
+    expect(screen.getByTestId('pane-status-chip').textContent).toBe('Ended');
+  });
+});
 
 describe('tabs, splits and the layout (story 16.4)', () => {
   it('shows the active tab only: its split panes connect, the other tab\'s do not', async () => {

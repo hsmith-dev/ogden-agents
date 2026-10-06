@@ -8,7 +8,7 @@ import type { AntigravityPorts } from './antigravity-wiring.js';
 import type { CodexPorts } from './codex-wiring.js';
 import type { GrokPorts } from './grok-wiring.js';
 import type { LocalPorts } from './local-wiring.js';
-import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, NotifierPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
+import type { LocalModelPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, NotifierPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -85,6 +85,10 @@ export interface StartOptions {
    * a memory setup) and the endpoint a chat talks to, or `false` to leave it out.
    */
   local?: false | LocalPorts;
+  /** The port the Local model's endpoints are called through (tests: the in-memory stub, so no real server is called). Default: the OpenAI-compatible adapter. */
+  localModelPort?: LocalModelPort | undefined;
+  /** The one-click presets and the addresses Detect looks at (tests: a fake server's own port, so a real server on this computer is never probed). Default: the shipped presets. */
+  endpointPresets?: ReadonlyArray<{ id: string; label: string; baseUrl: string; downloadUrl: string }> | undefined;
   /**
    * The Claude Agent ACP adapter's entry script (or, in tests, any script
    * that speaks ACP over stdio, such as the fake agent). Default:

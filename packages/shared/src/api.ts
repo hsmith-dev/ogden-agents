@@ -210,6 +210,18 @@ export const API_ROUTES = {
   localEndpointConfirm: `${API_BASE}/local-endpoints/:endpointId/confirm`,
   /** `PUT SetDefaultEndpointRequest` → `LocalEndpointsResponse`: the endpoint new chats use. */
   localEndpointDefault: `${API_BASE}/local-endpoints-default`,
+  /** `GET` → `LocalEndpointPresetsResponse` (epic 14 story 14.4): the one-click presets (label, address, where to get the server). */
+  localEndpointPresets: `${API_BASE}/local-endpoint-presets`,
+  /**
+   * `POST` → `LocalEndpointTestResponse` (story 14.4): Test connection. The server calls the endpoint
+   * (never the page); 409 `endpoint_confirmation_required` for an unconfirmed host, in which case nothing is called.
+   */
+  localEndpointTest: `${API_BASE}/local-endpoints/:endpointId/test`,
+  /**
+   * `POST` → `LocalEndpointDetectResponse` (story 14.4): Detect. Probes only 127.0.0.1 and localhost on the
+   * presets' ports, once, when the user presses it. Reads no body.
+   */
+  localEndpointDetect: `${API_BASE}/local-endpoints-detect`,
   /** `GET` → `AgentsResponse` (9.1): every supported agent's install and sign-in state. */
   agents: `${API_BASE}/agents`,
   /**

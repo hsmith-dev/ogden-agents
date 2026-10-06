@@ -20,11 +20,13 @@ import {
   createClaudeCodeAgent,
   createClaudeCodeSetup,
   createKeyringSecretStore,
+  createOpenAiLocalModel,
+  DETECT_PROBE_TIMEOUT_MS,
   createMemorySecretStore,
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
 } from '@ogden-agents/adapters';
-import { agentEnvKeys, AgentSetupError, CoreError, createAgentSetup, type AgentPort, type AgentTerminalResume, type Core, type LocalEndpoints } from '@ogden-agents/core';
+import { agentEnvKeys, AgentSetupError, CoreError, createAgentSetup, createLocalModels, type AgentPort, type AgentTerminalResume, type Core, type LocalEndpoints } from '@ogden-agents/core';
 import type { AgentId } from '@ogden-agents/shared';
 import { agentHomeDir, checkAgentWiring, describedLike, type AgentWiring } from './agent-wiring.js';
 import { antigravityWiring, type AntigravityPorts } from './antigravity-wiring.js';
@@ -219,7 +221,9 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   });
   /** Claude Code as a chat runs it: the default agent, and the one Plan and the document cards fall back to (stories 4.1, 4.7). */
   const chatAgent = forChat(CLAUDE_CODE_AGENT_ID, agent);
-  return { localEndpoints: localEndpoints(), claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
+  const localModelPort = options.localModelPort ?? createOpenAiLocalModel();
+  const localModels = createLocalModels({ endpoints: localEndpoints(), port: localModelPort, detectPort: options.localModelPort ?? createOpenAiLocalModel({ timeoutMs: DETECT_PROBE_TIMEOUT_MS }) });
+  return { localModels, localEndpoints: localEndpoints(), claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
 }
 
 /**

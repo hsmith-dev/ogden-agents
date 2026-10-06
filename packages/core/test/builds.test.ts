@@ -324,7 +324,7 @@ describe('review loop 1 hardening (story 5.2)', () => {
       vcs: h.git.vcs,
       sandbox: fakeSandbox(() => ({ available: true, kind: 'test' })),
       runner: testRunner,
-      chat: { createChatSession: async (wsId, options) => h.core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }), sendMessage, releaseAgent: async () => {} },
+      chat: { chatAgents: async () => ({ agents: [], defaultAgentId: 'claude-code' }), createChatSession: async (wsId, options) => h.core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }), sendMessage, releaseAgent: async () => {} },
       buildSessions: h.core.buildSessions,
       dataDir: h.dataDir,
     });

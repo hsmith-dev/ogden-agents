@@ -66,7 +66,7 @@
  * Core names no skill, VCS, sandbox or agent (AD-1, AD-12).
  */
 import { existsSync } from 'node:fs';
-import { type BuildAgent, ATTENDED_SANDBOX, ALREADY_MERGED_MESSAGE, ApproveBuildRequest, RetryRunRequest, RETRY_NOT_AVAILABLE_MESSAGE, RUN_NOT_ACTIVE_MESSAGE, CHECKOUT_BUSY_MESSAGE, CHECKOUT_MOVED_MESSAGE, CHECKS_FAILED_MESSAGE, MERGE_CONFLICT_MESSAGE, MERGE_REFUSED_MESSAGE, REVIEW_STALE_MESSAGE, RUN_ACTIVE_MESSAGE, OBJECTS_NOT_IMPORTED_MESSAGE, StartBuildRequest, UNKNOWN_BUILD_AGENT_MESSAGE, VCS_UNAVAILABLE_MESSAGE, type WorkspaceId, ALL_READY_ASK_MESSAGE, RUN_REASON_STOPPED, RejectBuildRequest } from '@ogden-agents/shared';
+import { type BuildAgent, type BuildAgentChoice, ATTENDED_SANDBOX, ALREADY_MERGED_MESSAGE, ApproveBuildRequest, RetryRunRequest, RETRY_NOT_AVAILABLE_MESSAGE, RUN_NOT_ACTIVE_MESSAGE, CHECKOUT_BUSY_MESSAGE, CHECKOUT_MOVED_MESSAGE, CHECKS_FAILED_MESSAGE, MERGE_CONFLICT_MESSAGE, MERGE_REFUSED_MESSAGE, REVIEW_STALE_MESSAGE, RUN_ACTIVE_MESSAGE, OBJECTS_NOT_IMPORTED_MESSAGE, StartBuildRequest, UNKNOWN_BUILD_AGENT_MESSAGE, VCS_UNAVAILABLE_MESSAGE, type WorkspaceId, ALL_READY_ASK_MESSAGE, RUN_REASON_STOPPED, RejectBuildRequest } from '@ogden-agents/shared';
 import { runShortOf } from './build-run-folder.js';
 import { objectStoreOf } from './build-object-store.js';
 import { sweepObjectStores, sweepRunBranches, sweepWorktrees } from './build-worktrees.js';
@@ -187,6 +187,23 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     async sandboxStatus(workspaceId) {
       bmad.requireBmadFeature(workspaceId, 'builds');
       return sandbox.status({ agent: runner.agent });
+    },
+
+    async buildAgents(workspaceId) {
+      bmad.requireBmadFeature(workspaceId, 'builds');
+      const listed = await chat.chatAgents(workspaceId);
+      const agents: BuildAgentChoice[] = [];
+      for (const each of listed.agents) {
+        if (runnerFor(each.agentId) === undefined) continue;
+        if (each.unavailable !== undefined) {
+          agents.push({ agentId: each.agentId, displayName: each.displayName, way: 'unavailable', reason: each.unavailable.reason });
+          continue;
+        }
+        // The sandbox answer is per agent (epic 17): a missing sandbox, or an agent not verified in its own, leaves it attended only.
+        const check = await sandbox.check({ agent: each.agentId });
+        agents.push(check.available ? { agentId: each.agentId, displayName: each.displayName, way: 'unattended', reason: null } : { agentId: each.agentId, displayName: each.displayName, way: 'attended_only', reason: check.reason });
+      }
+      return { agents, defaultAgentId: runner.agent };
     },
 
     async review(workspaceId, ref) {

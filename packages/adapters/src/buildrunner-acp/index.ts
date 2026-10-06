@@ -111,3 +111,7 @@ export function createAcpBuildRunner(options: AcpBuildRunnerOptions = {}): Build
 
 /** Codex's build runner (epic 17): the same contract, the skill run as `$bmad-build-auto ticket <ref>`. */
 export const createCodexBuildRunner = (): BuildRunnerPort => createAcpBuildRunner({ agent: 'codex', command: dollarCommand });
+/** Grok's build runner (epic 17): the skill run as a slash command, in `.claude/skills`. */
+export const createGrokBuildRunner = (): BuildRunnerPort => createAcpBuildRunner({ agent: 'grok' });
+/** Antigravity's build runner (epic 17): the skill run as a slash command. */
+export const createAntigravityBuildRunner = (): BuildRunnerPort => createAcpBuildRunner({ agent: 'antigravity' });

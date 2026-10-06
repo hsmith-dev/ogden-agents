@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createCodexAgent, createFixedSandbox, createMemoryAgentSetup } from '@ogden-agents/adapters';
 import type { AgentSetupPort, TicketStorePort } from '@ogden-agents/core';
-import { API_ROUTES, apiPath, BuildResponse, ReviewResponse, UNKNOWN_BUILD_AGENT_MESSAGE, WorkspaceResponse } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, BuildAgentsResponse, BuildResponse, ReviewResponse, UNKNOWN_BUILD_AGENT_MESSAGE, WorkspaceResponse } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import type { CodexPorts } from '../src/codex-wiring.js';
 import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
@@ -39,7 +39,7 @@ function request(server: TestServer, tab: SignedIn, method: string, path: string
   });
 }
 
-async function setup(options: { sandbox?: boolean; verified?: boolean; env?: Record<string, string> } = {}) {
+async function setup(options: { sandbox?: boolean; verified?: boolean; env?: Record<string, string>; key?: boolean } = {}) {
   const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_REPO_FILES, prefix: 'ogden-agents-build-repo-' });
   removeAfterTest(repo.path);
   const store = createPlanFileTicketStore([{ ref: '1.1', title: 'Build the thing', plan: FAKE_BUILD_PLAN }]);
@@ -47,7 +47,7 @@ async function setup(options: { sandbox?: boolean; verified?: boolean; env?: Rec
     codex: codex(options.verified),
     ticketStore: store as unknown as TicketStorePort,
     sandbox: createFixedSandbox(options.sandbox === true ? { available: true, kind: 'test' } : { available: false, reason: 'none here' }),
-    extraAgentEnv: { CODEX_API_KEY: KEY, FAKE_ACP_CHUNK_DELAY_MS: '1', ...options.env },
+    extraAgentEnv: { ...(options.key === false ? {} : { CODEX_API_KEY: KEY }), FAKE_ACP_CHUNK_DELAY_MS: '1', ...options.env },
   });
   const tab = await signIn(server);
   const wsId = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo.path })).json()).workspace.id;
@@ -147,5 +147,31 @@ describe('a second agent builds (epic 17 tracer): Codex against its fake persona
     const session = server.core.entities.getSession(ended.run.sessionId)!;
     expect(session.agentId).toBe('codex');
     expect(session.permissionMode).toBe('ask');
+  });
+
+  it('lists the agents that can build and how each would: unattended, attended only with its reason, or unavailable', async () => {
+    const list = async (s: Awaited<ReturnType<typeof setup>>) => BuildAgentsResponse.parse(await (await request(s.server, s.tab, 'GET', apiPath(API_ROUTES.workspaceBuildAgents, { wsId: s.wsId }))).json());
+    const sandboxed = await list(await setup({ sandbox: true }));
+    expect(sandboxed.defaultAgentId).toBe('claude-code');
+    // Only agents wired here are listed (Grok and Antigravity have runners but are not registered); Codex is not verified, so it is attended only.
+    expect(sandboxed.agents.map((agent) => [agent.agentId, agent.way])).toEqual([['claude-code', 'unattended'], ['codex', 'attended_only']]);
+    expect(sandboxed.agents[1]!.reason).toContain('can build with you watching');
+    expect(sandboxed.agents[0]!.reason).toBeNull();
+    const verified = await list(await setup({ sandbox: true, verified: true }));
+    expect(verified.agents.find((agent) => agent.agentId === 'codex')).toMatchObject({ way: 'unattended', reason: null });
+    // With no sandbox on this computer every agent is attended only, for the machine's reason.
+    const none = await list(await setup({ sandbox: false, verified: true }));
+    expect(none.agents.map((agent) => agent.way)).toEqual(['attended_only', 'attended_only']);
+    expect(none.agents[0]!.reason).toContain('none here');
+    // No key: Codex cannot be started at all, and says what to do.
+    const keyless = await list(await setup({ sandbox: true, key: false }));
+    expect(keyless.agents.find((agent) => agent.agentId === 'codex')).toMatchObject({ way: 'unavailable' });
+    expect(keyless.agents.find((agent) => agent.agentId === 'codex')!.reason).toBeTruthy();
+  });
+
+  it('the list is behind the builds piece: 409 feature_off with it off', async () => {
+    const { server, tab, wsId } = await setup();
+    expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: [] })).status).toBe(200);
+    expect((await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuildAgents, { wsId }))).status).toBe(409);
   });
 });

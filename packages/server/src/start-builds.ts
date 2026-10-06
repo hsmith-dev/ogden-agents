@@ -7,7 +7,7 @@
  */
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { createAcpBuildRunner, createCodexBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, createAntigravityBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
 import { createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type VcsPort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import type { Logger } from './log.js';
@@ -52,7 +52,7 @@ export function createBuildsWiring({
   core: Core;
   dataDir: string;
   log: Logger;
-  chat: Pick<Chat, 'createChatSession' | 'sendMessage' | 'releaseAgent'>;
+  chat: Pick<Chat, 'createChatSession' | 'sendMessage' | 'releaseAgent' | 'chatAgents'>;
   tickets: TicketStorePort;
   /** The board's store: a ticket with an active run is read and marked in its worktree (story 5.8: prerequisites, Retry's mark). */
   runAwareTickets: TicketStorePort;
@@ -103,7 +103,7 @@ export function createBuildsWiring({
     sandbox,
     runner: options.buildRunner ?? createAcpBuildRunner(),
     // The other agents that can build (epic 17); a test's own list replaces them.
-    runners: (options.buildRunners ?? [createCodexBuildRunner()]).filter((each) => registeredAgents(each.agent)),
+    runners: (options.buildRunners ?? [createCodexBuildRunner(), createGrokBuildRunner(), createAntigravityBuildRunner()]).filter((each) => registeredAgents(each.agent)),
     chat,
     buildSessions: core.buildSessions,
     dataDir,

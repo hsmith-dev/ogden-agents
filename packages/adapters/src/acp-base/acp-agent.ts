@@ -65,7 +65,7 @@ import {
 import type { PermissionMode } from '@ogden-agents/shared';
 import { killProcessTree } from '../process-tree.js';
 import { withTimeout } from '../with-timeout.js';
-import { buildFixedStart, checkFixedModeWiring, startFixedMode, type FixedModeStart } from './fixed-mode.js';
+import { buildFixedStart, checkFixedModeWiring, namesForbiddenSwitch, startFixedMode, type FixedModeStart } from './fixed-mode.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
 import { agentWords, modelOptionOf, modelsOf } from './models.js';
 import { answerPermissionRequest, type Diagnostic, type PermissionCallback } from './permission-request.js';
@@ -201,6 +201,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     if (buildQuirk !== undefined && input.sandbox !== undefined) {
       try {
         buildStart = buildQuirk.start(input.sandbox);
+        if (namesForbiddenSwitch(buildStart)) throw new Error('a build start may not name a switch that skips a permission decision');
       } catch (error) {
         throw new AgentError('agent_unavailable', reasons.couldNotStart, { cause: error });
       }

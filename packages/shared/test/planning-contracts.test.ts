@@ -73,9 +73,11 @@ describe('the catalog (story 4.2)', () => {
       module: null,
       installedAt: null,
       next: null,
+      scope: null,
+      nexts: [],
     });
     const full = { name: 'bmad-spec', description: 'Spec.', label: 'Write a spec', group: 'planning', module: 'bmm', installedAt: at, next: { skill: 'bmad-ticket', label: 'Turn this spec into tickets' } };
-    expect(CatalogSkill.parse(full)).toEqual(full);
+    expect(CatalogSkill.parse(full)).toEqual({ ...full, scope: null, nexts: [] });
     expect(CatalogSkill.safeParse({ ...full, next: { skill: '../x', label: 'x' } }).success).toBe(false);
     expect(CatalogSkill.safeParse({ ...full, installedAt: 'yesterday' }).success).toBe(false);
   });
@@ -91,7 +93,7 @@ describe('the catalog (story 4.2)', () => {
     expect(CatalogResponse.parse(catalog).skills[0]!.label).toBeNull();
     expect(CatalogResponse.safeParse({ ...catalog, capabilities: { plain_labels: true } }).success).toBe(false);
     expect(CatalogResponse.safeParse({ ...catalog, entryAction: 'Not A Skill' }).success).toBe(false);
-    expect(BMAD_CAPABILITIES).toEqual(['plain_labels', 'ticket_tree']);
+    expect(BMAD_CAPABILITIES).toEqual(['plain_labels', 'ticket_tree', 'look_back']);
     for (const capability of BMAD_CAPABILITIES) expect(BMAD_CAPABILITY_REDUCED_TEXT[capability]).toMatch(/^[A-Z].*\.$/);
   });
 
@@ -103,6 +105,13 @@ describe('the catalog (story 4.2)', () => {
     expect(catalogGroupRank(null)).toBe(6);
     expect(catalogGroupLabel('research')).toBe('Ideas and research');
     expect(catalogGroupLabel('mystery')).toBe('Other');
+  });
+
+  it('groupCatalogSkills leaves an epic-scoped skill out of Plan home (epic 7)', () => {
+    const look = CatalogSkill.parse({ name: 'bmad-retrospective', description: 'x', label: 'Look back on this epic', group: 'checking', scope: 'epic' });
+    const plain = CatalogSkill.parse({ name: 'bmad-code-review', description: 'y', group: 'checking' });
+    expect(groupCatalogSkills([look, plain]).map((group) => group.skills.map((skill) => skill.name))).toEqual([['bmad-code-review']]);
+    expect(groupCatalogSkills([look])).toEqual([]);
   });
 
   it('groupCatalogSkills groups in the UX order, keeps each group in catalog order, and puts unknown and missing last as Other (story 4.6)', () => {
@@ -144,7 +153,7 @@ describe('the board (story 4.2)', () => {
   it('TicketsResponse adds the folder and epics, defaulted for a 4.1 answer', () => {
     expect(TicketsResponse.parse({ tickets: [row], problems: [] })).toMatchObject({ folder: null, epics: [] });
     const epics = [{ slug: 'epic-a', id: 1, status: 'in-progress', after: [], blocks: ['epic-b'] }];
-    expect(TicketsResponse.parse({ tickets: [], problems: [], folder: 'initiative-demo', epics }).epics).toEqual(epics);
+    expect(TicketsResponse.parse({ tickets: [], problems: [], folder: 'initiative-demo', epics }).epics).toEqual(epics.map((epic) => ({ ...epic, retrospective: null })));
     expect(TicketsResponse.safeParse({ tickets: [], problems: [], epics: [{ slug: '' }] }).success).toBe(false);
   });
 

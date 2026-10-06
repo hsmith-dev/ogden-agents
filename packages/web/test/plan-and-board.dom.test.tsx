@@ -49,6 +49,8 @@ import {
   CatalogSkill,
   APPEARANCE_STORAGE_KEY,
   FEATURE_OFF_MESSAGE,
+  LOOK_BACK_EPIC_NOT_FOUND_MESSAGE,
+  LOOK_BACK_LABEL,
   BMAD_UPGRADE_LABEL,
   PLAN_EMPTY_TITLE,
   PLAN_ENTRY_REDUCED_TEXT,
@@ -100,6 +102,8 @@ const state = vi.hoisted(() => ({
   /** Build's answer and Commit plan files' answer (story 5.5). */
   build: undefined as unknown,
   commitPlan: undefined as unknown,
+  /** Look back's answer (story 7.1). */
+  lookBack: undefined as unknown,
 }));
 
 /** The event stream's stand-in: `push` appends events and re-renders what reads them. */
@@ -172,6 +176,7 @@ vi.mock('@/auth/tab-token', () => ({
       if (/\/tickets\/[^/]+$/.test(path)) return reply(state.ticket);
       if (method === 'POST' && path.endsWith('/commit-plan')) return reply(state.commitPlan);
       if (method === 'POST' && path.endsWith('/builds')) return reply(state.build);
+      if (method === 'POST' && path.endsWith('/look-back')) return reply(state.lookBack);
       return new Response('{}', { status: 404 });
     },
   },
@@ -228,6 +233,7 @@ beforeEach(() => {
   state.mark = undefined;
   state.build = undefined;
   state.commitPlan = undefined;
+  state.lookBack = undefined;
   stream.events = [];
   stream.caughtUp = true;
 });
@@ -1120,7 +1126,7 @@ describe('Commit plan files on the board (story 5.5)', () => {
     state.commitPlan = { committed: ['_bmad-output/plan.md'], revision: 'a'.repeat(40) };
     mount(<BoardTickets wsId={WS} builds={{ onStarted: () => {} }} />);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Build 1.1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Build this story 1.1' }));
     await settle();
     expect(screen.getByTestId('board-build-error').textContent).toContain(PLAN_UNCOMMITTED_MESSAGE);
     fireEvent.click(screen.getByRole('button', { name: COMMIT_PLAN_FILES_LABEL }));
@@ -1135,7 +1141,7 @@ describe('Commit plan files on the board (story 5.5)', () => {
     state.build = { status: 409, code: 'plan_uncommitted', message: BMAD_FILES_UNCOMMITTED_MESSAGE };
     mount(<BoardTickets wsId={WS} builds={{ onStarted: () => {} }} />);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Build 1.1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Build this story 1.1' }));
     await settle();
     expect(screen.getByTestId('board-build-error').textContent).toContain(BMAD_FILES_UNCOMMITTED_MESSAGE);
     expect(screen.queryByRole('button', { name: COMMIT_PLAN_FILES_LABEL })).toBeNull();
@@ -1145,10 +1151,48 @@ describe('Commit plan files on the board (story 5.5)', () => {
     state.commitPlan = { committed: [], revision: 'a'.repeat(40) };
     mount(<BoardTickets wsId={WS} builds={{ onStarted: () => {} }} />);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Build 1.1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Build this story 1.1' }));
     await settle();
     fireEvent.click(screen.getByRole('button', { name: COMMIT_PLAN_FILES_LABEL }));
     await settle();
     expect(screen.getByTestId('board-plan-committed').textContent).toBe(NO_PLAN_FILES_TO_COMMIT_TEXT);
+  });
+});
+
+describe('Look back on an epic on the board (story 7.1)', () => {
+  it('shows Look back on this epic on each epic header only with Retrospectives on', async () => {
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    expect(screen.queryByRole('button', { name: LOOK_BACK_LABEL })).toBeNull();
+    cleanup();
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: () => {} }} />);
+    await settle();
+    const buttons = screen.getAllByTestId('board-look-back');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]!.textContent).toBe(LOOK_BACK_LABEL);
+    expect(buttons[0]!.closest('[data-testid="board-epic"]')!.getAttribute('data-epic')).toBe('epic-first');
+  });
+
+  it('posts for that epic and hands the new session on', async () => {
+    state.lookBack = { session: SESSION };
+    const started = vi.fn();
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: started }} />);
+    await settle();
+    fireEvent.click(screen.getByTestId('board-look-back'));
+    await settle();
+    expect(state.calls).toContain(`POST ${apiPath(API_ROUTES.workspaceEpicLookBack, { wsId: WS, epic: 'epic-first' })}`);
+    expect(started).toHaveBeenCalledWith(SESSION.id);
+    expect(screen.queryByTestId('board-look-back-error')).toBeNull();
+  });
+
+  it('says why in an alert when it is refused, and starts nothing', async () => {
+    state.lookBack = { status: 404, code: 'not_found', message: LOOK_BACK_EPIC_NOT_FOUND_MESSAGE };
+    const started = vi.fn();
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: started }} />);
+    await settle();
+    fireEvent.click(screen.getByTestId('board-look-back'));
+    await settle();
+    expect(screen.getByTestId('board-look-back-error').textContent).toContain(LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
+    expect(started).not.toHaveBeenCalled();
   });
 });

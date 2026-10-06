@@ -153,7 +153,7 @@ describe('the Build dialog (story 5.6)', () => {
     const started: string[] = [];
     mount(<BoardTickets wsId={WS} builds={{ onStarted: (id) => started.push(id) }} />);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Build 1.1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Build this story 1.1' }));
     await settle();
     await settle();
     // A dialog, never the alert.

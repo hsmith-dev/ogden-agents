@@ -13,7 +13,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startFakeServer } from './fake-openai-server.mjs';
+import { startFakeServer } from '../../tests/fixtures/fake-openai-server.mjs';
 import { startAgent, stopAgent, IS_WIN } from './acp.mjs';
 import { startProxy, startWatcher } from './net.mjs';
 import { runStructured } from './structured.mjs';

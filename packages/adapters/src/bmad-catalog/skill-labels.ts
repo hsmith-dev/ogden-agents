@@ -18,6 +18,10 @@ export interface SkillLabelsEntry {
   readonly description?: string;
   readonly group?: string;
   readonly next?: { readonly skill: string; readonly label: string };
+  /** `epic`: takes an epic's folder and shows on the board's epic header, not in Plan home (epic 7). */
+  readonly scope?: 'epic';
+  /** Further next steps beside `next` (epic 7: the look-back's lessons and action items). */
+  readonly nexts?: ReadonlyArray<{ readonly skill: string; readonly label: string }>;
 }
 
 /** The mapping file's shape. */
@@ -30,3 +34,11 @@ export interface SkillLabelsFile {
 
 /** The mapping as shipped (unchecked here: 4.5's reader reports what doesn't fit; a test checks the shipped file's shape). */
 export const SKILL_LABELS: SkillLabelsFile = raw as SkillLabelsFile;
+
+/**
+ * The skill a look-back on an epic invokes (story 7.1, the tracer): the one
+ * name the retrospectives wiring needs, kept here with the other skill names
+ * (AD-12: core and web name none). Entry 7.3 gives the mapping an epic scope
+ * and entry 7.4 reads the look-back action from the catalog instead.
+ */
+export const LOOK_BACK_SKILL = 'bmad-retrospective';

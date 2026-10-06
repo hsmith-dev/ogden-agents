@@ -42,7 +42,7 @@
  *   without `_bmad/` and `bmad_upgrade_refused` when it is a link or a file,
  *   nothing written.
  *
- * - `GET …/documents?path=` (`planning`; no trust: it reads one file, runs
+ * - `GET …/documents?path=` (`planning` or `retrospectives`, story 7.1; no trust: it reads one file, runs
  *   nothing; story 4.7) → `DocumentResponse`: a Markdown document inside
  *   the project's output folder; 400 for a malformed path, one outside the
  *   folder or not `.md`, 404 when it is missing or its real path leaves the
@@ -121,10 +121,16 @@ export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning,
     return apiError(c, 503, 'tickets_unavailable', error.message);
   };
 
-  routes.get('planning', API_ROUTES.workspaceCatalog, async (c, { workspaceId }) => {
-    if (planning === undefined) return notImplemented(c);
-    return c.json(CatalogResponse.parse(await planning.catalog(workspaceId)));
-  });
+  // Planning, or Retrospectives for the look-back's epic-scoped action (epic 7); it only reads files, so no trust.
+  routes.get(
+    ['planning', 'retrospectives'],
+    API_ROUTES.workspaceCatalog,
+    async (c, { workspaceId }) => {
+      if (planning === undefined) return notImplemented(c);
+      return c.json(CatalogResponse.parse(await planning.catalog(workspaceId)));
+    },
+    { projectScripts: false },
+  );
 
   const limit = bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
   routes.post('planning', API_ROUTES.workspacePlanningSessions, async (c, { workspaceId }) => {
@@ -178,7 +184,7 @@ export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning,
 
   // A document a planning session wrote (story 4.7): read-only, confined to the output folder.
   routes.get(
-    'planning',
+    ['planning', 'retrospectives'],
     API_ROUTES.workspaceDocument,
     async (c, { workspaceId }) => {
       if (planning === undefined) return notImplemented(c);

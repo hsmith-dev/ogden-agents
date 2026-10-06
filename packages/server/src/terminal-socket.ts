@@ -50,37 +50,10 @@ import type { Hono } from 'hono';
 import type { WSContext } from 'hono/ws';
 import { webSocketToken, type TabTokens } from './auth.js';
 import type { Logger } from './log.js';
+import { ATTACH_WAIT_MS, CONTROL_FRAME_COST_BYTES, createInputBudget, createViewerCounter, INPUT_BURST_BYTES, INPUT_BYTES_PER_SECOND, MAX_TERMINAL_VIEWERS, MAX_VIEWER_BUFFERED_BYTES, POLICY, TERMINAL_TOO_MANY_VIEWERS, TOO_BIG, WS_OPEN } from './terminal-socket-limits.js';
 
-const WS_OPEN = 1;
-/** The standard close code for a message too big to process. */
-const TOO_BIG = 1009;
-/**
- * The most output a viewer may leave unsent before it is closed
- * ({@link TERMINAL_CLOSE}.slowViewer; story 3.1 review F2), so a stalled tab
- * never makes the server buffer a flooding CLI's output without bound. The
- * CLI is not paused: `ws` has no drain event and node-pty's pause is not
- * reliable on every platform, and one slow tab must not stall the others.
- */
-export const MAX_VIEWER_BUFFERED_BYTES = 1024 * 1024;
-
-/** The standard close code for a policy violation: here, typing faster than {@link INPUT_BYTES_PER_SECOND}. */
-const POLICY = 1008;
-/** How long a new viewer has to send `attach` before it is attached at the terminal's current size (story 3.5). */
-export const ATTACH_WAIT_MS = 5_000;
-/** How much a viewer may type at once (a long paste) before its rate applies (story 3.5; 3.1 review F4). */
-export const INPUT_BURST_BYTES = 4 * 1024 * 1024;
-/** How fast a viewer's typing allowance refills. */
-export const INPUT_BYTES_PER_SECOND = 1024 * 1024;
-/** What each control frame (`attach`, `resize`, or one that fails its schema) costs from the same allowance (3.5 review F3), so resizing in a loop is limited too. */
-export const CONTROL_FRAME_COST_BYTES = 1024;
-/** The most viewers one session's terminal may have at once (3.5 review F2, coordinator decision). */
-export const MAX_TERMINAL_VIEWERS = 8;
-/**
- * The close code for a viewer over {@link MAX_TERMINAL_VIEWERS} (3.5 review
- * F2): `shared`'s `TERMINAL_CLOSE.tooManyViewers`, kept under this name for
- * its callers (story 3.9).
- */
-export const TERMINAL_TOO_MANY_VIEWERS = TERMINAL_CLOSE.tooManyViewers;
+// The limits live in terminal-socket-limits.ts; these names stay importable from here.
+export { ATTACH_WAIT_MS, CONTROL_FRAME_COST_BYTES, createInputBudget, INPUT_BURST_BYTES, INPUT_BYTES_PER_SECOND, MAX_TERMINAL_VIEWERS, MAX_VIEWER_BUFFERED_BYTES, TERMINAL_TOO_MANY_VIEWERS };
 
 export interface TerminalSocketOptions {
   chat: Chat;
@@ -93,33 +66,9 @@ export interface TerminalSocketOptions {
   attachWaitMs?: number;
 }
 
-/**
- * A token bucket of `burst` bytes refilled at `perSecond` (story 3.5): `take`
- * says whether `bytes` more fit, and spends them if they do.
- */
-export function createInputBudget(burst: number, perSecond: number, now: () => number = Date.now) {
-  let tokens = burst;
-  let last = now();
-  return {
-    take(bytes: number): boolean {
-      const time = now();
-      tokens = Math.min(burst, tokens + (Math.max(0, time - last) * perSecond) / 1000);
-      last = time;
-      if (bytes > tokens) return false;
-      tokens -= bytes;
-      return true;
-    },
-  };
-}
-
 export function registerTerminalSocket(app: Hono, { chat, log, tabs, now = Date.now, attachWaitMs = ATTACH_WAIT_MS }: TerminalSocketOptions): void {
   /** How many viewers each session's terminal has now, over every socket. */
-  const viewerCounts = new Map<SessionId, number>();
-  const countViewer = (id: SessionId, change: 1 | -1) => {
-    const next = (viewerCounts.get(id) ?? 0) + change;
-    if (next <= 0) viewerCounts.delete(id);
-    else viewerCounts.set(id, next);
-  };
+  const viewers = createViewerCounter<SessionId>();
 
   app.get(
     TERMINAL_SOCKET_ROUTE,
@@ -140,7 +89,7 @@ export function registerTerminalSocket(app: Hono, { chat, log, tabs, now = Date.
       /** Detaches only this viewer: the terminal runs on. */
       const end = () => {
         closed = true;
-        if (counted && sessionId !== undefined) countViewer(sessionId, -1);
+        if (counted && sessionId !== undefined) viewers.count(sessionId, -1);
         counted = false;
         clearTimeout(attachTimer);
         attachTimer = undefined;
@@ -261,12 +210,12 @@ export function registerTerminalSocket(app: Hono, { chat, log, tabs, now = Date.
             close(ws, TERMINAL_CLOSE.notTerminal, 'not_terminal');
             return;
           }
-          if ((viewerCounts.get(sessionId) ?? 0) >= MAX_TERMINAL_VIEWERS) {
+          if (viewers.of(sessionId) >= MAX_TERMINAL_VIEWERS) {
             log.warn('too many terminal viewers; closing the newest', { sessionId, max: MAX_TERMINAL_VIEWERS });
             close(ws, TERMINAL_CLOSE.tooManyViewers, 'too_many_viewers');
             return;
           }
-          countViewer(sessionId, 1);
+          viewers.count(sessionId, 1);
           counted = true;
           // Told even before attaching: the terminal can end first.
           viewer.onEnd(({ exitCode }) => {

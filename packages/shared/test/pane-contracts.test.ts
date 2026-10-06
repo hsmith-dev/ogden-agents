@@ -72,7 +72,7 @@ describe('the layout tree', () => {
   const split = { type: 'split', direction: 'row', ratio: 0.5, first: { type: 'pane', paneId: PAN }, second: { type: 'pane', paneId: PAN2 } };
 
   it('is tabs of nested splits of panes, ids only', () => {
-    const layout = PaneLayout.parse({ tabs: [{ id: 't1', title: 'Main', root: { type: 'split', direction: 'column', ratio: 0.3, first: split, second: { type: 'pane', paneId: PAN } } }], activeTabId: 't1' });
+    const layout = PaneLayout.parse({ tabs: [{ id: 't1', title: 'Main', root: { type: 'split', direction: 'column', ratio: 0.3, first: split, second: { type: 'pane', paneId: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W9' } } }], activeTabId: 't1' });
     expect(layout.tabs).toHaveLength(1);
     expect(PaneLayout.safeParse({ tabs: [], activeTabId: null }).success).toBe(true);
   });
@@ -82,6 +82,14 @@ describe('the layout tree', () => {
     expect(PaneLayout.safeParse({ tabs: [{ id: 't', title: 'x', root: { type: 'split', direction: 'row', ratio: 0.5, first: split } }], activeTabId: null }).success).toBe(false);
     const tab = { id: 't', title: 'x', root: { type: 'pane', paneId: PAN } };
     expect(PaneLayout.safeParse({ tabs: Array.from({ length: MAX_PANES_PER_PROJECT + 1 }, () => tab), activeTabId: null }).success).toBe(false);
+  });
+
+  it('refuses a pane in two places, two tabs with one id and an active tab that does not exist (16.3 review)', () => {
+    const tab = (id: string, paneId: string) => ({ id, title: 'x', root: { type: 'pane', paneId } });
+    expect(PaneLayout.safeParse({ tabs: [tab('a', PAN), tab('b', PAN)], activeTabId: null }).success).toBe(false);
+    expect(PaneLayout.safeParse({ tabs: [tab('a', PAN), tab('a', PAN2)], activeTabId: null }).success).toBe(false);
+    expect(PaneLayout.safeParse({ tabs: [tab('a', PAN)], activeTabId: 'gone' }).success).toBe(false);
+    expect(PaneLayout.safeParse({ tabs: [tab('a', PAN), tab('b', PAN2)], activeTabId: 'b' }).success).toBe(true);
   });
 });
 

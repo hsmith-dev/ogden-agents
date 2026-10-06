@@ -1,4 +1,4 @@
-import { PANE_CLOSE, TERMINAL_CLOSE, type Pane, type PaneState } from '@ogden-agents/shared';
+import { PANE_CLOSE, TERMINAL_CLOSE, type Pane, type PaneState, type PaneStatus } from '@ogden-agents/shared';
 import type { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/ui/button';
@@ -6,6 +6,7 @@ import { Text } from '@/ui/typography';
 import { tokenNumber } from '@/ui/tokens';
 import { cn } from '@/ui/utils';
 import { MAX_NAME_LENGTH } from './layout-edit';
+import { STATUS_WORDS } from './pane-status-words';
 import { connectPane, type PaneConnection } from './pane-socket';
 import { restartPane } from './panes-api';
 import { RECONNECT_DELAYS_MS, STABLE_CONNECTION_MS } from './terminal-panel';
@@ -58,6 +59,7 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
   const terminal = useRef<Terminal | undefined>(undefined);
   const [link, setLink] = useState<Link>('loading');
   const [state, setState] = useState<PaneState>(pane.state);
+  const [liveStatus, setLiveStatus] = useState<PaneStatus | undefined>(undefined);
   const [exitCode, setExitCode] = useState<number | null>(pane.exitCode);
   const [slow, setSlow] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -120,8 +122,9 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
             if (++frames > 1) tries = 0;
             term.write(bytes);
           },
-          onState: (next) => {
+          onState: (next, status) => {
             setState(next);
+            if (status !== undefined) setLiveStatus(status);
             if (next !== 'exited') setExitCode(null);
           },
           onExit: (code) => setExitCode(code),
@@ -257,6 +260,9 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
           </button>
         )}
         <span className="flex items-center gap-2">
+          <Text variant="caption" data-testid="pane-status-chip" data-status={liveStatus ?? pane.status} title="A guess from what the program prints" className="text-terminal-foreground">
+            {STATUS_WORDS[liveStatus ?? pane.status]}
+          </Text>
           {onSplit === undefined ? null : (
             <>
               <Button variant="outline" size="sm" onClick={() => onSplit(pane.id, 'row')} disabled={splitDisabledReason !== undefined} title={splitDisabledReason} data-testid="pane-split-row">

@@ -64,6 +64,12 @@ export interface PaneProcess extends TerminalProcess {
    * still gives its last screen.
    */
   attach(onSnapshot: (snapshot: string) => void, onData: (data: string) => void): () => void;
+  /**
+   * The last `count` non empty lines of what the screen shows now, after
+   * everything printed so far has been read: for the status guess (story
+   * 16.6), in memory only, never stored or logged.
+   */
+  screenLines(count: number): Promise<string[]>;
 }
 
 export interface TerminalPort {

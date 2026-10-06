@@ -29,6 +29,9 @@ import type { AcpToolInputPaths } from '../acp-base/tool-paths.js';
 import { ANTIGRAVITY_API_KEY_METHOD_ID, ANTIGRAVITY_DESCRIPTOR, ANTIGRAVITY_MODE_IDS, GEMINI_API_KEY_ENV } from '../setup-antigravity/descriptor.js';
 import { pinnedServer } from '../setup-antigravity/layout.js';
 
+/** The Build picker's line for Antigravity (epic 17): no sandbox for a build, and its modes that approve for you are never used (plain words, no dashes). */
+export const ANTIGRAVITY_ATTENDED_ONLY_REASON = "Antigravity has no sandbox for a build, so it builds with you watching, and Ogden Agents never uses its modes that approve for you.";
+
 /** How long its server may take to start and open a session (Windows: about 17 s per process, spike 6.1). */
 export const ANTIGRAVITY_START_TIMEOUT_MS = 120_000;
 
@@ -75,7 +78,9 @@ export function createAntigravityAgent(options: AntigravityAgentOptions): AgentP
       if (server === undefined) throw new AgentError('agent_unavailable', reasons.notSetUp);
       return { command: server.command, args: [...server.args], logFields: { server: server.command } };
     },
-    // No `sessionMeta`: it has no per-session guard settings, so core never offers it Auto (it declares none anyway).
+    // No `sessionMeta` and no build start: it has no per-session guard settings and no sandbox, so a build is attended only
+    // (user decision 2026-10-06), in Ask. `auto_edit` approves protected files and `yolo` everything: neither is ever set.
+    attendedOnlyReason: ANTIGRAVITY_ATTENDED_ONLY_REASON,
     toolInputPaths: TOOL_INPUT_PATHS,
     askingModeIds: [ANTIGRAVITY_MODE_IDS.ask],
     commandFields: COMMAND_FIELDS,

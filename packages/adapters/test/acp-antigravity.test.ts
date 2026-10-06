@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { agentDescriptorProblems, agentEnvKeys, AgentError, declaredModes, PROTECTED_PATHS, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  ANTIGRAVITY_ATTENDED_ONLY_REASON,
   ANTIGRAVITY_DESCRIPTOR,
   ANTIGRAVITY_PINS,
   ANTIGRAVITY_START_TIMEOUT_MS,
@@ -259,3 +260,14 @@ describe("Antigravity's setup port: status from the data folder", () => {
   });
 });
 
+describe('builds (epic 17: attended only)', () => {
+  it('has no sandbox for a build and says so in plain words; an unattended start is refused and a mode that approves for you is never asked', async () => {
+    const agent = agentOf();
+    expect(agent.unattendedBuild).toBe(false);
+    expect(agent.attendedOnlyReason).toBe(ANTIGRAVITY_ATTENDED_ONLY_REASON);
+    expect(ANTIGRAVITY_ATTENDED_ONLY_REASON).not.toMatch(/[\u2013\u2014]/);
+    const cwd = tempDir();
+    const refused = await agent.startSession({ cwd, env: envOf({ GEMINI_API_KEY: KEY }), sandbox: { kind: 'test', writableRoots: [cwd], deniedPaths: [], deniedReads: [], allowedReads: [cwd] } }).catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: 'agent_unavailable' });
+  });
+});

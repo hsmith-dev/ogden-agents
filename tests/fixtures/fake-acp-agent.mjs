@@ -607,6 +607,8 @@ const agentBuilder = acp
     if (session === undefined) throw acp.RequestError.invalidParams(undefined, `no session ${params.sessionId}`);
     if (!AVAILABLE_MODES.some((mode) => mode.id === params.modeId)) throw acp.RequestError.invalidParams(undefined, `Mode ${params.modeId} is not available`);
     session.mode = params.modeId;
+    // Epic 17: FAKE_ACP_MODE_LOG=<file> records every mode id the client asked for (a build must never ask for a mode that skips its rule).
+    if (process.env.FAKE_ACP_MODE_LOG) appendFileSync(process.env.FAKE_ACP_MODE_LOG, `${params.modeId}\n`);
     // Takes the mode, then fails the request, or never answers it (an agent whose answer can't be trusted).
     if (process.env.FAKE_ACP_SET_MODE_FAIL === params.modeId) throw acp.RequestError.internalError(undefined, 'the fake agent failed set_mode on purpose');
     if (process.env.FAKE_ACP_SET_MODE_HANG === params.modeId) return new Promise(() => {});

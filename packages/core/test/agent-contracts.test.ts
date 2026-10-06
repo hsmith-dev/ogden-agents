@@ -81,6 +81,8 @@ describe('an agent descriptor (6.3)', () => {
     ['no Ask', { permissionModes: { skip_all: 'yolo' } as unknown as AgentDescriptor['permissionModes'] }, /does not declare Ask/],
     ['a mode Ogden has not', { permissionModes: { ask: 'default', plan: 'plan' } as unknown as AgentDescriptor['permissionModes'] }, /not a permission mode/],
     ['no provider', { provider: ' ' }, /provider is empty/],
+    ['an interactive only sentence with a dash', { interactiveOnly: 'Only a person \u2014 at the keyboard.' }, /interactive only sentence/],
+    ['an empty interactive only sentence', { interactiveOnly: ' ' }, /interactive only sentence/],
     ['an unknown send now style', { sendNow: 'teleport' as unknown as AgentDescriptor['sendNow'] }, /not a send now style/],
   ] as Array<[string, Partial<AgentDescriptor>, RegExp]>)('finds %s', (_what, overrides, problem) => {
     expect(agentDescriptorProblems(testDescriptor('some-agent', port('Some Agent'), overrides)).join('\n')).toMatch(problem);

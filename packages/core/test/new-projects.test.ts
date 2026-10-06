@@ -238,3 +238,46 @@ describe("a project's default agent and the default for new projects (epic 6, en
     expect(openTestCore(dataDir, undefined, { isAgentRegistered: registered(['agent-b']) }).permissions.getSettings(workspace.id).defaultAgentId).toBeUndefined();
   });
 });
+
+describe('the roster new projects start with (epic 15, 15.5)', () => {
+  const roster = { manager: null, planner: null, worker: { kind: 'agent', agentId: 'agent-b' }, reviewer: null } as const;
+
+  it('is kept in the same file beside the pieces, agent and mode, which a roster save leaves as they are, and the other way round', () => {
+    const { defaults, file } = store(['planning']);
+    defaults.set({ bmadPieces: ['planning'], defaultAgentId: 'agent-b', defaultPermissionMode: 'auto' });
+    expect(defaults.setRoster(roster)).toEqual(roster);
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ newProjects: { bmadPieces: ['planning'], defaultAgentId: 'agent-b', defaultPermissionMode: 'auto', orchestrationRoster: roster } });
+    expect(defaults.get()).toEqual({ bmadPieces: ['planning'], defaultAgentId: 'agent-b', defaultPermissionMode: 'auto', orchestrationRoster: roster });
+    // A later change of the pieces keeps the roster.
+    defaults.set({ bmadPieces: [] });
+    expect(defaults.get().orchestrationRoster).toEqual(roster);
+    // An empty roster is not kept at all.
+    defaults.setRoster({ manager: null, planner: null, worker: null, reviewer: null });
+    expect(JSON.parse(readFileSync(file, 'utf8')).newProjects.orchestrationRoster).toBeUndefined();
+    expect(defaults.get().orchestrationRoster).toBeUndefined();
+  });
+
+  it('reads a damaged roster as none without costing the pieces, and an older file as none', () => {
+    const { defaults, file } = store(['planning']);
+    writeFileSync(file, JSON.stringify({ newProjects: { bmadPieces: ['planning'], orchestrationRoster: { worker: 'agent-b' } } }));
+    expect(defaults.get()).toEqual({ bmadPieces: ['planning'] });
+    writeFileSync(file, JSON.stringify({ newProjects: { bmadPieces: ['planning'] } }));
+    expect(defaults.get()).toEqual({ bmadPieces: ['planning'] });
+  });
+
+  it('refuses a body that is not a roster and writes nothing', () => {
+    const { defaults, file } = store();
+    expect(() => defaults.setRoster({ worker: 'agent-b' })).toThrow(ValidationError);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('a project added with it starts with the roster in its own row, and one that exists is never changed by it', () => {
+    const { defaults } = store();
+    const core = openTestCore(tempDir());
+    const first = adding(core, defaults).addProject(tempDir());
+    defaults.setRoster(roster);
+    const second = core.entities.ensureWorkspace(tempDir(), { orchestrationRoster: () => defaults.get().orchestrationRoster });
+    expect(core.permissions.getSettings(second.id).orchestrationRoster).toEqual(roster);
+    expect(core.permissions.getSettings(first.id).orchestrationRoster).toBeUndefined();
+  });
+});

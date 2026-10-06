@@ -40,6 +40,9 @@ const view = (steps: unknown[], state = 'awaiting_user'): OrchestrationRunView =
     steps,
   }) as unknown as OrchestrationRunView;
 
+/** The roster view with each role's `chosen` as stored, as core would answer after a save. */
+const withChosen = (view: unknown, stored: Record<string, unknown>) => ({ ...(view as { roles: { role: string }[] }), roles: (view as { roles: { role: string }[] }).roles.map((role) => ({ ...role, chosen: stored[role.role] ?? null })) });
+
 const fake = vi.hoisted(() => ({
   enabled: true,
   managerReady: true,
@@ -56,6 +59,10 @@ const fake = vi.hoisted(() => ({
   /** The view each action answers. */
   next: undefined as unknown,
   switchSaved: undefined as boolean | undefined,
+  /** The roster as core describes it (absent: a default one), a refusal for the next roster change, and the last default roster saved. */
+  rosterView: undefined as unknown,
+  refuseRoster: undefined as string | undefined,
+  defaultSaved: undefined as Record<string, unknown> | undefined,
 }));
 
 vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [], caughtUp: true }), useSessionEvents: () => [] }));
@@ -77,11 +84,18 @@ vi.mock('@/auth/tab-token', () => ({
       if (path.endsWith('/settings') && method === 'GET') return json({ settings: { cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false, orchestrationEnabled: fake.enabled, orchestrationRoster: fake.roster } });
       if (path.endsWith('/settings') && method === 'PATCH') {
         const body = JSON.parse(String(init?.body)) as { orchestrationEnabled?: boolean; orchestrationRoster?: Record<string, unknown> };
+        if (body.orchestrationRoster !== undefined && fake.refuseRoster !== undefined) return json({ error: { code: 'invalid_request', message: fake.refuseRoster } }, 400);
         if (body.orchestrationRoster !== undefined) {
           fake.rosterSaved = body.orchestrationRoster;
           fake.roster = body.orchestrationRoster;
         } else fake.switchSaved = body.orchestrationEnabled;
         return json({ settings: { cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false, orchestrationEnabled: fake.switchSaved ?? fake.enabled, orchestrationRoster: fake.roster } });
+      }
+      if (path.endsWith('/orchestration/roster')) return json({ roster: withChosen(fake.rosterView ?? rosterView(), fake.roster), stored: fake.roster });
+      if (path === '/api/v1/settings/team-roster' && method === 'GET') return json({ roster: fake.rosterView ?? rosterView(), stored: fake.defaultSaved ?? { manager: null, planner: null, worker: null, reviewer: null } });
+      if (path === '/api/v1/settings/team-roster' && method === 'PUT') {
+        fake.defaultSaved = (JSON.parse(String(init?.body)) as { roster: Record<string, unknown> }).roster;
+        return json({ roster: fake.rosterView ?? rosterView(), stored: fake.defaultSaved });
       }
       if (path.endsWith('/orchestration')) return json({ settings: { mode: 'approve_each', limits: { maxInstructions: 20, maxDepth: 3, maxMinutes: 30 }, roster: { manager: null, planner: null, worker: null, reviewer: null }, managerReady: fake.managerReady, ...(fake.manager === undefined ? {} : { manager: fake.manager }) } });
       if (path === '/api/v1/local-endpoints') return json({ endpoints: fake.servers, defaultEndpointId: null });
@@ -106,7 +120,7 @@ vi.mock('@/auth/tab-token', () => ({
 }));
 
 const { WorkspaceOrchestratePage } = await import('../src/routes/workspace-orchestrate-page');
-const { ManagerModelView, OrchestrationSection, OrchestrationSectionView } = await import('../src/workspaces/orchestration-section');
+const { OrchestrationSection, OrchestrationSectionView } = await import('../src/workspaces/orchestration-section');
 const { TooltipProvider } = await import('../src/ui/tooltip');
 const { Message } = await import('../src/chat/transcript-parts');
 
@@ -136,6 +150,9 @@ beforeEach(() => {
   fake.dispatchFails = false;
   fake.next = undefined;
   fake.switchSaved = undefined;
+  fake.rosterView = undefined;
+  fake.refuseRoster = undefined;
+  fake.defaultSaved = undefined;
 });
 afterEach(cleanup);
 
@@ -265,64 +282,127 @@ describe('the project settings switch', () => {
 
 const SERVER = { id: 'lep_01J9Z3K4M5N6P7Q8R9S0T1V2W3', label: 'My Mac', baseUrl: 'http://localhost:1234/v1', preset: null, auth: 'none', model: null, remoteConfirmedFor: null, createdAt: '2026-10-05T00:00:00.000Z', host: 'localhost:1234', loopback: true, needsConfirmation: false, insecureRemote: false, keySaved: false };
 
-describe('the manager model setting', () => {
-  it('shows nothing about a manager while the piece is off', async () => {
+const agent = (agentId: string, label: string, fields: Record<string, unknown> = {}) => ({ assignee: { kind: 'agent', agentId }, label, available: true, ...fields });
+const model = (name: string, fields: Record<string, unknown> = {}) => ({ assignee: { kind: 'model', endpointId: SERVER.id, model: name }, label: name, where: 'on this computer, on My Mac', available: true, ...fields });
+const NOT_AN_AGENT = 'The manager must be a model on one of your servers, not an agent.';
+const roleView = (role: string, fields: Record<string, unknown> = {}) => ({ role, chosen: null, effective: null, source: 'none', label: null, empty: 'Nobody holds this role.', options: [], ...fields });
+/** A roster as core describes it for a project that has Claude Code and Codex ready and one model on a server. */
+const rosterView = () => ({
+  mode: 'approve_each',
+  workers: [
+    { agentId: 'claude-code', label: 'Claude Code', ready: true, role: 'worker' },
+    { agentId: 'codex', label: 'Codex', ready: true, role: 'reviewer' },
+  ],
+  roles: [
+    roleView('manager', {
+      effective: { kind: 'model', endpointId: SERVER.id, model: 'model-a' },
+      source: 'default',
+      label: 'model-a on this computer, on My Mac',
+      note: 'It passed Test as a manager.',
+      options: [agent('claude-code', 'Claude Code', { available: false, reason: NOT_AN_AGENT }), model('model-a', { note: 'It passed Test as a manager.' }), model('model-b', { available: false, reason: 'model-b did not pass Test as a manager. The model answered with JSON, but ignored the shape it was asked for, even when asked again.' })],
+    }),
+    roleView('planner', { options: [agent('claude-code', 'Claude Code'), model('model-a')] }),
+    roleView('worker', {
+      effective: { kind: 'agent', agentId: 'claude-code' },
+      source: 'default',
+      label: 'Claude Code',
+      note: 'Claude Code signs in with your account, so for now it only takes instructions you approve one by one.',
+      options: [agent('claude-code', 'Claude Code', { approveEachOnly: true, note: 'Claude Code signs in with your account, so for now it only takes instructions you approve one by one.' }), agent('codex', 'Codex'), agent('copilot-cli', 'Copilot CLI', { available: false, reason: 'Copilot CLI is never given instructions by a manager. Its terms allow only a person at the keyboard.' })],
+    }),
+    roleView('reviewer', { effective: { kind: 'agent', agentId: 'codex' }, source: 'default', label: 'Codex', options: [agent('claude-code', 'Claude Code'), agent('codex', 'Codex'), model('model-a')] }),
+  ],
+});
+
+describe('the team roster in project settings', () => {
+  const roleOf = (role: string) => screen.getByTestId(`roster-role-${role}`);
+
+  it('shows nothing about the team while the piece is off', async () => {
     fake.enabled = false;
     await mount(<OrchestrationSection wsId={WS} />);
-    expect(screen.queryByTestId('manager-model')).toBeNull();
+    expect(screen.queryByTestId('roster-project')).toBeNull();
+    expect(fake.calls.some((call) => call.includes('/orchestration/roster'))).toBe(false);
   });
 
-  it('says no manager is chosen and offers the user\'s servers, with where each runs', async () => {
-    fake.servers = [SERVER, { ...SERVER, id: 'lep_01J9Z3K4M5N6P7Q8R9S0T1V2W4', label: 'Company gateway', loopback: false, host: 'gateway.example.com' }];
+  it('shows each role with who holds it and where that came from, and which agents the manager may address', async () => {
     await mount(<OrchestrationSection wsId={WS} />);
-    expect(screen.getByTestId('manager-model-current').textContent).toBe('No manager is chosen yet.');
-    expect(screen.getAllByTestId('manager-show-models')).toHaveLength(2);
-    expect(screen.getByTestId(`manager-server-${SERVER.id}`).textContent).toContain('My Mac (on this computer)');
-    expect(screen.getByTestId('manager-server-lep_01J9Z3K4M5N6P7Q8R9S0T1V2W4').textContent).toContain('Company gateway (on another computer)');
-    expect(screen.queryByTestId('manager-clear')).toBeNull();
+    expect(screen.getAllByTestId(/^roster-role-/).map((node) => node.getAttribute('data-testid'))).toEqual(['roster-role-manager', 'roster-role-planner', 'roster-role-worker', 'roster-role-reviewer']);
+    expect(screen.getByTestId('roster-holder-manager').textContent).toBe('model-a on this computer, on My Mac (the default).');
+    expect(screen.getByTestId('roster-holder-worker').textContent).toBe('Claude Code (the default).');
+    expect(screen.getByTestId('roster-holder-planner').textContent).toBe('Nobody holds this role.');
+    expect(screen.getByTestId('roster-workers').textContent).toBe('The manager may address: Claude Code (worker), Codex (reviewer).');
   });
 
-  it('sends the user to Settings when no server is set up', async () => {
+  it('says why an agent cannot take a role, and marks a subscription agent as approve one by one', async () => {
     await mount(<OrchestrationSection wsId={WS} />);
-    expect(screen.getByTestId('manager-model-no-servers').textContent).toContain('Add one in Settings');
+    const copilot = screen.getByTestId('roster-option-worker-agent:copilot-cli');
+    expect(copilot.getAttribute('disabled')).not.toBeNull();
+    expect(roleOf('worker').textContent).toContain('Not available: Copilot CLI is never given instructions by a manager.');
+    expect(roleOf('manager').textContent).toContain(`Not available: ${NOT_AN_AGENT}`);
+    expect(roleOf('manager').textContent).toContain('did not pass Test as a manager');
+    expect(screen.getByTestId('roster-note-worker').textContent).toContain('only takes instructions you approve one by one');
+    expect(screen.getByTestId('roster-option-manager-agent:claude-code').getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByTestId('roster-project').textContent).not.toMatch(/[–—]| - /);
   });
 
-  it('reads a server\'s models, saves the chosen one as a model manager keeping the other roles, and shows it', async () => {
-    fake.servers = [SERVER];
+  it('saves a choice at once, keeping the other roles, and a role goes back to the default', async () => {
     fake.roster = { manager: null, planner: null, worker: { kind: 'agent', agentId: 'claude-code' }, reviewer: null };
     await mount(<OrchestrationSection wsId={WS} />);
-    fireEvent.click(screen.getByTestId('manager-show-models'));
+    fireEvent.click(screen.getByTestId('roster-option-reviewer-agent:claude-code'));
+    await settle();
+    expect(fake.rosterSaved).toEqual({ manager: null, planner: null, worker: { kind: 'agent', agentId: 'claude-code' }, reviewer: { kind: 'agent', agentId: 'claude-code' } });
+    fireEvent.click(screen.getByTestId('roster-option-reviewer-default'));
+    await settle();
+    expect(fake.rosterSaved).toEqual({ manager: null, planner: null, worker: { kind: 'agent', agentId: 'claude-code' }, reviewer: null });
+  });
+
+  it('reads a server\'s models and saves the chosen one as the manager', async () => {
+    fake.servers = [SERVER];
+    await mount(<OrchestrationSection wsId={WS} />);
+    expect(screen.queryByTestId('roster-choose-model-worker')).toBeNull();
+    fireEvent.click(screen.getByTestId('roster-choose-model-manager'));
+    await settle();
+    fireEvent.click(screen.getByTestId('roster-show-models'));
     await settle();
     expect(fake.calls).toContain(`GET /api/v1/local-endpoints/${SERVER.id}/models`);
-    fireEvent.click(screen.getByTestId('manager-use-model-b'));
+    fireEvent.click(screen.getByTestId('roster-use-manager-model-b'));
     await settle();
-    expect(fake.rosterSaved).toEqual({ manager: { kind: 'model', endpointId: SERVER.id, model: 'model-b' }, planner: null, worker: { kind: 'agent', agentId: 'claude-code' }, reviewer: null });
-    expect(screen.getByTestId('manager-model-current').textContent).toBe('The manager is model-b on My Mac.');
-    expect(screen.getByTestId('manager-model').textContent).not.toMatch(/[–—]| - /);
+    expect(fake.rosterSaved).toEqual({ manager: { kind: 'model', endpointId: SERVER.id, model: 'model-b' }, planner: null, worker: null, reviewer: null });
   });
 
-  it('clears the manager, and says so when the chosen server is gone', async () => {
-    fake.servers = [SERVER];
-    fake.roster = { manager: { kind: 'model', endpointId: SERVER.id, model: 'model-a' }, planner: null, worker: null, reviewer: null };
+  it('says why a choice was refused, in the server\'s own words', async () => {
+    fake.refuseRoster = 'model-b did not pass Test as a manager. It was too slow.';
     await mount(<OrchestrationSection wsId={WS} />);
-    fireEvent.click(screen.getByTestId('manager-clear'));
+    fireEvent.click(screen.getByTestId('roster-option-planner-agent:claude-code'));
     await settle();
-    expect(fake.rosterSaved).toEqual({ manager: null, planner: null, worker: null, reviewer: null });
-    expect(screen.getByTestId('manager-model-current').textContent).toBe('No manager is chosen yet.');
-    cleanup();
-    fake.servers = [];
-    fake.roster = { manager: { kind: 'model', endpointId: SERVER.id, model: 'model-a' }, planner: null, worker: null, reviewer: null };
-    await mount(<OrchestrationSection wsId={WS} />);
-    expect(screen.getByTestId('manager-model-current').textContent).toBe('The manager is model-a, on a server that is not set up any more.');
+    expect(screen.getByTestId('roster-error').textContent).toContain('model-b did not pass Test as a manager. It was too slow.');
   });
 
-  it('says why a choice failed', () => {
-    render(
-      <TooltipProvider>
-        <ManagerModelView chosen={null} servers={[SERVER as never]} models={undefined} loading={undefined} saving={false} error="The manager must be a model on one of your servers, not an agent." onShowModels={() => {}} onChoose={() => {}} onClear={() => {}} />
-      </TooltipProvider>,
-    );
-    expect(screen.getByTestId('manager-model-error').textContent).toContain('The manager must be a model on one of your servers, not an agent.');
+  it('says why a holder cannot do its role right now', async () => {
+    const view = rosterView();
+    (view.roles[2] as Record<string, unknown>).problem = 'Claude Code is not ready. Sign in to Claude Code.';
+    fake.rosterView = view;
+    await mount(<OrchestrationSection wsId={WS} />);
+    expect(screen.getByTestId('roster-problem-worker').textContent).toContain('Claude Code cannot be the worker right now. Claude Code is not ready. Sign in to Claude Code.');
+  });
+
+  it('with no server and no ready agent says what each empty role needs', async () => {
+    fake.rosterView = { mode: 'approve_each', workers: [], roles: ['manager', 'planner', 'worker', 'reviewer'].map((role) => roleView(role, { empty: `No one is ready for the ${role}.` })) };
+    await mount(<OrchestrationSection wsId={WS} />);
+    expect(screen.getByTestId('roster-workers').textContent).toBe('The manager has no worker to address yet.');
+    expect(screen.getByTestId('roster-holder-manager').textContent).toBe('No one is ready for the manager.');
+  });
+});
+
+describe('the team for new projects', () => {
+  it('shows the same four roles from the app-wide route and saves the whole roster there', async () => {
+    const { DefaultRoster } = await import('../src/orchestrate/roster-editor');
+    await mount(<DefaultRoster />);
+    expect(fake.calls).toContain('GET /api/v1/settings/team-roster');
+    expect(screen.getByTestId('roster-defaults')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('roster-option-reviewer-agent:claude-code'));
+    await settle();
+    expect(fake.calls).toContain('PUT /api/v1/settings/team-roster');
+    expect(fake.defaultSaved).toEqual({ manager: null, planner: null, worker: null, reviewer: { kind: 'agent', agentId: 'claude-code' } });
   });
 });
 

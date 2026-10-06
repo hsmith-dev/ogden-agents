@@ -561,7 +561,7 @@ describe('epic 16: core, shared and acp-base name no pane program', () => {
  * imports no shell, file, agent or credential port and no Node module, so it
  * cannot run a command, touch a file or read a key. The real adapter, 15.4,
  * calls only `LocalModelPort`. Story 15.4 adds the real manager to core (`manager-input`,
- * `manager-source`, `model-manager`), held to the same rules: it reaches the model only through
+ * `manager-source`, `model-manager`) and 15.5 the roster (`team-roster` in core, `roster` in shared), held to the same rules: it reaches the model only through
  * `LocalModelPort` and the endpoint only through `LocalEndpoints.target`.
  */
 const MODEL_PRODUCT_WORDS = /(?<![A-Za-z0-9])(gpt|llama|qwen|mistral|mixtral|gemma|deepseek|claude|anthropic|openai|ollama|lm[ -]?studio|gemini|grok|codex|copilot|antigravity|opencode)(?![A-Za-z0-9])/gi;
@@ -569,7 +569,7 @@ const MODEL_PRODUCT_WORDS = /(?<![A-Za-z0-9])(gpt|llama|qwen|mistral|mixtral|gem
 const FORBIDDEN_ORCHESTRATION_IMPORTS =
   /^(?:node:|child_process$|fs$|fs\/promises$|os$|net$|http$|https$|(?:\.{1,2}\/)+(?:[\w-]+\/)*(?:terminal-port|terminal-reasons|sandbox-port|secret-store-port|vcs-port|build-runner-port|build-object-store|build-worktrees|ticket-store-port|bmad-source-port|bmad-catalog-port|agent-port|agent-setup-port|app-shortcut-port|panes|pane-launchers|notifier-port|fs-safe|process-tree|child-env)(?:\.js)?$)/;
 /** Core, shared and fake-manager files that are the orchestration contracts. */
-const ORCHESTRATION_FILE = /(^|[\\/])packages[\\/](?:core|shared)[\\/]src[\\/](?:orchestration[\w-]*|events-orchestration|manager-[\w-]+|model-manager)\.ts$|(^|[\\/])packages[\\/]adapters[\\/]src[\\/]manager-memory[\\/]/;
+const ORCHESTRATION_FILE = /(^|[\\/])packages[\\/](?:core|shared)[\\/]src[\\/](?:orchestration[\w-]*|events-orchestration|manager-[\w-]+|model-manager|team-roster|roster)\.ts$|(^|[\\/])packages[\\/]adapters[\\/]src[\\/]manager-memory[\\/]/;
 
 /** One message per model product named, and per forbidden import, in the orchestration files (comments aside for the names). */
 export function findOrchestrationViolations(files: readonly SourceFile[]): string[] {
@@ -597,6 +597,8 @@ describe('E15: orchestration code is tool-free and names no model product (story
         'packages/core/src/model-manager.ts',
         'packages/core/src/orchestration-feature.ts',
         'packages/core/src/orchestration.ts',
+        'packages/core/src/team-roster.ts',
+        'packages/shared/src/roster.ts',
         'packages/shared/src/events-orchestration.ts',
         'packages/shared/src/orchestration.ts',
         'packages/adapters/src/manager-memory/index.ts',

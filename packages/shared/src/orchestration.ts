@@ -521,7 +521,7 @@ export type OrchestrationStep = z.infer<typeof OrchestrationStep>;
  * Where the project's manager stands (15.4): `ready` (a model on an endpoint that is set up and, when it is on
  * another computer, confirmed), or why not. Plain words come from {@link MANAGER_STATE_WORDS}.
  */
-export const MANAGER_STATES = ['ready', 'not_chosen', 'endpoint_missing', 'host_not_confirmed'] as const;
+export const MANAGER_STATES = ['ready', 'not_chosen', 'endpoint_missing', 'host_not_confirmed', 'test_failed'] as const;
 export const ManagerState = z.enum(MANAGER_STATES);
 export type ManagerState = z.infer<typeof ManagerState>;
 
@@ -529,6 +529,7 @@ export const MANAGER_STATE_WORDS: Readonly<Record<Exclude<ManagerState, 'ready'>
   not_chosen: "No manager is chosen yet. Choose a model for the manager in this project's settings.",
   endpoint_missing: "The server you chose for the manager is not set up any more. Choose a model for the manager again in this project's settings.",
   host_not_confirmed: 'You have not confirmed the server the manager runs on. Confirm it in Settings, under Agents, and try again.',
+  test_failed: 'The manager model did not pass Test as a manager. Choose another model in this project\'s settings, or test it again in Settings, under Agents.',
 };
 
 /** The manager's state with the sentence to show. */

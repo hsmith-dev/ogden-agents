@@ -207,4 +207,44 @@ describe('Test as a manager (epic 14 story 14.8)', () => {
     await expect(createLocalModels({ endpoints, port: answering({ ok: true, value: {}, mode: 'prompt' }, calls) }).managerTest(added.id, 'm')).rejects.toBeInstanceOf(EndpointConfirmationRequiredError);
     expect(calls).toEqual([]);
   });
+
+  it('remembers what each model\'s test found in this run: a pass, a slow or malformed answer, but never a server that was down', async () => {
+    const core = openTestCore(tempDir());
+    const endpoints = core.localEndpoints(secrets());
+    const added = await endpoints.add({ label: 'x', baseUrl: 'http://localhost:1234/v1' });
+    const replies: Array<Awaited<ReturnType<LocalModelPort['structuredComplete']>>> = [
+      { ok: true, value: {}, mode: 'json_schema' },
+      { ok: false, kind: 'bad_answer', reason: 'x', detail: 'not_json' },
+      { ok: false, kind: 'unreachable', reason: 'The server at x is not answering.' },
+      { ok: false, kind: 'model_not_found', reason: 'x' },
+    ];
+    const models = createLocalModels({ endpoints, port: answering(replies.shift()!, []) });
+    // One port per reply: the first model passes.
+    expect(models.managerTestResult(added.id, 'a')).toBeUndefined();
+    await models.runManagerTest(added.id, 'a');
+    expect(models.managerTestResult(added.id, 'a')).toEqual({ endpointId: added.id, model: 'a', pass: true, message: expect.stringContaining('Passed.') });
+    const failing = createLocalModels({ endpoints, port: answering(replies.shift()!, []) });
+    await failing.runManagerTest(added.id, 'b');
+    expect(failing.managerTestResult(added.id, 'b')).toMatchObject({ pass: false, message: "The model's answer was not valid JSON, even when asked again." });
+    const down = createLocalModels({ endpoints, port: answering(replies.shift()!, []) });
+    await down.runManagerTest(added.id, 'c');
+    expect(down.managerTestResult(added.id, 'c')).toBeUndefined();
+    const missing = createLocalModels({ endpoints, port: answering(replies.shift()!, []) });
+    await missing.runManagerTest(added.id, 'd');
+    expect(missing.managerTestResults()).toEqual([]);
+  });
+
+  it('lists the remembered results oldest first, a repeated test moves a model to the end, and the list is bounded', async () => {
+    const core = openTestCore(tempDir());
+    const endpoints = core.localEndpoints(secrets());
+    const added = await endpoints.add({ label: 'x', baseUrl: 'http://localhost:1234/v1' });
+    const models = createLocalModels({ endpoints, port: answering({ ok: true, value: {}, mode: 'json_schema' }) });
+    await models.runManagerTest(added.id, 'a');
+    await models.runManagerTest(added.id, 'b');
+    await models.runManagerTest(added.id, 'a');
+    expect(models.managerTestResults().map((result) => result.model)).toEqual(['b', 'a']);
+    for (let i = 0; i < 210; i++) await models.runManagerTest(added.id, `m${i}`);
+    expect(models.managerTestResults()).toHaveLength(200);
+    expect(models.managerTestResult(added.id, 'b')).toBeUndefined();
+  });
 });

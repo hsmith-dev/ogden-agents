@@ -85,7 +85,7 @@ export interface Core {
    * Each project's manager, read from its roster over the model port and the endpoints (epic 15, 15.4). The server
    * calls it once, after it has its endpoints.
    */
-  createManagerSource(ports: { endpoints: () => LocalEndpoints; port: LocalModelPort; timeoutMs?: number | undefined }): ManagerSource;
+  createManagerSource(ports: { endpoints: () => LocalEndpoints; port: LocalModelPort; timeoutMs?: number | undefined; tests?: (() => RosterContext['tests']) | undefined }): ManagerSource;
   close(): void;
 }
 

@@ -107,7 +107,7 @@ export function assess(role: TeamRole, assignee: TeamAssignee, ctx: RosterContex
   }
   const endpoint = ctx.endpoints.find((candidate) => candidate.id === assignee.endpointId);
   const label = assignee.model;
-  if (endpoint === undefined) return { label, available: false, reason: 'That server is not set up any more. Choose a model on one of your servers.' };
+  if (endpoint === undefined) return { label, available: false, reason: 'Choose a model on a server you have set up.' };
   const where = modelWhere(endpoint.loopback, endpoint.label);
   const kind = rosterKindProblem(role, assignee);
   if (kind !== undefined) return { label, where, available: false, reason: kind };
@@ -314,7 +314,12 @@ export function createTeam({ db, events, chat, endpoints, tests, defaults }: Tea
       const parsed = TeamRosterSchema.safeParse(input);
       if (!parsed.success) throw new ValidationError('Choose who takes each role: an agent, or a model.', [{ path: ['roster'], message: 'not a roster' }]);
       const previous = defaults.get().orchestrationRoster ?? TeamRosterSchema.parse({});
-      checkRoster(previous, parsed.data, await context(undefined));
+      const ctx = await context(undefined);
+      // Nothing after this check names an agent that is not here (a project's settings use-case does), so it is refused now.
+      for (const assignee of Object.values(parsed.data)) {
+        if (assignee?.kind === 'agent' && !ctx.agents.some((agent) => agent.agentId === assignee.agentId)) throw new ValidationError('Choose agents this install has for each role.', [{ path: ['roster'], message: 'unknown agent' }]);
+      }
+      checkRoster(previous, parsed.data, ctx);
       const next = defaults.setRoster(parsed.data);
       if (!sameRoster(previous, next)) {
         events.append({ type: 'settings.team_roster_default_changed', workspaceId: null, streamId: SETTINGS_STREAM, payload: { orchestrationRoster: next, previousOrchestrationRoster: previous } });

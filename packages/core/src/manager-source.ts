@@ -5,8 +5,8 @@
  * manager chosen, a chosen endpoint that is gone, or one on another computer
  * that was not confirmed has no usable manager, and says which in plain words
  * ({@link MANAGER_STATE_WORDS}). Whether the model passes "Test as a manager"
- * is the roster story's (15.5); here the manager is ready when the endpoint is
- * set up and may be called.
+ * is checked here only for a result remembered in this run (15.5); a manager is
+ * ready when the endpoint is set up, may be called, and did not fail the test.
  *
  * Nothing here calls a model: the manager made is {@link createModelManager},
  * which goes through `LocalEndpoints.target` on every call.
@@ -18,6 +18,7 @@ import type { LocalEndpoints } from './local-endpoints.js';
 import type { LocalModelPort } from './local-model-port.js';
 import type { ManagerPort } from './manager-port.js';
 import { createContextReader, createModelManager, type ContextReader } from './model-manager.js';
+import { defaultModel, type RosterContext } from './team-roster.js';
 import { readOrchestrationRoster } from './workspace-settings.js';
 
 export interface ManagerSource {
@@ -35,13 +36,22 @@ export interface ManagerSourceOptions {
   /** Default: reads the server's reported context and keeps it for a few minutes. */
   contextOf?: ContextReader | undefined;
   timeoutMs?: number | undefined;
+  /**
+   * What Test as a manager found for each model in this run (15.5). With it a roster's default manager (the first
+   * ready model that passed, else a server's chosen model) applies when none is chosen, and a manager that failed is not used.
+   * Without it, only a chosen manager counts and none is checked.
+   */
+  tests?: (() => RosterContext['tests']) | undefined;
 }
 
-export function createManagerSource({ db, endpoints, port, contextOf = createContextReader(port), timeoutMs }: ManagerSourceOptions): ManagerSource {
+export function createManagerSource({ db, endpoints, port, contextOf = createContextReader(port), timeoutMs, tests }: ManagerSourceOptions): ManagerSource {
   const resolve = (workspaceId: WorkspaceId): { status: ManagerStatusView; manager?: ManagerPort } => {
-    const assignee = readOrchestrationRoster(db.orm, workspaceId)?.manager ?? null;
-    if (assignee === null || assignee.kind !== 'model') return { status: { state: 'not_chosen', message: MANAGER_STATE_WORDS.not_chosen } };
     const known = endpoints();
+    // The user's choice, else the roster's default manager (a ready model, one that passed Test as a manager first).
+    const assignee =
+      readOrchestrationRoster(db.orm, workspaceId)?.manager ??
+      (tests === undefined ? null : defaultModel({ agents: [], projectDefaultAgent: undefined, endpoints: known.list(), defaultEndpointId: known.defaultEndpointId(), tests: tests(), mode: 'approve_each' }));
+    if (assignee === null || assignee.kind !== 'model') return { status: { state: 'not_chosen', message: MANAGER_STATE_WORDS.not_chosen } };
     let view: ReturnType<LocalEndpoints['get']>;
     try {
       view = known.get(assignee.endpointId);
@@ -50,6 +60,8 @@ export function createManagerSource({ db, endpoints, port, contextOf = createCon
       throw error;
     }
     if (view.needsConfirmation) return { status: { state: 'host_not_confirmed', message: MANAGER_STATE_WORDS.host_not_confirmed } };
+    // A model that was tested in this run and did not pass is not used as the manager; one not tested yet is (the roster says so).
+    if (tests?.().result(assignee.endpointId, assignee.model)?.pass === false) return { status: { state: 'test_failed', message: MANAGER_STATE_WORDS.test_failed } };
     const where = view.loopback ? 'on this computer' : 'on another computer';
     return {
       status: { state: 'ready', message: `The manager is ${assignee.model} ${where}, on ${view.label}.` },

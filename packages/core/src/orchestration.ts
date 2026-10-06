@@ -275,7 +275,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       const { agents } = await chat.chatAgents(workspaceId);
       // Only the rostered workers (15.5): the project's worker and its reviewer when that is an agent. Without a roster, every agent.
       const rostered = team === undefined ? undefined : await team.workers(workspaceId);
-      const addressable = rostered === undefined ? agents : agents.filter((agent) => rostered.some((worker) => worker.agentId === agent.agentId));
+      const addressable = rostered === undefined ? agents : rostered.flatMap((worker) => agents.filter((agent) => agent.agentId === worker.agentId));
       const context: ManagerContext = {
         goal,
         projectSummary: 'A software project in the folder the user opened.',

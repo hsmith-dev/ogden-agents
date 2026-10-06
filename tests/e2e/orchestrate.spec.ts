@@ -687,3 +687,74 @@ test('a restart in the middle of an automatic run picks it up without a second d
     { extra },
   );
 });
+
+test('the manager asks the roster\'s reviewer a bounded question about a worker\'s result: the answer comes back masked and capped, the step links to the worker chat, and only the person decides', async ({ page }) => {
+  const { createMemoryManager } = await serverModule();
+  const work = 'reply-with Fixed the login form. The key is {{SECRET}}.\n```ts\nexport const privateFile = 2;\n```\ndiff --git a/src/login.ts b/src/login.ts\n--- a/src/login.ts\n+++ b/src/login.ts\n@@ -1 +1 @@\n-const a = 1;\n+const secretChange = 2;\n\nAll the tests pass.';
+  const plan = {
+    version: 'ogden.manager.plan.v1',
+    goal: 'Fix the login form',
+    steps: [
+      { id: 's1', worker: 'fake-codex', chat: 'new', instruction: work, mode: 'ask', depends_on: [] },
+      { id: 's2', worker: 'fake-grok', chat: 'new', instruction: 'review-echo Is the change safe, and did it miss anything?', mode: 'ask', depends_on: ['s1'], review_of: 's1' },
+    ],
+  };
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const wsId = await addProject(page, repo);
+      const origin = server.url;
+      const headers = { authorization: `Bearer ${(await storedToken(page))!}`, origin, 'content-type': 'application/json' };
+      expect((await fetch(`${origin}${apiPath(API_ROUTES.workspaceSettings, { wsId })}`, { method: 'PATCH', headers, body: JSON.stringify({ orchestrationEnabled: true, orchestrationRoster: rosterOf('fake-codex', 'fake-grok') }) })).status).toBe(200);
+      await page.goto(`${origin}/w/${wsId}/orchestrate`);
+      await page.getByTestId('orchestrate-goal').fill('Fix the login form');
+      await page.getByTestId('orchestrate-plan').click();
+
+      // The review step says what it asks about and what the reviewer is sent; there is no link before the work was sent.
+      const review = row(page, 's2');
+      await expect(review.getByTestId('orchestrate-step-review-badge')).toHaveText('Review of step s1');
+      await expect(review.getByTestId('orchestrate-step-worker')).toHaveText('Fake Grok');
+      await expect(review.getByTestId('orchestrate-step-review-note')).toContainText('short summary of the result of step s1');
+      await expect(review.getByTestId('orchestrate-step-review-note')).toContainText('only you can approve or merge');
+      await expect(review.getByTestId('orchestrate-step-review-link')).toHaveCount(0);
+      await expect(review.getByTestId('orchestrate-approve')).toHaveCount(0);
+
+      // The work is done by the first worker; now the question can be approved, and links to the chat that did the work.
+      await row(page, 's1').getByTestId('orchestrate-approve').click();
+      await expect(row(page, 's1')).toHaveAttribute('data-state', 'done');
+      await expect(review.getByTestId('orchestrate-step-review-link')).toHaveText('Open the chat that did step s1');
+      await review.getByTestId('orchestrate-approve').click();
+      await expect(review).toHaveAttribute('data-state', 'done');
+
+      // What the reviewer was sent (it echoes it back): the question, the framing and the summary, with no secret, file or diff, and it is bounded.
+      const answer = (await review.getByTestId('orchestrate-step-report').textContent()) ?? '';
+      const received = /RECEIVED<<([\s\S]*?)>>RECEIVED/.exec(answer)?.[1] ?? '';
+      expect(received.startsWith('review-echo Is the change safe, and did it miss anything?\n\nOgden review request.')).toBe(true);
+      expect(received.length).toBeLessThanOrEqual(3000);
+      expect(received).toContain('Fixed the login form.');
+      expect(received).toContain('All the tests pass.');
+      for (const never of ['sk-ant', 'privateFile', 'secretChange', 'diff --git']) expect(received).not.toContain(never);
+      // The answer itself held a secret and a very long tail: masked and capped.
+      expect(answer).not.toContain('sk-ant');
+      expect(answer.length).toBeLessThanOrEqual(4000);
+      await expect(review.getByTestId('orchestrate-step-truncated')).toBeVisible();
+
+      // The reviewer is an ordinary worker chat: the transcript says the manager sent it at the user's approval.
+      await review.getByTestId('orchestrate-step-chat').click();
+      await expect(page.getByTestId('message-origin')).toHaveText('Sent by the manager, approved by you');
+      await page.goBack();
+      await expect(page.getByTestId('orchestrate-steps')).toBeVisible();
+      // The link opens the chat that did the work.
+      await row(page, 's2').getByTestId('orchestrate-step-review-link').click();
+      await expect(page.getByTestId('message-origin')).toHaveText('Sent by the manager, approved by you');
+      await expect(page.getByTestId('message-agent').last()).toContainText('Fixed the login form.');
+      await page.goBack();
+
+      // The person still decides: the page has no approve or merge for a build, and a direct call for a ticket nobody built is refused.
+      await expect(page.getByRole('button', { name: /merge/i })).toHaveCount(0);
+      const direct = await fetch(`${origin}${apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '5.2' })}`, { method: 'POST', headers, body: JSON.stringify({ revision: 'abc' }) });
+      expect(direct.status).toBeGreaterThanOrEqual(400);
+    },
+    { extra: { manager: createMemoryManager({ plans: [plan] }), extraAgents: [await apiKeyWorker('fake-codex', 'Fake Codex'), await apiKeyWorker('fake-grok', 'Fake Grok')] } },
+  );
+});

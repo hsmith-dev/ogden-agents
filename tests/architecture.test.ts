@@ -836,3 +836,57 @@ describe('E15: the manager and the loop never answer a permission card (story 15
     ]);
   });
 });
+
+/**
+ * E15 (story 15.10): the manager and the reviewer have no route to approve, reject, merge or mark a ticket done. Epic 5 keeps that for the person
+ * on the review page (AD-10: only approve writes `done`). The orchestration use-case, the manager's code, the server's orchestration routes and the
+ * Orchestrate page's code name none of the build or ticket use-cases that decide (approve, reject, merge, mark, commit plan files), their request
+ * types, the ticket store, or the routes that reach them. The review step links to the review page; it never calls it.
+ */
+const ORCHESTRATE_PAGE = /(^|[\\/])packages[\\/]web[\\/]src[\\/](?:orchestrate[\\/]|routes[\\/]workspace-orchestrate-page\.tsx$)/;
+const DECIDING_CALLS = /\.(approve|reject|merge|mark|markDone|commitPlanFiles|isMerged)\s*\(/;
+const DECIDING_NAMES = /\b(markDone|commitPlanFiles|isMerged|BuildsUseCases|createBuilds|ApproveBuildRequest|RejectBuildRequest|MarkTicketRequest|StatusNotAllowedError|TicketStorePort|workspaceBuildApprove|workspaceBuildReject|workspaceBuildCommitPlan|workspaceTicketStatus)\b/;
+export function findDecidingReaches(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    if (!ORCHESTRATION_USE_CASE.test(path) && !MANAGER_CODE.test(path) && !ORCHESTRATION_ROUTES.test(path) && !ORCHESTRATE_PAGE.test(path)) continue;
+    const code = withoutComments(source);
+    for (const match of code.matchAll(new RegExp(DECIDING_CALLS.source, 'g'))) violations.push(`${path}: calls ${match[1]} (E15: only a person approves, merges or marks a ticket done)`);
+    for (const match of code.matchAll(new RegExp(DECIDING_NAMES.source, 'g'))) violations.push(`${path}: names ${match[1]} (E15: only a person approves, merges or marks a ticket done)`);
+  }
+  return violations;
+}
+
+describe('E15: the manager and the reviewer have no path to approve, merge or mark done (story 15.10)', () => {
+  it('the orchestration use-case, the manager code, the routes and the page name no deciding use-case of builds or tickets', () => {
+    const files = loadWorkspaceSources();
+    expect(files.some((file) => ORCHESTRATION_USE_CASE.test(file.path))).toBe(true);
+    expect(files.some((file) => ORCHESTRATION_ROUTES.test(file.path))).toBe(true);
+    expect(files.filter((file) => ORCHESTRATE_PAGE.test(file.path)).length).toBeGreaterThan(3);
+    expect(files.filter((file) => MANAGER_CODE.test(file.path)).length).toBeGreaterThan(3);
+    expect(findDecidingReaches(files)).toEqual([]);
+  });
+
+  it('the review step only links to the review page: the page file names the route and calls nothing', () => {
+    const view = loadWorkspaceSources().find((file) => /orchestrate-view\.tsx$/.test(file.path))!.source;
+    expect(view).toContain('/w/$wsId/review/$ref');
+    expect(view).not.toMatch(/fetch\(|apiPath\(|API_ROUTES/);
+  });
+
+  it('flags a planted approve, merge, mark or route in the use-case, the manager code, the routes or the page', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration.ts', source: "// approve( is only a word here\nawait builds.approve(ws, ref, { revision });" },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/model-manager.ts', source: 'await board.mark(ws, ref, { status: "done" });' },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/orchestration-routes.ts', source: 'const use: BuildsUseCases = builds; use.merge(a);' },
+      { pkg: '@ogden-agents/web', path: 'packages/web/src/orchestrate/orchestrate-api.ts', source: 'post(apiPath(API_ROUTES.workspaceBuildApprove, { wsId }));' },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/build-routes.ts', source: 'builds.approve(a, b, c);' },
+    ];
+    expect(findDecidingReaches(files)).toEqual([
+      'packages/core/src/orchestration.ts: calls approve (E15: only a person approves, merges or marks a ticket done)',
+      'packages/core/src/model-manager.ts: calls mark (E15: only a person approves, merges or marks a ticket done)',
+      'packages/server/src/orchestration-routes.ts: calls merge (E15: only a person approves, merges or marks a ticket done)',
+      'packages/server/src/orchestration-routes.ts: names BuildsUseCases (E15: only a person approves, merges or marks a ticket done)',
+      'packages/web/src/orchestrate/orchestrate-api.ts: names workspaceBuildApprove (E15: only a person approves, merges or marks a ticket done)',
+    ]);
+  });
+});

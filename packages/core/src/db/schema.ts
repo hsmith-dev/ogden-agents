@@ -317,6 +317,8 @@ export const terminalPanes = sqliteTable(
     launcherId: text('launcher_id').notNull(),
     title: text('title').notNull(),
     createdAt: integer('created_at').notNull(),
+    /** The user's opt in to notifications for this pane (story 16.8). */
+    notify: integer('notify', { mode: 'boolean' }).notNull().default(false),
   },
   (table) => [index('terminal_panes_workspace_idx').on(table.workspaceId, table.createdAt)],
 );

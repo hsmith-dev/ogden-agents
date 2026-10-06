@@ -497,7 +497,7 @@ export const API_ROUTES = {
   terminalLaunchers: `${API_BASE}/terminals/launchers`,
   /** `PUT ArrangePanesRequest` → `PanesResponse` (epic 16, story 16.4): the project's layout arrangement. 400 unless it is the same panes, each once. Developer mode only. */
   workspacePaneLayout: `${API_BASE}/workspaces/:wsId/pane-layout`,
-  /** `PATCH RenamePaneRequest` → `PaneResponse` (story 16.4): rename a pane. `DELETE` → 204 (epic 16): closes the pane and stops its process tree. Developer mode only. 404 for another workspace's pane. */
+  /** `PATCH UpdatePaneRequest` → `PaneResponse` (stories 16.4, 16.8): rename a pane and/or turn its notifications on or off. `DELETE` → 204 (epic 16): closes the pane and stops its process tree. Developer mode only. 404 for another workspace's pane. */
   workspacePane: `${API_BASE}/workspaces/:wsId/panes/:paneId`,
   /** `POST` → `PaneResponse` (epic 16): Restart pane. Stops what is left of the pane's program and starts it again in the same pane. Developer mode only. */
   workspacePaneRestart: `${API_BASE}/workspaces/:wsId/panes/:paneId/restart`,

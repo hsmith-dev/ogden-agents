@@ -70,6 +70,8 @@ export interface NeedsYouEntry {
   request?: string;
   /** The pane a `pane` need is about (it has no chat: `sesId` is empty). */
   paneId?: string;
+  /** Whether the user opted this pane in to notifications (story 16.8): only then may it make a sound or a notice. */
+  notify?: boolean;
   /** Set on a sign in need of an agent that takes only an API key: its key was rejected, there is no sign in. */
   keyRejected?: true;
 }
@@ -185,11 +187,11 @@ export function paneNeeds(store: EventStoreState, wsId: string, workspaceName: s
   // Panes live in memory: what an earlier run of the server left in the log is gone with it.
   const startedSeq = store.install.events.findLast((event) => event.type === 'server.started')?.seq ?? 0;
   const events = streamEvents(store, wsId, wsId).filter((event) => event.seq > startedSeq);
-  const panes = new Map<string, { title: string; waiting: { seq: number; at: string } | undefined }>();
+  const panes = new Map<string, { title: string; notify: boolean; waiting: { seq: number; at: string } | undefined }>();
   for (const event of events) {
     switch (event.type) {
       case 'terminal.pane_opened':
-        panes.set(event.payload.paneId, { title: event.payload.title, waiting: undefined });
+        panes.set(event.payload.paneId, { title: event.payload.title, notify: false, waiting: undefined });
         break;
       case 'terminal.pane_renamed': {
         const pane = panes.get(event.payload.paneId);
@@ -197,8 +199,9 @@ export function paneNeeds(store: EventStoreState, wsId: string, workspaceName: s
         break;
       }
       case 'terminal.pane_status_changed': {
-        const pane = panes.get(event.payload.paneId) ?? { title: event.payload.title ?? 'Terminal', waiting: undefined };
+        const pane = panes.get(event.payload.paneId) ?? { title: event.payload.title ?? 'Terminal', notify: false, waiting: undefined };
         if (event.payload.title !== undefined) pane.title = event.payload.title;
+        pane.notify = event.payload.notify === true;
         pane.waiting = event.payload.status === 'needs_attention' ? { seq: event.seq, at: event.at } : undefined;
         panes.set(event.payload.paneId, pane);
         break;
@@ -218,7 +221,7 @@ export function paneNeeds(store: EventStoreState, wsId: string, workspaceName: s
   return [...panes].flatMap(([paneId, pane]) =>
     pane.waiting === undefined
       ? []
-      : [{ id: `pane:${paneId}:${pane.waiting.seq}`, kind: 'pane' as const, wsId, sesId: '', paneId, workspaceName, chatName: pane.title, text: `${pane.title} may need you`, agentName: '', at: pane.waiting.at }],
+      : [{ id: `pane:${paneId}:${pane.waiting.seq}`, kind: 'pane' as const, wsId, sesId: '', paneId, notify: pane.notify, workspaceName, chatName: pane.title, text: `${pane.title} may need you`, agentName: '', at: pane.waiting.at }],
   );
 }
 

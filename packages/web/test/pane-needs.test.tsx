@@ -58,6 +58,13 @@ describe('Needs you from pane events', () => {
     expect(paneNeeds(applyEvents(emptyStore(), before), WS, 'P')).toHaveLength(1);
   });
 
+  it('carries the pane\'s opt in from the status event, and nothing else', () => {
+    const base = event('terminal.pane_opened', { paneId: PANE, launcherId: 'a', title: 'One' });
+    const on = paneNeeds(storeOf(base, event('terminal.pane_status_changed', { paneId: PANE, status: 'needs_attention', previous: 'working', notify: true })), WS, 'P');
+    const off = paneNeeds(storeOf(base, event('terminal.pane_status_changed', { paneId: PANE, status: 'needs_attention', previous: 'working', notify: false })), WS, 'P');
+    expect([on[0]!.notify, off[0]!.notify]).toEqual([true, false]);
+  });
+
   it('carries no terminal text: only the pane\'s name and ids', () => {
     const needs = paneNeeds(storeOf(event('terminal.pane_opened', { paneId: PANE, launcherId: 'a', title: 'One' }), event('terminal.pane_status_changed', { paneId: PANE, status: 'needs_attention', previous: 'idle' })), WS, 'P');
     expect(Object.values(needs[0]!).filter((v) => typeof v === 'string').join(' ')).not.toMatch(/y\/n|proceed/i);

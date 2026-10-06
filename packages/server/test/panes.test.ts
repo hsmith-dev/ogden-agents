@@ -641,3 +641,22 @@ describe('layouts survive a restart and a hard stop is cleaned up (story 16.7)',
     }
   }, 60_000);
 });
+
+describe('a pane\'s notifications over the API (story 16.8)', () => {
+  it('are off by default, switched on and off with PATCH (a name, notify or both), and refused without Developer mode or with nothing to change', async () => {
+    const setup = await startPaneServer();
+    const pane = await openPane(setup);
+    expect(pane.notify).toBe(false);
+    const patch = (body: unknown) => fetch(paneUrl(setup, pane.id), { method: 'PATCH', headers: jsonHeaders(setup.tab), body: JSON.stringify(body) });
+    const on = await patch({ notify: true });
+    expect(PaneResponse.parse(await on.json()).pane.notify).toBe(true);
+    const both = PaneResponse.parse(await (await patch({ title: 'Watch', notify: false })).json()).pane;
+    expect([both.title, both.notify]).toEqual(['Watch', false]);
+    expect((await patch({})).status).toBe(400);
+    expect((await patch({ notify: 'yes' })).status).toBe(400);
+    const listed = PanesResponse.parse(await (await fetch(panesUrl(setup), { headers: setup.tab.headers })).json());
+    expect(listed.panes[0]).toMatchObject({ title: 'Watch', notify: false });
+    setup.server.core.installSettings.setDeveloperMode(false);
+    expect((await patch({ notify: true })).status).toBe(403);
+  }, 45_000);
+});

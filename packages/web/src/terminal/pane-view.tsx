@@ -39,6 +39,8 @@ export interface PaneViewProps {
   onRename?: ((paneId: string, title: string) => void) | undefined;
   /** How the program's own resume is offered (plain words), shown on a stopped pane; a launcher without one has none. */
   resumeHint?: string | undefined;
+  /** Turn this pane's notifications on or off. Absent: no switch. */
+  onNotify?: ((paneId: string, on: boolean) => void) | undefined;
   /** Take keyboard focus when the terminal has loaded (a pane the user just opened). */
   focusOnOpen?: boolean | undefined;
   /** Why a split is not offered now (the limit of panes), in plain words. */
@@ -56,7 +58,7 @@ export interface PaneViewProps {
  * After an abnormal close it reconnects as the chat terminal does. Nothing
  * typed or printed is kept or logged here.
  */
-export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRename, splitDisabledReason, focusOnOpen = false, resumeHint, className }: PaneViewProps) {
+export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRename, splitDisabledReason, focusOnOpen = false, resumeHint, onNotify, className }: PaneViewProps) {
   const [typedArgs, setTypedArgs] = useState('');
   const focusRef = useRef(focusOnOpen);
   focusRef.current = focusOnOpen;
@@ -269,6 +271,12 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
           <Text variant="caption" data-testid="pane-status-chip" data-status={liveStatus ?? pane.status} title="A guess from what the program prints" className="text-terminal-foreground">
             {state === 'stopped' ? 'Stopped' : STATUS_WORDS[liveStatus ?? pane.status]}
           </Text>
+          {onNotify === undefined ? null : (
+            <label className="flex items-center gap-1 text-caption text-terminal-foreground" title="A sound or a notice, as in Settings, Notifications, when this terminal seems to need you. Only its name and that it may need you are shown, never what it printed.">
+              <input type="checkbox" checked={pane.notify} onChange={(event) => onNotify(pane.id, event.target.checked)} data-testid="pane-notify" />
+              Notify me
+            </label>
+          )}
           {onSplit === undefined ? null : (
             <>
               <Button variant="outline" size="sm" onClick={() => onSplit(pane.id, 'row')} disabled={splitDisabledReason !== undefined} title={splitDisabledReason} data-testid="pane-split-row">

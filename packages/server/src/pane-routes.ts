@@ -9,11 +9,12 @@ import { CoreError, DeveloperModeRequiredError, LauncherUnavailableError, NotFou
 import {
   API_ROUTES,
   ArrangePanesRequest,
-  RenamePaneRequest,
+  UpdatePaneRequest,
   OpenPaneRequest,
   PaneId,
   PaneLaunchersResponse,
   PaneResponse,
+  type Pane,
   PanesResponse,
   RestartPaneRequest,
   MAX_PANES_PER_INSTALL,
@@ -134,10 +135,13 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
   app.patch(API_ROUTES.workspacePane, bodyLimit({ maxSize: MAX_BODY_BYTES, onError: tooLarge }), async (c) => {
     const ids = paneIds(c);
     if (ids === undefined) return notFound(c);
-    const body = await readBody(c, RenamePaneRequest);
+    const body = await readBody(c, UpdatePaneRequest);
     if (!body.ok) return body.response;
     try {
-      return c.json(PaneResponse.parse({ pane: panes.rename(ids.workspaceId, ids.paneId, body.value.title) }));
+      let pane: Pane | undefined;
+      if (body.value.title !== undefined) pane = panes.rename(ids.workspaceId, ids.paneId, body.value.title);
+      if (body.value.notify !== undefined) pane = panes.setNotify(ids.workspaceId, ids.paneId, body.value.notify);
+      return c.json(PaneResponse.parse({ pane }));
     } catch (error) {
       return refuse(c, error);
     }

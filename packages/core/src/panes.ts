@@ -88,6 +88,8 @@ export interface Panes {
    * `ValidationError` unless it holds the same panes, each exactly once.
    */
   arrange(workspaceId: WorkspaceId, layout: unknown): PaneLayout;
+  /** Turns a pane's notifications on or off (the user's opt in; off by default). `NotFoundError` for an unknown pane. */
+  setNotify(workspaceId: WorkspaceId, paneId: PaneId, on: boolean): Pane;
   /** Renames a pane; `ValidationError` for a name with control characters or no name. `NotFoundError` for an unknown pane. */
   rename(workspaceId: WorkspaceId, paneId: PaneId, title: string): Pane;
   /** Stops the pane's program and everything it started, and forgets the pane. `NotFoundError` for an unknown or another project's pane. */
@@ -115,6 +117,8 @@ export interface PanesOptions {
   store?: PaneStore | undefined;
   /** Records each program's pid (and forgets it when it ends), for the sweep after a hard stop (story 16.7). */
   pids?: { add(pid: number): void; remove(pid: number): void } | undefined;
+  /** The launchers whose panes the user opted in to notifications (story 16.9 keeps the setting). Read at each status change. */
+  notifyLaunchers?: (() => readonly string[]) | undefined;
   /** The launchers (story 16.5). Without it only the plain shell opens. */
   launchers?: PaneLaunchers | undefined;
   /** The program a plain shell pane runs: the user's own shell, by absolute path. */
@@ -213,13 +217,15 @@ export function createPanes(options: PanesOptions): Panes {
     safely(() => (layout.tabs.length === 0 ? options.store?.deleteLayout(workspaceId) : options.store?.saveLayout(workspaceId, layout)));
     emit({ type: 'terminal.layout_changed', workspaceId, streamId: workspaceId, payload: { tabCount: layout.tabs.length, paneCount: layoutPaneIds(layout).length } });
   };
+  /** Whether this pane's notifications are on: its own opt in, or its launcher's. */
+  const notifies = (entry: Entry): boolean => entry.pane.notify || (options.notifyLaunchers?.() ?? []).includes(entry.pane.launcherId);
   /** A status change: the pane, its viewers and an event (state only, with the pane's name). */
   const setStatus = (entry: Entry, status: PaneStatus, previous: PaneStatus = entry.pane.status) => {
     if (entry.pane.status === status) return;
     entry.pane = { ...entry.pane, status };
     for (const viewer of [...entry.viewers]) for (const listener of [...viewer.states]) safely(() => listener(entry.pane));
     // Working and idle come and go with every command: they reach the page over the pane's own socket. The log keeps the changes someone elsewhere acts on: into or out of needs attention, and the end.
-    if (entry.announced && (status === 'needs_attention' || previous === 'needs_attention' || status === 'exited')) emit({ type: 'terminal.pane_status_changed', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, status, previous, title: entry.pane.title } });
+    if (entry.announced && (status === 'needs_attention' || previous === 'needs_attention' || status === 'exited')) emit({ type: 'terminal.pane_status_changed', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, status, previous, title: entry.pane.title, notify: notifies(entry) } });
   };
   const setState = (entry: Entry, state: PaneState, exitCode: number | null = null) => {
     if (entry.pane.state === state && entry.pane.exitCode === exitCode) return;
@@ -373,7 +379,7 @@ export function createPanes(options: PanesOptions): Panes {
         const workspace = entities.getWorkspace(saved.workspaceId);
         if (workspace === undefined) continue;
         entries.set(saved.id, {
-          pane: { id: saved.id, workspaceId: saved.workspaceId, launcherId: saved.launcherId, title: saved.title, state: 'stopped', status: 'idle', exitCode: null },
+          pane: { id: saved.id, workspaceId: saved.workspaceId, launcherId: saved.launcherId, title: saved.title, state: 'stopped', status: 'idle', notify: saved.notify, exitCode: null },
           cwd: workspace.realPath ?? workspace.path,
           command: undefined,
           typed: [],
@@ -462,7 +468,7 @@ export function createPanes(options: PanesOptions): Panes {
       if (entries.size >= perInstall) throw new PaneLimitError('install', perInstall);
       if ([...entries.values()].filter((e) => e.pane.workspaceId === workspaceId).length >= perProject) throw new PaneLimitError('project', perProject);
       const entry: Entry = {
-        pane: { id: newId('pan'), workspaceId, launcherId, title: titleFor(workspaceId, label), state: 'starting', status: 'working', exitCode: null },
+        pane: { id: newId('pan'), workspaceId, launcherId, title: titleFor(workspaceId, label), state: 'starting', status: 'working', notify: false, exitCode: null },
         cwd: workspace.realPath ?? workspace.path,
         command,
         typed,
@@ -492,7 +498,7 @@ export function createPanes(options: PanesOptions): Panes {
       // Closed while it started (closed by the user, Developer mode turned off, the server stopping): nothing is left running, and nothing was announced.
       if (entry.closed || disposed) throw new NotFoundError('pane', entry.pane.id);
       entry.announced = true;
-      safely(() => options.store?.savePane({ id: entry.pane.id, workspaceId, launcherId: entry.pane.launcherId, title: entry.pane.title, createdAt: (lastCreated = Math.max(Date.now(), lastCreated + 1)) }));
+      safely(() => options.store?.savePane({ id: entry.pane.id, workspaceId, launcherId: entry.pane.launcherId, title: entry.pane.title, notify: false, createdAt: (lastCreated = Math.max(Date.now(), lastCreated + 1)) }));
       const current = layoutOf(workspaceId);
       const split = placement?.kind === 'split' ? splitPane(current, placement.paneId, entry.pane.id, placement.direction) : undefined;
       emit({ type: 'terminal.pane_opened', workspaceId, streamId: workspaceId, payload: { paneId: entry.pane.id, launcherId: entry.pane.launcherId, title: entry.pane.title } });
@@ -519,6 +525,17 @@ export function createPanes(options: PanesOptions): Panes {
       // Nothing changed: nothing is saved or announced (an arrow key at the end of a divider's range).
       if (JSON.stringify(next) !== JSON.stringify(layoutOf(workspaceId))) setLayout(workspaceId, next);
       return next;
+    },
+
+    setNotify(workspaceId, paneId, on) {
+      requireDeveloperMode();
+      const entry = find(workspaceId, paneId);
+      if (entry.pane.notify !== on) {
+        entry.pane = { ...entry.pane, notify: on };
+        safely(() => options.store?.setNotify(paneId, on));
+        for (const viewer of [...entry.viewers]) for (const listener of [...viewer.states]) safely(() => listener(entry.pane));
+      }
+      return entry.pane;
     },
 
     rename(workspaceId, paneId, title) {

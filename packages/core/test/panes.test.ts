@@ -431,9 +431,9 @@ describe('a pane\'s status (story 16.6)', () => {
       expect(panes.list(workspace.id)[0]!.status).toBe('exited');
       const changes = core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_status_changed');
       expect(changes.map((e) => e.payload)).toEqual([
-        { paneId: pane.id, status: 'needs_attention', previous: 'working', title: 'Example CLI 1' },
-        { paneId: pane.id, status: 'working', previous: 'needs_attention', title: 'Example CLI 1' },
-        { paneId: pane.id, status: 'exited', previous: 'working', title: 'Example CLI 1' },
+        { paneId: pane.id, status: 'needs_attention', previous: 'working', title: 'Example CLI 1', notify: false },
+        { paneId: pane.id, status: 'working', previous: 'needs_attention', title: 'Example CLI 1', notify: false },
+        { paneId: pane.id, status: 'exited', previous: 'working', title: 'Example CLI 1', notify: false },
       ]);
       expect(JSON.stringify(changes)).not.toContain('Sure?');
       expect(seen).toContain('needs_attention');
@@ -493,6 +493,74 @@ describe('a pane\'s status (story 16.6)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('notifications are the user\'s opt in (story 16.8)', () => {
+  const LAUNCHER = PaneLauncher.parse({ id: 'example', label: 'Example CLI', kind: 'cli', executables: {}, promptPatterns: [{ name: 'q', pattern: '\\(y/n\\)', depth: 1 }] });
+
+  function booted(notifyLaunchers?: () => readonly string[]) {
+    const core = openTestCore();
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    core.installSettings.setDeveloperMode(true);
+    const fake = fakeTerminal();
+    const panes = createPanes({
+      entities: core.entities,
+      installSettings: core.installSettings,
+      events: core.events,
+      terminal: fake.port,
+      store: core.paneStore,
+      notifyLaunchers,
+      launchers: { list: async () => [], detect: async () => [], get: (id) => (id === 'example' ? LAUNCHER : undefined), command: async () => ({ ok: true, file: '/abs/example', args: [] }) },
+      shell: () => ({ file: '/x', args: [] }),
+      env: () => ({}),
+    });
+    stops.push(() => panes.dispose());
+    return { core, workspace, fake, panes };
+  }
+
+  const waiting = async (b: ReturnType<typeof booted>, id: string) => {
+    b.fake.processes[0]!.setScreen(['Sure? (y/n)']);
+    b.fake.processes[0]!.print('Sure? (y/n)');
+    await vi.advanceTimersByTimeAsync(600);
+    return b.core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_status_changed' && e.payload.paneId === id).at(-1)!.payload;
+  };
+
+  it('is off by default, saved per pane, and the status event says whether it is on; the setting is not text', async () => {
+    vi.useFakeTimers();
+    try {
+      const b = booted();
+      const pane = await b.panes.open(b.workspace.id, SIZE, undefined, { launcherId: 'example' });
+      expect(pane.notify).toBe(false);
+      expect(await waiting(b, pane.id)).toMatchObject({ status: 'needs_attention', notify: false });
+      expect(b.panes.setNotify(b.workspace.id, pane.id, true).notify).toBe(true);
+      expect(b.core.paneStore.load().panes[0]!.notify).toBe(true);
+      // Typing answers it; the next wait carries the opt in.
+      b.panes.attach(pane.id)!.write('y\r');
+      b.fake.processes[0]!.print('Again? (y/n)');
+      await vi.advanceTimersByTimeAsync(600);
+      expect(b.core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_status_changed').at(-1)!.payload).toMatchObject({ status: 'needs_attention', notify: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a launcher the user opted in turns it on for all its panes', async () => {
+    vi.useFakeTimers();
+    try {
+      const b = booted(() => ['example']);
+      const pane = await b.panes.open(b.workspace.id, SIZE, undefined, { launcherId: 'example' });
+      expect(await waiting(b, pane.id)).toMatchObject({ notify: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('needs Developer mode and a known pane', () => {
+    const b = booted();
+    expect(() => b.panes.setNotify(b.workspace.id, 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3', true)).toThrow(NotFoundError);
+    b.core.installSettings.setDeveloperMode(false);
+    expect(() => b.panes.setNotify(b.workspace.id, 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3', true)).toThrow(DeveloperModeRequiredError);
   });
 });
 

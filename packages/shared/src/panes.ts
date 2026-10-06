@@ -55,6 +55,8 @@ export const Pane = z.object({
   state: PaneState,
   /** A guess at what it is doing (story 16.6). Never certain: the page says so. */
   status: PaneStatus.default('working'),
+  /** Whether the user opted this pane in to notifications when it seems to need them (story 16.8; off by default). */
+  notify: z.boolean().default(false),
   /** The program's own exit code once `exited`; `null` while it runs or when it was stopped. */
   exitCode: z.number().int().nullable(),
 });
@@ -241,9 +243,11 @@ export type PanesResponse = z.infer<typeof PanesResponse>;
 export const ArrangePanesRequest = z.object({ layout: PaneLayout });
 export type ArrangePanesRequest = z.infer<typeof ArrangePanesRequest>;
 
-/** `PATCH` pane (story 16.4): rename it. */
-export const RenamePaneRequest = z.object({ title: PaneTitle });
-export type RenamePaneRequest = z.infer<typeof RenamePaneRequest>;
+/** `PATCH` pane (stories 16.4, 16.8): rename it and/or turn its notifications on or off (at least one). */
+export const UpdatePaneRequest = z
+  .object({ title: PaneTitle.optional(), notify: z.boolean().optional() })
+  .refine((request) => request.title !== undefined || request.notify !== undefined, 'a name or notify');
+export type UpdatePaneRequest = z.infer<typeof UpdatePaneRequest>;
 
 /** Server → client on the pane socket: the pane's state now (sent on attach and on every change). */
 export const PaneStateFrame = z.object({ type: z.literal('state'), state: PaneState, /** The pane's status guess (story 16.6), sent with every change so its chip needs no refetch. */ status: PaneStatus.optional() });

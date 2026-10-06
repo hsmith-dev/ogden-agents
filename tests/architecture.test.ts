@@ -585,6 +585,87 @@ export function findOrchestrationViolations(files: readonly SourceFile[]): strin
   return violations;
 }
 
+/**
+ * E15 (story 15.6): approval comes only from a user action. The five use-cases
+ * that are the user's alone (approve, edit, skip, reorder, Stop) are called by
+ * the server's orchestration routes and by nothing else: not the manager code
+ * (the port, its input, the real and the fake managers, the source), and not
+ * the use-case's own manager and dispatch paths (`startRun`, the read-back and
+ * `dispatchStep`). A manager's answer is data; there is no function it can
+ * reach that approves, edits, skips, reorders or stops.
+ */
+const USER_ACTIONS = /\b(approveStep|editStep|skipStep|reorderSteps|stopRun)\b/;
+/** The manager's own code: core's manager files and the fake manager. */
+const MANAGER_CODE = /(^|[\\/])packages[\\/]core[\\/]src[\\/](?:manager-[\w-]+|model-manager)\.ts$|(^|[\\/])packages[\\/]adapters[\\/]src[\\/](?:manager-memory|local-model[\w-]*)[\\/]/;
+const ORCHESTRATION_USE_CASE = /(^|[\\/])packages[\\/]core[\\/]src[\\/]orchestration\.ts$/;
+/** The pieces of the use-case that call the manager or send to a worker, cut by their markers. */
+const GUARDED_SLICES: ReadonlyArray<readonly [name: string, from: string, to: string | undefined]> = [
+  ['startRun', 'async startRun(', 'async listRuns('],
+  ['dispatchStep', 'async dispatchStep(', undefined],
+  ['readBack', 'const readBack =', 'const NO_MANAGER'],
+];
+/** Where the user's actions are called from outside core: the server's orchestration routes, and the web client that sends them. */
+const USER_ACTION_CALLERS = /(^|[\\/])packages[\\/]server[\\/]src[\\/]orchestration-routes\.ts$/;
+
+export function findUserActionReaches(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    const code = withoutComments(source);
+    if (MANAGER_CODE.test(path)) {
+      for (const match of code.matchAll(new RegExp(USER_ACTIONS.source, 'g'))) violations.push(`${path}: names ${match[1]} (E15: the manager's code cannot approve, edit, skip, reorder or stop)`);
+    }
+    if (ORCHESTRATION_USE_CASE.test(path)) {
+      for (const [name, from, to] of GUARDED_SLICES) {
+        const start = code.indexOf(from);
+        const end = to === undefined ? code.length : code.indexOf(to, start);
+        if (start < 0 || end < 0) {
+          violations.push(`${path}: cannot find ${name} (E15 guard needs its marker ${from})`);
+          continue;
+        }
+        for (const match of code.slice(start, end).matchAll(new RegExp(USER_ACTIONS.source, 'g'))) violations.push(`${path}: ${name} names ${match[1]} (E15: only the user's routes may call it)`);
+      }
+    }
+    // Outside core and its tests, only the server's orchestration routes call the use-cases.
+    if (/(^|[\\/])packages[\\/]server[\\/]src[\\/]/.test(path) && !USER_ACTION_CALLERS.test(path)) {
+      for (const match of code.matchAll(/\.(approveStep|editStep|skipStep|reorderSteps|stopRun)\(/g)) violations.push(`${path}: calls ${match[1]} (E15: only orchestration-routes.ts, a user's route, may)`);
+    }
+  }
+  return violations;
+}
+
+describe('E15: approval comes only from a user action (story 15.6)', () => {
+  it('the manager code and the manager and dispatch paths never reach approve, edit, skip, reorder or stop', () => {
+    const files = loadWorkspaceSources();
+    const manager = files.filter((file) => MANAGER_CODE.test(file.path)).map((file) => file.path.split('\\').join('/'));
+    expect(manager).toEqual(expect.arrayContaining(['packages/core/src/manager-port.ts', 'packages/core/src/model-manager.ts', 'packages/core/src/manager-source.ts', 'packages/adapters/src/manager-memory/index.ts']));
+    expect(files.some((file) => ORCHESTRATION_USE_CASE.test(file.path))).toBe(true);
+    expect(files.some((file) => USER_ACTION_CALLERS.test(file.path))).toBe(true);
+    expect(findUserActionReaches(files)).toEqual([]);
+  });
+
+  it('flags a planted call from a manager file, from startRun or dispatchStep, and from another server file', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/model-manager.ts', source: "// approveStep is only a word here\nawait use.approveStep(ws, run, step);" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/manager-memory/index.ts', source: 'orchestration.skipStep(a, b, c);' },
+      {
+        pkg: '@ogden-agents/core',
+        path: 'packages/core/src/orchestration.ts',
+        source: "async startRun() { await this.approveStep(); }\nasync listRuns() {}\nconst readBack = () => { stopRun(); };\nconst NO_MANAGER = 1;\nasync approveStep() {}\nasync dispatchStep() { editStep(); }",
+      },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/chat-routes.ts', source: 'runs.reorderSteps(a, b);' },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/orchestration-routes.ts', source: 'use.approveStep(a, b, c);' },
+    ];
+    expect(findUserActionReaches(files)).toEqual([
+      "packages/core/src/model-manager.ts: names approveStep (E15: the manager's code cannot approve, edit, skip, reorder or stop)",
+      "packages/adapters/src/manager-memory/index.ts: names skipStep (E15: the manager's code cannot approve, edit, skip, reorder or stop)",
+      "packages/core/src/orchestration.ts: startRun names approveStep (E15: only the user's routes may call it)",
+      "packages/core/src/orchestration.ts: dispatchStep names editStep (E15: only the user's routes may call it)",
+      "packages/core/src/orchestration.ts: readBack names stopRun (E15: only the user's routes may call it)",
+      "packages/server/src/chat-routes.ts: calls reorderSteps (E15: only orchestration-routes.ts, a user's route, may)",
+    ]);
+  });
+});
+
 describe('E15: orchestration code is tool-free and names no model product (story 15.2)', () => {
   it('core, shared and the fake manager keep to the rules', () => {
     const files = loadWorkspaceSources();

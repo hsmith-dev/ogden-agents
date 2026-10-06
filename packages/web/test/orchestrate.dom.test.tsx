@@ -63,6 +63,9 @@ const fake = vi.hoisted(() => ({
   rosterView: undefined as unknown,
   refuseRoster: undefined as string | undefined,
   defaultSaved: undefined as Record<string, unknown> | undefined,
+  /** A refusal (code and words) for the next plan review action, and the bodies the review routes were sent. */
+  refuse: undefined as undefined | { status: number; code: string; message: string },
+  bodies: [] as unknown[],
 }));
 
 vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [], caughtUp: true }), useSessionEvents: () => [] }));
@@ -104,6 +107,12 @@ vi.mock('@/auth/tab-token', () => ({
       if (path.endsWith('/orchestration/runs') && method === 'POST') {
         fake.runs = [fake.next];
         return json({ run: fake.next }, 201);
+      }
+      if (/\/(edit|skip|reorder|stop)$/.test(path)) {
+        if (init?.body !== undefined) fake.bodies.push(JSON.parse(String(init.body)));
+        if (fake.refuse !== undefined) return json({ error: { code: fake.refuse.code, message: fake.refuse.message } }, fake.refuse.status);
+        fake.runs = [fake.next];
+        return json({ run: fake.next });
       }
       if (path.endsWith('/approve')) {
         fake.runs = [fake.next];
@@ -153,6 +162,8 @@ beforeEach(() => {
   fake.rosterView = undefined;
   fake.refuseRoster = undefined;
   fake.defaultSaved = undefined;
+  fake.refuse = undefined;
+  fake.bodies = [];
 });
 afterEach(cleanup);
 
@@ -252,9 +263,119 @@ describe('the Orchestrate page', () => {
     expect(screen.getByTestId('orchestrate-step-session-state').textContent).toBe('The worker is working.');
   });
 
-  it('uses no dashes in what it says', async () => {
+  it('shows every step with its worker, chat, instruction, mode and prerequisites, and where the manager runs', async () => {
+    fake.manager = { state: 'ready', message: 'The manager is model-a on another computer, on Work Linux box.' };
+    fake.runs = [view([step('s1'), step('s2', { dependsOn: ['s1'], position: 1, chat: 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3' })])];
+    await mount(<WorkspaceOrchestratePage />);
+    const rows = screen.getAllByTestId('orchestrate-step');
+    expect(rows).toHaveLength(2);
+    expect(screen.getAllByTestId('orchestrate-step-instruction').map((node) => node.textContent)).toEqual(['Instruction s1', 'Instruction s2']);
+    expect(screen.getAllByTestId('orchestrate-step-target').map((node) => node.textContent)).toEqual(['Goes to a new chat', 'Goes to an existing chat']);
+    expect(screen.getAllByTestId('orchestrate-step-mode').map((node) => node.textContent)).toEqual(['Mode: Ask', 'Mode: Ask']);
+    expect(screen.getAllByTestId('orchestrate-step-needs').map((node) => node.textContent)).toEqual(['Needs nothing first', 'Needs s1 first']);
+    expect(screen.getByTestId('orchestrate-run-where').textContent).toBe('The manager is model-a on another computer, on Work Linux box.');
+  });
+
+  it('Edit opens the text, Save sends the new instruction, and the server\'s plain refusal keeps the editor open', async () => {
+    fake.runs = [view([step('s1', { state: 'approved', approvedBy: 'user' })])];
+    fake.next = view([step('s1', { instruction: 'A better instruction.' })]);
+    await mount(<WorkspaceOrchestratePage />);
+    fireEvent.click(screen.getByTestId('orchestrate-edit'));
+    expect(screen.getByTestId('orchestrate-edit-note').textContent).toContain('you will need to approve it again');
+    const box = screen.getByTestId('orchestrate-edit-text') as HTMLTextAreaElement;
+    expect(box.value).toBe('Instruction s1');
+    fireEvent.change(box, { target: { value: 'sk-secret' } });
+    fake.refuse = { status: 400, code: 'invalid_request', message: 'That text looks like it holds a key or a secret. Take it out and try again.' };
+    fireEvent.click(screen.getByTestId('orchestrate-edit-save'));
+    await settle();
+    expect(screen.getByTestId('orchestrate-error').textContent).toContain('key or a secret');
+    expect(screen.getByTestId('orchestrate-edit-form')).toBeTruthy();
+    fake.refuse = undefined;
+    fireEvent.change(screen.getByTestId('orchestrate-edit-text'), { target: { value: 'A better instruction.' } });
+    fireEvent.click(screen.getByTestId('orchestrate-edit-save'));
+    await settle();
+    expect(fake.bodies).toEqual([{ instruction: 'sk-secret' }, { instruction: 'A better instruction.' }]);
+    expect(screen.queryByTestId('orchestrate-edit-form')).toBeNull();
+    // The step is waiting for approval again, and offers Approve and send, not Send.
+    expect(screen.getByTestId('orchestrate-step-instruction').textContent).toBe('A better instruction.');
+    expect(screen.getByTestId('orchestrate-step-state').textContent).toBe('Waiting for you');
+    expect(screen.queryByTestId('orchestrate-send')).toBeNull();
+    expect(screen.getByTestId('orchestrate-approve')).toBeTruthy();
+  });
+
+  it('Cancel closes the editor without asking the server', async () => {
     fake.runs = [view([step('s1')])];
     await mount(<WorkspaceOrchestratePage />);
+    fireEvent.click(screen.getByTestId('orchestrate-edit'));
+    fireEvent.change(screen.getByTestId('orchestrate-edit-text'), { target: { value: 'changed' } });
+    fireEvent.click(screen.getByTestId('orchestrate-edit-cancel'));
+    expect(screen.getByTestId('orchestrate-step-instruction').textContent).toBe('Instruction s1');
+    expect(fake.calls.some((call) => call.endsWith('/edit'))).toBe(false);
+  });
+
+  it('Skip asks the server, and a step that needs a skipped one says it will not go ahead', async () => {
+    fake.runs = [view([step('s1'), step('s2', { dependsOn: ['s1'], position: 1 })])];
+    fake.next = view([step('s1', { state: 'skipped' }), step('s2', { dependsOn: ['s1'], position: 1 })]);
+    await mount(<WorkspaceOrchestratePage />);
+    fireEvent.click(screen.getAllByTestId('orchestrate-skip')[0]!);
+    await settle();
+    expect(fake.calls).toContain(`POST /api/v1/workspaces/${WS}/orchestration/runs/${RUN}/steps/s1/skip`);
+    const rows = screen.getAllByTestId('orchestrate-step');
+    expect(rows[0]!.getAttribute('data-state')).toBe('skipped');
+    expect(screen.getAllByTestId('orchestrate-step-state')[0]!.textContent).toBe('Skipped');
+    // A skipped step offers nothing more; the one that needs it waits, with the reason, and cannot be approved.
+    expect(rows[0]!.querySelector('[data-testid="orchestrate-skip"]')).toBeNull();
+    expect(screen.getByTestId('orchestrate-step-waits').textContent).toBe('Waits for s1. s1 was skipped, so this step will not go ahead. Skip it too if you do not want it.');
+    expect(screen.queryByTestId('orchestrate-approve')).toBeNull();
+  });
+
+  it('Move up and Move down send the whole new order, and a refused order shows the plain reason', async () => {
+    fake.runs = [view([step('s1'), step('s2', { position: 1 }), step('s3', { position: 2, dependsOn: ['s2'] })])];
+    fake.next = view([step('s2'), step('s1', { position: 1 }), step('s3', { position: 2, dependsOn: ['s2'] })]);
+    await mount(<WorkspaceOrchestratePage />);
+    // The first cannot move up and the last cannot move down.
+    expect(screen.getAllByTestId('orchestrate-move-up')[0]!.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getAllByTestId('orchestrate-move-down')[2]!.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Move step s2 up' }));
+    await settle();
+    expect(fake.bodies).toEqual([{ order: ['s2', 's1', 's3'] }]);
+    expect(screen.getAllByTestId('orchestrate-step').map((row) => row.getAttribute('data-step-id'))).toEqual(['s2', 's1', 's3']);
+    fake.refuse = { status: 409, code: 'bad_order', message: 'Step s3 needs step s2 first, so it cannot come before it.' };
+    fireEvent.click(screen.getByRole('button', { name: 'Move step s3 up' }));
+    await settle();
+    expect(screen.getByTestId('orchestrate-error').textContent).toContain('Step s3 needs step s2 first, so it cannot come before it.');
+  });
+
+  it('Stop is visible while the run is live, asks the server, and the stopped run offers nothing more', async () => {
+    fake.runs = [view([step('s1', { state: 'approved', approvedBy: 'user' }), step('s2', { position: 1, dependsOn: ['s1'] })])];
+    const stopped = view([step('s1', { state: 'approved', approvedBy: 'user' }), step('s2', { position: 1, dependsOn: ['s1'] })], 'stopped');
+    stopped.run.stopReason = 'user';
+    fake.next = stopped;
+    await mount(<WorkspaceOrchestratePage />);
+    fireEvent.click(screen.getByTestId('orchestrate-stop'));
+    await settle();
+    expect(fake.calls).toContain(`POST /api/v1/workspaces/${WS}/orchestration/runs/${RUN}/stop`);
+    expect(screen.getByTestId('orchestrate-run-state').textContent).toBe('Stopped');
+    expect(screen.getByTestId('orchestrate-stopped-note').textContent).toContain('Nothing more will be approved or sent');
+    expect(screen.queryByTestId('orchestrate-stop')).toBeNull();
+    for (const id of ['orchestrate-approve', 'orchestrate-send', 'orchestrate-edit', 'orchestrate-skip', 'orchestrate-move-up']) expect(screen.queryByTestId(id), id).toBeNull();
+    expect(screen.getAllByTestId('orchestrate-step-state').map((node) => node.textContent)).toEqual(['Not sent. The run was stopped.', 'Not sent. The run was stopped.']);
+  });
+
+  it('says plainly that the manager is thinking, with Stop, and nothing about the chats is held', async () => {
+    fake.runs = [view([], 'planning')];
+    await mount(<WorkspaceOrchestratePage />);
+    expect(screen.getByTestId('orchestrate-run-state').textContent).toBe('The manager is thinking');
+    expect(screen.getByTestId('orchestrate-thinking').textContent).toContain('Your chats keep working');
+    expect(screen.getByTestId('orchestrate-stop')).toBeTruthy();
+    expect(screen.getByTestId('orchestrate-thinking').getAttribute('role')).toBe('status');
+  });
+
+  it('uses no dashes in what it says', async () => {
+    fake.manager = { state: 'ready', message: 'The manager is model-a on this computer, on My Mac.' };
+    fake.runs = [view([step('s1'), step('s2', { dependsOn: ['s1'], position: 1, state: 'skipped' })])];
+    await mount(<WorkspaceOrchestratePage />);
+    fireEvent.click(screen.getAllByTestId('orchestrate-edit')[0]!);
     expect(screen.getByTestId('orchestrate').textContent).not.toMatch(/[–—]| - /);
   });
 });

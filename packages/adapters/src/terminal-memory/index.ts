@@ -127,6 +127,8 @@ export function createMemoryTerminalPort(options: MemoryTerminalOptions = {}): M
       return {
         ...process,
         pid: undefined,
+        // No screen to read: what was printed so far, by line.
+        screenLines: async (count) => printed.split(/\r?\n/).filter((line) => line.trim() !== '').slice(-count),
         // No screen to serialize: the snapshot is what was printed so far.
         attach(onSnapshot, onData) {
           onSnapshot(printed);

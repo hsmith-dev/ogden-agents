@@ -156,7 +156,7 @@ pub fn quit(force: bool) -> QuitAnswer {
         return QuitAnswer::NotOurs;
     }
     // What the server started (agents), noted before it goes, so a straggler can be stopped after.
-    let before = descendants(pid);
+    let mut before = descendants(pid);
     let token = std::fs::read_to_string(data_dir.join("launcher.token")).ok().map(|t| t.trim().to_string());
     let mut asked = false;
     if let Some(token) = token {
@@ -175,18 +175,32 @@ pub fn quit(force: bool) -> QuitAnswer {
     // The held launcher ends when the server does; wait for that, then check nothing is left.
     let deadline = Instant::now() + Duration::from_secs(if asked { 20 } else { 1 });
     let mut stopped = false;
+    let mut last_note = Instant::now();
     while Instant::now() < deadline {
         let done = LAUNCHER.lock().ok().and_then(|mut g| g.as_mut().map(|c| matches!(c.try_wait(), Ok(Some(_))))).unwrap_or(true);
         if done {
             stopped = true;
             break;
         }
+        // An agent or its child that started after the first note (a turn that was starting as Quit came) is ours too:
+        // keep noting what is under the server until it is gone, so the sweep below stops it.
+        if last_note.elapsed() >= Duration::from_millis(500) {
+            last_note = Instant::now();
+            for p in descendants(pid) {
+                if !before.contains(&p) {
+                    before.push(p);
+                }
+            }
+        }
         std::thread::sleep(Duration::from_millis(100));
     }
     if !stopped {
         report("quit_timeout", json!({}));
     }
+    // What was still running when the sweep began, named for the test report (pids only, nothing secret).
+    let alive: Vec<u32> = before.iter().copied().filter(|p| crate::report::pid_alive(*p)).collect();
     cleanup_leftovers(pid, &before);
+    report("quit_sweep", json!({ "noted": before.len(), "aliveBeforeSweep": alive }));
     report("server_stopped", json!({ "serverPid": pid, "graceful": stopped }));
     QuitAnswer::Stopped
 }

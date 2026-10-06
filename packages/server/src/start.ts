@@ -40,7 +40,7 @@ import { wireAgents } from './start-agents.js';
 import { createPanesWiring } from './start-panes.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
-import { createBuildsWiring } from './start-builds.js';
+import { createBuildsWiring, createServerVcs } from './start-builds.js';
 import { createNotificationsWiring } from './start-notifications.js';
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
@@ -310,7 +310,7 @@ async function listenAndAnnounce({
   // One terminal port for the chat and the toggle's availability check (story 3.7): they agree on node-pty.
   const terminal = createPtyTerminalPort(options.loadPty);
   // Terminal panes (epic 16): in memory, Developer mode only, stopped with the server.
-  const panes = createPanesWiring({ options, hooks, core, terminal, onError: (error) => log.warn('a terminal pane listener failed', { error: error instanceof Error ? error.name : 'unknown' }) });
+  const panes = createPanesWiring({ options, hooks, core, terminal, dataDir, onError: (error) => log.warn('a terminal pane listener failed', { error: error instanceof Error ? error.name : 'unknown' }), onSweep: (result) => log.info('terminal panes left running by a hard stop were cleaned up', result) });
   // Document cards (story 4.7, `start-planning.ts`).
   const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, agentOf, log });
   const chat = createChat({
@@ -342,7 +342,10 @@ async function listenAndAnnounce({
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
+  // One git for builds and for Save the lessons (epic 7).
+  const vcs = createServerVcs(options, dataDir);
   const { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
+    vcs,
     options,
     core,
     dataDir,
@@ -359,7 +362,7 @@ async function listenAndAnnounce({
   // Inside the desktop app (story 13.11) there is no shortcut to offer: the app is the shortcut.
   const shell = options.shell === undefined ? shellModeOf() : options.shell;
   // Unattended builds (story 5.2, `start-builds.ts`): git, the sandbox check and the build runner.
-  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks });
+  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks, vcs });
   // Worktrees no run needs any more (a removal that failed, a start cut off) go before builds are served (story 5.5).
   await builds.sweep();
   // Queued runs a stopped server left start where the limits allow (story 5.8).

@@ -64,6 +64,7 @@ vi.mock('@xterm/xterm', () => ({
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
 vi.mock('@xterm/addon-unicode11', () => ({ Unicode11Addon: class {} }));
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
+vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [], store: undefined, caughtUp: true }) }));
 vi.mock('../src/terminal/pane-socket', () => ({
   connectPane: (_paneId: string, handlers: PaneSocketHandlers) => {
     const connection = { handlers, closed: false, typed: [] as string[] };
@@ -259,6 +260,53 @@ const two = () => {
   fakes.panes.push(pane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WC', title: 'Terminal 3', state: 'running' }));
 };
 const puts = () => fakes.requests.filter((r) => r.method === 'PUT').map((r) => JSON.parse(r.body!).layout);
+
+describe('stopped panes after a restart (story 16.7)', () => {
+  it('says it is stopped and offers Start, with the program\'s own resume words and an arguments field for a CLI', async () => {
+    fakes.launchers = [launcher('example', 'Example CLI', 'found', { resumeHint: 'Run example --resume to pick up an earlier session.' })];
+    fakes.panes = [pane({ launcherId: 'example', state: 'stopped', status: 'idle' })];
+    await mount();
+    expect(screen.getByTestId('pane-status-chip').textContent).toBe('Stopped');
+    const connection = fakes.connections[0]!;
+    await act(async () => connection.handlers.onOpen());
+    expect(screen.getByTestId('pane-status').textContent).toContain('Press Start to run it again.');
+    expect(screen.getByTestId('pane-status').textContent).toContain('Run example --resume');
+    fireEvent.change(screen.getByTestId('pane-start-args'), { target: { value: '--model big' } });
+    fireEvent.click(screen.getByTestId('pane-restart'));
+    await settle();
+    expect(screen.getByTestId('pane-restart').textContent).toBe('Start');
+    expect(JSON.parse(fakes.requests.find((r) => r.path.endsWith('/restart'))!.body!)).toEqual({ cols: 80, rows: 24, args: '--model big' });
+  });
+
+  it('a stopped shell has no arguments field and no resume words', async () => {
+    fakes.panes = [pane({ state: 'stopped', status: 'idle' })];
+    await mount();
+    await act(async () => fakes.connections[0]!.handlers.onOpen());
+    expect(screen.queryByTestId('pane-start-args')).toBeNull();
+    expect(screen.getByTestId('pane-restart').textContent).toBe('Start');
+  });
+});
+
+describe('status (story 16.6)', () => {
+  it('shows each pane\'s status in plain words, says it is a guess, and marks a tab that has a pane needing attention', async () => {
+    two();
+    fakes.panes = (fakes.panes as Array<Record<string, unknown>>).map((p, i) => ({ ...p, status: ['needs_attention', 'idle', 'working'][i] }));
+    await mount();
+    const chips = screen.getAllByTestId('pane-status-chip');
+    expect(chips.map((chip) => [chip.getAttribute('data-status'), chip.textContent])).toEqual([['needs_attention', 'Needs attention'], ['idle', 'Idle']]);
+    expect(screen.getByTestId('status-guess').textContent).toContain('a guess');
+    // The tab of the pane that needs attention says so; the other tab does not.
+    const tabs = screen.getAllByTestId('terminal-tab');
+    expect(tabs[0]!.textContent).toContain('Needs attention');
+    expect(tabs[1]!.textContent).not.toContain('Needs attention');
+  });
+
+  it('an ended program reads Ended', async () => {
+    fakes.panes = [pane({ state: 'exited', status: 'exited', exitCode: 0 })];
+    await mount();
+    expect(screen.getByTestId('pane-status-chip').textContent).toBe('Ended');
+  });
+});
 
 describe('tabs, splits and the layout (story 16.4)', () => {
   it('shows the active tab only: its split panes connect, the other tab\'s do not', async () => {

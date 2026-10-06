@@ -1,4 +1,4 @@
-import { apiPath, PANE_SOCKET_ROUTE, PaneServerFrame, type PaneState, type TerminalClientFrame } from '@ogden-agents/shared';
+import { apiPath, PANE_SOCKET_ROUTE, PaneServerFrame, type PaneState, type PaneStatus, type TerminalClientFrame } from '@ogden-agents/shared';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 
 /**
@@ -21,7 +21,7 @@ export interface PaneSocketHandlers {
   onBytes(bytes: Uint8Array): void;
   /** What follows replaces what is shown: the viewer resets its terminal. */
   onReset(): void;
-  onState(state: PaneState): void;
+  onState(state: PaneState, status?: PaneStatus): void;
   /** The pane's program ended (`null`: it was stopped). The socket stays open. */
   onExit(exitCode: number | null): void;
   /** Another viewer resized the pane: follow its size. */
@@ -71,7 +71,7 @@ export function connectPane(paneId: string, handlers: PaneSocketHandlers, auth: 
         handlers.onReset();
         break;
       case 'state':
-        handlers.onState(frame.data.state);
+        handlers.onState(frame.data.state, frame.data.status);
         break;
       case 'exit':
         handlers.onExit(frame.data.exitCode);

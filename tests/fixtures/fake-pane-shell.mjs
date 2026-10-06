@@ -11,6 +11,9 @@
 //   size        prints `size=<cols>x<rows>`
 //   alt         paints a full-screen picture on the alternate screen, once, and prints no prompt (a replay probe)
 //   args        prints `args=<its arguments as JSON>` (what the launcher passed)
+//   perm        prints a permission style question, `Do you want to proceed? (y/n)`, and waits (no prompt) until a line is typed
+//   work        prints a line every 200 ms for 1.5 s, then the prompt
+//   think       prints nothing for 3 s (silent work), then the prompt
 //   pid         prints `pid=<pid>`
 //   cwd         prints `cwd=<folder>`
 //   secret      prints `secret=<value>` for each variable whose name contains KEY, TOKEN, SECRET, PASSWORD or SSH_AUTH_SOCK (should print none)
@@ -62,6 +65,7 @@ if (!flags.includes('--silent')) {
 }
 
 let line = '';
+let asking = false;
 const run = (text) => {
   const [command, ...rest] = text.trim().split(/\s+/);
   if (command === 'exit') {
@@ -69,7 +73,28 @@ const run = (text) => {
     process.exit(Number(rest[0] ?? 0));
   }
   if (command === 'size') out(`size=${process.stdout.columns}x${process.stdout.rows}\r\n`);
-  else if (command === 'args') out(`args=${JSON.stringify(flags)}\r\n`);
+  else if (command === 'perm') {
+    out('Do you want to proceed? (y/n)\r\n');
+    asking = true;
+    return false;
+  } else if (command === 'work') {
+    let n = 0;
+    const timer = setInterval(() => {
+      out(`working-${++n}\r\n`);
+      if (n >= 7) {
+        clearInterval(timer);
+        out('work-done\r\n');
+        prompt();
+      }
+    }, 200);
+    return false;
+  } else if (command === 'think') {
+    setTimeout(() => {
+      out('think-done\r\n');
+      prompt();
+    }, 3000);
+    return false;
+  } else if (command === 'args') out(`args=${JSON.stringify(flags)}\r\n`);
   else if (command === 'pid') out(`pid=${process.pid}\r\n`);
   else if (command === 'cwd') out(`cwd=${process.cwd()}\r\n`);
   else if (command === 'alt') {
@@ -91,7 +116,12 @@ process.stdin.on('data', (chunk) => {
       out('\r\n');
       const text = line;
       line = '';
-      if (run(text)) prompt();
+      if (asking) {
+        // The answer to the question: it is taken, and the prompt comes back.
+        asking = false;
+        out(`answered:${text.trim() || 'enter'}\r\n`);
+        prompt();
+      } else if (run(text)) prompt();
     } else if (ch === '\x7f' || ch === '\b') {
       if (line.length > 0) {
         line = line.slice(0, -1);

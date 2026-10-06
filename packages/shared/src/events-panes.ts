@@ -23,7 +23,7 @@ export type TerminalPaneOpenedEvent = z.infer<typeof TerminalPaneOpenedEvent>;
 export const TerminalPaneStatusChangedInput = z.object({
   type: z.literal('terminal.pane_status_changed'),
   ...onWorkspaceStream,
-  payload: z.object({ paneId: PaneId, status: PaneStatus, previous: PaneStatus }),
+  payload: z.object({ paneId: PaneId, status: PaneStatus, previous: PaneStatus, /** The pane's name, so a row in the sidebar names it without the rest of its history. */ title: PaneTitle.optional() }),
 });
 /** A pane's guessed status changed (story 16.6): working, needs attention, idle or exited. */
 export const TerminalPaneStatusChangedEvent = TerminalPaneStatusChangedInput.extend(assigned);

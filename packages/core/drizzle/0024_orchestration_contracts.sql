@@ -27,5 +27,6 @@ CREATE TABLE `orchestration_steps` (
 	FOREIGN KEY (`run_id`) REFERENCES `orchestration_runs`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
+ALTER TABLE `workspaces` ADD `orchestration_enabled` integer DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE `workspaces` ADD `orchestration_mode` text;--> statement-breakpoint
 ALTER TABLE `workspaces` ADD `orchestration_roster` text;

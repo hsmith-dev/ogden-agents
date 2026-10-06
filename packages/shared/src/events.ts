@@ -315,11 +315,13 @@ const WorkspaceSettingsChangedInput = z.object({
     whileWorking: WhileWorking.nullable().optional(),
     previousWhileWorking: WhileWorking.nullable().optional(),
     /**
-     * The project's orchestration mode and roster, now and before (epic 15
+     * Whether the Orchestration piece is on, the project's orchestration mode and roster, now and before (epic 15
      * story 15.2), present when they changed; `orchestrationAutomaticConfirmed`
      * when the user confirmed the switch to automatic dispatch. Optional, so
      * every earlier event still parses.
      */
+    orchestrationEnabled: z.boolean().optional(),
+    previousOrchestrationEnabled: z.boolean().optional(),
     orchestrationMode: OrchestrationMode.optional(),
     previousOrchestrationMode: OrchestrationMode.optional(),
     orchestrationRoster: TeamRoster.optional(),

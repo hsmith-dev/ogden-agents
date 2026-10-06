@@ -320,6 +320,7 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     chat,
     permissions: core.permissions,
     bmad: core.bmad,
+    orchestration: core.orchestration,
     bmadDetection: core.bmadDetection,
     bmadScriptTrust: core.bmadScriptTrust,
     planning: createPlanning({ bmad: core.bmad, entities: core.entities, catalog: createMemoryBmadCatalog(), chat, agent }),

@@ -33,10 +33,11 @@ import {
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { readBmadPieces } from './bmad-pieces.js';
+import { readOrchestrationEnabled } from './orchestration-feature.js';
 import { readScriptsTrusted } from './bmad-script-trust.js';
 import type { Database, Orm } from './db/database.js';
 import { workspaces } from './db/schema.js';
-import { ConfirmationRequiredError, DeveloperModeRequiredError, FeatureUnavailableError, NotFoundError, UnknownAgentError, ValidationError } from './errors.js';
+import { ConfirmationRequiredError, DeveloperModeRequiredError, FeatureUnavailableError, NotFoundError, OrchestrationUnavailableError, UnknownAgentError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 
 export interface WorkspaceSettingsAccess {
@@ -72,6 +73,7 @@ export interface WorkspaceSettingsAccess {
       confirm?: unknown;
       defaultModels?: unknown;
       whileWorking?: unknown;
+      orchestrationEnabled?: unknown;
       orchestrationMode?: unknown;
       orchestrationRoster?: unknown;
     },
@@ -238,7 +240,8 @@ const sameRoster = (a: TeamRoster, b: TeamRoster): boolean => JSON.stringify(can
 const canonicalRoster = (roster: TeamRoster) => ({ manager: roster.manager, planner: roster.planner, worker: roster.worker, reviewer: roster.reviewer });
 
 /** The settings' orchestration fields, present only when they differ from the defaults. */
-const orchestrationFields = (mode: OrchestrationMode, roster: TeamRoster) => ({
+const orchestrationFields = (enabled: boolean, mode: OrchestrationMode, roster: TeamRoster) => ({
+  ...(enabled ? { orchestrationEnabled: true } : {}),
   ...(mode === DEFAULT_ORCHESTRATION_MODE ? {} : { orchestrationMode: mode }),
   ...(sameRoster(roster, TeamRosterSchema.parse({})) ? {} : { orchestrationRoster: roster }),
 });
@@ -259,6 +262,8 @@ export interface WorkspaceSettingsOptions {
   events: EventLog;
   /** Whether this install ships a BMad piece, so it may be turned on (core's `bmad.isAvailable`). */
   isBmadPieceAvailable: (piece: BmadPiece) => boolean;
+  /** Whether this install ships Orchestration (epic 15), so it may be turned on. Absent: no. */
+  isOrchestrationAvailable?: (() => boolean) | undefined;
   /**
    * Whether an agent is registered on this install (epic 6, entry 6), so it
    * may be a project's default. Read at each call: server wiring builds the
@@ -276,6 +281,7 @@ export function createWorkspaceSettings({
   db,
   events,
   isBmadPieceAvailable,
+  isOrchestrationAvailable = () => false,
   isAgentRegistered = () => true,
   developerMode = () => false,
 }: WorkspaceSettingsOptions): WorkspaceSettingsAccess {
@@ -289,9 +295,10 @@ export function createWorkspaceSettings({
       const mode = readDefaultPermissionMode(orm, workspaceId);
       const defaultModels = readDefaultModels(orm, workspaceId);
       const whileWorking = readWhileWorking(orm, workspaceId);
+      const orchestrationEnabled = readOrchestrationEnabled(orm, workspaceId);
       const orchestrationMode = readOrchestrationMode(orm, workspaceId);
       const orchestrationRoster = readOrchestrationRoster(orm, workspaceId);
-      if (orchestrationMode === undefined || orchestrationRoster === undefined || cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null || mode === undefined || defaultModels === null || whileWorking === null) {
+      if (orchestrationEnabled === undefined || orchestrationMode === undefined || orchestrationRoster === undefined || cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null || mode === undefined || defaultModels === null || whileWorking === null) {
         throw new NotFoundError('workspace', workspaceId);
       }
       return {
@@ -302,7 +309,7 @@ export function createWorkspaceSettings({
         ...modeFields(mode),
         ...modelsField(defaultModels),
         ...(whileWorking === undefined ? {} : { whileWorking }),
-        ...orchestrationFields(orchestrationMode, orchestrationRoster),
+        ...orchestrationFields(orchestrationEnabled, orchestrationMode, orchestrationRoster),
       };
     },
 
@@ -356,6 +363,12 @@ export function createWorkspaceSettings({
         whileWorking = parsed.data;
       }
       // Orchestration (epic 15): the mode, and the team roster (agents this install has; a model's endpoint is checked by the roster story, 15.4).
+      let orchestrationEnabled: boolean | undefined;
+      if (input.orchestrationEnabled !== undefined) {
+        const parsed = z.boolean().safeParse(input.orchestrationEnabled);
+        if (!parsed.success) throw new ValidationError('Choose whether Orchestration is on or off.', [{ path: ['orchestrationEnabled'], message: 'not on or off' }]);
+        orchestrationEnabled = parsed.data;
+      }
       let orchestrationMode: OrchestrationMode | undefined;
       if (input.orchestrationMode !== undefined) {
         const parsed = OrchestrationModeSchema.safeParse(input.orchestrationMode);
@@ -376,6 +389,7 @@ export function createWorkspaceSettings({
         permissionMode === undefined &&
         modelChanges === undefined &&
         whileWorking === undefined &&
+        orchestrationEnabled === undefined &&
         orchestrationMode === undefined &&
         orchestrationRoster === undefined
       ) {
@@ -394,6 +408,7 @@ export function createWorkspaceSettings({
         const previousAgent = readDefaultAgent(orm, workspaceId, isAgentRegistered);
         const previousMode = readDefaultPermissionMode(orm, workspaceId);
         const previousWhileWorking = readWhileWorking(orm, workspaceId);
+        const previousOrchestrationEnabled = readOrchestrationEnabled(orm, workspaceId);
         const previousOrchestrationMode = readOrchestrationMode(orm, workspaceId);
         const previousOrchestrationRoster = readOrchestrationRoster(orm, workspaceId);
         if (
@@ -402,6 +417,7 @@ export function createWorkspaceSettings({
           previousAgent === null ||
           previousMode === undefined ||
           previousWhileWorking === null ||
+          previousOrchestrationEnabled === undefined ||
           previousOrchestrationMode === undefined ||
           previousOrchestrationRoster === undefined
         ) {
@@ -433,6 +449,10 @@ export function createWorkspaceSettings({
         const modelsChanged = !sameModels(defaultModels, previousModels);
         const whileWorkingChanged = whileWorking !== undefined && (whileWorking ?? undefined) !== previousWhileWorking;
         const projectWhileWorking = whileWorkingChanged ? (whileWorking ?? undefined) : previousWhileWorking;
+        const enabledNow = orchestrationEnabled ?? previousOrchestrationEnabled;
+        const orchestrationEnabledChanged = enabledNow !== previousOrchestrationEnabled;
+        // Like a BMad piece (AD-22): turned on only where the install ships it; turning off is always allowed.
+        if (orchestrationEnabledChanged && enabledNow && !isOrchestrationAvailable()) throw new OrchestrationUnavailableError();
         const modeNow = orchestrationMode ?? previousOrchestrationMode;
         const orchestrationModeChanged = modeNow !== previousOrchestrationMode;
         const rosterNow = orchestrationRoster ?? previousOrchestrationRoster;
@@ -445,9 +465,9 @@ export function createWorkspaceSettings({
           ...modeFields(mode),
           ...modelsField(defaultModels),
           ...(projectWhileWorking === undefined ? {} : { whileWorking: projectWhileWorking }),
-          ...orchestrationFields(modeNow, rosterNow),
+          ...orchestrationFields(enabledNow, modeNow, rosterNow),
         };
-        if (level === previous && !piecesChanged && !agentChanged && !modeChanged && !modelsChanged && !whileWorkingChanged && !orchestrationModeChanged && !orchestrationRosterChanged) return settings;
+        if (level === previous && !piecesChanged && !agentChanged && !modeChanged && !modelsChanged && !whileWorkingChanged && !orchestrationEnabledChanged && !orchestrationModeChanged && !orchestrationRosterChanged) return settings;
         orm
           .update(workspaces)
           .set({
@@ -457,6 +477,7 @@ export function createWorkspaceSettings({
             ...(modeChanged ? { defaultPermissionMode: mode.mode, defaultPermissionModeNotice: null } : {}),
             ...(modelsChanged ? { defaultModels: JSON.stringify(defaultModels) } : {}),
             ...(whileWorkingChanged ? { whileWorking: whileWorking ?? null } : {}),
+            ...(orchestrationEnabledChanged ? { orchestrationEnabled: enabledNow } : {}),
             ...(orchestrationModeChanged ? { orchestrationMode: modeNow } : {}),
             ...(orchestrationRosterChanged ? { orchestrationRoster: JSON.stringify(canonicalRoster(rosterNow)) } : {}),
           })
@@ -482,6 +503,7 @@ export function createWorkspaceSettings({
               : {}),
             ...(modelsChanged ? { defaultModels, previousDefaultModels: previousModels } : {}),
             ...(whileWorkingChanged ? { whileWorking: whileWorking ?? null, previousWhileWorking: previousWhileWorking ?? null } : {}),
+            ...(orchestrationEnabledChanged ? { orchestrationEnabled: enabledNow, previousOrchestrationEnabled } : {}),
             ...(orchestrationModeChanged
               ? {
                   orchestrationMode: modeNow,

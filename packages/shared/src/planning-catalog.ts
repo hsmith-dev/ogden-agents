@@ -161,7 +161,7 @@ export type BmadCapabilities = z.infer<typeof BmadCapabilities>;
 /**
  * The capabilities each piece needs (entry 4.11, AD-14): Planning the plain
  * labels and the entry action, Board the ticket tree, Retrospectives the
- * look-back step (epic 7). Builds and Orchestration need none. A capability
+ * look-back step (epic 7). Builds needs none. A capability
  * is read (and its notice shown) only for a piece that is on.
  */
 export const BMAD_PIECE_CAPABILITIES: Readonly<Record<BmadPiece, readonly BmadCapability[]>> = {
@@ -169,7 +169,6 @@ export const BMAD_PIECE_CAPABILITIES: Readonly<Record<BmadPiece, readonly BmadCa
   board: ['ticket_tree'],
   builds: [],
   retrospectives: ['look_back'],
-  orchestration: [],
 };
 
 /** The capabilities `pieces` need, each once, in {@link BMAD_CAPABILITIES} order. */

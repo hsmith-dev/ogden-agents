@@ -78,5 +78,6 @@ export * from './build-settings.js';
 export * from './local-endpoints.js';
 export * from './local-model-port.js';
 export * from './manager-port.js';
+export * from './orchestration-feature.js';
 export * from './local-models.js';
 export * from './build-findings.js';

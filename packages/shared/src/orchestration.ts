@@ -105,9 +105,9 @@ const refuse = (code: ManagerRefusalCode): { ok: false; code: ManagerRefusalCode
 // ---- text rules (every string from a manager is untrusted) ----
 
 /** Control characters other than tab and line feed, and the invisible and direction controls that disguise text. */
-const BAD_TEXT_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F​-‏‪-‮⁠-⁤⁦-⁩﻿]/u;
+const BAD_TEXT_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/u;
 /** The same, plus tab and line feed: a single line. */
-const BAD_LINE_CHARS = /[\u0000-\u001F\u007F-\u009F​-‏‪-‮⁠-⁤⁦-⁩  ﻿]/u;
+const BAD_LINE_CHARS = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u2028\u2029\uFEFF]/u;
 const BAD_TEXT = 'bad_text';
 const BAD_REFERENCE = 'bad_reference';
 
@@ -189,7 +189,7 @@ export type ManagerStatusReport = z.infer<typeof ManagerStatusReport>;
  * ({@link redactSecrets}), stripped of control characters and capped. Pure.
  */
 export function makeStatusReport(input: { stepId: string; worker: string; state: SessionState; text: string }): ManagerStatusReport {
-  const clean = redactSecrets(input.text).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F​-‏‪-‮⁠-⁤⁦-⁩﻿]/gu, '');
+  const clean = redactSecrets(input.text).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu, '');
   const truncated = clean.length > MANAGER_LIMITS.maxSummaryChars;
   return ManagerStatusReport.parse({
     version: MANAGER_STATUS_VERSION,
@@ -257,7 +257,8 @@ const valueAt = (root: unknown, path: readonly PropertyKey[]): { found: boolean;
     } else if (isRecord(current) && typeof key === 'string' && Object.hasOwn(current, key)) current = current[key];
     else return { found: false };
   }
-  return { found: true, value: current };
+  // A key holding `undefined` (not possible in JSON) counts as missing.
+  return { found: current !== undefined, value: current };
 };
 
 /** The one refusal that best names why `value` failed `error`'s schema: extra keys first, then the version, then the rest in order. */
@@ -350,6 +351,25 @@ export function checkManagerDecision(value: unknown, context: ManagerDecisionChe
   if (action === 'ask_user' && question === undefined) return refuse('missing_field');
   return { ok: true, value: parsed.data };
 }
+
+// ---- the piece ----
+
+/**
+ * Orchestration is an opt-in piece, off by default for every project (AD-22
+ * style; epic 15). It is not a BMad Method piece, so it is not in
+ * `BMAD_PIECES`: it has its own switch, `orchestrationEnabled`, kept by core
+ * on the workspace row and changed only through the workspace settings
+ * use-case. It needs no other piece and runs none of the project's scripts.
+ */
+export const ORCHESTRATION_PIECE = {
+  label: 'Orchestration',
+  sentence: 'Let a manager model plan the work and tell your other agents what to do, with you approving each instruction.',
+} as const;
+
+/** `feature_off` (409) from an orchestration route whose project has the piece off. */
+export const ORCHESTRATION_OFF_MESSAGE = "Orchestration is off in this project. Turn it on in the project's settings to use it.";
+/** `feature_unavailable` (409): turning Orchestration on in an install that does not ship it yet. */
+export const ORCHESTRATION_UNAVAILABLE_MESSAGE = "Orchestration isn't in this version of Ogden Agents yet, so it can't be turned on.";
 
 // ---- the mode, the limits, the run ----
 

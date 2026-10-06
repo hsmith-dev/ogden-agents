@@ -13,6 +13,7 @@ import {
   DeveloperModeRequiredError,
   FeatureOffError,
   FeatureUnavailableError,
+  OrchestrationUnavailableError,
   NotFoundError,
   UnknownAgentError,
   ValidationError,
@@ -27,6 +28,7 @@ import {
   CreateFolderResponse,
   FEATURE_OFF_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
+  ORCHESTRATION_UNAVAILABLE_MESSAGE,
   FolderListing,
   FolderListingQuery,
   HistoryDeletedResponse,
@@ -76,6 +78,8 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
     if (error instanceof FeatureOffError) return apiError(c, 409, 'feature_off', FEATURE_OFF_MESSAGE);
     // Turning on a piece this install doesn't ship yet (story 10.2): nothing was stored.
     if (error instanceof FeatureUnavailableError) return apiError(c, 409, 'feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
+    // Turning on Orchestration where this install doesn't ship it (epic 15): nothing was stored.
+    if (error instanceof OrchestrationUnavailableError) return apiError(c, 409, 'feature_unavailable', ORCHESTRATION_UNAVAILABLE_MESSAGE);
     // A default agent this install doesn't have (epic 6, entry 6): nothing was stored.
     if (error instanceof UnknownAgentError) return apiError(c, 400, 'agent_unknown', error.message);
     // Skip all as the default (default permission mode): the server is the gate; nothing was stored.

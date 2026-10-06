@@ -2,6 +2,7 @@ import type { AgentId } from '@ogden-agents/shared';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
 import { createLookBackOffers, type LookBackOffers } from './look-back-offers.js';
+import { createOrchestrationFeature, type OrchestrationFeature } from './orchestration-feature.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-pieces.js';
 import { createBmadModulesSeen, type BmadModulesSeen } from './bmad-modules-seen.js';
 import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
@@ -33,6 +34,8 @@ export interface Core {
   readonly permissions: Permissions;
   /** The BMad pieces guard (AD-22): every use-case serving a piece calls it first. */
   readonly bmad: BmadFeatures;
+  /** The Orchestration piece's guard (epic 15; AD-22 style): off by default, turned on only where the install ships it. */
+  readonly orchestration: OrchestrationFeature;
   /** Whether a project's repo already uses BMad Method, and Not now on the offer (story 10.3). */
   readonly bmadDetection: BmadDetectionUseCases;
   /** The finished-epic offer's Not now (epic 7, story 7.2), behind the Retrospectives guard. */
@@ -70,6 +73,8 @@ export type OpenCoreOptions = OpenDatabaseOptions &
     onPermissionError?: (error: unknown) => void;
     /** The read-only BMad detection (story 10.3). Without it, every repo answers that it has no `_bmad/`. */
     bmadCatalog?: BmadCatalogPort;
+    /** Whether this install ships Orchestration (epic 15), so a project may turn it on. Default no (server wiring says when it does). */
+    orchestrationAvailable?: boolean;
     /** Told why a BMad Method setup failed (story 4.3), for the log. */
     onBmadSetupFailure?: (workspaceId: string, error: unknown) => void;
     /**
@@ -103,6 +108,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
   const entities = createEntities(db, events, sessionEvents);
   // Which pieces this install ships is the server wiring's list (story 10.2), never core's.
   const bmad = createBmadFeatures(db, { availableBmadPieces });
+  const orchestration = createOrchestrationFeature(db, { available: options.orchestrationAvailable });
   const bmadDetection = createBmadDetection({ orm: db.orm, events, entities, catalog: options.bmadCatalog });
   const lookBackOffers = createLookBackOffers({ orm: db.orm, events, bmad });
   const catalog = options.bmadCatalog;
@@ -134,6 +140,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     entities,
     sessionEvents,
     isBmadPieceAvailable: bmad.isAvailable,
+    isOrchestrationAvailable: orchestration.isAvailable,
     isAgentRegistered: options.isAgentRegistered,
     developerMode: installSettings.developerMode,
     agentConfigFolders: options.agentConfigFolders,
@@ -145,6 +152,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     entities,
     permissions,
     bmad,
+    orchestration,
     bmadDetection,
     lookBackOffers,
     bmadScriptTrust,

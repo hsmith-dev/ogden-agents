@@ -29,6 +29,7 @@ import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
 import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
+import { SHIPPED_ORCHESTRATION } from './orchestration-routes.js';
 import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey } from './auth.js';
 import { createGate, launchUrl as launchUrlFor } from './gate.js';
 import { acquireInstanceLock, type InstanceLock } from './instance-lock.js';
@@ -175,6 +176,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       // The version, so an upgrade is backed up and a newer database refused (story 13.6).
       appVersion: VERSION,
       availableBmadPieces,
+      // Whether Orchestration (epic 15) can be turned on: not until its tracer ships, or a test says so.
+      orchestrationAvailable: options.orchestrationAvailable ?? SHIPPED_ORCHESTRATION,
       bmadCatalog,
       onBmadSetupFailure: bmadSetupFailureLogger(log),
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
@@ -426,6 +429,7 @@ async function listenAndAnnounce({
     }),
     permissions,
     bmad: core.bmad,
+    orchestration: core.orchestration,
     // The test-only BMad probe route (story 10.1): a test run on a temp data folder, with its own variable set.
     bmadProbe: hooks.bmadProbe,
     bmadDetection: core.bmadDetection,

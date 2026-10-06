@@ -102,6 +102,12 @@ export const workspaces = sqliteTable(
      */
     whileWorking: text('while_working'),
     /**
+     * Whether the Orchestration piece is on for this project (epic 15 story 15.2;
+     * AD-22 style, off by default). It is not a BMad Method piece, so it has its
+     * own column. Changed only through the workspace settings use-case.
+     */
+    orchestrationEnabled: integer('orchestration_enabled', { mode: 'boolean' }).notNull().default(false),
+    /**
      * The project's orchestration mode (epic 15 story 15.2): `approve_each` or
      * `automatic`; NULL (and anything unreadable) is Approve each instruction.
      * Changed only through the workspace settings use-case.

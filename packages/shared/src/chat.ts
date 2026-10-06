@@ -353,6 +353,8 @@ export const WorkspaceSettings = z.object({
   defaultModels: z.record(AgentId, ModelId).optional(),
   /** The project's own choice of what a message sent while the agent works does (send now or wait); absent: the app-wide one. */
   whileWorking: WhileWorking.optional(),
+  /** Whether the Orchestration piece is on for this project (epic 15). Absent: off (and from older servers). */
+  orchestrationEnabled: z.boolean().optional(),
   /** The project's orchestration mode (epic 15). Absent: Approve each instruction (and from older servers). */
   orchestrationMode: OrchestrationMode.optional(),
   /** The project's team roster (epic 15). Absent: nobody assigned yet. */
@@ -389,10 +391,11 @@ export const UpdateWorkspaceSettingsRequest = z
     /** `null` goes back to the app-wide choice (send now or wait). */
     whileWorking: WhileWorking.nullable().optional(),
     /**
-     * Orchestration (epic 15): the mode, and the team roster. Switching to
+     * Orchestration (epic 15): the piece's switch (refused with `feature_unavailable` where the install does not ship it), the mode, and the team roster. Switching to
      * automatic needs `confirm: true` (`confirmation_required`); the roster is
      * checked against the install's agents (`agent_unknown`).
      */
+    orchestrationEnabled: z.boolean().optional(),
     orchestrationMode: OrchestrationMode.optional(),
     orchestrationRoster: TeamRoster.optional(),
   })
@@ -404,6 +407,7 @@ export const UpdateWorkspaceSettingsRequest = z
       settings.defaultPermissionMode !== undefined ||
       settings.defaultModels !== undefined ||
       settings.whileWorking !== undefined ||
+      settings.orchestrationEnabled !== undefined ||
       settings.orchestrationMode !== undefined ||
       settings.orchestrationRoster !== undefined,
     'Choose a setting to change.',

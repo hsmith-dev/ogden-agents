@@ -9,6 +9,7 @@ import {
   type BmadSourceUseCases,
   type BmadSetupUseCases,
   type BoardUseCases,
+  type OrchestrationFeature,
   type RetrospectiveUseCases,
   type BuildSettings,
   type Notifications,
@@ -116,6 +117,8 @@ export interface AppOptions {
   permissions?: Permissions;
   /** Core's BMad pieces (AD-22): the guard (10.1) and what this install ships (10.2); without it `GET` pieces answers 501. */
   bmad?: BmadFeatures;
+  /** Core's Orchestration guard (epic 15, 15.2); without it the orchestration routes are not registered. */
+  orchestration?: OrchestrationFeature;
   /** Registers the test-only BMad probe route (story 10.1); `start()` sets it only when its test hook is allowed. */
   bmadProbe?: boolean;
   /** Core's read-only BMad detection and Not now on its offer (story 10.3); without it those routes answer 501. */
@@ -194,6 +197,7 @@ export function createApp({
   terminalAvailability,
   permissions,
   bmad,
+  orchestration,
   bmadProbe,
   bmadDetection,
   bmadScriptTrust,
@@ -323,7 +327,7 @@ export function createApp({
   // Retrospectives (story 7.1): the same helper, guard and trust.
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerRetrospectiveRoutes(app, { bmad, scriptTrust: bmadScriptTrust, retrospectives, log });
   // Orchestration (epic 15, story 15.2): the same helper and guard; it runs no project script, so no trust.
-  if (bmad !== undefined) registerOrchestrationRoutes(app, { bmad, permissions, log });
+  if (orchestration !== undefined) registerOrchestrationRoutes(app, { orchestration, permissions, log });
   // Unattended builds (story 5.2): the same helper, guard and trust.
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, buildSettings, log });
   // Terminal panes (epic 16): behind the gate, and Developer mode enforced by core on every call.

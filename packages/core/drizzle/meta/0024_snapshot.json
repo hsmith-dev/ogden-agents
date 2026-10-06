@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f19bd47c-3f38-4c50-8486-80d2d98ff59a",
+  "id": "b2817618-db00-46be-a67e-6e75e2d186d3",
   "prevId": "898d02f3-a9cb-4d51-a7fd-e2a60a4088d9",
   "tables": {
     "agent_settings": {
@@ -1163,6 +1163,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "orchestration_enabled": {
+          "name": "orchestration_enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "orchestration_mode": {
           "name": "orchestration_mode",

@@ -500,7 +500,7 @@ export const API_ROUTES = {
   workspaceBuildSettings: `${API_BASE}/workspaces/:wsId/build-settings`,
   /**
    * `GET` → `OrchestrationSettingsResponse` (epic 15, 15.2): the project's
-   * orchestration mode, run limits and roster, behind the `orchestration`
+   * orchestration mode, run limits and roster, behind the Orchestration
    * piece (409 `feature_off` while it is off). The mode and roster change
    * through the workspace settings route.
    */

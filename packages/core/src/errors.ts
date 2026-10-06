@@ -8,6 +8,8 @@ import {
   REDUCED_MODE_MESSAGE,
   BMAD_SETUP_FAILURE_REASONS,
   FEATURE_OFF_MESSAGE,
+  ORCHESTRATION_OFF_MESSAGE,
+  ORCHESTRATION_UNAVAILABLE_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
   SCRIPTS_CHANGED_MESSAGE,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
@@ -84,6 +86,26 @@ export class FeatureUnavailableError extends CoreError {
   override readonly name = 'FeatureUnavailableError';
   constructor(readonly piece: string) {
     super('feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
+  }
+}
+
+/**
+ * The Orchestration piece (epic 15) was asked for in a project that has it
+ * off: core's guard refused it and did nothing (AD-22 style; same code as a
+ * BMad piece, its own words).
+ */
+export class OrchestrationOffError extends CoreError {
+  override readonly name = 'OrchestrationOffError';
+  constructor() {
+    super('feature_off', ORCHESTRATION_OFF_MESSAGE);
+  }
+}
+
+/** Turning on Orchestration in an install that does not ship it yet was refused; nothing was stored. */
+export class OrchestrationUnavailableError extends CoreError {
+  override readonly name = 'OrchestrationUnavailableError';
+  constructor() {
+    super('feature_unavailable', ORCHESTRATION_UNAVAILABLE_MESSAGE);
   }
 }
 

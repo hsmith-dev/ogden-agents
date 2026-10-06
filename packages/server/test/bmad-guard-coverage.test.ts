@@ -50,6 +50,8 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `POST ${API_ROUTES.sessionPermission}`,
   `GET ${API_ROUTES.permissionRules}`,
   `DELETE ${API_ROUTES.permissionRule}`,
+  // Orchestration (epic 15) is not a BMad piece: its routes go through `orchestrationRoutes` (see orchestration-contract.test.ts).
+  `GET ${API_ROUTES.workspaceOrchestration}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
   // The script trust (story 4.2): asked before or right after a script-running piece is turned on, never revoked by turning one off.

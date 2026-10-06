@@ -5,9 +5,10 @@
  * and core's builds use-cases over the chat and the ticket store. Each port
  * is a wiring slot a test (or a later lane) fills through `StartOptions`.
  */
+import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { createAcpBuildRunner, createAntigravityBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
 import { createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type VcsPort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import type { Logger } from './log.js';
@@ -46,6 +47,7 @@ export function createBuildsWiring({
   vcs: sharedVcs,
   registeredAgents,
   unattendedAgents,
+  describeAgent,
 }: {
   vcs?: VcsPort;
   options: StartOptions;
@@ -62,6 +64,8 @@ export function createBuildsWiring({
   registeredAgents: (agentId: string) => boolean;
   /** Whether an agent can run an unattended build here (its port says so; `AgentPort.unattendedBuild`). */
   unattendedAgents: (agentId: string) => boolean;
+  /** An agent's product name and where its skills go in a project (its descriptor). */
+  describeAgent: (agentId: string) => { displayName: string; skillsFolder: string } | undefined;
 }): BuildsUseCases {
   // Git runs as the user, with the agents' allowlist and never an API key (AD-16).
   // Removals only ever in `<data>/w` (story 5.5).
@@ -88,7 +92,23 @@ export function createBuildsWiring({
     },
     run: (request) => machineSandbox.run(request),
   };
+  // The build skill must be where the agent reads skills, in the run's worktree (committed): a plain refusal naming it otherwise.
+  const skillReach = (agent: string, worktree: string): string | undefined => {
+    const described = describeAgent(agent);
+    // An agent with no descriptor cannot be known to find the skill: refused, never assumed.
+    if (described === undefined) return `That agent can't find the ${BUILD_AUTO_SKILL} skill in this project.`;
+    const file = join(worktree, ...described.skillsFolder.split('/'), BUILD_AUTO_SKILL, 'SKILL.md');
+    // A regular file that is the project's own: never a link (the agent would read what it points at).
+    let present = false;
+    try {
+      present = lstatSync(file).isFile();
+    } catch {
+      present = false;
+    }
+    return present ? undefined : `${described.displayName} can't find the ${BUILD_AUTO_SKILL} skill in this project (${described.skillsFolder}). Add the BMad skills for ${described.displayName} and commit them, then build again.`;
+  };
   return createBuilds({
+    skillReach,
     settings: core.buildSettings,
     // The re-run of a project's tests gets the agents' allowlist and never an API key (AD-16).
     commandEnv: () => withoutAgentKeys(agentEnvironment()),

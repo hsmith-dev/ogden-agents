@@ -129,7 +129,8 @@
 //                  long-lived child process (a build's command still running)
 //                  and writes "<agent pid> <child pid>" to <file> (story 5.4:
 //                  stopping the session must stop both). Story 5.7:
-//                  FAKE_ACP_BUILD_ENV_DUMP=<file> writes the agent's whole
+//                  FAKE_ACP_BUILD_PROTECTED=1 also asks to write AGENTS.md in the
+//                  worktree (epic 17; a protected file); FAKE_ACP_BUILD_ENV_DUMP=<file> writes the agent's whole
 //                  environment there (`NAME=value` per line);
 //                  FAKE_ACP_BUILD_ECHO_KEY=1 says ANTHROPIC_API_KEY in a message.
 //   "plan-exit"    asks permission to leave plan mode with the real adapter's
@@ -844,6 +845,11 @@ async function runPrompt(params, client, session) {
       }
       const outside = resolve(cwd, '..', `escape-${ref}.txt`);
       if (await ask('call-build-escape', outside)) writeFileSync(outside, 'escaped\n');
+      // Epic 17: FAKE_ACP_BUILD_PROTECTED=1 also tries a protected file inside the worktree (AGENTS.md).
+      if (process.env.FAKE_ACP_BUILD_PROTECTED === '1') {
+        const protectedFile = join(cwd, 'AGENTS.md');
+        if (await ask('call-build-protected', protectedFile)) writeFileSync(protectedFile, 'The agent changed this.\n');
+      }
       // The plan: the Markdown file under _bmad-output whose frontmatter names this ticket's id.
       const id = ref.slice(ref.lastIndexOf('.') + 1);
       const plans = [];

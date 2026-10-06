@@ -40,7 +40,7 @@ function request(server: TestServer, tab: SignedIn, method: string, path: string
 }
 
 async function setup(options: { sandbox?: boolean; verified?: boolean; env?: Record<string, string>; key?: boolean } = {}) {
-  const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_REPO_FILES, prefix: 'ogden-agents-build-repo-' });
+  const repo = createFakeBmadRepo({ git: true, files: { ...FAKE_BUILD_REPO_FILES, '.agents/skills/bmad-build-auto/SKILL.md': '# Build\n' }, prefix: 'ogden-agents-build-repo-' });
   removeAfterTest(repo.path);
   const store = createPlanFileTicketStore([{ ref: '1.1', title: 'Build the thing', plan: FAKE_BUILD_PLAN }]);
   const server = await startTestServer({

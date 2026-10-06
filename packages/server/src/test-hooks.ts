@@ -24,6 +24,9 @@
  * - {@link PANE_SHELL_ENV}: a Node script inside the temp folder that terminal
  *   panes run in place of the user's shell (epic 16), so the suites open panes
  *   with a fake program on every OS.
+ * - {@link PANE_PATH_ENV}: a folder inside the temp folder that terminal pane
+ *   detection treats as its whole PATH (epic 16), holding fake programs. In a
+ *   test run with none named, detection finds nothing.
  * - {@link BMAD_PROBE_ENV} = `1`: registers the test-only route that serves
  *   the `planning` BMad piece behind core's guard (story 10.1), so a test can
  *   see `feature_off` while the piece is off.
@@ -110,6 +113,14 @@ export const CLAUDE_CLI_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_CLI';
  * a suite's panes run a fake on every OS and never the real shell or a CLI.
  */
 export const PANE_SHELL_ENV = 'OGDEN_AGENTS_TEST_PANE_SHELL';
+
+/**
+ * Absolute path to a folder inside the temp folder that holds fake programs
+ * (a `claude`, a `codex` ...): terminal pane detection looks only there, as
+ * its whole PATH and home (epic 16, story 16.5; tests only), so no suite ever
+ * finds or runs a real CLI.
+ */
+export const PANE_PATH_ENV = 'OGDEN_AGENTS_TEST_PANE_PATH';
 
 /** `1`: register `TEST_ROUTES.bmadProbe`, a route guarded by the `planning` piece (tests only; story 10.1). */
 export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
@@ -308,6 +319,25 @@ export function testClaudeCli(env: Env, dataDir: string, tmp: string = tmpdir())
 /** The Node script {@link PANE_SHELL_ENV} names (see {@link testClaudeCli}), or `undefined` (the user's own shell); throws when allowed but unusable. */
 export function testPaneShell(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
   return testNodeScript(PANE_SHELL_ENV, env, dataDir, tmp);
+}
+
+/** The folder {@link PANE_PATH_ENV} names, by its real path; `''` (finds nothing) in a test run that names none; `undefined` when hooks are not allowed or the folder is outside the temp folder: not inside the temp folder, or not an absolute folder (allowed but unusable throws). */
+export function testPanePath(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  const folder = env[PANE_PATH_ENV];
+  if (!testHooksAllowed(env, dataDir, tmp)) return undefined;
+  // A test run with no folder named finds nothing at all: detection never looks at the real computer, so no suite ever runs a real CLI.
+  if (folder === undefined || folder === '') return '';
+  if (!isAbsolute(folder)) throw new Error(`${PANE_PATH_ENV}: must be an absolute path`);
+  let real: string;
+  try {
+    real = realpathSync(folder);
+    if (!statSync(real).isDirectory()) throw new Error('not a folder');
+  } catch {
+    throw new Error(`${PANE_PATH_ENV}: must be an existing folder`);
+  }
+  // Allowed but unusable throws, so a test never falls back to looking at the real computer.
+  if (!insideTemp(real, tmp)) throw new Error(`${PANE_PATH_ENV}: must be a folder inside the temp folder`);
+  return real;
 }
 
 /**
@@ -541,7 +571,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox'> & {
+export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -553,6 +583,7 @@ export interface TestHooks {
   apiKeyCheck: ((value: string, signal: AbortSignal) => Promise<ApiKeyVerification>) | undefined;
   claudeCli: string | undefined;
   paneShell: string | undefined;
+  panePath: string | undefined;
   antigravityServer: string | undefined;
   antigravityInstall: TestAntigravityInstall | undefined;
   codexServer: string | undefined;
@@ -586,6 +617,7 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     claudeCli: options.extraAgentEnv?.CLAUDE_CODE_EXECUTABLE === undefined ? testClaudeCli(env, dataDir, tmp) : undefined,
     // A shell a test passes decides it: the hook is not read.
     paneShell: options.paneShell === undefined ? testPaneShell(env, dataDir, tmp) : undefined,
+    panePath: options.paneLaunchers === undefined ? testPanePath(env, dataDir, tmp) : undefined,
     // Antigravity's ports given (or left out) by a test decide it: the hook is not read.
     antigravityServer: options.antigravity === undefined ? testAntigravityServer(env, dataDir, tmp) : undefined,
     antigravityInstall: options.antigravity === undefined ? testAntigravityInstall(env, dataDir, tmp) : undefined,
@@ -620,6 +652,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.apiKeyCheck !== undefined ||
     hooks.claudeCli !== undefined ||
     hooks.paneShell !== undefined ||
+    (hooks.panePath !== undefined && hooks.panePath !== '') ||
     hooks.antigravityServer !== undefined ||
     hooks.antigravityInstall !== undefined ||
     hooks.codexServer !== undefined ||
@@ -640,6 +673,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     apiKeyCheck: hooks.apiKeyCheck !== undefined,
     claudeCli: hooks.claudeCli !== undefined,
     paneShell: hooks.paneShell !== undefined,
+    panePath: hooks.panePath !== undefined && hooks.panePath !== '',
     antigravityServer: hooks.antigravityServer !== undefined,
     antigravityInstall: hooks.antigravityInstall !== undefined,
     codexServer: hooks.codexServer !== undefined,

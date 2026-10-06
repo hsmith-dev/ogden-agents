@@ -7,7 +7,6 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim from its Log entry's summary (story 10.8). Log entries are append-only, so the phrase never goes stale; `node scripts/check-provenance.mjs` (CI job Provenance) fails on a line whose phrase is missing or matches no summary, on a line whose phrase a `Resolved:` summary contains (the entry is closed, so the line is stale), and (entry 4.12) on a Log entry added since the base branch that isn't `Resolved:`, contains no index line's phrase, and isn't quoted (`"<part of its summary>"`) by a `Resolved:` summary. A partial close starts `Resolved (…):` and leaves its index line in place.
 
 - Epic 7 (retrospectives, from 7.1 review): a look-back's epic folder can name a folder that does not exist when the active initiative is nested or the central config overrides the output folder; check it exists before starting. (log: "A look-back's epic folder is derived from tickets.py's folder name and the setup status's output folder")
-- Epic 7 (7.4, from 7.2 review): the look-back's first message must carry each build summary's blocked reason as bounded plain text, one line each. (log: "A build summary's blockedReason is agent-authored text that reaches the look-back's first message")
 - Remove-project story (not yet ticketed): delete a project's always-allow rules before its workspace row (`permission_rules.workspace_id` has no `ON DELETE`). From 2.6 F9. (log: "Removing a project must delete its always-allow rules first")
 - Epic 5 (unattended builds): the inside-the-project check for file-kind rules is check-then-use, so a symlink swapped in before the write could redirect it. From 2.6. (log: "The inside-the-project check for file-kind rules runs before the agent acts (check-then-use)")
 - Unowned (copy change): say in the caution-level copy (EXPERIENCE.md, settings page) that `think` auto-allows helper-agent launches and TodoWrite. From 2.8 F3. (log: "the `think` kind is auto-allowed")
@@ -109,6 +108,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (a later sandbox story): 5.6's low review findings (a compression-bomb object, an unremovable store, the bubblewrap probe, the docker lookup). From 5.6. (log: "Low findings of 5.6's review")
 - 16.4 (proposed): a stored layout must also refuse duplicate pane ids and an active tab that does not exist; the memory terminal stub's pane freezes its exit getters. From 16.3 reviews. (log: "16.3 review: layout duplicate ids and dangling active tab")
 - 16.9 (proposed): `PaneLayout` hard codes the cap of panes per project though core's limit is a constant it could change, and two windows arranging at once are last writer wins. From 16.4 reviews. (log: "16.4 review: the layout schema holds the pane cap")
+- 16.11 (proposed): the fake program folder has no space in its path and no test hangs a probe for real; add both to the end to end suite. From 16.5 reviews. (log: "16.5 review: the fake program folder has no space")
 - 16.7 (proposed): closing a pane stops its process group only, so an interactive shell's background jobs (`cmd &`, stopped jobs) survive Close, Restart, Developer mode off and the server stopping; walk descendants or HUP the shell first. From 16.2 security review. (log: "16.2 review: a pane's POSIX tree kill signals only the shell's own process group")
 - 16.9 (proposed): a pane's pty is never paused under a flood, the screen mirror's memory grows with the terminal width, and a pane route's 403 comes after a bad id or body is refused. From 16.2 reviews. (log: "16.2 review: low findings, no pty backpressure")
 - 16.2 (proposed): a server killed hard leaves a pane whose program ignores hangup running on macOS and Windows; record each pane's pid and start time and sweep only those on the next start. From spike 16.1. (log: "Spike 16.1: a server killed hard leaves a pane")
@@ -800,6 +800,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-tracer-bullet-one-plain-shell-pane-in-developer-mode-end-to-end-plan.md`
   summary: 16.2 review: a pane's POSIX tree kill signals only the shell's own process group, so background jobs of an interactive shell outlive Close and Restart.
   evidence: security review; `process-tree.ts` `killGroup`, `terminal-pty/index.ts` `killTerminalTree`; the fixture's grandchild stays in the shell's group so no test covers it.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-cli-launcher-and-install-detection-claude-code-codex-grok-antigravity-copilot-and-a-plain-shell-plan.md`
+  summary: 16.5 review: the fake program folder has no space in its path, and no test hangs a probe for real.
+  evidence: `tests/fixtures/fake-cli-folder.ts`; `detect.ts` probe.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-pane-and-layout-model-tabs-splits-resize-keyboard-focus-plan.md`
   summary: 16.4 review: the layout schema holds the pane cap, and two windows arranging at once are last writer wins.
   evidence: `PaneLayout` refine in `shared/src/panes.ts`; `arrange` in `core/src/panes.ts`.
@@ -831,6 +834,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-retrospectives/story-epic-contracts-and-stubs-plan.md`
   summary: A build summary's blockedReason is agent-authored text that reaches the look-back's first message (it can hold text a script or agent wrote), so 7.4 builds that message from bounded single-line plain text.
   evidence: security review of 7.2 on `EpicBuildSummary.blockedReason` (max 500, no pattern); the message is built only in 7.4.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-retrospectives/story-look-back-and-the-board-plan.md`
+  summary: Resolved: "A build summary's blockedReason is agent-authored text that reaches the look-back's first message" is closed in 7.4: the summary's blocked reason is Ogden's own fixed sentence for the run's code, never the run's reason text, and each line of the message is plain, single-line and bounded.
+  evidence: `packages/core/src/build-summaries.ts` (`blockedSentence`, `summaryLine`) and its test.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-live-run-view-and-the-runs-tab-plan.md`
   summary: Apply the saved fix after a late failure: the patch stays applied while the run is still blocked when the plan mark or the prompt fails; the patch is read by git three times and is not previewed.
   evidence: 11.1 correctness and security reviews; Retry still works, and the agent is released while the run is blocked.

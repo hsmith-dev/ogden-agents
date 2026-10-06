@@ -37,8 +37,6 @@ export const LOOK_BACK_EPIC_NOT_FOUND_MESSAGE = "That epic isn't on this project
 /** `not_found` (404) from the step route: that skill is not one of the retrospective's next steps. */
 export const LOOK_BACK_STEP_NOT_OFFERED_MESSAGE = "That step isn't offered for this retrospective.";
 
-/** `not_found` (404) from the look-back route: the project's BMad Method has no look-back step. */
-export const LOOK_BACK_UNAVAILABLE_MESSAGE = "This project's BMad Method has no step for looking back on an epic.";
 
 // ---- Story 7.2: the rest of epic 7's contract ----
 

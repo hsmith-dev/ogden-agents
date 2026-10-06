@@ -24,6 +24,7 @@ const fakes = vi.hoisted(() => ({
   layout: undefined as unknown,
   terminal: { available: true } as unknown,
   denied: false,
+  launchers: [] as unknown[],
 }));
 
 vi.mock('@xterm/xterm', () => ({
@@ -75,6 +76,7 @@ vi.mock('@/auth/tab-token', () => ({
     fetch: async (path: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       fakes.requests.push({ method, path, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+      if (path.endsWith('/terminals/launchers')) return new Response(JSON.stringify({ launchers: fakes.launchers }));
       if (fakes.denied) return new Response(JSON.stringify({ error: { code: 'developer_mode_required', message: 'Terminals are only offered in Developer mode.' } }), { status: 403 });
       if (method === 'GET') {
         const panes = fakes.panes as Array<{ id: string; title: string }>;
@@ -132,10 +134,74 @@ beforeEach(() => {
   fakes.layout = undefined;
   fakes.terminal = { available: true };
   fakes.denied = false;
+  fakes.launchers = [];
 });
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+});
+
+const launcher = (id: string, label: string, state: string, extra: Record<string, unknown> = {}) => ({
+  launcher: { id, label, kind: 'cli', executables: {}, defaultArgs: [], promptPatterns: [], showWhenMissing: true, installUrl: `https://example.com/${id}`, ...extra },
+  detection: { launcherId: id, state, ...(state === 'found' ? { version: 'tool 1.2.3' } : {}) },
+});
+
+describe('programs: detection and starting (story 16.5; E16-R5, R9)', () => {
+  it('shows each program as found or not found, with the install page and "install it yourself" and never an installer', async () => {
+    fakes.launchers = [launcher('claude-code', 'Claude Code', 'found'), launcher('codex', 'Codex', 'not_found'), launcher('grok', 'Grok', 'failed')];
+    await mount();
+    const rows = screen.getAllByTestId('launcher');
+    expect(rows.map((row) => [row.getAttribute('data-launcher'), row.getAttribute('data-state')])).toEqual([['claude-code', 'found'], ['codex', 'not_found'], ['grok', 'failed']]);
+    expect(rows[0]!.textContent).toContain('Found, tool 1.2.3');
+    const missing = rows[1]!;
+    expect(missing.textContent).toContain('Install it yourself, then press Detect.');
+    const link = missing.querySelector('a')!;
+    expect(link.getAttribute('href')).toBe('https://example.com/codex');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(rows[2]!.textContent).toContain('did not answer');
+    // Only a found program can be started; nothing here installs anything.
+    expect(rows[1]!.querySelector('[data-testid="launcher-start"]')).toBeNull();
+    expect(fakes.requests.filter((r) => r.method === 'POST')).toEqual([]);
+  });
+
+  it('starts a found program with the arguments typed in its own field, and nothing else', async () => {
+    fakes.launchers = [launcher('claude-code', 'Claude Code', 'found')];
+    await mount();
+    fireEvent.change(screen.getByTestId('launcher-args'), { target: { value: '--model big' } });
+    fireEvent.click(screen.getByTestId('launcher-start'));
+    await settle();
+    const post = fakes.requests.find((r) => r.method === 'POST')!;
+    expect(JSON.parse(post.body!)).toEqual({ cols: 100, rows: 30, launcherId: 'claude-code', args: '--model big' });
+  });
+
+  it('starts with no args field content as just the launcher', async () => {
+    fakes.launchers = [launcher('codex', 'Codex', 'found')];
+    await mount();
+    fireEvent.click(screen.getByTestId('launcher-start'));
+    await settle();
+    expect(JSON.parse(fakes.requests.find((r) => r.method === 'POST')!.body!)).toEqual({ cols: 100, rows: 30, launcherId: 'codex' });
+  });
+
+  it('Detect asks the server to look again and shows the new answer', async () => {
+    fakes.launchers = [launcher('codex', 'Codex', 'not_found')];
+    await mount();
+    fakes.launchers = [launcher('codex', 'Codex', 'found')];
+    fireEvent.click(screen.getByTestId('launchers-detect'));
+    await settle();
+    expect(fakes.requests.some((r) => r.method === 'POST' && r.path.endsWith('/terminals/launchers'))).toBe(true);
+    expect(screen.getByTestId('launcher').getAttribute('data-state')).toBe('found');
+  });
+
+  it('says Copilot is for interactive use only', async () => {
+    fakes.launchers = [launcher('copilot', 'Copilot', 'found', { termsNote: 'interactive_only' })];
+    await mount();
+    expect(screen.getByTestId('launcher-interactive').textContent).toContain('own interactive use only');
+  });
+
+  it('shows nothing about programs when there are none and none failed to load', async () => {
+    await mount();
+    expect(screen.queryByTestId('launchers')).toBeNull();
+  });
 });
 
 describe('the Terminals page (E16-R3, AD-21)', () => {

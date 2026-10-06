@@ -7,7 +7,7 @@
  */
 import { TicketEpic, TicketRow, TicketsResponse } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { cardStatusLine, groupBoard, humanEpicTitle, indexTickets, prerequisitesOf, unmetPrerequisites } from '../src/planning/board-model';
+import { cardStatusLine, groupBoard, humanEpicTitle, isFinishedTicket, indexTickets, prerequisitesOf, unmetPrerequisites } from '../src/planning/board-model';
 
 const row = (fields: Record<string, unknown>) =>
   TicketRow.parse({ id: null, epic: 'epic-first', title: 'A ticket', type: 'story', status: '', state: 'planned', blocked_reason: '', ...fields });
@@ -98,5 +98,36 @@ describe('humanEpicTitle', () => {
     expect(humanEpicTitle('epic-planning-and-board')).toBe('Planning and board');
     expect(humanEpicTitle('backlog')).toBe('Backlog');
     expect(humanEpicTitle('')).toBe('Not in an epic');
+  });
+});
+
+describe('a finished epic and its retrospective (epic 7, story 7.4)', () => {
+  const row = (ref: string, epic: string, state: string, status = '') => TicketRow.parse({ ref, id: 1, epic, title: ref, type: 'story', status, state, blocked_reason: '' });
+  const response = (tickets: TicketRow[], epics: unknown[] = []) => TicketsResponse.parse({ tickets, problems: [], epics });
+
+  it('a ticket is finished when done or dropped, not when built or in review', () => {
+    expect(isFinishedTicket({ status: 'done', state: 'done' })).toBe(true);
+    expect(isFinishedTicket({ status: 'dropped', state: 'dropped' })).toBe(true);
+    expect(isFinishedTicket({ status: 'dropped', state: 'backlog' })).toBe(true);
+    for (const [status, state] of [['built', 'review'], ['in-review', 'review'], ['', 'planned'], ['blocked', 'backlog']] as const) expect(isFinishedTicket({ status, state }), `${status} ${state}`).toBe(false);
+  });
+
+  it('an epic is finished when every ticket is, judged over dropped tickets even when the filter hides them', () => {
+    const tickets = [row('1.1', 'epic-a', 'done', 'done'), row('1.2', 'epic-a', 'dropped', 'dropped'), row('2.1', 'epic-b', 'done', 'done'), row('2.2', 'epic-b', 'review', 'built')];
+    const groups = groupBoard(response(tickets), false);
+    expect(groups.map((group) => [group.slug, group.finished])).toEqual([
+      ['epic-a', true],
+      ['epic-b', false],
+    ]);
+    expect(groupBoard(response(tickets), true).map((group) => group.finished)).toEqual([true, false]);
+  });
+
+  it('carries each epic\'s retrospective from the tree, null when none', () => {
+    const epics = [
+      { slug: 'epic-a', id: 1, status: 'done', after: [], blocks: [], retrospective: { path: 'x/epic-a-retrospective.md', verdict: 'rejected', date: '2026-10-05' } },
+      { slug: 'epic-b', id: 2, status: 'active', after: [], blocks: [] },
+    ];
+    const groups = groupBoard(response([row('1.1', 'epic-a', 'done', 'done'), row('2.1', 'epic-b', 'planned')], epics), false);
+    expect(groups.map((group) => group.retrospective?.verdict ?? null)).toEqual(['rejected', null]);
   });
 });

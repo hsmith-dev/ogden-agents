@@ -331,7 +331,7 @@ function Board({
   const droppedId = useId();
   const { onChoose, saving, announcement, failure } = useBoardMarks(wsId, updatedAt, showDropped, droppedId);
   const { onBuild, onBuildAll, allStarted, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted } = build;
-  const { onLookBack, lookingBack, lookBackFailure } = useBoardLookBack(wsId, lookBack);
+  const { controls: lookBackControls, reducedText: lookBackReduced, failure: lookBackFailure } = useBoardLookBack(wsId, lookBack);
   const commitRef = buildFailure?.commitRef;
   // Story 5.8: a ticket whose build waits for a slot says Queued on its card.
   const runs = useWorkspaceRuns(wsId, hasBuilds);
@@ -383,6 +383,7 @@ function Board({
           {buildFailure.message}
         </Notice>
       )}
+      {lookBackReduced === undefined ? null : <ReducedModeNotice wsId={wsId} texts={[lookBackReduced]} className="flex max-w-(--space-chat-column) flex-col gap-3" />}
       {allStarted === undefined ? null : (
         <Notice
           role="status"
@@ -450,7 +451,7 @@ function Board({
         <ul aria-label={BOARD_EPICS_LABEL} className="m-0 flex list-none flex-col gap-8 p-0">
           {epics.map((epic) => (
             <li key={epic.slug} className="min-w-0">
-              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} failures={failures} onLookBack={onLookBack} lookingBack={lookingBack} />
+              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} failures={failures} lookBack={lookBackControls} />
             </li>
           ))}
         </ul>

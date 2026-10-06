@@ -34,11 +34,3 @@ export interface SkillLabelsFile {
 
 /** The mapping as shipped (unchecked here: 4.5's reader reports what doesn't fit; a test checks the shipped file's shape). */
 export const SKILL_LABELS: SkillLabelsFile = raw as SkillLabelsFile;
-
-/**
- * The skill a look-back on an epic invokes (story 7.1, the tracer): the one
- * name the retrospectives wiring needs, kept here with the other skill names
- * (AD-12: core and web name none). Entry 7.3 gives the mapping an epic scope
- * and entry 7.4 reads the look-back action from the catalog instead.
- */
-export const LOOK_BACK_SKILL = 'bmad-retrospective';

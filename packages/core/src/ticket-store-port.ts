@@ -44,6 +44,19 @@ export interface TicketRunGuard {
  */
 export interface TicketWatchOptions {
   beforeRun?: (() => Promise<TicketRunGuard>) | undefined;
+  /**
+   * Called with the epics (their folder names) whose retrospective file
+   * appeared, changed or went since the watch last read the tree (epic 7,
+   * story 7.4): no ticket row changes then, so `onChange` stays silent. Never
+   * called with `[]`, and not for the first read.
+   */
+  onRetrospectiveChange?: ((epics: string[]) => void) | undefined;
+  /**
+   * Whether Retrospectives is on now (epic 7): asked before each read, and
+   * the store looks at no retrospective file while it answers `false` or
+   * this is left out (AD-22: nothing is read for a project with it off).
+   */
+  retrospectivesOn?: (() => boolean) | undefined;
 }
 
 export interface TicketStorePort {

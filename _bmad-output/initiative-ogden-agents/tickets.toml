@@ -87,6 +87,16 @@ title = "v1.1: Codex and Grok beside Claude Code"
 covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]
 after = [{ epic = 6, needs = "the agents-as-a-choice contracts (6.3), the shared ACP client in acp-base (6.4), the picker and default agent per project (6.6), its sweep (6.9) and v1 released (6.10)" }, { epic = 4, needs = "the per-project trust store (4.2), BMad setup (4.3), planning sessions (4.6) and its release (4.13)" }]
 
+# ---- builds with other agents (user, 2026-10-05: unattended builds with Codex, Grok and Antigravity are brought into version 1; Copilot is not included) ----
+
+# Epic id 17 (2026-10-05): 14 is v1.2 local models, 15 is v2 orchestration, 16 is the native CLI terminal; no other open branch uses 17.
+[[epic]]
+id = 17
+slug = "epic-builds-with-other-agents"
+title = "Build unattended with Codex, Grok or Antigravity, not only Claude Code"
+covers = ["CAP-15", "CAP-8", "CAP-9", "CAP-10", "CAP-12", "CAP-4", "CAP-16", "CAP-19"]
+after = [{ epic = 5, needs = "the headless build session (5.4), the sandbox chain and Build dialog (5.6), the runner (5.7), the dispatcher (5.8) and review and approve (5.9)" }, { epic = 6, needs = "the registry, acp-base and the picker (6.3, 6.4, 6.6), Antigravity's chat, setup and skills (6.5, 6.7, 6.8)" }, { epic = 12, needs = "the contracts with a mode fixed at start (12.3), Codex's and Grok's chats, setup and skills (12.5 to 12.9)" }, { epic = 11, needs = "the board's build actions (11.3)" }]
+
 # ---- v2 (planned; outside the v1 initiative's Done when) ----
 
 [[epic]]

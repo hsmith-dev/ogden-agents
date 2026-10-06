@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { agentWrapper, appExecutable, installNsis, IS_WIN, killApps, killSidecars, launchApp, listApps, listSidecars, newWorkspace, readReport, sleep, tabOf, waitFor, writeQuit } from './app-harness.mjs';
+import { agentWrapper, appExecutable, describeSidecars, installNsis, IS_WIN, launchApp, listApps, listSidecars, newWorkspace, readReport, sleep, sweepScenario, tabOf, waitFor, writeQuit } from './app-harness.mjs';
 
 const { values } = parseArgs({ options: { app: { type: 'string' }, installer: { type: 'string' }, target: { type: 'string' } }, strict: true });
 if ((!values.app && !values.installer) || !values.target) {
@@ -53,6 +53,14 @@ const alive = (pid) => {
   }
 };
 const noSidecars = () => listSidecars(before).length === 0;
+/** Waits for the sidecars to be gone; when they are not, says which ones were left (pid, parent, state, command). */
+async function expectNoSidecars(what, ms) {
+  try {
+    await waitFor(what, noSidecars, ms);
+  } catch (error) {
+    throw new Error(`${error.message}; left: ${JSON.stringify(describeSidecars(before))}`);
+  }
+}
 
 /** An app with its own data folder and the fake agent; waits until the page loaded. */
 async function startApp(name, extraEnv = {}) {
@@ -100,8 +108,7 @@ async function scenario(name, fn) {
         // Already gone.
       }
     }
-    killSidecars(before);
-    killApps(appsBefore);
+    sweepScenario(appsBefore, before);
     // The single-instance lock is held until the old app is really gone: wait for it before the next scenario starts one.
     await waitFor('the last scenario\'s app to be gone', () => listApps(appsBefore).length === 0, 20_000).catch(() => {});
     await sleep(1500);
@@ -126,7 +133,7 @@ await scenario('A. a second launch focuses the first window and starts no second
   // B. quit with an idle server leaves nothing.
   writeQuit(app.ws);
   await Promise.race([app.child.exited, sleep(30_000)]);
-  await waitFor('B. no ogden-node after quit', noSidecars, 20_000);
+  await expectNoSidecars('B. no ogden-node after quit', 20_000);
 });
 
 await scenario('C. an npm-started server is attached to, kept running, and not stopped by the app', async () => {
@@ -173,7 +180,9 @@ await scenario('D2. "quit anyway" stops the server and the agent and its child',
   await waitFor('the question', () => events(app.ws, 'confirm_asked').length > 0, 30_000);
   const exit = await Promise.race([app.child.exited, sleep(60_000).then(() => 'timeout')]);
   if (exit === 'timeout') throw new Error('the app did not quit after "quit anyway"');
-  await waitFor('no ogden-node (server, agent or its child) after quit', noSidecars, 20_000);
+  await expectNoSidecars('no ogden-node (server, agent or its child) after quit', 20_000).catch((error) => {
+    throw new Error(`${error.message}; the shell's sweep: ${JSON.stringify(events(app.ws, 'quit_sweep').map((e) => e.data))}`);
+  });
 });
 
 await scenario('F. a chat with the fake agent completes a turn through the app', async () => {
@@ -191,7 +200,7 @@ await scenario('F. a chat with the fake agent completes a turn through the app',
     return session.state === 'idle' && Boolean(session.autoTitle);
   }, 60_000);
   writeQuit(app.ws);
-  await waitFor('no ogden-node after quit', noSidecars, 30_000);
+  await expectNoSidecars('no ogden-node after quit', 30_000);
 });
 
 await scenario('E. killing the shell leaves nothing running', async () => {
@@ -203,7 +212,7 @@ await scenario('E. killing the shell leaves nothing running', async () => {
     if (IS_WIN) spawnSync('taskkill', ['/pid', String(pid), '/F']);
     else process.kill(pid, 'SIGKILL');
   }
-  await waitFor('no ogden-node after the shell was killed', noSidecars, 45_000);
+  await expectNoSidecars('no ogden-node after the shell was killed', 45_000);
 });
 
 const failed = results.filter((r) => !r.ok);

@@ -116,7 +116,7 @@ function managerContract(name: string, make: (script?: MemoryManagerScript) => M
 managerContract('manager-memory', (script) => createMemoryManager(script), { unscripted: true, failures: true, exactCodes: true });
 
 describe('manager-memory', () => {
-  it('plays its scripted replies in turn and repeats the last, and records only the method and the goal', async () => {
+  it('plays its scripted replies in turn and repeats the last, and records only the method, the goal and the rules the call carried', async () => {
     const other: ManagerPlan = { ...GOOD_PLAN, steps: [GOOD_PLAN.steps[0]!] };
     const manager = createMemoryManager({ plans: [GOOD_PLAN, other] });
     expect(await manager.proposePlan(context())).toMatchObject({ ok: true, value: { steps: expect.arrayContaining([expect.anything(), expect.anything()]) } });
@@ -125,10 +125,22 @@ describe('manager-memory', () => {
     const third = await manager.proposePlan(context());
     expect(third.ok && third.value.steps).toHaveLength(1);
     expect(manager.calls).toEqual([
-      { method: 'proposePlan', goal: 'Add a contact form to the site' },
-      { method: 'proposePlan', goal: 'Add a contact form to the site' },
-      { method: 'proposePlan', goal: 'Add a contact form to the site' },
+      { method: 'proposePlan', goal: 'Add a contact form to the site', rules: [] },
+      { method: 'proposePlan', goal: 'Add a contact form to the site', rules: [] },
+      { method: 'proposePlan', goal: 'Add a contact form to the site', rules: [] },
     ]);
+  });
+
+  it('records the routing rules (15.12) a plan call carried, and accepts a step that names one of them', async () => {
+    const rules = [{ id: 'r1', text: 'Tests go to the first agent' }];
+    const step = { ...GOOD_PLAN.steps[0]!, rule: 'r1' };
+    const manager = createMemoryManager({ plans: [{ ...GOOD_PLAN, steps: [step] }] });
+    const planned = await manager.proposePlan({ ...context(), rules });
+    expect(planned.ok && (planned.value.steps[0] as { rule?: string }).rule).toBe('r1');
+    expect(manager.calls).toEqual([{ method: 'proposePlan', goal: 'Add a contact form to the site', rules }]);
+    // A rule the call did not carry is refused like any other off-protocol answer.
+    const refused = await createMemoryManager({ plans: [{ ...GOOD_PLAN, steps: [step] }] }).proposePlan(context());
+    expect(refused).toMatchObject({ ok: false, kind: 'malformed', code: 'unknown_rule' });
   });
 });
 

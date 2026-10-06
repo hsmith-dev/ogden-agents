@@ -65,6 +65,8 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `POST ${API_ROUTES.workspaceOrchestrationStop}`,
   `POST ${API_ROUTES.workspaceOrchestrationAnswer}`,
   `GET ${API_ROUTES.workspaceOrchestrationActivity}`,
+  `GET ${API_ROUTES.workspaceOrchestrationRouting}`,
+  `PUT ${API_ROUTES.workspaceOrchestrationRouting}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
   // The script trust (story 4.2): asked before or right after a script-running piece is turned on, never revoked by turning one off.
@@ -103,6 +105,8 @@ const UNGUARDED_BY_DESIGN: readonly string[] = [
   `POST ${API_ROUTES.workspaceOrchestrationStop}`,
   `POST ${API_ROUTES.workspaceOrchestrationAnswer}`,
   `GET ${API_ROUTES.workspaceOrchestrationActivity}`,
+  `GET ${API_ROUTES.workspaceOrchestrationRouting}`,
+  `PUT ${API_ROUTES.workspaceOrchestrationRouting}`,
 ];
 
 /** Path segments that name BMad Method or one of its pieces. */

@@ -39,9 +39,11 @@ import {
   ORCHESTRATION_NO_MANAGER_MESSAGE,
   ORCHESTRATION_OFF_MESSAGE,
   OrchestrationActivityResponse,
+  OrchestrationRoutingResponse,
   OrchestrationRunResponse,
   OrchestrationRunsResponse,
   OrchestrationSettingsResponse,
+  ROUTING_LIMITS,
   RUN_LIMITS,
   StartOrchestrationRunRequest,
   TeamRoster,
@@ -302,4 +304,26 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
 
   // The activity log (15.8): every instruction sent or refused, read from the events.
   routes.get(API_ROUTES.workspaceOrchestrationActivity, (c, { workspaceId }) => run(c, async (use) => c.json(OrchestrationActivityResponse.parse({ entries: await use.activity(workspaceId) }))));
+
+  // The routing rules (15.12): the person's own sentences, saved as a whole list. They go to the manager as data and only ever suggest; no
+  // route here changes the roster, the mode or an approval.
+  const routing = (rules: ReturnType<Orchestration['getRouting']>) => OrchestrationRoutingResponse.parse({ rules, maxRules: ROUTING_LIMITS.maxRules, maxRuleChars: ROUTING_LIMITS.maxRuleChars });
+  routes.get(API_ROUTES.workspaceOrchestrationRouting, (c, { workspaceId }) => run(c, async (use) => c.json(routing(use.getRouting(workspaceId)))));
+  routes.put(API_ROUTES.workspaceOrchestrationRouting, async (c, { workspaceId }) => {
+    let answer: Response | undefined;
+    const tooLong = await reviewLimit(c, async () => {
+      const body = await readJson(c);
+      if (!body.ok) {
+        answer = body.response;
+        return;
+      }
+      // The rules are the person's own words: only their count is logged.
+      answer = await run(c, async (use) => {
+        const saved = use.setRouting(workspaceId, body.value);
+        log.info('orchestration routing rules saved', { workspaceId, rules: saved.length });
+        return c.json(routing(saved));
+      });
+    });
+    return tooLong ?? answer!;
+  });
 }

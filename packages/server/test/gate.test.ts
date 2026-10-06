@@ -726,6 +726,8 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.workspaceOrchestrationStop}`,
   `POST ${API_ROUTES.workspaceOrchestrationAnswer}`,
   `GET ${API_ROUTES.workspaceOrchestrationActivity}`,
+  `GET ${API_ROUTES.workspaceOrchestrationRouting}`,
+  `PUT ${API_ROUTES.workspaceOrchestrationRouting}`,
   `GET ${API_ROUTES.orchestrationDefaults}`,
   `PUT ${API_ROUTES.orchestrationDefaults}`,
 ] as const;

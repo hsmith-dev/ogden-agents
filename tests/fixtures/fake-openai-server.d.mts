@@ -31,6 +31,8 @@ export interface FakeRequest {
   messageRoles?: string[];
   messageCount?: number;
   userText?: string;
+  /** The whole of the last user message, up to 20000 characters. */
+  promptText?: string;
   lastToolContent?: string;
   systemChars?: number;
   temperature?: number;

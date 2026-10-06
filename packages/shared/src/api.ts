@@ -555,6 +555,13 @@ export const API_ROUTES = {
   /** `GET` → `OrchestrationActivityResponse` (15.8): every instruction that was sent or refused, newest first, read from the events. Behind the Orchestration piece. */
   workspaceOrchestrationActivity: `${API_BASE}/workspaces/:wsId/orchestration/activity`,
   /**
+   * `GET` → `OrchestrationRoutingResponse`; `PUT SetOrchestrationRoutingRequest` → `OrchestrationRoutingResponse` (15.12): the project's routing
+   * rules, plain sentences the manager reads as the person's wishes. Behind the Orchestration piece. 400 `invalid_request` with the plain reason
+   * for too many rules, a rule that is too long or not clean text, or one that holds a secret; nothing is saved then. A change appends
+   * `orchestration.routing_changed`.
+   */
+  workspaceOrchestrationRouting: `${API_BASE}/workspaces/:wsId/orchestration/routing`,
+  /**
    * `GET` → `OrchestrationDefaultsResponse`; `PUT UpdateOrchestrationDefaultsRequest` → `OrchestrationDefaultsResponse` (15.8): the mode new
    * projects are offered and the limits of every run (instructions, depth, minutes, each within its bounds), install-level preferences
    * beside the default for new projects. Dispatch automatically needs `confirm: true` (400 `confirmation_required`). A change appends

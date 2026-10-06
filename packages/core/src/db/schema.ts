@@ -115,6 +115,8 @@ export const workspaces = sqliteTable(
     orchestrationMode: text('orchestration_mode'),
     /** The project's team roster as JSON (`TeamRoster`), or NULL for nobody assigned. Read only through `readOrchestrationRoster`. */
     orchestrationRoster: text('orchestration_roster'),
+    /** The project's routing rules as JSON (`RoutingRules`, 15.12), or NULL for none. Read only through `readRoutingRules`. */
+    orchestrationRouting: text('orchestration_routing'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],
@@ -456,6 +458,9 @@ export const orchestrationSteps = sqliteTable(
     buildRef: text('build_ref'),
     /** The build run the person started in the Build dialog for this step (15.11); NULL until then. */
     buildRunId: text('build_run_id'),
+    /** The routing rule the manager said this step followed, and its text as it was when the plan was made (15.12); NULL for none. */
+    ruleId: text('rule_id'),
+    ruleText: text('rule_text'),
   },
   (t) => [primaryKey({ columns: [t.runId, t.stepId] })],
 );

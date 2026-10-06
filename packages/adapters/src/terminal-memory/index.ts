@@ -124,17 +124,18 @@ export function createMemoryTerminalPort(options: MemoryTerminalOptions = {}): M
       const process = await this.open(input);
       let printed = '';
       process.onData((text) => (printed += text));
-      return {
-        ...process,
+      // Not a copy (`...process` would freeze the live `exitCode` and `kills`): the pane process reads through to the terminal.
+      const pane: PaneProcess = Object.assign(Object.create(process) as typeof process, {
         pid: undefined,
         // No screen to read: what was printed so far, by line.
-        screenLines: async (count) => printed.split(/\r?\n/).filter((line) => line.trim() !== '').slice(-count),
+        screenLines: async (count: number) => printed.split(/\r?\n/).filter((line) => line.trim() !== '').slice(-count),
         // No screen to serialize: the snapshot is what was printed so far.
-        attach(onSnapshot, onData) {
+        attach(onSnapshot: (snapshot: string) => void, onData: (data: string) => void) {
           onSnapshot(printed);
           return process.onData(onData);
         },
-      };
+      });
+      return pane;
     },
     async open(input) {
       if (!availability.ok) throw new Error(availability.reason);

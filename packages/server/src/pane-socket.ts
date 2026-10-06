@@ -33,19 +33,7 @@ import type { Hono } from 'hono';
 import type { WSContext } from 'hono/ws';
 import { webSocketToken, type TabTokens } from './auth.js';
 import type { Logger } from './log.js';
-import {
-  ATTACH_WAIT_MS,
-  CONTROL_FRAME_COST_BYTES,
-  createInputBudget,
-  INPUT_BURST_BYTES,
-  INPUT_BYTES_PER_SECOND,
-  MAX_TERMINAL_VIEWERS,
-  MAX_VIEWER_BUFFERED_BYTES,
-} from './terminal-socket.js';
-
-const WS_OPEN = 1;
-const TOO_BIG = 1009;
-const POLICY = 1008;
+import { ATTACH_WAIT_MS, CONTROL_FRAME_COST_BYTES, createInputBudget, createViewerCounter, INPUT_BURST_BYTES, INPUT_BYTES_PER_SECOND, MAX_TERMINAL_VIEWERS, MAX_VIEWER_BUFFERED_BYTES, POLICY, TOO_BIG, WS_OPEN } from './terminal-socket-limits.js';
 
 export interface PaneSocketOptions {
   panes: Panes;
@@ -56,12 +44,7 @@ export interface PaneSocketOptions {
 }
 
 export function registerPaneSocket(app: Hono, { panes, log, tabs, now = Date.now, attachWaitMs = ATTACH_WAIT_MS }: PaneSocketOptions): void {
-  const viewerCounts = new Map<PaneId, number>();
-  const countViewer = (id: PaneId, change: 1 | -1) => {
-    const next = (viewerCounts.get(id) ?? 0) + change;
-    if (next <= 0) viewerCounts.delete(id);
-    else viewerCounts.set(id, next);
-  };
+  const viewers = createViewerCounter<PaneId>();
 
   app.get(
     PANE_SOCKET_ROUTE,
@@ -79,7 +62,7 @@ export function registerPaneSocket(app: Hono, { panes, log, tabs, now = Date.now
       const unsubscribes: Array<() => void> = [];
       const end = () => {
         closed = true;
-        if (counted && paneId !== undefined) countViewer(paneId, -1);
+        if (counted && paneId !== undefined) viewers.count(paneId, -1);
         counted = false;
         clearTimeout(attachTimer);
         attachTimer = undefined;
@@ -213,12 +196,12 @@ export function registerPaneSocket(app: Hono, { panes, log, tabs, now = Date.now
             close(ws, PANE_CLOSE.notAvailable, 'not_available');
             return;
           }
-          if ((viewerCounts.get(paneId) ?? 0) >= MAX_TERMINAL_VIEWERS) {
+          if (viewers.of(paneId) >= MAX_TERMINAL_VIEWERS) {
             log.warn('too many terminal pane viewers; closing the newest', { paneId, max: MAX_TERMINAL_VIEWERS });
             close(ws, TERMINAL_CLOSE.tooManyViewers, 'too_many_viewers');
             return;
           }
-          countViewer(paneId, 1);
+          viewers.count(paneId, 1);
           counted = true;
           const target = viewer;
           attachTimer = setTimeout(() => {

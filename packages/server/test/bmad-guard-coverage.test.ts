@@ -52,6 +52,7 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `DELETE ${API_ROUTES.permissionRule}`,
   // Orchestration (epic 15) is not a BMad piece: its routes go through `orchestrationRoutes` (see orchestration-contract.test.ts).
   `GET ${API_ROUTES.workspaceOrchestration}`,
+  `GET ${API_ROUTES.workspaceTeamRoster}`,
   `GET ${API_ROUTES.workspaceOrchestrationRuns}`,
   `POST ${API_ROUTES.workspaceOrchestrationRuns}`,
   `GET ${API_ROUTES.workspaceOrchestrationRun}`,
@@ -82,6 +83,7 @@ const UNGUARDED_BY_DESIGN: readonly string[] = [
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
   `PUT ${API_ROUTES.workspaceBmadScriptTrust}`,
   // Orchestration's runs (epic 15, 15.3) have a `runs` segment but serve no BMad piece: they go through `orchestrationRoutes`, behind its own guard.
+  `GET ${API_ROUTES.workspaceTeamRoster}`,
   `GET ${API_ROUTES.workspaceOrchestrationRuns}`,
   `POST ${API_ROUTES.workspaceOrchestrationRuns}`,
   `GET ${API_ROUTES.workspaceOrchestrationRun}`,

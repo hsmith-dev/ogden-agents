@@ -710,6 +710,9 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.localEndpointManagerTest}`,
   // Orchestration (epic 15, 15.2): behind the gate and core's Orchestration guard (its own helper, not a BMad piece's).
   `GET ${API_ROUTES.workspaceOrchestration}`,
+  `GET ${API_ROUTES.workspaceTeamRoster}`,
+  `GET ${API_ROUTES.teamRosterDefault}`,
+  `PUT ${API_ROUTES.teamRosterDefault}`,
   `GET ${API_ROUTES.workspaceOrchestrationRuns}`,
   `POST ${API_ROUTES.workspaceOrchestrationRuns}`,
   `GET ${API_ROUTES.workspaceOrchestrationRun}`,

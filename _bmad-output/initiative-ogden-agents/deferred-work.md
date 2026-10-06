@@ -114,6 +114,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 14.10 (proposed): The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one. From 14.3 review. (log: "The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one")
 - 14.10 (proposed): Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry). From 14.3 review. (log: "Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry)")
 - 14.10 (proposed): shared/src/events.ts is over 600 lines and shared compiles with DOM types. From 14.3 review. (log: "shared/src/events.ts is over 600 lines and shared compiles with DOM types")
+- 15.7 (proposed): Dispatch does not re-check that a step's worker is still rostered and ready. From 15.5 review. (log: "Dispatch does not re-check that a step's worker is still rostered and ready")
+- 15.5 follow-up (proposed): Test as a manager results are kept in memory only, so they read as untested after a restart; persist them and forget them when a server's address changes. From 15.5 review. (log: "Test as a manager results are kept in memory only")
+- 15.5 follow-up (proposed): the worker role is one agent, so the manager addresses the worker and the reviewer; several workers would add an optional list to TeamRoster. From 15.5 design. (log: "The worker role is one agent, so the manager addresses only the worker and the reviewer")
 - 14.11 (live check): The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model. From 14.9 review. (log: "The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model")
 
 ## Log
@@ -869,6 +872,15 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-epic-contracts-and-stubs-endpoint-localmodelport-no-account-descriptor-and-the-fake-server-plan.md`
   summary: shared/src/events.ts is over 600 lines and shared compiles with DOM types: events.ts grew from 615 to 621 lines with the endpoint event and shared's tsconfig gained the DOM lib only for URL; a narrower URL declaration and a split of events.ts are the sweep's.
   evidence: 14.3 correctness review.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-llm-orchestration/story-team-roster-and-roles-in-settings-assign-agents-and-models-to-manager-planner-worker-reviewer-per-project-plan.md`
+  summary: Dispatch does not re-check that a step's worker is still rostered and ready: the plan is checked against the roster when proposed, so a worker removed from the roster, no longer ready, or a subscription agent after a switch to automatic can still get an approved step; dispatch and read-back should require the worker to be a ready entry of the roster.
+  evidence: 15.5 security review.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-llm-orchestration/story-team-roster-and-roles-in-settings-assign-agents-and-models-to-manager-planner-worker-reviewer-per-project-plan.md`
+  summary: Test as a manager results are kept in memory only, so they read as untested after a restart: persist them and forget them when a server's address changes or a server is removed.
+  evidence: 15.5 correctness review.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-llm-orchestration/story-team-roster-and-roles-in-settings-assign-agents-and-models-to-manager-planner-worker-reviewer-per-project-plan.md`
+  summary: The worker role is one agent, so the manager addresses only the worker and the reviewer: letting the manager address several workers would add an optional workers list to TeamRoster, compatible with the stored roster and the shared type.
+  evidence: 15.5 design decision.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-bmad-skills-reach-the-local-model-where-planning-is-on-nothing-where-it-is-off-plan.md`
   summary: The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model: spike 14.1 says it reads `.opencode/skills` unless project config is disabled and walks up from the project folder; whether `OPENCODE_DISABLE_PROJECT_CONFIG` covers `.opencode/skills` is a live check on the real harness.
   evidence: 14.9 review; spike 14.1 report.

@@ -15,6 +15,8 @@ import {
   DEFAULT_ORCHESTRATION_MODE,
   DefaultModeNotice as DefaultModeNoticeSchema,
   OrchestrationMode as OrchestrationModeSchema,
+  rosterKindProblem,
+  TEAM_ROLES,
   TeamRoster as TeamRosterSchema,
   type OrchestrationMode,
   type TeamRoster,
@@ -246,8 +248,6 @@ const orchestrationFields = (enabled: boolean, mode: OrchestrationMode, roster: 
   ...(sameRoster(roster, TeamRosterSchema.parse({})) ? {} : { orchestrationRoster: roster }),
 });
 
-/** The message refusing a manager that is an agent. */
-const ROSTER_MANAGER_IS_A_MODEL = 'The manager must be a model on one of your servers, not an agent.';
 /** The message refusing a model on a server the user has not set up. */
 const ROSTER_UNKNOWN_ENDPOINT = 'Choose a model on a server you have set up.';
 /** The message refusing a roster that names an agent this install doesn't have. */
@@ -384,8 +384,14 @@ export function createWorkspaceSettings({
         const parsed = TeamRosterSchema.safeParse(input.orchestrationRoster);
         if (!parsed.success) throw new ValidationError('Choose who takes each role: an agent, or a model.', [{ path: ['orchestrationRoster'], message: 'not a roster' }]);
         for (const assignee of Object.values(parsed.data)) if (assignee?.kind === 'agent' && !isAgentRegistered(assignee.agentId)) throw new UnknownAgentError(ROSTER_UNKNOWN_AGENT);
-        // The manager is a model, never an agent (E15: it is a tool-free call, not a coding agent).
-        if (parsed.data.manager?.kind === 'agent') throw new ValidationError(ROSTER_MANAGER_IS_A_MODEL, [{ path: ['orchestrationRoster', 'manager'], message: 'not a model' }]);
+        // The manager is a model and a worker is an agent, whatever is ready (E15: the manager is a tool-free call, a worker runs commands).
+        const before = readOrchestrationRoster(orm, workspaceId);
+        for (const role of TEAM_ROLES) {
+          // Only a role that is being changed: a roster stored before the rule never blocks a change to another role.
+          if (JSON.stringify(parsed.data[role]) === JSON.stringify(before?.[role] ?? null)) continue;
+          const problem = rosterKindProblem(role, parsed.data[role]);
+          if (problem !== undefined) throw new ValidationError(problem, [{ path: ['orchestrationRoster', role], message: role === 'manager' ? 'not a model' : 'not an agent' }]);
+        }
         // A model sits on a server the user has set up (15.4); whether it is confirmed is checked when it is called.
         const current = readOrchestrationRoster(orm, workspaceId);
         for (const [role, assignee] of Object.entries(parsed.data)) {

@@ -30,3 +30,39 @@ export type TeamRoster = z.infer<typeof TeamRoster>;
 
 /** A roster with nobody in any role. */
 export const emptyRoster = (): TeamRoster => TeamRoster.parse({});
+
+/** Each role's plain name. */
+export const TEAM_ROLE_LABELS: Readonly<Record<TeamRole, string>> = { manager: 'Manager', planner: 'Planner', worker: 'Worker', reviewer: 'Reviewer' };
+
+/** What each role does, in one plain sentence. */
+export const TEAM_ROLE_SENTENCES: Readonly<Record<TeamRole, string>> = {
+  manager: 'Reads your goal and writes one instruction at a time. It is a model on one of your servers.',
+  planner: 'Breaks a goal into steps. A model or an agent.',
+  worker: 'Does the work in its own chat, with its own permission cards. An agent.',
+  reviewer: 'Looks over what a worker did. An agent or a model.',
+};
+
+/** The words refusing a manager that is an agent (15.4). */
+export const ROSTER_MANAGER_IS_A_MODEL = 'The manager must be a model on one of your servers, not an agent.';
+/** The words refusing a worker that is a model: only an agent runs commands and edits files. */
+export const ROSTER_WORKER_IS_AN_AGENT = 'A worker must be an agent. A model on its own cannot run commands or edit files.';
+
+/**
+ * The rule of a role that depends only on who is assigned, never on what is
+ * ready now: the manager is a model, a worker is an agent. The plain refusal,
+ * or `undefined` when the assignment is allowed. Checked by the server on
+ * every save, and again by the roster screen to show why.
+ */
+export function rosterKindProblem(role: TeamRole, assignee: TeamAssignee | null): string | undefined {
+  if (assignee === null) return undefined;
+  if (role === 'manager' && assignee.kind === 'agent') return ROSTER_MANAGER_IS_A_MODEL;
+  if (role === 'worker' && assignee.kind === 'model') return ROSTER_WORKER_IS_AN_AGENT;
+  return undefined;
+}
+
+/** Whether two assignees are the same agent or the same model on the same server. */
+export function sameAssignee(a: TeamAssignee | null, b: TeamAssignee | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.kind === 'agent') return b.kind === 'agent' && a.agentId === b.agentId;
+  return b.kind === 'model' && a.endpointId === b.endpointId && a.model === b.model;
+}

@@ -98,6 +98,11 @@ export const ChatAgent = z.object({
   needsProjectTrust: z.boolean(),
   /** `true` for an agent that needs no account and no key (epic 14: the Local model): its card shows its endpoint's state, not a sign in. */
   noAccount: z.boolean().optional(),
+  /**
+   * Present for an agent its vendor's terms allow only a person to drive
+   * (epic 15): the plain sentence. It is never a worker or asked by a manager.
+   */
+  interactiveOnly: z.string().min(1).optional(),
   permissionModes: z.array(PermissionMode).min(1),
   unavailable: AgentUnavailable.optional(),
   /**

@@ -11,6 +11,7 @@ import {
   type BoardUseCases,
   type Orchestration,
   type OrchestrationFeature,
+  type Team,
   type RetrospectiveUseCases,
   type BuildSettings,
   type Notifications,
@@ -48,6 +49,7 @@ import { registerPaneSocket } from './pane-socket.js';
 import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
 import { registerOrchestrationRoutes } from './orchestration-routes.js';
+import { registerTeamRosterRoutes } from './team-roster-routes.js';
 import { registerRetrospectiveRoutes } from './retrospective-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
 import { registerLocalEndpointRoutes } from './local-endpoint-routes.js';
@@ -124,6 +126,8 @@ export interface AppOptions {
   orchestration?: OrchestrationFeature;
   /** Core's Orchestration use-case over the chat (epic 15, 15.3); without it the run routes answer 501. */
   orchestrationRuns?: Orchestration;
+  /** Core's team roster (epic 15, 15.5); without it the roster routes answer 501 and settings are not checked for it. */
+  team?: Team;
   /** Registers the test-only BMad probe route (story 10.1); `start()` sets it only when its test hook is allowed. */
   bmadProbe?: boolean;
   /** Core's read-only BMad detection and Not now on its offer (story 10.3); without it those routes answer 501. */
@@ -206,6 +210,7 @@ export function createApp({
   bmad,
   orchestration,
   orchestrationRuns,
+  team,
   bmadProbe,
   bmadDetection,
   bmadScriptTrust,
@@ -322,7 +327,7 @@ export function createApp({
     const addProject = createAddProject({ chat, defaults: newProjectDefaults, bmad });
     registerChatRoutes(app, chat, log, { terminalAvailability, addProject, agentDefaults });
   }
-  registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, builds, log });
+  registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, team, builds, log });
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });
@@ -337,6 +342,7 @@ export function createApp({
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerRetrospectiveRoutes(app, { bmad, scriptTrust: bmadScriptTrust, retrospectives, log });
   // Orchestration (epic 15, story 15.2): the same helper and guard; it runs no project script, so no trust.
   if (orchestration !== undefined) registerOrchestrationRoutes(app, { orchestration, permissions, runs: orchestrationRuns, log });
+  registerTeamRosterRoutes(app, { team, orchestration, log });
   // Unattended builds (story 5.2): the same helper, guard and trust.
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, buildSettings, log });
   // Terminal panes (epic 16): behind the gate, and Developer mode enforced by core on every call.

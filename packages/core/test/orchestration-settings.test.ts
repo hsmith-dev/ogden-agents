@@ -144,6 +144,24 @@ describe('the manager role (story 15.4)', () => {
   });
 });
 
+describe('the worker role (story 15.5)', () => {
+  it('is an agent, never a model, whatever is ready, and writes nothing when refused', async () => {
+    const { core, workspace } = setUp();
+    const values = new Map<string, string>();
+    const endpoints = core.localEndpoints({ backend: 'memory' as const, get: async (name: string) => values.get(name), set: async (name: string, value: string) => void values.set(name, value), delete: async (name: string) => void values.delete(name) });
+    const endpointId = (await endpoints.add({ label: 'My Mac', baseUrl: 'http://localhost:1234/v1' })).id;
+    const before = core.events.lastSeq();
+    try {
+      core.permissions.updateSettings(workspace.id, { orchestrationRoster: { worker: { kind: 'model', endpointId, model: 'a-model' } } });
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as Error).message).toBe('A worker must be an agent. A model on its own cannot run commands or edit files.');
+    }
+    expect(core.events.lastSeq()).toBe(before);
+  });
+});
+
 describe('the Orchestration piece', () => {
   it('is off by default for a new project, and the guard refuses with feature_off', () => {
     const { core, workspace } = setUp();

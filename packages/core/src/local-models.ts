@@ -56,7 +56,20 @@ export interface ManagerTestAnswer {
   message: string;
 }
 
+/** What a model's last Test as a manager found: kept in memory, so it is unknown after the server restarts. */
+export interface ManagerTestResult {
+  endpointId: LocalEndpointId;
+  model: string;
+  pass: boolean;
+  /** The plain words the test gave. */
+  message: string;
+}
+
 export interface LocalModels {
+  /** The last Test as a manager of `model` on endpoint `id` in this run, or `undefined` when it was not tested since the server started. */
+  managerTestResult(id: LocalEndpointId, model: string): ManagerTestResult | undefined;
+  /** Every remembered test result, oldest first. */
+  managerTestResults(): ManagerTestResult[];
   /**
    * Test as a manager: one fixed small plan shaped request to `model` on endpoint `id` (no tools, no files), validated by
    * Ogden, with the result in plain words (malformed JSON, ignored schema, too slow, context too small). No manager
@@ -100,6 +113,55 @@ export function createLocalModels({
   let running: Promise<DetectedEndpoint[]> | undefined;
   const reading = new Map<LocalEndpointId, Promise<LocalModelsAnswer>>();
   const testing = new Map<string, Promise<ManagerTestAnswer>>();
+  /** What each model's last Test as a manager found, kept in memory until the server stops, oldest first. */
+  const results = new Map<string, ManagerTestResult>();
+  const remember = (endpointId: LocalEndpointId, model: string, answer: ManagerTestAnswer): void => {
+    const key = `${endpointId}\u0000${model}`;
+    results.delete(key);
+    results.set(key, { endpointId, model, pass: answer.pass, message: answer.message });
+    // A bounded list: the oldest result goes first.
+    while (results.size > 200) results.delete(results.keys().next().value as string);
+  };
+  /** Answers that tell about the model itself (it passed, or answered too slowly or in the wrong shape), as opposed to a server that was not there. */
+  const definite = new WeakSet<ManagerTestAnswer>();
+  const counted = (answer: ManagerTestAnswer): ManagerTestAnswer => {
+    definite.add(answer);
+    return answer;
+  };
+  const measure = async (id: LocalEndpointId, model: string): Promise<ManagerTestAnswer> => {
+    const target = await endpoints.target(id);
+    if (target === undefined) throw new Error('unreachable: target() answered nothing for a named endpoint');
+    const started = Date.now();
+    const result = await port.structuredComplete(
+      { baseUrl: target.baseUrl, key: target.key, preset: target.preset },
+      { model, prompt: MANAGER_TEST_PROMPT, schema: MANAGER_TEST_SCHEMA, schemaName: 'plan', system: 'You plan software work. Answer with one JSON value only.', maxTokens: 512, timeoutMs: MANAGER_TEST_TIMEOUT_MS },
+    );
+    const ms = Date.now() - started;
+    if (result.ok) {
+      if (ms > MANAGER_TEST_SLOW_MS) return counted({ pass: false, mode: result.mode, ms, message: `Too slow: it answered in the right shape, but took ${Math.round(ms / 1000)} seconds. A manager needs an answer in under ${Math.round(MANAGER_TEST_SLOW_MS / 1000)} seconds.` });
+      const how = result.mode === 'json_schema' ? 'with the server enforcing the shape' : result.mode === 'json_object' ? 'when told the shape in the request' : 'when asked for the shape in plain words';
+      return counted({ pass: true, mode: result.mode, ms, message: `Passed. The model answered in the shape a manager needs, ${how}.` });
+    }
+    const message =
+      result.kind === 'timeout'
+        ? `Too slow: no answer in ${Math.round(MANAGER_TEST_TIMEOUT_MS / 1000)} seconds.`
+        : result.kind === 'context_full'
+          ? "The model's context is too small for this test. Load it with a larger context in the server."
+          : result.kind === 'model_not_found'
+            ? "The server doesn't have that model right now."
+            : result.kind === 'bad_answer'
+              ? result.detail === 'not_json'
+                ? "The model's answer was not valid JSON, even when asked again."
+                : result.detail === 'bad_schema'
+                  ? "The test's own shape could not be used. Please report this."
+                  : result.detail === 'no_way_to_ask'
+                    ? "The server didn't accept any way of asking for a structured answer."
+                    : 'The model answered with JSON, but ignored the shape it was asked for, even when asked again.'
+              : result.reason;
+    const answer: ManagerTestAnswer = { pass: false, mode: null, ms, message };
+    // A server that was down or lacked the model says nothing about the model's fitness: only a slow or malformed answer counts against it.
+    return result.kind === 'timeout' || result.kind === 'bad_answer' ? counted(answer) : answer;
+  };
   return {
     async test(id) {
       const target = await endpoints.target(id);
@@ -120,6 +182,14 @@ export function createLocalModels({
       return { state, models, message };
     },
 
+    managerTestResult(id, model) {
+      return results.get(`${id}\u0000${model}`);
+    },
+
+    managerTestResults() {
+      return [...results.values()];
+    },
+
     managerTest(id, model) {
       // One test per endpoint and model at a time (a test can make up to four requests): a repeated press shares it.
       const key = `${id}\u0000${model}`;
@@ -132,36 +202,9 @@ export function createLocalModels({
     },
 
     async runManagerTest(id, model) {
-      const target = await endpoints.target(id);
-      if (target === undefined) throw new Error('unreachable: target() answered nothing for a named endpoint');
-      const started = Date.now();
-      const result = await port.structuredComplete(
-        { baseUrl: target.baseUrl, key: target.key, preset: target.preset },
-        { model, prompt: MANAGER_TEST_PROMPT, schema: MANAGER_TEST_SCHEMA, schemaName: 'plan', system: 'You plan software work. Answer with one JSON value only.', maxTokens: 512, timeoutMs: MANAGER_TEST_TIMEOUT_MS },
-      );
-      const ms = Date.now() - started;
-      if (result.ok) {
-        if (ms > MANAGER_TEST_SLOW_MS) return { pass: false, mode: result.mode, ms, message: `Too slow: it answered in the right shape, but took ${Math.round(ms / 1000)} seconds. A manager needs an answer in under ${Math.round(MANAGER_TEST_SLOW_MS / 1000)} seconds.` };
-        const how = result.mode === 'json_schema' ? 'with the server enforcing the shape' : result.mode === 'json_object' ? 'when told the shape in the request' : 'when asked for the shape in plain words';
-        return { pass: true, mode: result.mode, ms, message: `Passed. The model answered in the shape a manager needs, ${how}.` };
-      }
-      const message =
-        result.kind === 'timeout'
-          ? `Too slow: no answer in ${Math.round(MANAGER_TEST_TIMEOUT_MS / 1000)} seconds.`
-          : result.kind === 'context_full'
-            ? "The model's context is too small for this test. Load it with a larger context in the server."
-            : result.kind === 'model_not_found'
-              ? "The server doesn't have that model right now."
-              : result.kind === 'bad_answer'
-                ? result.detail === 'not_json'
-                  ? "The model's answer was not valid JSON, even when asked again."
-                  : result.detail === 'bad_schema'
-                    ? "The test's own shape could not be used. Please report this."
-                    : result.detail === 'no_way_to_ask'
-                      ? "The server didn't accept any way of asking for a structured answer."
-                      : 'The model answered with JSON, but ignored the shape it was asked for, even when asked again.'
-                : result.reason;
-      return { pass: false, mode: null, ms, message };
+      const answer = await measure(id, model);
+      if (definite.has(answer)) remember(id, model, answer);
+      return answer;
     },
 
     models(id) {

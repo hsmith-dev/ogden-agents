@@ -23,11 +23,13 @@ import {
   DEFAULT_NEW_PROJECT_DEFAULTS,
   NewProjectDefaults as NewProjectDefaultsSchema,
   PermissionMode as PermissionModeSchema,
+  TeamRoster as TeamRosterSchema,
   UpdateNewProjectDefaultsRequest,
   type AgentId,
   type BmadPiece,
   type NewProjectDefaults,
   type PermissionMode,
+  type TeamRoster,
   type Workspace,
 } from '@ogden-agents/shared';
 import { z } from 'zod';
@@ -48,10 +50,12 @@ type PreferencesRecord = z.infer<typeof PreferencesRecord>;
  * the pieces (10.4).
  */
 const StoredRecord = z.object({
-  newProjects: NewProjectDefaultsSchema.omit({ defaultAgentId: true, defaultPermissionMode: true }).extend({
+  newProjects: NewProjectDefaultsSchema.omit({ defaultAgentId: true, defaultPermissionMode: true, orchestrationRoster: true }).extend({
     defaultAgentId: z.unknown().optional(),
     // Read on its own too (default permission mode): a damaged value reads as Ask.
     defaultPermissionMode: z.unknown().optional(),
+    // Read on its own as well (epic 15, 15.5): a damaged roster reads as none and never costs the pieces.
+    orchestrationRoster: z.unknown().optional(),
   }),
 });
 
@@ -87,6 +91,12 @@ export interface NewProjectDefaultsStore {
    */
   set(input: unknown): NewProjectDefaults;
   /**
+   * Keeps the team roster new projects start with (epic 15, 15.5), as the
+   * caller checked it (the pieces, agent and mode are kept as they are), and
+   * returns the roster as kept. `ValidationError` for a wrong shape.
+   */
+  setRoster(roster: unknown): TeamRoster;
+  /**
    * Developer mode was turned off: a Skip all default becomes Ask (the file is
    * rewritten; it already reads as Ask). Returns whether it changed.
    */
@@ -101,6 +111,8 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
   let storedAgent: AgentId | undefined;
   /** The mode the file holds as last read (Skip all included), so a save that leaves the mode out keeps it. */
   let storedMode: PermissionMode | undefined;
+  /** The roster the file holds as last read, so a save that leaves it out keeps it. */
+  let storedRoster: TeamRoster | undefined;
   /** The mode as shown: Skip all only while Developer mode is on. */
   const shownMode = (mode: PermissionMode | undefined) => (mode === undefined || (mode === 'skip_all' && !developerMode()) ? {} : { defaultPermissionMode: mode });
 
@@ -135,6 +147,7 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
       else report(code);
       storedAgent = undefined;
       storedMode = undefined;
+      storedRoster = undefined;
       return { bmadPieces: [...DEFAULT_NEW_PROJECT_DEFAULTS.bmadPieces] };
     }
     try {
@@ -145,11 +158,14 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
         storedAgent = agent.success ? agent.data : undefined;
         const mode = PermissionModeSchema.safeParse(parsed.data.newProjects.defaultPermissionMode);
         storedMode = mode.success ? mode.data : undefined;
+        const roster = TeamRosterSchema.safeParse(parsed.data.newProjects.orchestrationRoster);
+        storedRoster = roster.success && Object.values(roster.data).some((assignee) => assignee !== null) ? roster.data : undefined;
         // An agent this install doesn't have now reads as the install's default; the file keeps it.
         return {
           bmadPieces: canonicalBmadPieces(parsed.data.newProjects.bmadPieces),
           ...(agent.success && isAgentRegistered(agent.data) ? { defaultAgentId: agent.data } : {}),
           ...shownMode(storedMode),
+          ...(storedRoster === undefined ? {} : { orchestrationRoster: storedRoster }),
         };
       }
     } catch {
@@ -159,6 +175,7 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
     report('corrupt');
     storedAgent = undefined;
     storedMode = undefined;
+    storedRoster = undefined;
     return { bmadPieces: [...DEFAULT_NEW_PROJECT_DEFAULTS.bmadPieces] };
   };
 
@@ -194,12 +211,30 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
           bmadPieces: pieces,
           ...(keptAgent === undefined ? {} : { defaultAgentId: keptAgent }),
           ...(keptMode === undefined ? {} : { defaultPermissionMode: keptMode }),
+          ...(storedRoster === undefined ? {} : { orchestrationRoster: storedRoster }),
         },
       });
       storedAgent = keptAgent;
       storedMode = keptMode;
       const shown = keptAgent !== undefined && isAgentRegistered(keptAgent) ? keptAgent : undefined;
-      return { bmadPieces: pieces, ...(shown === undefined ? {} : { defaultAgentId: shown }), ...shownMode(keptMode) };
+      return { bmadPieces: pieces, ...(shown === undefined ? {} : { defaultAgentId: shown }), ...shownMode(keptMode), ...(storedRoster === undefined ? {} : { orchestrationRoster: storedRoster }) };
+    },
+
+    setRoster(input) {
+      const parsed = TeamRosterSchema.safeParse(input);
+      if (!parsed.success) throw new ValidationError('Choose who takes each role: an agent, or a model.', [{ path: ['roster'], message: 'not a roster' }]);
+      const current = read();
+      const roster = Object.values(parsed.data).some((assignee) => assignee !== null) ? parsed.data : undefined;
+      write({
+        newProjects: {
+          bmadPieces: current.bmadPieces,
+          ...(storedAgent === undefined ? {} : { defaultAgentId: storedAgent }),
+          ...(storedMode === undefined ? {} : { defaultPermissionMode: storedMode }),
+          ...(roster === undefined ? {} : { orchestrationRoster: roster }),
+        },
+      });
+      storedRoster = roster;
+      return parsed.data;
     },
 
     dropSkipAll() {
@@ -270,6 +305,7 @@ export function createAddProject(options: AddProjectOptions): AddProject {
         bmadPieces: resolve,
         defaultAgentId: () => options.defaults?.get().defaultAgentId,
         defaultPermissionMode: () => options.defaults?.get().defaultPermissionMode,
+        orchestrationRoster: () => options.defaults?.get().orchestrationRoster,
       });
     },
   };

@@ -133,6 +133,7 @@ describe('the route helper', () => {
     expect(orchestrationRouteKeys(app)).toEqual(
       [
         `GET ${API_ROUTES.workspaceOrchestration}`,
+        `GET ${API_ROUTES.workspaceTeamRoster}`,
         `GET ${API_ROUTES.workspaceOrchestrationRuns}`,
         `POST ${API_ROUTES.workspaceOrchestrationRuns}`,
         `GET ${API_ROUTES.workspaceOrchestrationRun}`,

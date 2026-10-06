@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { AgentId, SETTINGS_STREAM, WhileWorking } from './events-common.js';
 import { ModelId } from './entities.js';
 import { assigned } from './events-envelope.js';
+import { TeamRoster } from './team.js';
 
 const onSettingsStream = { workspaceId: z.null(), streamId: z.literal(SETTINGS_STREAM) };
 
@@ -45,6 +46,18 @@ export const SettingsWhileWorkingChangedInput = z.object({
  */
 export const SettingsWhileWorkingChangedEvent = SettingsWhileWorkingChangedInput.extend(assigned);
 export type SettingsWhileWorkingChangedEvent = z.infer<typeof SettingsWhileWorkingChangedEvent>;
+
+export const SettingsTeamRosterDefaultChangedInput = z.object({
+  type: z.literal('settings.team_roster_default_changed'),
+  ...onSettingsStream,
+  payload: z.object({ orchestrationRoster: TeamRoster, previousOrchestrationRoster: TeamRoster }),
+});
+/**
+ * The roster new projects start with (epic 15, 15.5; install-level, beside the
+ * default for new projects) changed. A project that exists keeps its own.
+ */
+export const SettingsTeamRosterDefaultChangedEvent = SettingsTeamRosterDefaultChangedInput.extend(assigned);
+export type SettingsTeamRosterDefaultChangedEvent = z.infer<typeof SettingsTeamRosterDefaultChangedEvent>;
 
 export const SettingsUpdateNoticeChangedInput = z.object({
   type: z.literal('settings.update_notice_changed'),

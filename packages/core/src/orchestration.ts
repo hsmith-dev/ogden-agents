@@ -57,6 +57,7 @@ import type { EventLog } from './event-log.js';
 import type { OrchestrationFeature } from './orchestration-feature.js';
 import type { ManagerContext, ManagerPort, ManagerRecord } from './manager-port.js';
 import type { ManagerSource } from './manager-source.js';
+import type { Team } from './team-roster.js';
 import type { Chat } from './chat/types.js';
 import { newId } from './ids.js';
 
@@ -92,7 +93,12 @@ export interface OrchestrationOptions {
   manager?: ManagerPort | undefined;
   /** The manager of each project, read from its roster (the real one, 15.4). Absent with no `manager`: no project has one. */
   managers?: ManagerSource | undefined;
+  /** The project's team roster (15.5): the manager addresses only its rostered workers. Absent: every agent the install lists. */
+  team?: Team | undefined;
 }
+
+/** The words when the project's team has no worker that can be given an instruction now. */
+export const NO_READY_WORKER = 'No worker on this project\'s team is ready. Choose a worker, or sign in to one, in the project settings under Orchestration.';
 
 /** How much of a session's newest events are read for its last reply. */
 const REPLY_WINDOW = Math.min(MAX_PAGE_EVENTS, 200);
@@ -129,7 +135,7 @@ const stepOf = (row: StepRow): OrchestrationStep =>
     sessionId: row.sessionId,
   });
 
-export function createOrchestration({ db, events, feature, chat, manager: fixedManager, managers }: OrchestrationOptions): Orchestration {
+export function createOrchestration({ db, events, feature, chat, manager: fixedManager, managers, team }: OrchestrationOptions): Orchestration {
   const { orm } = db;
   const now = () => new Date().toISOString();
   /** Steps being sent right now: a second dispatch of the same step is refused, not raced. */
@@ -267,11 +273,21 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       if (manager === undefined) throw new ManagerUnavailableError(status.state === 'ready' ? ORCHESTRATION_NO_MANAGER_MESSAGE : status.message);
 
       const { agents } = await chat.chatAgents(workspaceId);
+      // Only the rostered workers (15.5): the project's worker and its reviewer when that is an agent. Without a roster, every agent.
+      const rostered = team === undefined ? undefined : await team.workers(workspaceId);
+      const addressable = rostered === undefined ? agents : rostered.flatMap((worker) => agents.filter((agent) => agent.agentId === worker.agentId));
       const context: ManagerContext = {
         goal,
         projectSummary: 'A software project in the folder the user opened.',
-        workers: agents.map((agent) => ({ agentId: agent.agentId, label: agent.displayName, ready: agent.unavailable === undefined, modes: agent.permissionModes, chats: [] })),
+        workers: addressable.map((agent) => ({
+          agentId: agent.agentId,
+          label: agent.displayName,
+          ready: rostered === undefined ? agent.unavailable === undefined : (rostered.find((worker) => worker.agentId === agent.agentId)?.ready ?? false),
+          modes: agent.permissionModes,
+          chats: [],
+        })),
       };
+      if (team !== undefined && !context.workers.some((worker) => worker.ready)) throw new ManagerUnavailableError(NO_READY_WORKER);
       const runId = newId('orc') as OrchestrationRun['id'];
       const at = now();
       events.transaction(() => {

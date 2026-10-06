@@ -69,6 +69,7 @@ export function chatAgentOf(
     terminalResume: agent.terminalResume !== undefined,
     needsProjectTrust: descriptor.needsProjectTrust,
     ...(descriptor.noAccount === true ? { noAccount: true } : {}),
+    ...(descriptor.interactiveOnly === undefined ? {} : { interactiveOnly: descriptor.interactiveOnly }),
     // Ask is every agent's (where every chat starts); the rest only as it declares them.
     permissionModes: PERMISSION_MODES.filter((mode) => mode === 'ask' || declared.includes(mode)),
     ...(unavailable === undefined ? {} : { unavailable }),

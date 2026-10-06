@@ -18,6 +18,7 @@ import {
   SessionDriver as SessionDriverSchema,
   SessionKind as SessionKindSchema,
   SessionState as SessionStateSchema,
+  TeamRoster as TeamRosterSchema,
   autoChatName,
   canonicalBmadPieces,
   CHAT_NAME_MAX,
@@ -49,6 +50,7 @@ import {
   type SessionId,
   type SessionKind,
   type SessionState,
+  type TeamRoster,
   type Workspace,
   type WorkspaceId,
 } from '@ogden-agents/shared';
@@ -115,6 +117,12 @@ export interface NewWorkspaceOptions {
    * this project (notice `skip_all_unconfirmed`). Default Ask.
    */
   defaultPermissionMode?: PermissionMode | undefined | (() => PermissionMode | undefined);
+  /**
+   * The team roster it starts with (epic 15, 15.5: the app-wide default for
+   * new projects), or a function that returns it, called only when the
+   * workspace is created. Default: nobody chosen (every role uses the defaults).
+   */
+  orchestrationRoster?: TeamRoster | undefined | (() => TeamRoster | undefined);
 }
 
 export interface NewRun {
@@ -416,6 +424,8 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         // Skip all is confirmed once per project: from the app-wide default it waits for that confirmation, in Ask.
         const unconfirmed = wanted === 'skip_all';
         const permissionMode: PermissionMode = wanted === 'auto' ? 'auto' : 'ask';
+        const givenRoster = typeof options.orchestrationRoster === 'function' ? options.orchestrationRoster() : options.orchestrationRoster;
+        const roster = givenRoster !== undefined && Object.values(givenRoster).some((assignee) => assignee !== null) ? givenRoster : undefined;
         const workspace: Workspace = { id: newId('ws'), path: canonical, realPath: real, createdAt: now() };
         orm
           .insert(workspaces)
@@ -427,6 +437,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
             defaultAgentId: defaultAgentId ?? null,
             defaultPermissionMode: wanted === undefined ? null : permissionMode,
             defaultPermissionModeNotice: unconfirmed ? 'skip_all_unconfirmed' : null,
+            ...(roster === undefined ? {} : { orchestrationRoster: JSON.stringify({ manager: roster.manager, planner: roster.planner, worker: roster.worker, reviewer: roster.reviewer }) }),
           })
           .run();
         log.append({
@@ -437,7 +448,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         });
         // A project that starts with pieces on (story 10.4) or its own default agent (epic 6, entry 6)
         // says so right after it is created, in the same transaction.
-        if (bmadPieces.length > 0 || defaultAgentId !== undefined || permissionMode !== 'ask') {
+        if (bmadPieces.length > 0 || defaultAgentId !== undefined || permissionMode !== 'ask' || roster !== undefined) {
           log.append({
             type: 'workspace.settings_changed',
             workspaceId: workspace.id,
@@ -448,6 +459,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
               ...(bmadPieces.length > 0 ? { bmadPieces, previousBmadPieces: [] } : {}),
               ...(defaultAgentId === undefined ? {} : { defaultAgentId, previousDefaultAgentId: null }),
               ...(permissionMode === 'ask' ? {} : { defaultPermissionMode: permissionMode, previousDefaultPermissionMode: 'ask' as const, defaultPermissionModeCause: 'user' as const }),
+              ...(roster === undefined ? {} : { orchestrationRoster: roster, previousOrchestrationRoster: TeamRosterSchema.parse({}) }),
             },
           });
         }

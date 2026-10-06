@@ -159,7 +159,9 @@ function ManagerModel({ wsId }: { wsId: string }) {
   const roster: TeamRoster = settings.data?.orchestrationRoster ?? { manager: null, planner: null, worker: null, reviewer: null };
   const manager = roster.manager?.kind === 'model' ? roster.manager : null;
   const servers = endpoints.data?.endpoints;
+  const loaded = settings.data !== undefined;
   const save = (next: { endpointId: string; model: string } | null) => {
+    if (!loaded) return;
     setSaving(true);
     setError(undefined);
     updateManagerModel(wsId, roster, next).then(
@@ -193,7 +195,7 @@ function ManagerModel({ wsId }: { wsId: string }) {
       servers={servers}
       models={models}
       loading={loading}
-      saving={saving}
+      saving={saving || !loaded}
       error={error}
       onShowModels={show}
       onChoose={(endpointId, model) => save({ endpointId, model })}

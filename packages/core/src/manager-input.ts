@@ -32,9 +32,19 @@ export const CHARS_PER_TOKEN = 3;
 export const DEFAULT_CONTEXT_TOKENS = 4_096;
 
 /** The most characters the whole request may be: half of the context, in characters. The other half is for the answer. */
+/** The cost of `text` in the budget's units: a character outside ASCII (CJK, emoji) may take a whole token, so it counts as `CHARS_PER_TOKEN` characters. */
+export function budgetCost(text: string): number {
+  let cost = 0;
+  for (const char of text) cost += char.codePointAt(0)! < 128 ? 1 : CHARS_PER_TOKEN;
+  return cost;
+}
+
+/** Room kept in the budget for the text a repair adds (the adapter's own repair carries the last answer back; ours adds a sentence). */
+export const REPAIR_HEADROOM_CHARS = 1_500;
+
 export function inputBudgetChars(contextTokens: number | undefined): number {
   const tokens = contextTokens !== undefined && Number.isFinite(contextTokens) && contextTokens > 0 ? Math.floor(contextTokens) : DEFAULT_CONTEXT_TOKENS;
-  return Math.floor(tokens / 2) * CHARS_PER_TOKEN;
+  return Math.max(0, Math.floor(tokens / 2) * CHARS_PER_TOKEN - REPAIR_HEADROOM_CHARS);
 }
 
 /** The most tokens asked of the answer: the other half of a small context, up to what a long plan needs. */
@@ -47,11 +57,15 @@ const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\p{Co}\p{Cn}]/u;
 
 /** An absolute path (a drive letter, a share, a home folder or a rooted path of two or more parts). */
 const PATHS: readonly RegExp[] = [
+  // A home folder, whose name may hold spaces or non-ASCII letters: everything to the end of the line goes.
+  /(?<![\w./\\@~)-])\/(?:Users|home)\/[^\/\n"'`<>]+(?:\/[^\n"'`<>]*)?/g,
+  // A URL of a scheme that names a place on this computer or an app's file (`file:///Users/me/a.ts`, `vscode://file/...`).
+  /\b(?:file|vscode|cursor|idea|zed):\/\/[^\s"'`<>]*/gi,
   /(?<![\w./\\:@-])[A-Za-z]:[\\/][^\s"'`<>|*?]*/g,
   /(?<![\w./\\:@-])\\\\[^\s"'`<>|*?\\]+(?:\\[^\s"'`<>|*?]*)*/g,
   /(?<![\w./\\:@~-])~[\\/][^\s"'`<>|*?]*/g,
-  /(?<![\w./\\:@~)-])\/(?:[\w.@+~-]+\/)+[\w.@+~-]*/g,
-  /(?<![\w./\\:@~)-])\/(?:Users|home|root|etc|var|tmp|private|opt|usr|mnt|Volumes|srv|Library|proc)\b/g,
+  /(?<![\w./\\@~)-])\/(?:[\w.@+~-]+\/)+[\w.@+~-]*/g,
+  /(?<![\w./\\@~)-])\/(?:Users|home|root|etc|var|tmp|private|opt|usr|mnt|Volumes|srv|Library|proc|bin|dev)\b(?:\/[^\n"'`<>]*)?/g,
 ];
 
 /** `text` with every absolute path replaced. */
@@ -141,14 +155,14 @@ export function buildManagerInput(kind: 'plan' | 'decision', context: ManagerCon
       `Ready workers (name only these ids):\n${roster === '' ? '(none)' : roster}`,
     ];
     if (plan !== undefined) {
-      parts.push(`The plan so far:\n${plan.steps.map((step) => `- ${step.id} for ${cleanForManager(step.worker)}, after [${step.depends_on.join(' ')}]: ${cut(cleanForManager(step.instruction), level.instruction)}`).join('\n')}`);
+      parts.push(`The plan so far:\n${datum('plan', plan.steps.map((step) => `- ${step.id} for ${cleanForManager(step.worker)}, after [${step.depends_on.join(' ')}]: ${cut(cleanForManager(step.instruction).replace(/\s+/g, ' '), level.instruction)}`).join('\n'))}`);
     }
     if (report !== undefined) {
       parts.push(`The last step, ${report.step_id}, done by ${cleanForManager(report.worker)}, ended as ${report.state}${report.truncated ? ' (its output was already cut)' : ''}. Its output is the worker's own text:`);
       parts.push(datum('worker-output', level.report === 0 ? '[left out to make room]' : cut(report.summary, level.report)));
     }
     const prompt = parts.filter((part) => part !== '').join('\n\n');
-    if (MANAGER_SYSTEM_TEXT.length + prompt.length + schemaChars <= budgetChars) return { ok: true, input: { system: MANAGER_SYSTEM_TEXT, prompt, cut: index > 0 } };
+    if (budgetCost(MANAGER_SYSTEM_TEXT) + budgetCost(prompt) + schemaChars <= budgetChars) return { ok: true, input: { system: MANAGER_SYSTEM_TEXT, prompt, cut: index > 0 } };
   }
   return { ok: false };
 }

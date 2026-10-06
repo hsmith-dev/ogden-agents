@@ -58,7 +58,16 @@ import { NotFoundError } from './errors.js';
 export const MANAGER_CALL_TIMEOUT_MS = 90_000;
 
 /** The context window of `model` on the endpoint at `target`, in tokens, when the server reports one. */
-export type ContextReader = (target: LocalModelTarget, model: string) => Promise<number | undefined>;
+export interface ContextReader {
+  (target: LocalModelTarget, model: string, signal?: AbortSignal): Promise<number | undefined>;
+  /** Forgets what was read, so the next call asks the server again (after the context was found too small: the user may have loaded a larger one). */
+  forget?(target: LocalModelTarget, model: string): void;
+}
+
+/** Some servers report a model's trained maximum, not the context it is loaded with: no reported context is believed beyond this (the input never needs more). */
+const REPORTED_CONTEXT_CAP_TOKENS = 16_384;
+/** The most a read of the reported context may take. */
+const CONTEXT_READ_MS = 10_000;
 
 /**
  * A reader of the endpoint's reported context that asks the server at most once in `ttlMs` per endpoint and model
@@ -67,21 +76,31 @@ export type ContextReader = (target: LocalModelTarget, model: string) => Promise
  */
 export function createContextReader(port: Pick<LocalModelPort, 'listModels'>, ttlMs = 5 * 60_000, now: () => number = Date.now): ContextReader {
   const known = new Map<string, { at: number; tokens: number | undefined }>();
-  return async (target, model) => {
-    const key = `${target.baseUrl}\u0000${model}`;
+  const keyOf = (target: LocalModelTarget, model: string) => `${target.baseUrl}\u0000${model}`;
+  const read = async (target: LocalModelTarget, model: string, signal?: AbortSignal): Promise<number | undefined> => {
+    const key = keyOf(target, model);
     const hit = known.get(key);
     if (hit !== undefined && now() - hit.at < ttlMs) return hit.tokens;
     let listed: Awaited<ReturnType<LocalModelPort['listModels']>>;
     try {
-      listed = await port.listModels({ baseUrl: target.baseUrl, key: target.key, preset: target.preset });
+      // Bounded and cancellable: a slow server must not hold a run past its own limit.
+      const limit = AbortSignal.timeout(CONTEXT_READ_MS);
+      listed = await port.listModels({ baseUrl: target.baseUrl, key: target.key, preset: target.preset }, signal === undefined ? limit : AbortSignal.any([signal, limit]));
     } catch {
+      known.set(key, { at: now(), tokens: undefined });
       return undefined;
     }
-    if (!listed.ok) return undefined;
-    const tokens = listed.models.find((each) => each.id === model)?.contextTokens;
+    if (!listed.ok) {
+      // A failed read is remembered briefly too, so a down server is not asked again on every call.
+      known.set(key, { at: now() - Math.max(0, ttlMs - 30_000), tokens: undefined });
+      return undefined;
+    }
+    const reported = listed.models.find((each) => each.id === model)?.contextTokens;
+    const tokens = reported === undefined ? undefined : Math.min(reported, REPORTED_CONTEXT_CAP_TOKENS);
     known.set(key, { at: now(), tokens });
     return tokens;
   };
+  return Object.assign(read, { forget: (target: LocalModelTarget, model: string) => void known.delete(keyOf(target, model)) });
 }
 
 export interface ModelManagerOptions {
@@ -140,9 +159,10 @@ function capped(text: string, max: number): string {
 /** The manager's answer as masked, capped JSON text for the event log. */
 function recordOutput(value: unknown): string | undefined {
   try {
-    const text = JSON.stringify(value);
-    // Mask after the cut as well: a cut can leave half a secret that the first pass would not have seen whole.
-    return text === undefined ? undefined : redactSecrets(capped(redactSecrets(text), MANAGER_LIMITS.maxRecordChars));
+    // Mask each string value before it is written as JSON (escaped line breaks would hide a multi line secret), and again after the cut.
+    const walk = (each: unknown, depth = 0): unknown => (typeof each === 'string' ? redactSecrets(each) : depth > 8 || typeof each !== 'object' || each === null ? each : Array.isArray(each) ? each.map((item) => walk(item, depth + 1)) : Object.fromEntries(Object.entries(each).map(([key, item]) => [redactSecrets(key), walk(item, depth + 1)])));
+    const text = JSON.stringify(walk(value));
+    return text === undefined ? undefined : redactSecrets(capped(text, MANAGER_LIMITS.maxRecordChars));
   } catch {
     return undefined;
   }
@@ -179,10 +199,13 @@ export function createModelManager({ port, endpoints, endpointId, model, context
     if (target === undefined) return fail('endpoint_missing', { call: kind });
     const place: LocalModelTarget = { baseUrl: target.baseUrl, key: target.key, preset: target.preset };
 
-    const contextTokens = await (contextOf?.(place, model) ?? Promise.resolve(undefined)).catch(() => undefined);
+    const contextTokens = await (contextOf?.(place, model, signal) ?? Promise.resolve(undefined)).catch(() => undefined);
     const schema = kind === 'plan' ? MANAGER_PLAN_JSON_SCHEMA : MANAGER_DECISION_JSON_SCHEMA;
     const built = buildManagerInput(kind, context, inputBudgetChars(contextTokens), JSON.stringify(schema).length);
-    if (!built.ok) return fail('context_too_small', { call: kind });
+    if (!built.ok) {
+      contextOf?.forget?.(place, model);
+      return fail('context_too_small', { call: kind });
+    }
     // A backstop: the endpoint's own key is never in the input (it holds none), and its text would be masked if it were.
     const key = target.key;
     const scrub = (text: string): string => (key !== undefined && key.length >= 4 ? text.split(key).join('[redacted]') : text);
@@ -207,6 +230,7 @@ export function createModelManager({ port, endpoints, endpointId, model, context
     if (!first.ok) {
       // `structuredComplete` has already repaired a bad shape once: no second ask here.
       const told = failureOf(first);
+      if (told.kind === 'context_too_small') contextOf?.forget?.(place, model);
       return fail(told.kind, { call: kind }, { ...(told.reason === undefined ? {} : { reason: told.reason }), ...(told.code === undefined ? {} : { code: told.code }) });
     }
     asked = first.mode;

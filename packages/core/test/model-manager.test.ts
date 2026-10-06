@@ -233,12 +233,14 @@ describe('the cap on the input', () => {
     const { port, calls } = scripted([ok(PLAN)], [{ id: 'm', contextTokens: 32_768 }]);
     let at = 0;
     const reader = createContextReader(port, 1_000, () => at);
-    expect(await reader({ baseUrl: 'http://a/v1' }, 'm')).toBe(32_768);
-    expect(await reader({ baseUrl: 'http://a/v1' }, 'm')).toBe(32_768);
+    expect(await reader({ baseUrl: 'http://a/v1' }, 'm')).toBe(16_384);
+    expect(await reader({ baseUrl: 'http://a/v1' }, 'm')).toBe(16_384);
+    reader.forget?.({ baseUrl: 'http://a/v1' }, 'm');
+    expect(await reader({ baseUrl: 'http://a/v1' }, 'm')).toBe(16_384);
     expect(await reader({ baseUrl: 'http://a/v1' }, 'other')).toBeUndefined();
     at = 2_000;
     await reader({ baseUrl: 'http://a/v1' }, 'm');
-    expect(calls.filter((call) => call === 'listModels')).toHaveLength(3);
+    expect(calls.filter((call) => call === 'listModels')).toHaveLength(4);
     const down: Pick<LocalModelPort, 'listModels'> = { listModels: async () => ({ ok: false, kind: 'unreachable', reason: 'down' }) };
     expect(await createContextReader(down)({ baseUrl: 'http://a/v1' }, 'm')).toBeUndefined();
     const throwing: Pick<LocalModelPort, 'listModels'> = { listModels: async () => { throw new Error('boom'); } };

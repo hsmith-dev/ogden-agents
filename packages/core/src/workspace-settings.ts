@@ -387,7 +387,10 @@ export function createWorkspaceSettings({
         // The manager is a model, never an agent (E15: it is a tool-free call, not a coding agent).
         if (parsed.data.manager?.kind === 'agent') throw new ValidationError(ROSTER_MANAGER_IS_A_MODEL, [{ path: ['orchestrationRoster', 'manager'], message: 'not a model' }]);
         // A model sits on a server the user has set up (15.4); whether it is confirmed is checked when it is called.
+        const current = readOrchestrationRoster(orm, workspaceId);
         for (const [role, assignee] of Object.entries(parsed.data)) {
+          // Only a role that is being changed: a leftover model on a removed server in another role never blocks choosing a manager.
+          if (JSON.stringify(assignee) === JSON.stringify((current as Record<string, unknown> | undefined)?.[role])) continue;
           if (assignee?.kind === 'model' && orm.select({ id: localEndpoints.id }).from(localEndpoints).where(eq(localEndpoints.id, assignee.endpointId)).get() === undefined) {
             throw new ValidationError(ROSTER_UNKNOWN_ENDPOINT, [{ path: ['orchestrationRoster', role], message: 'no such server' }]);
           }

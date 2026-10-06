@@ -269,7 +269,7 @@ describe('the team of a project and the default for new projects', () => {
     const defaults = createNewProjectDefaults({ dataDir, bmad: core.bmad, isAgentRegistered: (id) => ['alpha', 'beta'].includes(id) });
     const results = options.tests ?? [];
     const team = core.createTeam({
-      chat: { listSessions: () => [], async chatAgents() { return { agents: options.agentList ?? agents, defaultAgentId: 'alpha' }; } },
+      chat: { async chatAgents() { return { agents: options.agentList ?? agents, defaultAgentId: 'alpha' }; } },
       endpoints: () => endpoints,
       tests: () => ({ result: (id, model) => results.find((entry) => entry.endpointId === id && entry.model === model), all: () => results }),
       defaults,

@@ -21,6 +21,7 @@ import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
 import { Text } from '@/ui/typography';
 import { deleteHistory, fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
 import { BmadMethodSection } from '@/workspaces/bmad-method-section';
+import { OrchestrationSection } from '@/workspaces/orchestration-section';
 import { useBmadRepoNoteSlot, useNewProjectsDefaultSlot } from '@/workspaces/bmad-settings-slots';
 import { createLatestGate, updateCautionLevel, updateDefaultAgent, updateDefaultPermissionMode, updateProjectDefaultModel, usePermissionRules, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
@@ -63,6 +64,7 @@ export function WorkspaceSettingsPage() {
             <ProjectModelsSection wsId={wsId} />
             <ProjectWhileWorkingSection wsId={wsId} />
             <BmadSection wsId={wsId} />
+            <OrchestrationSection wsId={wsId} />
             <BuildLimitSection wsId={wsId} />
             <AlwaysAllowRulesSection wsId={wsId} name={workspaceName(workspace.data)} />
             <DeleteHistorySection wsId={wsId} name={workspaceName(workspace.data)} />

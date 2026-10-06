@@ -182,6 +182,14 @@ export const API_ERROR_CODES = [
   'agents_file_missing',
   /** A Local model endpoint on a host that is not this computer was used before the user confirmed it, or its address changed since (409; epic 14 story 14.3). Nothing was called. */
   'endpoint_confirmation_required',
+  /** Orchestration (epic 15, 15.3): a run was asked for but no manager is set up yet (409). Nothing was stored. */
+  'manager_unavailable',
+  /** Orchestration: the manager did not give a usable plan (409); the message is its plain reason. The run is marked failed and holds no step. */
+  'manager_failed',
+  /** Orchestration: an instruction was to be sent before the user approved it (409). Nothing was created or sent. */
+  'step_not_approved',
+  /** Orchestration: a step was to be approved but is not waiting for approval, or a step it needs is not done (409). */
+  'step_not_proposed',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

@@ -515,9 +515,51 @@ export const OrchestrationSettings = z.object({
   mode: OrchestrationMode,
   limits: RunLimits,
   roster: TeamRoster,
+  /** Whether a manager is set up in this install. Absent from older servers; read as not set up. */
+  managerReady: z.boolean().optional(),
 });
 export type OrchestrationSettings = z.infer<typeof OrchestrationSettings>;
 
 /** `GET /api/v1/workspaces/:wsId/orchestration`: 409 `feature_off` while the Orchestration piece is off. */
 export const OrchestrationSettingsResponse = z.object({ settings: OrchestrationSettings });
 export type OrchestrationSettingsResponse = z.infer<typeof OrchestrationSettingsResponse>;
+
+// ---- the tracer's runs over REST (15.3) ----
+
+/** What the user types to start a run: one line, as long as a manager's goal may be. Whitespace and line breaks are folded to single spaces. */
+export const StartOrchestrationRunRequest = z.object({
+  goal: z
+    .string()
+    .transform((text) => text.replace(/\s+/g, ' ').trim())
+    .pipe(line(MANAGER_LIMITS.maxGoalChars)),
+});
+export type StartOrchestrationRunRequest = z.infer<typeof StartOrchestrationRunRequest>;
+
+/** One step as the Orchestrate page shows it: the stored step, the worker's name, and what came back once it was sent. */
+export const OrchestrationStepView = OrchestrationStep.extend({
+  /** The worker's name as the user knows it. */
+  workerLabel: z.string(),
+  /** The worker chat's normalized state, once the instruction was sent. */
+  sessionState: SessionState.nullable(),
+  /** A capped, secret-masked summary of the worker's last reply, once it was sent. */
+  report: ManagerStatusReport.nullable(),
+});
+export type OrchestrationStepView = z.infer<typeof OrchestrationStepView>;
+
+export const OrchestrationRunView = z.object({ run: OrchestrationRun, steps: z.array(OrchestrationStepView) });
+export type OrchestrationRunView = z.infer<typeof OrchestrationRunView>;
+
+/** `POST …/orchestration/runs`, `GET …/runs/:runId` and each step action. */
+export const OrchestrationRunResponse = z.object({ run: OrchestrationRunView });
+export type OrchestrationRunResponse = z.infer<typeof OrchestrationRunResponse>;
+
+/** `GET …/orchestration/runs`: the project's runs, newest first (at most {@link ORCHESTRATION_RUNS_PAGE}). */
+export const OrchestrationRunsResponse = z.object({ runs: z.array(OrchestrationRunView) });
+export type OrchestrationRunsResponse = z.infer<typeof OrchestrationRunsResponse>;
+export const ORCHESTRATION_RUNS_PAGE = 20;
+
+/** Plain words for the tracer's states and refusals. No dashes. */
+export const ORCHESTRATION_NO_MANAGER_MESSAGE = 'There is no manager yet. A manager model comes with a later update, so a plan cannot be made here yet.';
+export const ORCHESTRATION_STEP_NOT_APPROVED_MESSAGE = 'This instruction has not been approved, so it was not sent.';
+export const ORCHESTRATION_STEP_NOT_PROPOSED_MESSAGE = 'This instruction is not waiting for your approval, or a step it needs is not finished yet.';
+export const ORCHESTRATION_MANAGER_MARK = 'Sent by the manager, approved by you';

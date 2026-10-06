@@ -20,7 +20,7 @@ import { useGoShortcuts } from './use-go-shortcuts';
  * each tab's tooltip (on hover and keyboard focus) shows its keys.
  */
 
-export type WorkspaceTabId = 'chats' | 'plan' | 'board' | 'runs' | 'terminals';
+export type WorkspaceTabId = 'chats' | 'plan' | 'board' | 'runs' | 'orchestrate' | 'terminals';
 
 export interface WorkspaceTabSlot {
   id: WorkspaceTabId;
@@ -31,6 +31,8 @@ export interface WorkspaceTabSlot {
   piece?: BmadPiece;
   /** The tab's route, with `$wsId`; unset until the epic that builds its page sets it. */
   to?: string;
+  /** Shown only while the project has the Orchestration piece on (epic 15; it is not a BMad piece). */
+  orchestration?: true;
   /** Shown only in Developer mode (epic 16: Terminals). The server refuses what it serves without it all the same. */
   developerOnly?: true;
 }
@@ -41,6 +43,7 @@ export const WORKSPACE_TAB_SLOTS: readonly WorkspaceTabSlot[] = [
   { id: 'plan', label: 'Plan', key: 'p', piece: 'planning', to: '/w/$wsId/plan' },
   { id: 'board', label: 'Board', key: 'b', piece: 'board', to: '/w/$wsId/board' },
   { id: 'runs', label: 'Runs', key: 'r', piece: 'builds', to: '/w/$wsId/runs' },
+  { id: 'orchestrate', label: 'Orchestrate', key: 'o', to: '/w/$wsId/orchestrate', orchestration: true },
   { id: 'terminals', label: 'Terminals', key: 't', to: '/w/$wsId/terminals', developerOnly: true },
 ];
 
@@ -51,7 +54,7 @@ export type VisibleWorkspaceTab = WorkspaceTabSlot & { to: string };
  * The tabs to show, in slot order: those with a page, and, for a piece's
  * tab, only when the project has the piece on and this install has it
  * available. `pieces` or `availability` unknown (loading or failed) shows
- * only the tabs that serve no piece. A Developer-mode tab (Terminals, epic 16)
+ * only the tabs that serve no piece. Orchestrate (epic 15) shows only with `orchestration`, the project's own switch. A Developer-mode tab (Terminals, epic 16)
  * shows only with `developerMode`, whatever the pieces say (E16-R3, AD-21).
  */
 export function visibleWorkspaceTabs(
@@ -59,9 +62,11 @@ export function visibleWorkspaceTabs(
   availability: readonly BmadPieceAvailability[] | undefined,
   slots: readonly WorkspaceTabSlot[] = WORKSPACE_TAB_SLOTS,
   developerMode = false,
+  orchestration = false,
 ): VisibleWorkspaceTab[] {
   return slots.filter((slot): slot is VisibleWorkspaceTab => {
     if (slot.to === undefined) return false;
+    if (slot.orchestration === true && !orchestration) return false;
     if (slot.developerOnly === true && !developerMode) return false;
     if (slot.piece === undefined) return true;
     const piece = slot.piece;
@@ -125,7 +130,7 @@ export function WorkspaceTabs({ wsId, active, slots = WORKSPACE_TAB_SLOTS }: { w
   const pieces = settings.isError ? undefined : settings.data?.bmadPieces;
   const availability = available.isError ? undefined : available.data;
   const { appearance } = useAppearance();
-  const tabs = visibleWorkspaceTabs(pieces, availability, slots, appearance.developerMode);
+  const tabs = visibleWorkspaceTabs(pieces, availability, slots, appearance.developerMode, !settings.isError && settings.data?.orchestrationEnabled === true);
   useGoShortcuts(wsId, tabs);
   return <WorkspaceTabsView wsId={wsId} tabs={tabs} active={active} hints={appearance.developerMode} />;
 }

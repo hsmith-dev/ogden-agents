@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, ENDPOINT_PRESETS, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createWebhookNotifier, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, ENDPOINT_PRESETS, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createWebhookNotifier, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
@@ -413,6 +413,8 @@ async function listenAndAnnounce({
     shell === 'desktop'
       ? createDesktopUpdate({ dataDir, version, isNewer: (a, b) => (compareVersions(a, b) ?? 0) > 0, defaultChannel: channelOf(version) === 'preview' ? 'next' : 'stable', busy: busyRule, events: core.events, log })
       : undefined;
+  // Orchestration (epic 15, 15.3) over the chat: the manager is a test's stub, else none yet (the real adapter is 15.4).
+  const orchestrationRuns = core.createOrchestration({ chat, manager: options.manager ?? (hooks.manager === 'memory' ? createMemoryManager() : undefined) });
   const app = createApp({
     events: core.events,
     webRoot: options.webRoot ?? defaultWebRoot(),
@@ -430,6 +432,7 @@ async function listenAndAnnounce({
     permissions,
     bmad: core.bmad,
     orchestration: core.orchestration,
+    orchestrationRuns,
     // The test-only BMad probe route (story 10.1): a test run on a temp data folder, with its own variable set.
     bmadProbe: hooks.bmadProbe,
     bmadDetection: core.bmadDetection,

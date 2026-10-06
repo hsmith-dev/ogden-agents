@@ -506,6 +506,20 @@ export const API_ROUTES = {
    */
   workspaceOrchestration: `${API_BASE}/workspaces/:wsId/orchestration`,
   /**
+   * `GET` → `OrchestrationRunsResponse` (the project's runs, newest first);
+   * `POST StartOrchestrationRunRequest` → `OrchestrationRunResponse` (epic 15,
+   * 15.3): the goal goes to the manager and its plan comes back as proposed
+   * steps. Behind the Orchestration piece. 409 `manager_unavailable` with no
+   * manager set up, 409 `manager_failed` when it gave no usable plan.
+   */
+  workspaceOrchestrationRuns: `${API_BASE}/workspaces/:wsId/orchestration/runs`,
+  /** `GET` → `OrchestrationRunResponse`: the run, its steps and, for each dispatched step, the worker's state and a capped, masked report. */
+  workspaceOrchestrationRun: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId`,
+  /** `POST` → `OrchestrationRunResponse`: the user approves one proposed step. 409 `step_not_proposed`. */
+  workspaceOrchestrationStepApprove: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/approve`,
+  /** `POST` → `OrchestrationRunResponse`: sends an approved step's instruction into a new worker chat. 409 `step_not_approved` for any other step. */
+  workspaceOrchestrationStepDispatch: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/dispatch`,
+  /**
    * `GET` → `RunLimitSettingsResponse`; `PATCH UpdateRunLimitSettingsRequest`
    * (5.8): the install's limits (builds at a time, time limit). Install-level,
    * not a piece's (no workspace); 501 until 5.8.

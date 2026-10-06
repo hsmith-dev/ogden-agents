@@ -3,6 +3,8 @@ import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
 import { createLookBackOffers, type LookBackOffers } from './look-back-offers.js';
 import { createOrchestrationFeature, type OrchestrationFeature } from './orchestration-feature.js';
+import { createOrchestration, type Orchestration, type OrchestrationChat } from './orchestration.js';
+import type { ManagerPort } from './manager-port.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-pieces.js';
 import { createBmadModulesSeen, type BmadModulesSeen } from './bmad-modules-seen.js';
 import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
@@ -64,6 +66,11 @@ export interface Core {
    * never in the database. The server calls it once, after it has its secret store.
    */
   localEndpoints(secrets: SecretStorePort): LocalEndpoints;
+  /**
+   * The Orchestration use-case (epic 15, 15.3) over the chat the server holds and a manager when there is one.
+   * Every call is behind {@link Core.orchestration}'s guard. The server calls it once, after it has its chat.
+   */
+  createOrchestration(ports: { chat: OrchestrationChat; manager?: ManagerPort | undefined }): Orchestration;
   close(): void;
 }
 
@@ -164,6 +171,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     buildSettings: createBuildSettings({ db, events, entities }),
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),
     localEndpoints: (secrets) => createLocalEndpoints({ db, events, secrets }),
+    createOrchestration: (ports) => createOrchestration({ db, events, feature: orchestration, ...ports }),
     close: () => {
       try {
         permissions.close();

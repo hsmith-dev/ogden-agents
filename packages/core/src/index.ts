@@ -79,5 +79,6 @@ export * from './local-endpoints.js';
 export * from './local-model-port.js';
 export * from './manager-port.js';
 export * from './orchestration-feature.js';
+export * from './orchestration.js';
 export * from './local-models.js';
 export * from './build-findings.js';

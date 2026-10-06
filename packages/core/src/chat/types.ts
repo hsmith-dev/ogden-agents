@@ -222,8 +222,18 @@ export interface Chat {
    * its agent can take it there, else after the current step is stopped
    * (`session.turn_interrupted`); `AnswerFirstError` while a permission card
    * waits. Absent or `wait`: as before.
+   * With `origin: 'manager'` (epic 15, 15.3: the orchestration use-case, after
+   * the user approved the instruction) the stored message is marked as sent
+   * by the manager, so the transcript says so. Only the message stored at
+   * once is marked: a message queued behind a working agent is not, so the
+   * caller sends it only to an idle chat.
    */
-  sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string, options?: { delivery?: WhileWorking | undefined; build?: boolean | undefined }): { messageId: string; queued: boolean };
+  sendMessage(
+    workspaceId: WorkspaceId,
+    sessionId: SessionId,
+    text: string,
+    options?: { delivery?: WhileWorking | undefined; build?: boolean | undefined; origin?: 'manager' | undefined },
+  ): { messageId: string; queued: boolean };
   /**
    * Send now or wait: changes one message waiting to be sent, its text or its
    * place (0 goes next), and appends `session.queue_changed`. Throws

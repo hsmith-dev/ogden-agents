@@ -32,6 +32,8 @@ import {
   testHooksAllowed,
   SANDBOX_ENV,
   testSandbox,
+  testManager,
+  MANAGER_ENV,
   TEST_SANDBOX_KIND,
   TEST_SANDBOX_UNAVAILABLE_REASON,
 } from '../src/test-hooks.js';
@@ -109,6 +111,18 @@ describe('testBmadProbe (story 10.1)', () => {
     expect(testBmadProbe({ NODE_ENV: 'test', [BMAD_PROBE_ENV]: '1' }, OUTSIDE)).toBe(false);
     expect(testBmadProbe({ NODE_ENV: 'test' }, dir)).toBe(false);
     expect(testBmadProbe({ NODE_ENV: 'test', [BMAD_PROBE_ENV]: 'true' }, dir)).toBe(false);
+  });
+});
+
+describe('testManager (epic 15, story 15.3)', () => {
+  it('is the stub manager only for a test run on a temp data folder with its variable set to memory', () => {
+    const dir = tempDataDir();
+    expect(testManager({ NODE_ENV: 'test', [MANAGER_ENV]: 'memory' }, dir)).toBe('memory');
+    expect(testManager({ [MANAGER_ENV]: 'memory' }, dir)).toBeUndefined();
+    expect(testManager({ NODE_ENV: 'production', VITEST: '', [MANAGER_ENV]: 'memory' }, dir)).toBeUndefined();
+    expect(testManager({ NODE_ENV: 'test', [MANAGER_ENV]: 'memory' }, OUTSIDE)).toBeUndefined();
+    expect(testManager({ NODE_ENV: 'test' }, dir)).toBeUndefined();
+    expect(testManager({ NODE_ENV: 'test', [MANAGER_ENV]: 'real' }, dir)).toBeUndefined();
   });
 });
 

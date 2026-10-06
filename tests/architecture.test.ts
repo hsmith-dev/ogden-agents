@@ -591,6 +591,7 @@ describe('E15: orchestration code is tool-free and names no model product (story
       expect.arrayContaining([
         'packages/core/src/manager-port.ts',
         'packages/core/src/orchestration-feature.ts',
+        'packages/core/src/orchestration.ts',
         'packages/shared/src/events-orchestration.ts',
         'packages/shared/src/orchestration.ts',
         'packages/adapters/src/manager-memory/index.ts',

@@ -68,3 +68,5 @@ export { createMemoryTicketStore, type MemoryTicketStore } from '@ogden-agents/a
 export type { BmadSourcePort } from '@ogden-agents/core';
 // The in-memory BMad Method catalog (story 4.6): the e2e suite's Plan home renders from it (labels, groups, entry action).
 export { createMemoryBmadCatalog } from '@ogden-agents/adapters';
+// The fake manager (epic 15, 15.3): tests pass it as `manager` so Orchestrate runs with no model.
+export { createMemoryManager } from '@ogden-agents/adapters';

@@ -3,6 +3,7 @@
  * `routes/session-page.tsx` by story 6.9 to keep it under 600 lines): Show
  * earlier, the resumed marker, the handoff divider, and one message.
  */
+import { ORCHESTRATION_MANAGER_MARK } from '@ogden-agents/shared';
 import { ArrowClockwise } from '@phosphor-icons/react';
 import type { TranscriptMessage } from '@/chat/transcript';
 import { Button } from '@/ui/button';
@@ -103,6 +104,19 @@ export function Message({ message, agentName }: { message: TranscriptMessage; ag
         </UserMessage>
         <Text variant="caption" data-testid="message-origin">
           from terminal
+        </Text>
+      </div>
+    );
+  }
+  if (message.role === 'user' && message.origin === 'manager') {
+    // An instruction the orchestration manager wrote and the user approved (epic 15, 15.3).
+    return (
+      <div className="flex max-w-[85%] flex-col items-end gap-1 self-end" data-testid="message-from-manager">
+        <UserMessage className="max-w-full" data-testid="message-user">
+          {message.text}
+        </UserMessage>
+        <Text variant="caption" data-testid="message-origin">
+          {ORCHESTRATION_MANAGER_MARK}
         </Text>
       </div>
     );

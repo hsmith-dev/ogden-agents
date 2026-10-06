@@ -37,21 +37,23 @@ const render = (path: string, pieces: readonly BmadPiece[] | undefined, availabl
 const tabLabels = (html: string) => [...html.matchAll(/data-testid="workspace-tab-([a-z]+)"/g)].map((match) => match[1]);
 
 describe('workspace tabs (E10-R6, story 10.6)', () => {
-  it('has the slots Chats, Plan, Board, Runs, Terminals in order; every slot has a page (stories 4.1, 11.1 and 16.2)', () => {
+  it('has the slots Chats, Plan, Board, Runs, Orchestrate, Terminals in order; every slot has a page (stories 4.1, 11.1, 15.3 and 16.2)', () => {
     expect(WORKSPACE_TAB_SLOTS.map((slot) => [slot.id, slot.piece])).toEqual([
       ['chats', undefined],
       ['plan', 'planning'],
       ['board', 'board'],
       ['runs', 'builds'],
+      ['orchestrate', undefined],
       ['terminals', undefined],
     ]);
     // Story 4.6: g c, g p, g b, g r; epic 16: g t.
-    expect(WORKSPACE_TAB_SLOTS.map((slot) => slot.key)).toEqual(['c', 'p', 'b', 'r', 't']);
+    expect(WORKSPACE_TAB_SLOTS.map((slot) => slot.key)).toEqual(['c', 'p', 'b', 'r', 'o', 't']);
     expect(WORKSPACE_TAB_SLOTS.filter((slot) => slot.to !== undefined).map((slot) => [slot.id, slot.to])).toEqual([
       ['chats', '/w/$wsId'],
       ['plan', '/w/$wsId/plan'],
       ['board', '/w/$wsId/board'],
       ['runs', '/w/$wsId/runs'],
+      ['orchestrate', '/w/$wsId/orchestrate'],
       ['terminals', '/w/$wsId/terminals'],
     ]);
   });
@@ -61,6 +63,14 @@ describe('workspace tabs (E10-R6, story 10.6)', () => {
     expect(visibleWorkspaceTabs([], availability(), WORKSPACE_TAB_SLOTS, true).map((tab) => tab.id)).toEqual(['chats', 'terminals']);
     // Pieces on and Developer mode off: Terminals is still not there.
     expect(visibleWorkspaceTabs(['planning', 'board', 'builds'], availability(), WORKSPACE_TAB_SLOTS, false).map((tab) => tab.id)).not.toContain('terminals');
+  });
+
+  it('Orchestrate shows only with the project\'s Orchestration switch on, whatever the BMad pieces say (epic 15)', () => {
+    expect(visibleWorkspaceTabs([], availability()).map((tab) => tab.id)).toEqual(['chats']);
+    expect(visibleWorkspaceTabs(['planning', 'board', 'builds'], availability('planning', 'board', 'builds')).map((tab) => tab.id)).not.toContain('orchestrate');
+    expect(visibleWorkspaceTabs([], availability(), WORKSPACE_TAB_SLOTS, false, true).map((tab) => tab.id)).toEqual(['chats', 'orchestrate']);
+    // With the piece on the tab is there even while the BMad availability is unknown.
+    expect(visibleWorkspaceTabs(undefined, undefined, WORKSPACE_TAB_SLOTS, false, true).map((tab) => tab.id)).toEqual(['chats', 'orchestrate']);
   });
 
   it('a simple project (no pieces) shows Chats only, current, on the chats and session pages', async () => {

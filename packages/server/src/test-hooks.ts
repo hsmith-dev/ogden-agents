@@ -165,6 +165,11 @@ export const LOCAL_ENDPOINT_ENV = 'OGDEN_AGENTS_TEST_LOCAL_ENDPOINT';
 export const CODEX_SERVER_ENV = 'OGDEN_AGENTS_TEST_CODEX_SERVER';
 /** Absolute path to a Node script inside the temp folder, registered as a test agent that needs a trusted project (tests only; epic 6 entry 10). */
 export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
+/**
+ * `memory`: Orchestration's manager is the in-memory stub, a deterministic fake that plans one step
+ * per ready worker and calls no model (tests only; epic 15, 15.3). Without it a real install has no manager yet.
+ */
+export const MANAGER_ENV = 'OGDEN_AGENTS_TEST_MANAGER';
 /** `available` or `unavailable`: the sandbox check unattended builds get (tests only; story 5.2). */
 export const SANDBOX_ENV = 'OGDEN_AGENTS_TEST_SANDBOX';
 
@@ -187,6 +192,11 @@ export function testSandbox(env: Env, dataDir: string, tmp: string = tmpdir()): 
   // As Windows answers (story 5.6): building with you watching first.
   if (value === 'unavailable-windows') return { available: false, reason: TEST_SANDBOX_UNAVAILABLE_REASON, choices: ['attended', 'install_docker', 'other_agent'] };
   throw new Error(`${SANDBOX_ENV}: must be available, unavailable or unavailable-windows`);
+}
+
+/** `memory` when a test asked for the stub manager and test hooks are allowed for `dataDir`; otherwise `undefined` (no manager yet). */
+export function testManager(env: Env, dataDir: string, tmp: string = tmpdir()): 'memory' | undefined {
+  return env[MANAGER_ENV] === 'memory' && testHooksAllowed(env, dataDir, tmp) ? 'memory' : undefined;
 }
 
 /** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). Honoured only when `testHooksAllowed`. */
@@ -571,7 +581,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox'> & {
+export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox' | 'manager'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -599,6 +609,7 @@ export interface TestHooks {
   checkInMs: number | undefined;
   secretStore: 'memory' | undefined;
   sandbox: SandboxCheck | undefined;
+  manager: 'memory' | undefined;
 }
 
 /**
@@ -638,6 +649,8 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     checkInMs: options.checkInDelayMs === undefined ? checkInDelayFromEnv(env, dataDir, tmp) : undefined,
     secretStore: options.secrets === undefined ? testSecretStore(env, dataDir, tmp) : undefined,
     sandbox: options.sandbox === undefined ? testSandbox(env, dataDir, tmp) : undefined,
+    // A manager a test passes decides it: the hook is not read.
+    manager: options.manager === undefined ? testManager(env, dataDir, tmp) : undefined,
   };
 }
 
@@ -666,6 +679,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.bmadAvailable.length > 0 ||
     hooks.bmadSource !== undefined ||
     hooks.checkInMs !== undefined ||
+    hooks.manager !== undefined ||
     hooks.sandbox !== undefined;
   if (!inUse) return undefined;
   return {
@@ -686,6 +700,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     bmadProbe: hooks.bmadProbe,
     bmadAvailable: hooks.bmadAvailable.join(','),
     bmadSource: hooks.bmadSource !== undefined,
+    manager: hooks.manager !== undefined,
     ...(hooks.sandbox === undefined ? {} : { sandbox: hooks.sandbox.available ? 'available' : 'unavailable' }),
     ...(hooks.checkInMs === undefined ? {} : { checkInMs: hooks.checkInMs }),
   };

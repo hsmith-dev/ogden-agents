@@ -221,6 +221,76 @@ describe('a pane that closes or restarts', () => {
   });
 });
 
+describe('pane events: state only (story 16.3)', () => {
+  const paneEvents = (core: ReturnType<typeof setup>['core']) => core.events.readAfter(0).filter((e) => e.type.startsWith('terminal.'));
+
+  it('appends opened, exited and closed with their ids and cause, and never a pane\'s text', async () => {
+    const { core, panes, workspace, fake } = setup();
+    const pane = await panes.open(workspace.id, SIZE);
+    fake.processes[0]!.print('SECRET-OUTPUT-MARKER');
+    fake.processes[0]!.exit(5);
+    panes.close(workspace.id, pane.id);
+    const events = paneEvents(core);
+    expect(events.map((e) => e.type)).toEqual(['terminal.pane_opened', 'terminal.pane_exited', 'terminal.pane_closed']);
+    expect(events[0]).toMatchObject({ workspaceId: workspace.id, streamId: workspace.id, payload: { paneId: pane.id, launcherId: 'shell', title: 'Terminal 1' } });
+    expect(events[1]!.payload).toEqual({ paneId: pane.id, exitCode: 5 });
+    expect(events[2]!.payload).toEqual({ paneId: pane.id, cause: 'user' });
+    expect(JSON.stringify(events)).not.toContain('SECRET-OUTPUT-MARKER');
+  });
+
+  it('says why a pane closed: Developer mode off, or the server stopping', async () => {
+    const { core, panes, workspace } = setup();
+    await panes.open(workspace.id, SIZE);
+    core.installSettings.setDeveloperMode(false);
+    await new Promise((resolve) => setImmediate(resolve));
+    core.installSettings.setDeveloperMode(true);
+    await panes.open(workspace.id, SIZE);
+    panes.dispose();
+    const causes = paneEvents(core).flatMap((e) => (e.type === 'terminal.pane_closed' ? [e.payload.cause] : []));
+    expect(causes).toEqual(['developer_mode_off', 'server_stopped']);
+  });
+
+  it('delivers the Developer mode change to a later subscriber before the pane closes, in order (no lost event)', async () => {
+    const { core, panes, workspace } = setup();
+    await panes.open(workspace.id, SIZE);
+    const heard: string[] = [];
+    // Registered after the panes' own subscriber, as the /ws broadcast is.
+    core.events.subscribe(core.events.lastSeq(), (event) => void heard.push(event.type));
+    core.installSettings.setDeveloperMode(false);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(heard).toEqual(['settings.developer_mode_changed', 'terminal.pane_closed']);
+  });
+
+  it('announces nothing for a pane closed while it was starting', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { core, panes, workspace } = setup({ terminal: { opening: () => gate } });
+    const opening = panes.open(workspace.id, SIZE);
+    opening.catch(() => undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+    const id = panes.list(workspace.id)[0]!.id;
+    panes.close(workspace.id, id);
+    release();
+    await expect(opening).rejects.toBeInstanceOf(NotFoundError);
+    expect(paneEvents(core)).toEqual([]);
+  });
+
+  it('says exited with no code when Restart pane could not start the program', async () => {
+    let failing = false;
+    const { core, panes, workspace } = setup({ terminal: { opening: async () => void (failing && (() => { throw new Error('x'); })()) } });
+    const pane = await panes.open(workspace.id, SIZE);
+    failing = true;
+    await panes.restart(workspace.id, pane.id, SIZE).catch(() => undefined);
+    expect(paneEvents(core).at(-1)).toMatchObject({ type: 'terminal.pane_exited', payload: { paneId: pane.id, exitCode: null } });
+  });
+
+  it('emits nothing for an open that fails', async () => {
+    const { core, panes, workspace } = setup({ terminal: { openError: new Error('no') } });
+    await panes.open(workspace.id, SIZE).catch(() => undefined);
+    expect(paneEvents(core)).toEqual([]);
+  });
+});
+
 describe('review findings (security review of 16.2)', () => {
   it('two Restarts at once leave one program running, the other stopped', async () => {
     const { panes, workspace, fake } = setup({ terminal: { opening: () => new Promise((resolve) => setTimeout(resolve, 5)) } });

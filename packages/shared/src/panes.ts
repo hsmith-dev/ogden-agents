@@ -31,17 +31,144 @@ export type PaneState = z.infer<typeof PaneState>;
 export const PaneLauncherId = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/);
 export type PaneLauncherId = z.infer<typeof PaneLauncherId>;
 
+/** A pane's or tab's name: plain words with no control or format characters. It is stored and broadcast, so it is never taken from terminal output. */
+export const PaneTitle = z.string().min(1).max(80).regex(/^[^\p{Cc}\p{Cf}]+$/u, 'a name has no control characters');
+
 export const Pane = z.object({
   id: PaneId,
   workspaceId: WorkspaceId,
   launcherId: PaneLauncherId,
   /** What the pane is called in the page (plain words). */
-  title: z.string().min(1).max(80),
+  title: PaneTitle,
   state: PaneState,
   /** The program's own exit code once `exited`; `null` while it runs or when it was stopped. */
   exitCode: z.number().int().nullable(),
 });
 export type Pane = z.infer<typeof Pane>;
+
+/**
+ * What a pane seems to be doing, a guess (story 16.6; E16-R6): derived in
+ * memory from the pane's activity and a launcher's prompt patterns, never from
+ * stored output. `working` while it prints, `needs_attention` at a prompt
+ * waiting for the user (silence alone never says it), `idle` after it has been
+ * quiet, `exited` once its program ended.
+ */
+export const PaneStatus = z.enum(['working', 'needs_attention', 'idle', 'exited']);
+export type PaneStatus = z.infer<typeof PaneStatus>;
+
+/**
+ * One prompt pattern of a launcher, as data so a change in a CLI's wording
+ * needs no code release (E16-R6): a regular expression (source, no flags;
+ * matched without case) tried against the last `depth` non empty lines of the
+ * pane's screen. A one line question is only a question while it is the
+ * last line; a menu spans several (spike 16.1 finding 13).
+ */
+export const PanePromptPattern = z.object({
+  name: z.string().min(1).max(40),
+  pattern: z
+    .string()
+    .min(1)
+    .max(300)
+    .refine((source) => {
+      try {
+        new RegExp(source, 'i');
+        return true;
+      } catch {
+        return false;
+      }
+    }, 'not a valid pattern')
+    // Nested quantifiers are the usual way to a runaway match: a pattern is data, so it is refused here.
+    .refine((source) => !/\([^)]*[+*][^)]*\)[+*{]/.test(source), 'a pattern may not repeat a repeated group'),
+  depth: z.number().int().min(1).max(20),
+});
+export type PanePromptPattern = z.infer<typeof PanePromptPattern>;
+
+/** A program name to look up on the PATH (never a relative path), or an absolute path: `/…`, `~/…`, `C:\…` or a `%LOCALAPPDATA%`, `%APPDATA%`, `%ProgramFiles%`, `%USERPROFILE%` prefix. */
+const PaneExecutable = z
+  .string()
+  .min(1)
+  .max(260)
+  .refine((value) => !/[\p{Cc}\p{Cf}]/u.test(value) && !/(^|[\\/])\.\.([\\/]|$)/.test(value), 'no control characters or ..')
+  .refine((value) => /^[A-Za-z0-9._-]{1,64}$/.test(value) || /^(\/|~\/|[A-Za-z]:[\\/]|%(LOCALAPPDATA|APPDATA|ProgramFiles|ProgramFiles\(x86\)|USERPROFILE)%[\\/])/.test(value), 'a program name, or an absolute path');
+
+/** Where to look for a launcher's program, by OS: names looked up on the user's PATH, then fixed install folders (`~` is the user's home; `%NAME%` a Windows variable). Detection never installs. */
+export const PaneExecutables = z.object({
+  darwin: z.array(PaneExecutable).max(8).default([]),
+  linux: z.array(PaneExecutable).max(8).default([]),
+  win32: z.array(PaneExecutable).max(8).default([]),
+});
+export type PaneExecutables = z.infer<typeof PaneExecutables>;
+
+/**
+ * A launcher: what a pane runs, as data (story 16.3; E16-R1, R5, R9). Core
+ * and shared name no CLI: the adapters hold the list. `args` are the only
+ * arguments Ogden ever adds, and never one that skips a permission prompt;
+ * the rest is what the user types in the launcher's visible argument field.
+ */
+export const PaneLauncher = z.object({
+  id: PaneLauncherId,
+  /** What the page calls it. */
+  label: z.string().min(1).max(40),
+  /** `shell` is the user's own shell; `cli` is an agent's own program, found by detection. */
+  kind: z.enum(['shell', 'cli']),
+  executables: PaneExecutables,
+  /** The vendor's own install page, shown when the program is not found (Ogden never installs it). */
+  installUrl: z.url().refine((url) => url.startsWith('https://'), 'an https link').optional(),
+  /** Arguments always passed (none that skip a permission prompt). */
+  defaultArgs: z.array(z.string().max(200).regex(/^[A-Za-z0-9._=:/@+-]+$/, 'a plain argument')).max(10).default([]),
+  /** The words that say the program waits for the user. */
+  promptPatterns: z.array(PanePromptPattern).max(20).default([]),
+  /** How the program's own resume is offered for a stopped pane (plain words; `{id}` is its session id), if it has one. */
+  resumeHint: z.string().max(200).optional(),
+  /** `interactive_only`: never fed, scheduled or driven by Ogden, and left out of any automation (E16-R9). */
+  termsNote: z.enum(['interactive_only']).optional(),
+});
+export type PaneLauncher = z.infer<typeof PaneLauncher>;
+
+/** A tab's split tree (E16-R4): a pane, or two children side by side (`row`) or stacked (`column`) at `ratio` for the first. */
+export type PaneLayoutNode = { type: 'pane'; paneId: PaneId } | { type: 'split'; direction: 'row' | 'column'; ratio: number; first: PaneLayoutNode; second: PaneLayoutNode };
+export const PaneLayoutNode: z.ZodType<PaneLayoutNode> = z.lazy(() =>
+  z.discriminatedUnion('type', [
+    z.object({ type: z.literal('pane'), paneId: PaneId }),
+    z.object({ type: z.literal('split'), direction: z.enum(['row', 'column']), ratio: z.number().min(0.05).max(0.95), first: PaneLayoutNode, second: PaneLayoutNode }),
+  ]),
+);
+
+/** A project's terminal workspace layout: tabs of split trees of panes. It holds ids, titles and shapes, never output or secrets (E16-R8). */
+export const PaneLayoutTab = z.object({ id: z.string().min(1).max(40), title: PaneTitle, root: PaneLayoutNode });
+export type PaneLayoutTab = z.infer<typeof PaneLayoutTab>;
+/** How many panes a tree holds, and how deep it goes. */
+function measure(node: PaneLayoutNode, depth = 1): { leaves: number; depth: number } {
+  if (node.type === 'pane') return { leaves: 1, depth };
+  const a = measure(node.first, depth + 1);
+  const b = measure(node.second, depth + 1);
+  return { leaves: a.leaves + b.leaves, depth: Math.max(a.depth, b.depth) };
+}
+export const PaneLayout = z
+  .object({ tabs: z.array(PaneLayoutTab).max(MAX_PANES_PER_PROJECT), activeTabId: z.string().min(1).max(40).nullable() })
+  .refine((layout) => layout.tabs.reduce((sum, tab) => sum + measure(tab.root).leaves, 0) <= MAX_PANES_PER_PROJECT, 'more panes than a project may have')
+  .refine((layout) => layout.tabs.every((tab) => measure(tab.root).depth <= 16), 'a layout nested too deep');
+export type PaneLayout = z.infer<typeof PaneLayout>;
+
+/**
+ * The install's Terminals settings (stories 16.8, 16.9): opt in notifications
+ * (off by default, state and pane label only, never terminal text), what the
+ * pane environment adds on request (a proxy URL can hold a password; the SSH
+ * agent lets a pane use the user's keys), each launcher's visible argument
+ * field, and hiding the surface. The caps are constants, not settings.
+ */
+export const TerminalsSettings = z.object({
+  notifyNeedsAttention: z.boolean().default(false),
+  notifyExited: z.boolean().default(false),
+  /** Launchers whose notifications are on, by launcher id (per launcher opt in). */
+  notifyLaunchers: z.array(PaneLauncherId).default([]),
+  passProxies: z.boolean().default(false),
+  passSshAgent: z.boolean().default(false),
+  /** What the user types after a launcher's own arguments, by launcher id. */
+  launcherArgs: z.record(PaneLauncherId, z.string().max(500).regex(/^[^\p{Cc}]*$/u, 'no control characters')).default({}),
+  hidden: z.boolean().default(false),
+});
+export type TerminalsSettings = z.infer<typeof TerminalsSettings>;
 
 const size = {
   cols: z.number().int().min(1).max(1000),

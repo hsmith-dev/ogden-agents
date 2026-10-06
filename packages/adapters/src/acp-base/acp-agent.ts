@@ -706,7 +706,7 @@ async function startOnChild(
             ? error
             : new AgentError(
                 limited ? 'usage_limit' : !processGone && isAuthRequired(error) ? 'auth_required' : 'agent_failed',
-                processGone ? STOPPED : limited ? reasons.usageLimit : plainReason(error, FAILED),
+                processGone ? STOPPED : limited ? reasons.usageLimit : (isAuthRequired(error) ? undefined : quirks.failureReason?.(errorText(error))) ?? plainReason(error, FAILED),
                 {
                   details: { reason: mask(error instanceof Error ? error.message : String(error)) },
                   cause: error,

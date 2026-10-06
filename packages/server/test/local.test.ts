@@ -76,8 +76,9 @@ describe('a Local model chat (epic 14 story 14.2)', () => {
     const { server, tab, wsId, chat } = await setUp({ target: async () => ({ baseUrl: `${fake.url}/v1` }) });
     const session = await chat();
     expect(await say(server, tab, wsId, session.id, 'hello')).toBe('Hello from the fake model.');
-    // Ogden probed the endpoint itself (`/models`), then the harness sent one chat request; nothing else reached the server.
-    expect(fake.log.map((entry) => `${entry.method} ${entry.path}`)).toEqual(['GET /v1/models', 'POST /v1/chat/completions']);
+    // Ogden looked at the endpoint itself (`/models`, before the chat and before the message), then the harness sent one chat request; nothing else reached the server.
+    expect(new Set(fake.log.map((entry) => `${entry.method} ${entry.path}`))).toEqual(new Set(['GET /v1/models', 'POST /v1/chat/completions']));
+    expect(fake.log.filter((entry) => entry.method === 'POST')).toHaveLength(1);
     expect(fake.log.every((entry) => entry.host?.startsWith('127.0.0.1:') === true)).toBe(true);
   });
 

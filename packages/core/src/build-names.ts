@@ -35,7 +35,7 @@ export const CREDENTIAL_FOLDERS = [
   // The whole config folder (gh, gcloud, browsers on Linux and more), not only gh's.
   '.config',
   // Other agents' homes and logins, and Claude Code's own settings and login (story 5.8 review: an unattended command reads none of them).
-  '.claude', '.claude.json', '.codex', '.gemini', '.grok', '.antigravity', '.opencode', join('.local', 'share', 'keyrings'), join('.local', 'share', 'opencode'),
+  '.claude', '.claude.json', '.codex', '.gemini', '.grok', '.antigravity', join('.local', 'share', 'keyrings'),
   // macOS: keychains, cookies and the browsers' profiles.
   join('Library', 'Keychains'), join('Library', 'Cookies'), join('Library', 'Safari'),
   join('Library', 'Application Support', 'Google', 'Chrome'), join('Library', 'Application Support', 'Firefox'), join('Library', 'Application Support', 'BraveSoftware'), join('Library', 'Application Support', 'Microsoft Edge'), join('Library', 'Application Support', 'Arc'),

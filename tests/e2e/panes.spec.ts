@@ -7,13 +7,14 @@
  * Content-Security-Policy. No test runs the user's shell or a CLI. Skipped
  * only where node-pty can't load (never on CI).
  */
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
-import { API_ROUTES, ROOT } from '../support.js';
+import { API_ROUTES, ROOT, startServer } from '../support.js';
 import { APPEARANCE_KEY, ptyLoads, setDeveloperMode, withChatServer } from './chat-server.js';
 import { addFakeCli, makeFakeCliFolder } from '../fixtures/fake-cli-folder.js';
-import { storedToken } from './tab.js';
+import { openConnected, storedToken } from './tab.js';
 
 const FAKE_SHELL = join(ROOT, 'tests', 'fixtures', 'fake-pane-shell.mjs');
 /** Programs detection finds: none. A test that is not about detection never looks at the real computer, so it never runs a real CLI. */
@@ -313,4 +314,85 @@ test('Terminals settings: hide the surface, and turning Developer mode off with 
     },
     { extra: { paneShell: { file: process.execPath, args: [FAKE_SHELL] }, paneLaunchers: NO_PROGRAMS } },
   );
+});
+
+/** Every file under `dir`, read as bytes (the database and its write ahead log included). */
+function filesUnder(dir: string): Buffer[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return filesUnder(path);
+    return statSync(path).isFile() ? [readFileSync(path)] : [];
+  });
+}
+
+test('the layout, names and opt in survive a server restart as stopped terminals that Start again; nothing a terminal printed or was typed is stored, and no server secret reaches it', async ({ page }) => {
+  test.skip(!process.env.CI && !(await ptyLoads()), 'node-pty cannot load on this computer');
+  const SECRET_VALUE = 'sk-e2e-planted-secret-4417';
+  const TYPED = 'typed-marker-7731';
+  const before = process.env.OGDEN_E2E_PLANTED_API_KEY;
+  process.env.OGDEN_E2E_PLANTED_API_KEY = SECRET_VALUE;
+  try {
+    await withChatServer(
+      page,
+      async ({ server, dataDir, repo }) => {
+        const wsId = await openProject(page, repo);
+        await setBrowserDeveloperMode(page, true);
+        await setDeveloperMode(page, true);
+        await page.goto(at(page, `/w/${wsId}/terminals`));
+        await page.getByTestId('terminals-new').click();
+        await expect(page.getByTestId('pane-terminal').locator('.xterm-rows')).toContainText('fake-shell-ready');
+        await page.getByTestId('pane-split-row').click();
+        await expect(page.getByTestId('pane')).toHaveCount(2);
+        await expect(page.getByTestId('pane').nth(1).locator('.xterm-rows')).toContainText('fake-shell-ready');
+        // The second pane gets a name and the opt in; the first prints what is typed, and lists its secrets (none).
+        await page.getByTestId('pane-title').nth(1).click();
+        await page.getByTestId('pane-title-input').fill('Build watcher');
+        await page.keyboard.press('Enter');
+        await page.getByTestId('pane-notify').nth(1).click();
+        await expect(page.getByTestId('pane-notify').nth(1)).toBeChecked();
+        await expect(page.getByTestId('pane-title').nth(1)).toHaveText('Build watcher');
+        await page.getByTestId('pane').nth(0).locator('textarea').focus();
+        await page.keyboard.type(`echo ${TYPED}`);
+        await page.keyboard.press('Enter');
+        await expect(page.getByTestId('pane').nth(0).locator('.xterm-rows')).toContainText(`echo:echo ${TYPED}`);
+        await page.keyboard.type('secret');
+        await page.keyboard.press('Enter');
+        await expect(page.getByTestId('pane').nth(0).locator('.xterm-rows')).toContainText('secret-done');
+        await expect(page.getByTestId('pane').nth(0).locator('.xterm-rows')).not.toContainText('secret=');
+
+        // Stop the server (the programs end with it) and look at everything it kept.
+        await server.close();
+        const everything = filesUnder(dataDir);
+        for (const needle of [TYPED, `echo:echo ${TYPED}`, 'fake-shell-ready', SECRET_VALUE]) {
+          expect(everything.some((bytes) => bytes.includes(needle)), `${needle} is not stored`).toBe(false);
+        }
+
+        // The next run restores both panes, stopped, in the same split, with the name and the opt in kept.
+        const next = await startServer(dataDir, 0, { paneShell: { file: process.execPath, args: [FAKE_SHELL] }, paneLaunchers: NO_PROGRAMS });
+        try {
+          await openConnected(page, '/', next.launchUrl);
+          // The browser's own copy of Developer mode is per address, and the new server has a new one.
+          await setBrowserDeveloperMode(page, true);
+          await page.goto(at(page, `/w/${wsId}/terminals`));
+          await expect(page.getByTestId('pane')).toHaveCount(2);
+          await expect(page.getByTestId('layout-divider')).toHaveCount(1);
+          await expect(page.getByTestId('pane').nth(1)).toContainText('Build watcher');
+          await expect(page.getByTestId('pane-notify').nth(1)).toBeChecked();
+          await expect(page.getByTestId('pane-notify').nth(0)).not.toBeChecked();
+          await expect(page.getByTestId('pane-status-chip').first()).toHaveText('Stopped');
+          await page.getByTestId('pane-restart').first().click();
+          await expect(page.getByTestId('pane').first()).toHaveAttribute('data-state', 'running');
+          await expect(page.getByTestId('pane').first().locator('.xterm-rows')).toContainText('fake-shell-ready');
+          // The second one stays stopped until it is started.
+          await expect(page.getByTestId('pane').nth(1)).toHaveAttribute('data-state', 'stopped');
+        } finally {
+          await next.close();
+        }
+      },
+      { extra: { paneShell: { file: process.execPath, args: [FAKE_SHELL] }, paneLaunchers: NO_PROGRAMS } },
+    );
+  } finally {
+    if (before === undefined) delete process.env.OGDEN_E2E_PLANTED_API_KEY;
+    else process.env.OGDEN_E2E_PLANTED_API_KEY = before;
+  }
 });

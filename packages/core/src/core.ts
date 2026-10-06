@@ -8,6 +8,7 @@ import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust
 import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
 import { createBuildSessions, type BuildSessions } from './build-sessions.js';
 import { createBuildSettings, type BuildSettings } from './build-settings.js';
+import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
@@ -53,6 +54,8 @@ export interface Core {
   readonly buildSessions: BuildSessions;
   /** Unattended builds' limits and a project's build settings (story 5.8). */
   readonly buildSettings: BuildSettings;
+  /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
+  readonly createNotifications: (ports: NotificationsPorts) => Notifications;
   /**
    * The Local model's endpoints (epic 14 story 14.3) over the keychain the server holds (AD-16): their keys are
    * never in the database. The server calls it once, after it has its secret store.
@@ -151,6 +154,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     agentModels,
     buildSessions: createBuildSessions(),
     buildSettings: createBuildSettings({ db, events, entities }),
+    createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),
     localEndpoints: (secrets) => createLocalEndpoints({ db, events, secrets }),
     close: () => {
       try {

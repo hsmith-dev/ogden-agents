@@ -96,8 +96,9 @@ export function createAnnouncer(say: { polite(text: string): void; assertive(tex
  * announced: announcements start after the first `caught_up`.
  */
 export function LiveAnnouncer() {
-  const { model } = useSidebarData();
-  const { caughtUp } = useEventStream();
+  const { model, runsSettled } = useSidebarData();
+  const { caughtUp: streamCaughtUp } = useEventStream();
+  const caughtUp = streamCaughtUp && runsSettled;
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [polite, setPolite] = useState<LiveMessage>({ text: '', n: 0 });
   const [assertive, setAssertive] = useState<LiveMessage>({ text: '', n: 0 });

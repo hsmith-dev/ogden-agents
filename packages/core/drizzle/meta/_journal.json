@@ -162,6 +162,13 @@
       "when": 1791245483489,
       "tag": "0022_look_back_offers",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1791249188580,
+      "tag": "0023_notifications",
+      "breakpoints": true
     }
   ]
 }

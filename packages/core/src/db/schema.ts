@@ -331,3 +331,23 @@ export const localEndpointSettings = sqliteTable('local_endpoint_settings', {
   id: integer('id').primaryKey(),
   defaultEndpointId: text('default_endpoint_id'),
 });
+
+/**
+ * Notification webhooks (story 11.4): one row per webhook the user added. Only
+ * its id, its host as it may be shown (masked) and the events it gets; the URL
+ * itself, which usually carries a token, is kept through `SecretStorePort`
+ * under the id, never here (AD-16).
+ */
+export const notificationWebhooks = sqliteTable('notification_webhooks', {
+  id: text('id').primaryKey(),
+  host: text('host').notNull(),
+  /** JSON array of `blocked` and `ready_for_review`. */
+  events: text('events').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+/** Install-wide notification settings (story 11.4; one row, `id = 1`, created on first write). */
+export const notificationSettings = sqliteTable('notification_settings', {
+  id: integer('id').primaryKey(),
+  browserNotifications: integer('browser_notifications', { mode: 'boolean' }).notNull().default(false),
+});

@@ -277,6 +277,8 @@ export const MANAGER_CASES: readonly ManagerCase[] = [
   c('decision-done', 'decision', 'good', 'The goal is done.', [say(decision('done'))], ACCEPTED),
   c('decision-stop', 'decision', 'good', 'Stop the run.', [say(decision('stop'))], ACCEPTED),
   c('decision-fenced', 'decision', 'wrapped', 'A decision inside a code fence.', [`\`\`\`json\n${say(decision('done'))}\n\`\`\``], ACCEPTED),
+  c('decision-prose', 'decision', 'wrapped', 'A decision between sentences.', [`I have decided as follows: ${say(decision('stop'))} Thanks.`], ACCEPTED),
+  c('decision-ask-without-question', 'decision', 'rules', 'A question to the user with no question in it.', [say(decision('ask_user'))], refused('missing_field')),
   c('decision-truncated', 'decision', 'malformed', 'A decision cut off.', ['{"version":"ogden.manager.decision.v1","action":"dispa'], refused('not_json')),
   c('decision-wrong-version', 'decision', 'malformed', 'A decision of an unknown version.', [say({ ...decision('done'), version: 'ogden.manager.decision.v0' })], refused('wrong_version')),
   c('decision-unknown-action', 'decision', 'adversarial', 'An action Ogden does not offer.', [say(decision('rewrite_history'))], refused('forbidden_action')),

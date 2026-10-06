@@ -114,7 +114,7 @@ export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = nul
           const script = managerCases[caseId];
           const n = caseCounts.get(caseId) ?? 0;
           caseCounts.set(caseId, n + 1);
-          if (script.hang) { await new Promise((r) => res.on('close', r)); return; }
+          if (script.hang) { if (!res.destroyed && !res.closed) await new Promise((r) => res.on('close', r)); return; }
           const content = script.replies[Math.min(n, script.replies.length - 1)] ?? '';
           return send(200, { ...base(model), object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] });
         }

@@ -129,7 +129,7 @@ export function createFakeManager(options: FakeManagerOptions = {}): FakeManager
       if (script.hang === true) {
         counts.set(key, (counts.get(key) ?? 0) + 1);
         requests.push({ caseId: key, n: counts.get(key) ?? 1, schemaName: request.schemaName });
-        await wait(request.timeoutMs ?? 60_000, request.signal);
+        await wait(request.timeoutMs ?? 1_000, request.signal);
         return failure('timeout', 'The server took too long to answer.');
       }
       let last: 'not_json' | 'off_shape' = 'not_json';
@@ -138,7 +138,7 @@ export function createFakeManager(options: FakeManagerOptions = {}): FakeManager
         counts.set(key, n);
         requests.push({ caseId: key, n, schemaName: request.schemaName });
         const reply = script.replies[Math.min(sent, script.replies.length - 1)] ?? '';
-        if (reply.length > HARNESS_LIMITS.maxReplyBytes) return failure('too_large', 'The server sent back more than expected.');
+        if (Buffer.byteLength(reply) > HARNESS_LIMITS.maxReplyBytes) return failure('too_large', 'The server sent back more than expected.');
         const parsed = readJson(reply);
         if (parsed === undefined) {
           last = 'not_json';
@@ -164,6 +164,8 @@ export interface Observed {
   code?: RefusalCode;
   /** Plain words for a refusal. */
   reason?: string;
+  /** The port refused the shape (valid JSON that did not fit the schema): the reason is one of the rule codes, not known here. */
+  schemaRefused?: boolean;
   requests: number;
 }
 
@@ -171,7 +173,7 @@ export interface Observed {
 export function observe(kind: CaseKind, result: StructuredResult, requests: number, roster: readonly string[] = HARNESS_ROSTER): Observed {
   if (!result.ok) {
     const code: RefusalCode | undefined = result.kind === 'too_large' ? 'too_large' : result.kind === 'timeout' ? 'timeout' : result.detail === 'not_json' ? 'not_json' : undefined;
-    return { outcome: 'refused', ...(code === undefined ? {} : { code, reason: REFUSAL_REASONS[code] }), requests };
+    return { outcome: 'refused', ...(code === undefined ? {} : { code, reason: REFUSAL_REASONS[code] }), ...(result.kind === 'bad_answer' && result.detail === 'off_shape' ? { schemaRefused: true } : {}), requests };
   }
   const checked = checkManagerReply(kind, result.value, roster);
   if (!checked.ok) return { outcome: 'refused', code: checked.code, reason: checked.reason, requests };
@@ -200,14 +202,23 @@ export interface TableOptions {
   cases?: readonly ManagerCase[];
   /** A count of requests the model has served so far; read before and after each case to tell accepted from repaired. */
   countRequests: () => number;
-  /** How long a hanging case waits (default 300 ms). */
-  timeoutMs?: number;
+  /** How long a case may take (default 300 ms for a hanging case, 10 s for any other, so load cannot turn a refusal into a timeout). */
+  timeoutMs?: number | ((each: ManagerCase) => number);
   roster?: readonly string[];
 }
 
-/** An observed outcome matches when the outcome is the expected one and any code it gives is the expected code. */
-export const matches = (expected: ManagerCase['expected'], observed: Observed): boolean =>
-  expected.outcome === observed.outcome && (observed.code === undefined || observed.code === expected.code);
+const PORT_CODES: readonly RefusalCode[] = ['not_json', 'too_large', 'timeout'];
+
+/**
+ * An observed outcome matches when the outcome is the expected one and a refusal has the expected code. The one
+ * exception: a schema refusal gives no code, and stands for any rule code the schema can say (never a port code).
+ */
+export const matches = (expected: ManagerCase['expected'], observed: Observed): boolean => {
+  if (expected.outcome !== observed.outcome) return false;
+  if (expected.outcome !== 'refused') return true;
+  if (observed.schemaRefused === true) return expected.code !== undefined && !PORT_CODES.includes(expected.code);
+  return observed.code === expected.code;
+};
 
 /** Plays each case through `port` in order (one at a time) and compares it with the table. */
 export async function runCaseTable(options: TableOptions): Promise<TableRun> {
@@ -219,7 +230,7 @@ export async function runCaseTable(options: TableOptions): Promise<TableRun> {
       prompt: `${markerFor(each.id)}\nPlan the work for the goal.`,
       schema: schemaFor(each.kind),
       schemaName: each.kind === 'plan' ? 'manager_plan' : 'manager_decision',
-      timeoutMs: options.timeoutMs ?? 300,
+      timeoutMs: typeof options.timeoutMs === 'function' ? options.timeoutMs(each) : (options.timeoutMs ?? (each.script.hang === true ? 300 : 10_000)),
     });
     const observed = observe(each.kind, result, options.countRequests() - before, options.roster);
     rows.push({ id: each.id, group: each.group, expected: each.expected, observed, match: matches(each.expected, observed) });

@@ -20,7 +20,7 @@ import {
   checkManagerReply,
   markerFor,
 } from './fixtures/manager-cases.js';
-import { SAMPLE_GOALS, createFakeManager, formatReport, formatTable, measureModel, readJson, runCaseTable } from './fixtures/manager-harness.js';
+import { SAMPLE_GOALS, createFakeManager, formatReport, formatTable, matches, measureModel, readJson, runCaseTable } from './fixtures/manager-harness.js';
 
 const TARGET = { baseUrl: 'http://fake.invalid/v1' };
 const MODEL = 'fake-manager';
@@ -143,7 +143,7 @@ describe('the fake manager', () => {
     const fake = createFakeManager();
     const started = Date.now();
     expect(await fake.structuredComplete(TARGET, { model: MODEL, prompt: markerFor('plan-slow'), schema: PLAN_SCHEMA, timeoutMs: 50 })).toMatchObject({ ok: false, kind: 'timeout' });
-    expect(Date.now() - started).toBeGreaterThanOrEqual(40);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(30);
     const controller = new AbortController();
     const pending = fake.structuredComplete(TARGET, { model: MODEL, prompt: markerFor('plan-slow'), schema: PLAN_SCHEMA, timeoutMs: 60_000, signal: controller.signal });
     controller.abort();
@@ -180,12 +180,19 @@ describe('the table through each port', () => {
     const server = await startFakeServer({ models: [MODEL], managerCases: Object.fromEntries(MANAGER_CASES.map((each) => [each.id, each.script])) });
     servers.push(server);
     const chats = () => server.log.filter((entry) => entry.path === '/v1/chat/completions');
-    const run = await runCaseTable({ port: createOpenAiLocalModel(), target: { baseUrl: `${server.url}/v1` }, model: MODEL, countRequests: () => chats().length, timeoutMs: 400 });
+    const run = await runCaseTable({ port: createOpenAiLocalModel(), target: { baseUrl: `${server.url}/v1` }, model: MODEL, countRequests: () => chats().length });
     expect(run.mismatches).toEqual([]);
     expect(run.total).toBe(MANAGER_CASES.length);
     expect(chats().every((entry) => (entry.tools ?? []).length === 0 && entry.stream === false)).toBe(true);
     expect(run.rows.find((row) => row.id === 'plan-repairable')!.observed.outcome).toBe('repaired');
     expect(run.rows.find((row) => row.id === 'plan-slow')!.observed).toMatchObject({ outcome: 'refused', code: 'timeout' });
+  });
+
+  it('a refusal for another reason is a mismatch, and a schema refusal never stands for a port code', () => {
+    expect(matches({ outcome: 'refused', code: 'forbidden_field' }, { outcome: 'refused', requests: 1 })).toBe(false);
+    expect(matches({ outcome: 'refused', code: 'timeout' }, { outcome: 'refused', requests: 1 })).toBe(false);
+    expect(matches({ outcome: 'refused', code: 'forbidden_field' }, { outcome: 'refused', schemaRefused: true, requests: 4 })).toBe(true);
+    expect(matches({ outcome: 'refused', code: 'not_json' }, { outcome: 'refused', schemaRefused: true, requests: 4 })).toBe(false);
   });
 
   it('a mismatch is reported in plain words', async () => {

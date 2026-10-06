@@ -47,7 +47,7 @@ export function agentAvailability(agent: ChatAgent): AgentAvailability {
     return { available: false, description: agent.unavailable.reason, setUp: !trust, trust };
   }
   const signedIn = agent.install === 'installed' && agent.auth === 'signed_in';
-  const base = signedIn ? (agent.signInMethods.every((method) => method.kind === 'api_key') ? 'Installed, using your API key' : 'Installed, signed in') : 'Installed';
+  const base = signedIn ? (agent.signInMethods.every((method) => method.kind === 'api_key') ? `Installed, using your ${agent.apiKeyName ?? 'API key'}` : 'Installed, signed in') : 'Installed';
   return { available: true, description: agent.needsProjectTrust ? `${base}. Asks you to trust each project first.` : base, setUp: false, trust: false };
 }
 

@@ -74,6 +74,8 @@ export interface NeedsYouEntry {
   notify?: boolean;
   /** Set on a sign in need of an agent that takes only an API key: its key was rejected, there is no sign in. */
   keyRejected?: true;
+  /** What that agent calls its key, when it is not "API key" (Grok: "xAI API access token"). */
+  keyName?: string;
   /** A run ready for review opens its review page for this ticket, not its session (story 11.4). */
   reviewRef?: string;
 }
@@ -141,7 +143,7 @@ export const checkInText = (agentName: string) => `${agentName} has been quiet f
 export const signInText = (agentName: string) => `${agentName} needs you to sign in again`;
 
 /** The same for an agent that takes only an API key (Codex, Grok): there is no sign in, the key was rejected. */
-export const keyRejectedText = (agentName: string) => `${agentName}'s API key was rejected`;
+export const keyRejectedText = (agentName: string, keyName?: string) => `${agentName}'s ${keyName ?? 'API key'} was rejected`;
 
 const rank = (state: SessionState) => STATE_ORDER.indexOf(state);
 const time = (iso: string) => Date.parse(iso) || 0;
@@ -279,7 +281,7 @@ export function buildSidebar(
   /** A chat's model by the agent's name for it (story 11); default: its id. */
   modelName: (agentId: string | undefined, model: string) => string = (_agentId, model) => model,
   /** Whether a chat's agent takes only an API key, never an account sign in (Codex, Grok): its sign in need says the key was rejected. */
-  keyOnly: (agentId: string | undefined) => boolean = () => false,
+  keyOnly: (agentId: string | undefined) => boolean | string = () => false,
   /** Blocked runs and runs ready for review (story 11.4), from `buildRunNeeds`. */
   runNeeds: readonly NeedsYouEntry[] = [],
 ): SidebarModel {
@@ -334,13 +336,15 @@ export function buildSidebar(
       }
       if (session.state === 'error' && folded?.errorCode === 'auth_required' && (folded.state === undefined || folded.state === 'error')) {
         const rejected = keyOnly(session.agentId);
+        const keyName = typeof rejected === 'string' ? rejected : undefined;
         needsYou.push({
           ...base,
           id: `sign_in:${session.id}:${folded.errorSeq ?? session.updatedAt}`,
           kind: 'sign_in',
-          text: rejected ? keyRejectedText(agent) : signInText(agent),
+          text: rejected ? keyRejectedText(agent, keyName) : signInText(agent),
           at: session.updatedAt,
           ...(rejected ? { keyRejected: true as const } : {}),
+          ...(keyName === undefined ? {} : { keyName }),
         });
       }
     }

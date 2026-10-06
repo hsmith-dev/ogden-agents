@@ -68,6 +68,7 @@ const COULD_NOT_INSTALL = "Ogden Agents couldn't start the install. Try again.";
 const COULD_NOT_UNINSTALL = "Ogden Agents couldn't uninstall that. Try again.";
 const COULD_NOT_SIGN_OUT = "Ogden Agents couldn't sign out. Try again.";
 const COULD_NOT_SAVE_WELCOME = "Ogden Agents couldn't save that. Try again.";
+const COULD_NOT_READ_WELCOME = "Ogden Agents couldn't check whether Welcome is done. Try again.";
 
 const noStore = (c: Context) => c.header('Cache-Control', 'no-store');
 
@@ -267,7 +268,14 @@ function registerOnboardingRoutes(app: Hono, onboarding: Onboarding | undefined,
     return;
   }
 
-  app.get(API_ROUTES.onboarding, (c) => c.json(OnboardingState.parse(onboarding.get())));
+  app.get(API_ROUTES.onboarding, (c) => {
+    try {
+      return c.json(OnboardingState.parse(onboarding.get()));
+    } catch (error) {
+      log.error('reading onboarding failed', { code: (error as NodeJS.ErrnoException).code ?? (error instanceof CoreError ? error.code : 'unexpected') });
+      return apiError(c, 500, 'internal_error', COULD_NOT_READ_WELCOME);
+    }
+  });
 
   app.patch(
     API_ROUTES.onboarding,

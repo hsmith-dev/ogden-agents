@@ -127,6 +127,10 @@ describe('agentAvailability and projectDefaultAgent (entry 6)', () => {
     // Read for a project: it says it needs that project trusted; the trust prompt fixes it.
     const untrusted = { ...LIST.agents[1]!, needsProjectTrust: true, unavailable: { code: 'project_not_trusted' as const, reason: projectNotTrustedReason('Fake Agent'), action: 'trust_project' as const } };
     expect(agentAvailability(untrusted)).toEqual({ available: false, description: projectNotTrustedReason('Fake Agent'), setUp: false, trust: true });
+    // An agent that takes only a key says what it calls it (Grok: a token).
+    const grok = { ...LIST.agents[1]!, signInMethods: [{ kind: 'api_key' as const, label: 'Use an xAI API access token' }], auth: 'signed_in' as const, apiKeyName: 'xAI API access token' };
+    expect(agentAvailability(grok).description).toBe('Installed, using your xAI API access token');
+    expect(agentAvailability({ ...grok, apiKeyName: undefined }).description).toBe('Installed, using your API key');
     // Read for no project: each project asks for its own trust, so the agent can be the default.
     expect(agentAvailability({ ...LIST.agents[1]!, needsProjectTrust: true })).toEqual({ available: true, description: 'Installed, signed in. Asks you to trust each project first.', setUp: false, trust: false });
   });

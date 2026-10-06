@@ -72,6 +72,42 @@ describe('Test connection', () => {
   });
 });
 
+describe('models (epic 14 story 14.5)', () => {
+  const listing = (models: Array<{ id: string }>): LocalModelPort => ({
+    async probe() { return { ok: true, models: models.map((m) => m.id) }; },
+    async listModels() { return { ok: true, models }; },
+    async structuredComplete() { throw new Error('not used'); },
+  });
+
+  it('lists the models, tells the picker once, and marks a chosen model the server dropped as missing, never another', async () => {
+    const core = openTestCore(tempDir());
+    const endpoints = core.localEndpoints(secrets());
+    const told: string[][] = [];
+    const added = await endpoints.add({ label: 'x', baseUrl: 'http://localhost:1234/v1', model: 'gone' });
+    const models = createLocalModels({ endpoints, port: listing([{ id: 'a' }, { id: 'b' }]), onModels: (_id, list) => told.push(list.map((m) => m.id)) });
+    expect(await models.models(added.id)).toMatchObject({ state: 'ready', model: 'gone', missing: 'gone', message: 'Ready. 2 models are available.' });
+    expect(told).toEqual([['a', 'b']]);
+    await endpoints.update(added.id, { model: 'b' });
+    expect(await models.models(added.id)).toMatchObject({ model: 'b', missing: null });
+  });
+
+  it('is running with none when the list is empty, and never fails because the picker could not be told', async () => {
+    const core = openTestCore(tempDir());
+    const endpoints = core.localEndpoints(secrets());
+    const added = await endpoints.add({ label: 'x', baseUrl: 'http://localhost:1234/v1' });
+    const models = createLocalModels({ endpoints, port: listing([]), onModels: () => { throw new Error('boom'); } });
+    expect(await models.models(added.id)).toMatchObject({ state: 'no_models', missing: null });
+  });
+
+  it('refuses a host nobody confirmed', async () => {
+    const core = openTestCore(tempDir());
+    const endpoints = core.localEndpoints(secrets());
+    const added = await endpoints.add({ label: 'r', baseUrl: 'https://a.example.com/v1', confirmHost: 'https://a.example.com' });
+    await endpoints.update(added.id, { baseUrl: 'https://b.example.com/v1' });
+    await expect(createLocalModels({ endpoints, port: listing([]) }).models(added.id)).rejects.toBeInstanceOf(EndpointConfirmationRequiredError);
+  });
+});
+
 describe('Detect', () => {
   const candidates = [
     { id: 'one', label: 'One', baseUrl: 'http://localhost:1234/v1' },

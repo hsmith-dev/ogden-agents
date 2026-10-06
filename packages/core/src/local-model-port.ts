@@ -18,6 +18,8 @@
 export interface LocalModelTarget {
   baseUrl: string;
   key?: string | undefined;
+  /** The preset the endpoint was made from, when it was: an adapter may read more of that kind of server (sizes, context length) than the OpenAI-compatible list gives. */
+  preset?: string | undefined;
 }
 
 /** Why a call to an endpoint failed. */
@@ -61,6 +63,8 @@ export interface LocalModelInfo {
   id: string;
   /** Parameters or size on disk in bytes, where the server reports it. */
   sizeBytes?: number | undefined;
+  /** Parameters as the server writes them (`7B`), where it reports them. */
+  parameterSize?: string | undefined;
   /** The context window in tokens, where the server reports it. */
   contextTokens?: number | undefined;
   /** Whether the server says it can call tools; `undefined` when it doesn't say. */

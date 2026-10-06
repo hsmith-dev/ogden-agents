@@ -106,3 +106,25 @@ describe('the team types (types only; epic 15 builds on them)', () => {
     expect(TeamRoster.safeParse({ worker: { kind: 'agent', agentId: 'x' } }).success).toBe(true);
   });
 });
+
+describe('model cautions and descriptions (epic 14 story 14.5)', () => {
+  it('cautions on a small context, no tool support and a small model, only for what the server reported', async () => {
+    const { modelCautions, modelDescription, LOCAL_CONTEXT_FLOOR_TOKENS } = await import('../src/index.js');
+    expect(LOCAL_CONTEXT_FLOOR_TOKENS).toBe(16_384);
+    expect(modelCautions({})).toEqual([]);
+    expect(modelCautions({ contextTokens: 32_768, toolCall: true, parameterSize: '32B' })).toEqual([]);
+    expect(modelCautions({ contextTokens: 4096 })).toEqual([expect.stringContaining('context is small (4k)')]);
+    expect(modelCautions({ contextTokens: 16_384 })).toEqual([]);
+    expect(modelCautions({ toolCall: false })).toEqual([expect.stringContaining("can't call tools")]);
+    expect(modelCautions({ parameterSize: '7B' })).toEqual([expect.stringContaining('Small models follow tool instructions less reliably')]);
+    expect(modelCautions({ parameterSize: '8.0B' })).toHaveLength(1);
+    expect(modelCautions({ parameterSize: '70B' })).toEqual([]);
+    expect(modelCautions({ parameterSize: '500M' })).toHaveLength(1);
+    expect(modelCautions({ parameterSize: 'big' })).toEqual([]);
+    expect(modelCautions({ contextTokens: 2048, toolCall: false, parameterSize: '3B' })).toHaveLength(3);
+    expect(modelDescription({})).toBeUndefined();
+    expect(modelDescription({ parameterSize: '7B', sizeBytes: 4_100_000_000, contextTokens: 32_768 })).toBe('7B, 4.1 GB, 32k context');
+    expect(modelDescription({ sizeBytes: 820_000_000 })).toBe('820 MB');
+    for (const words of [...modelCautions({ contextTokens: 1, toolCall: false, parameterSize: '1B' })]) expect(words).not.toMatch(/—|–/);
+  });
+});

@@ -287,3 +287,76 @@ export function endpointStateWords(state: LocalEndpointState, models: number): s
       return "The server answered, but not in a way Ogden Agents can use. Check its address.";
   }
 }
+
+/** The context length below which the card cautions (epic 14 story 14.5; spike 14.1 and the epic's floor): tool use needs 16k to 32k or more. */
+export const LOCAL_CONTEXT_FLOOR_TOKENS = 16_384;
+
+/** The most a model family's size may be (in billions of parameters) to be called small. */
+const SMALL_MODEL_BILLIONS = 14;
+
+/** What a server reports of one model; every field is only what it said (nothing is guessed). */
+export const EndpointModel = z.object({
+  id: z.string().min(1).max(300),
+  sizeBytes: z.number().int().nonnegative().optional(),
+  /** E.g. `7B`, as the server writes it. */
+  parameterSize: z.string().min(1).max(40).optional(),
+  contextTokens: z.number().int().positive().optional(),
+  /** `false` only when the server says it can't call tools. */
+  toolCall: z.boolean().optional(),
+  /** Plain-words cautions for this model (small context, small model, no tools). */
+  cautions: z.array(z.string().min(1)).max(6),
+});
+export type EndpointModel = z.infer<typeof EndpointModel>;
+
+/** `GET /api/v1/local-endpoints/:endpointId/models`. The server (never the page) asks the endpoint. */
+export const LocalEndpointModelsResponse = z.object({
+  state: LocalEndpointState,
+  message: z.string().min(1),
+  models: z.array(EndpointModel).max(MAX_TEST_MODELS),
+  /** The model its chats start on, as chosen; `null` when none is chosen (the first one is used). */
+  model: z.string().nullable(),
+  /** The chosen model when the server no longer lists it: shown as missing, never swapped for another. */
+  missing: z.string().nullable(),
+});
+export type LocalEndpointModelsResponse = z.infer<typeof LocalEndpointModelsResponse>;
+
+/** `4.1 GB`, `820 MB`: a size in plain words. */
+export function sizeWords(bytes: number): string {
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1).replace(/\.0$/, '')} GB`;
+  return `${Math.max(1, Math.round(bytes / 1_000_000))} MB`;
+}
+
+/** `32k`, `128k`: a context length in plain words. */
+export function contextWords(tokens: number): string {
+  // Rounded down, so a context just under 16k never reads as 16k.
+  return tokens >= 1024 ? `${Math.floor(tokens / 1024)}k` : String(tokens);
+}
+
+/** The billions of parameters in a size such as `7B`, `8.0B` or `70B`; `undefined` when it isn't one. */
+function billions(parameterSize: string | undefined): number | undefined {
+  const match = /^\s*(\d+(?:\.\d+)?)\s*([BbMm])\s*$/.exec(parameterSize ?? '');
+  if (match === null) return undefined;
+  const value = Number(match[1]);
+  return match[2]!.toLowerCase() === 'b' ? value : value / 1000;
+}
+
+/**
+ * The cautions for a model, from what the server reported (E14-R7): never a guarantee
+ * and never a recommendation. Nothing is said for what the server did not report.
+ */
+export function modelCautions(model: { parameterSize?: string | undefined; contextTokens?: number | undefined; toolCall?: boolean | undefined }): string[] {
+  const out: string[] = [];
+  if (model.contextTokens !== undefined && model.contextTokens < LOCAL_CONTEXT_FLOOR_TOKENS) {
+    out.push(`Its context is small (${contextWords(model.contextTokens)}). Editing files and running commands needs 16k to 32k or more, and long skills need more.`);
+  }
+  if (model.toolCall === false) out.push("The server says it can't call tools, so it can chat but not edit files or run commands.");
+  const size = billions(model.parameterSize);
+  if (size !== undefined && size < SMALL_MODEL_BILLIONS) out.push('Small models follow tool instructions less reliably. Models of about 30B or more are more dependable for coding.');
+  return out;
+}
+
+/** One line on a model for a picker: its size and context, where the server reported them. */
+export function modelDescription(model: { sizeBytes?: number | undefined; parameterSize?: string | undefined; contextTokens?: number | undefined }): string | undefined {
+  const parts = [model.parameterSize, model.sizeBytes === undefined ? undefined : sizeWords(model.sizeBytes), model.contextTokens === undefined ? undefined : `${contextWords(model.contextTokens)} context`].filter((part): part is string => part !== undefined);
+  return parts.length === 0 ? undefined : parts.join(', ');
+}

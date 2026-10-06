@@ -218,6 +218,13 @@ export const API_ROUTES = {
    */
   localEndpointTest: `${API_BASE}/local-endpoints/:endpointId/test`,
   /**
+   * `GET` → `LocalEndpointModelsResponse` (story 14.5): the models the endpoint serves with the size,
+   * context length and tool support it reports, cautions in plain words, and the chosen model if
+   * the server no longer has it. The server (never the page) asks the endpoint; 409
+   * `endpoint_confirmation_required` for an unconfirmed host, in which case nothing is called.
+   */
+  localEndpointModels: `${API_BASE}/local-endpoints/:endpointId/models`,
+  /**
    * `POST` → `LocalEndpointDetectResponse` (story 14.4): Detect. Probes only 127.0.0.1 and localhost on the
    * presets' ports, once, when the user presses it. Reads no body.
    */

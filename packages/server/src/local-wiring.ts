@@ -89,7 +89,14 @@ export function localWiring(input: {
     const models = listed.filter((each) => SAFE_MODEL_ID.test(each.id));
     if (listed.length === 0) throw new AgentError('agent_unavailable', 'The server has no models yet. Load one in the server, then try again.');
     if (models.length === 0) throw new AgentError('agent_unavailable', "None of the server's model names can be used. Names use letters, digits and . _ : / @ + - only.");
-    const model = target.model !== undefined && models.some((each) => each.id === target.model) ? target.model : models[0]!.id;
+    // A model the user chose that the server no longer has is missing: said so, never swapped for another.
+    if (target.model !== undefined && models.every((each) => each.id !== target.model) && listed.some((each) => each.id === target.model)) {
+      throw new AgentError('agent_unavailable', `The model ${target.model} has a name Ogden Agents can't pass on safely. Choose another in Settings, Agents.`, { details: { code: 'model_name_unusable' } });
+    }
+    if (target.model !== undefined && !models.some((each) => each.id === target.model)) {
+      throw new AgentError('agent_unavailable', `The model ${target.model} isn't on the server any more. Choose another in Settings, Agents. Ogden Agents won't switch to a different one for you.`, { details: { code: 'model_missing' } });
+    }
+    const model = target.model ?? models[0]!.id;
     let configFile: string;
     try {
       configFile = writeOpenCodeConfig(input.dataDir, opencodeConfig({ baseUrl: target.baseUrl, models, model, hasKey: target.key !== undefined && target.key !== '' }));

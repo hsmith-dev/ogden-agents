@@ -30,6 +30,8 @@ export {
   OPENCODE_PROVIDER_ID,
   OPENCODE_SWITCHES,
 } from './constants.js';
+/** The id a model has in the harness's own list (and so in the chat's model picker): `ogden/<server's id>`. */
+export const localModelId = (id: string): string => `ogden/${id}`;
 export { createLocalAgent, type LocalAgentOptions, type LocalServerCommand } from './opencode-agent.js';
 
 /**

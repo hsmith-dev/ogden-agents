@@ -50,7 +50,7 @@ describe('a build step in the plan', () => {
   });
 
   it('has no worker, chat, instruction or mode: the step is the id, the ticket, a short reason and what it waits on', () => {
-    expect(Object.keys(ManagerBuildStep.shape).sort()).toEqual(['build', 'depends_on', 'id', 'reason']);
+    expect(Object.keys(ManagerBuildStep.shape).sort()).toEqual(['build', 'depends_on', 'id', 'reason', 'rule']);
     expect(Object.keys(ManagerBuildStep.shape.build.shape)).toEqual(['ticket']);
   });
 
@@ -116,7 +116,7 @@ describe('a build step in the plan', () => {
 
   it('is in the JSON schema the server is asked with when a ticket is ready, with nothing that names how to build', () => {
     const items = (MANAGER_PLAN_WITH_BUILDS_JSON_SCHEMA as { properties: { steps: { items: { properties: Record<string, { properties?: Record<string, unknown> }>; required: string[]; additionalProperties: boolean } } } }).properties.steps.items;
-    expect(Object.keys(items.properties).sort()).toEqual(['build', 'chat', 'depends_on', 'id', 'instruction', 'mode', 'reason', 'review_of', 'worker']);
+    expect(Object.keys(items.properties).sort()).toEqual(['build', 'chat', 'depends_on', 'id', 'instruction', 'mode', 'reason', 'review_of', 'rule', 'worker']);
     expect(Object.keys(items.properties.build!.properties!)).toEqual(['ticket']);
     expect(items.required.sort()).toEqual(['depends_on', 'id']);
     expect(items.additionalProperties).toBe(false);
@@ -125,7 +125,7 @@ describe('a build step in the plan', () => {
 
   it('is not in the JSON schema asked with when nothing is ready to build: that one is the worker step alone, as before', () => {
     const items = (MANAGER_PLAN_JSON_SCHEMA as { properties: { steps: { items: { properties: Record<string, unknown>; required: string[] } } } }).properties.steps.items;
-    expect(Object.keys(items.properties).sort()).toEqual(['chat', 'depends_on', 'id', 'instruction', 'mode', 'review_of', 'worker']);
+    expect(Object.keys(items.properties).sort()).toEqual(['chat', 'depends_on', 'id', 'instruction', 'mode', 'review_of', 'rule', 'worker']);
     expect(items.required).toEqual(expect.arrayContaining(['id', 'worker', 'chat', 'instruction', 'mode', 'depends_on']));
     expect(JSON.stringify(MANAGER_PLAN_JSON_SCHEMA)).not.toMatch(/build|reason/i);
   });

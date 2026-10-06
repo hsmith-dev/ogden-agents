@@ -56,6 +56,11 @@ export interface ManagerContext {
   /** A short summary of the project: its name and, when Board is on, its ticket titles and states. */
   projectSummary: string;
   workers: readonly ManagerWorker[];
+  /**
+   * The agent id of the project's reviewer when it is an agent that is ready (15.10). Only a plan step with `review_of` may go to it as a
+   * review; absent means no review step is allowed.
+   */
+  reviewer?: string | undefined;
   /** The last step's capped, masked report; absent before the first step. */
   lastReport?: ManagerStatusReport | undefined;
 }
@@ -143,7 +148,7 @@ export const readyWorkerIds = (context: Pick<ManagerContext, 'workers'>): string
 
 /** `value` as a plan for `context`, or the failure to return instead. The one check a manager's answer passes through. */
 export function validatePlanFor(context: ManagerContext, value: unknown): ManagerResult<ManagerPlan> {
-  const checked = checkManagerPlan(value, { roster: readyWorkerIds(context), chats: Object.fromEntries(context.workers.map((worker) => [worker.agentId, worker.chats.map((chat) => chat.sessionId)])) });
+  const checked = checkManagerPlan(value, { roster: readyWorkerIds(context), chats: Object.fromEntries(context.workers.map((worker) => [worker.agentId, worker.chats.map((chat) => chat.sessionId)])), reviewer: context.reviewer });
   return checked.ok ? { ok: true, value: checked.value } : { ok: false, kind: failureKindFor(checked.code), code: checked.code, reason: checked.reason };
 }
 

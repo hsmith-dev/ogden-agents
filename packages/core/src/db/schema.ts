@@ -450,6 +450,8 @@ export const orchestrationSteps = sqliteTable(
     approvedBy: text('approved_by'),
     /** The chat the instruction was sent to, once dispatched. */
     sessionId: text('session_id'),
+    /** The step whose result this step asks the reviewer about (15.10); NULL for an ordinary step. */
+    reviewOf: text('review_of'),
   },
   (t) => [primaryKey({ columns: [t.runId, t.stepId] })],
 );

@@ -7,6 +7,8 @@ import {
   ORCHESTRATION_TOLD_WORDS,
   ORCHESTRATION_WAITING_CARD_WORDS,
   ORCHESTRATION_WAITING_INTERRUPTED_WORDS,
+  REVIEW_LIMITS,
+  orchestrationReviewNote,
   orchestrationStopWords,
   type OrchestrationActivityEntry,
   type OrchestrationMode,
@@ -313,6 +315,11 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denie
           {step.workerLabel}
         </Badge>
         <Badge data-testid="orchestrate-step-state">{stateWords}</Badge>
+        {step.reviewOf === null ? null : (
+          <Badge variant="outline" data-testid="orchestrate-step-review-badge">
+            Review of step {step.reviewOf}
+          </Badge>
+        )}
         {suggested ? (
           <Badge variant="outline" data-testid="orchestrate-step-suggested">
             The manager suggests this next
@@ -341,7 +348,7 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denie
             aria-label={`Instruction for step ${step.stepId}`}
             data-testid="orchestrate-edit-text"
             value={text}
-            maxLength={MANAGER_LIMITS.maxInstructionChars}
+            maxLength={step.reviewOf === null ? MANAGER_LIMITS.maxInstructionChars : REVIEW_LIMITS.maxQuestionChars}
             onChange={(event) => setText(event.target.value)}
             className="rounded-lg border border-border p-2"
           />
@@ -371,6 +378,22 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denie
         <Text data-testid="orchestrate-step-instruction" className="whitespace-pre-wrap">
           {step.instruction}
         </Text>
+      )}
+      {step.reviewOf === null ? null : (
+        <div className="flex flex-col gap-1" data-testid="orchestrate-step-review">
+          <Text variant="caption" data-testid="orchestrate-step-review-note">
+            {orchestrationReviewNote(step.reviewOf)}
+          </Text>
+          {step.review == null ? null : step.review.kind === 'build_review' ? (
+            <Link to="/w/$wsId/review/$ref" params={{ wsId, ref: step.review.ticketRef }} className="text-label underline" data-testid="orchestrate-step-review-link" data-review-kind="build_review">
+              Open the review page for step {step.reviewOf}
+            </Link>
+          ) : (
+            <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId: step.review.sessionId }} className="text-label underline" data-testid="orchestrate-step-review-link" data-review-kind="worker_chat">
+              Open the chat that did step {step.reviewOf}
+            </Link>
+          )}
+        </div>
       )}
       {step.state === 'proposed' && !ready && live ? (
         <Text variant="caption" data-testid="orchestrate-step-waits">

@@ -24,6 +24,8 @@
 //                  "Edited <paths>." if allowed, else "Denied <paths>."
 //   "tool"         an `edit` tool call, then an update completing it with a
 //                  diff of src/example.ts; replies "Edited."
+//   "reply-with <text>"  replies exactly <text>, with {{SECRET}} made into a key-shaped secret (epic 15, story 15.10: a worker's result a test shapes)
+//   "review-echo ..."  replies the whole prompt it was given between RECEIVED<< and >>RECEIVED, then a secret and 6000 `z` (15.10)
 //   "context"      replies `session=<its id> via=<new|resumed|loaded> primed=<n>`,
 //                  n being the earlier messages ("User: " or "Claude Code: "
 //                  lines) of a transcript core primed the prompt with
@@ -1125,6 +1127,19 @@ async function runPrompt(params, client, session) {
       session.cancel = undefined;
       if (cancelled) return { stopReason: 'cancelled' };
       await say(client, params.sessionId, ', done.');
+      return { stopReason: 'end_turn' };
+    }
+    // The reviewer role (epic 15, story 15.10): "reply-with <text>" answers exactly <text> (a worker's result a test shapes), and a prompt that
+    // starts "review-echo" answers with the whole prompt it was given (what the reviewer was sent), then a secret and a very long tail (an answer
+    // that must come back masked and capped).
+    if (text.startsWith('reply-with ')) {
+      await say(client, params.sessionId, text.slice('reply-with '.length).replaceAll('{{SECRET}}', 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789'));
+      return { stopReason: 'end_turn' };
+    }
+    if (text.startsWith('review-echo')) {
+      await say(client, params.sessionId, `RECEIVED<<${text}>>RECEIVED `);
+      await say(client, params.sessionId, 'The key I saw is sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789. ');
+      await say(client, params.sessionId, 'z'.repeat(6000));
       return { stopReason: 'end_turn' };
     }
     if (text === 'hold') {

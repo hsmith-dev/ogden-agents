@@ -65,6 +65,11 @@ import {
   type DispatchRefusalReason,
   MANAGER_LIMITS,
   ORCHESTRATION_NO_MANAGER_MESSAGE,
+  ORCHESTRATION_REVIEW_QUESTION_TOO_LONG_MESSAGE,
+  REVIEW_LIMITS,
+  buildReviewMessage,
+  isReviewMessageFor,
+  type OrchestrationReviewTarget,
   type ManagerStatusView,
   type ManagerDecision,
   type ManagerPlan,
@@ -78,11 +83,12 @@ import {
 } from '@ogden-agents/shared';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Database } from './db/database.js';
-import { events as eventsTable, orchestrationRuns, orchestrationSteps } from './db/schema.js';
+import { events as eventsTable, orchestrationRuns, orchestrationSteps, runs as runsTable } from './db/schema.js';
 import { readAutomaticConfirmed, readDefaultPermissionMode, readOrchestrationMode } from './workspace-settings.js';
 import { AgentNotReadyError, BadOrderError, DispatchRefusedError, DriverIsTerminalError, ManagerFailedError, ManagerUnavailableError, NoQuestionPendingError, NotFoundError, OrchestrationOffError, QueueFullError, RunNotOpenError, SessionBusyError, SessionNotIdleError, StepNotApprovedError, StepNotChangeableError, StepNotProposedError, UnknownAgentError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { OrchestrationFeature } from './orchestration-feature.js';
+import { cleanForManager } from './manager-input.js';
 import { dispatchableSteps, MANAGER_FAILURE_WORDS, type ManagerContext, type ManagerDecisionContext, type ManagerPort, type ManagerRecord } from './manager-port.js';
 import { RESTARTED_REASON } from './chat/constants.js';
 import type { ManagerSource } from './manager-source.js';
@@ -219,7 +225,11 @@ const stepOf = (row: StepRow): OrchestrationStep =>
     state: row.state,
     approvedBy: row.approvedBy,
     sessionId: row.sessionId,
+    reviewOf: row.reviewOf,
   });
+
+/** Whether `content` is the instruction a step sent: the text itself, or for a review step the message core built from its question. */
+const sentAs = (content: string, instruction: string, reviewed: boolean): boolean => content === instruction || (reviewed && isReviewMessageFor(content, instruction));
 
 export function createOrchestration({ db, events, feature, chat, manager: fixedManager, managers, team, limits: runLimits, clock }: OrchestrationOptions): Orchestration {
   const { orm } = db;
@@ -304,7 +314,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
    * finished reply after it, as plain text for {@link makeStatusReport}, which masks and caps it. The instruction is found by its
    * text among the chat's newest events; a chat that was used before the instruction shows only what came after it.
    */
-  const lastReply = (workspaceId: WorkspaceId, sessionId: SessionId, instruction: string, reused: boolean): string => {
+  const lastReply = (workspaceId: WorkspaceId, sessionId: SessionId, instruction: string, reused: boolean, reviewed = false): string => {
     const page = events.readBefore(workspaceId, events.lastSeq() + 1, REPLY_WINDOW, sessionId);
     let reply = '';
     let found = false;
@@ -314,7 +324,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       if (event.type === 'session.message_completed') {
         if (event.payload.role === 'agent') {
           if (reply === '') reply = event.payload.content;
-        } else if ((event.payload.origin === 'manager' || event.payload.origin === 'manager_auto') && event.payload.content === instruction) {
+        } else if ((event.payload.origin === 'manager' || event.payload.origin === 'manager_auto') && sentAs(event.payload.content, instruction, reviewed)) {
           found = true;
           break;
         }
@@ -335,7 +345,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
    * `undefined`. Read from the worker session's own `permission.resolved` events since the manager's instruction, so it survives a restart.
    * A card that was cancelled (the worker was stopped) is not a Deny.
    */
-  const deniedSince = (workspaceId: WorkspaceId, sessionId: SessionId, instruction: string, reused: boolean): { title: string } | undefined => {
+  const deniedSince = (workspaceId: WorkspaceId, sessionId: SessionId, instruction: string, reused: boolean, reviewed = false): { title: string } | undefined => {
     const page = events.readBefore(workspaceId, events.lastSeq() + 1, REPLY_WINDOW, sessionId);
     const denied: string[] = [];
     const titles = new Map<string, string>();
@@ -345,7 +355,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       if (event.type === 'permission.resolved') {
         if (event.payload.decision === 'deny' && event.payload.by !== 'cancelled') denied.push(event.payload.requestId);
       } else if (event.type === 'permission.requested') titles.set(event.payload.requestId, event.payload.toolCall.title);
-      else if (event.type === 'session.message_completed' && event.payload.role !== 'agent' && (event.payload.origin === 'manager' || event.payload.origin === 'manager_auto') && event.payload.content === instruction) {
+      else if (event.type === 'session.message_completed' && event.payload.role !== 'agent' && (event.payload.origin === 'manager' || event.payload.origin === 'manager_auto') && sentAs(event.payload.content, instruction, reviewed)) {
         found = true;
         break;
       }
@@ -417,6 +427,18 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
   /** The manager of this project now, or `undefined` when none is ready (a test's fixed manager wins). */
   const managerOf = (workspaceId: WorkspaceId): ManagerPort | undefined => fixedManager ?? (statusOf(workspaceId).state === 'ready' ? managers?.managerFor(workspaceId) : undefined);
 
+  /**
+   * Where the person looks at the result a review step is about (15.10): epic 5's review page when the reviewed step's chat is a build run
+   * (the ticket's review, where they approve and merge), else the worker chat that did it; `null` while the reviewed step was not sent.
+   * Read only: this never decides anything on a run.
+   */
+  const reviewTargetOf = (runId: string, reviewedStepId: string): OrchestrationReviewTarget | null => {
+    const reviewed = orm.select().from(orchestrationSteps).where(and(eq(orchestrationSteps.runId, runId), eq(orchestrationSteps.stepId, reviewedStepId))).get();
+    if (reviewed === undefined || reviewed.sessionId === null) return null;
+    const build = orm.select({ ticketRef: runsTable.ticketRef }).from(runsTable).where(eq(runsTable.sessionId, reviewed.sessionId)).get();
+    return build === undefined ? { kind: 'worker_chat', sessionId: reviewed.sessionId as SessionId } : { kind: 'build_review', ticketRef: build.ticketRef };
+  };
+
   /** Reads back every dispatched step: its chat's state and a masked, capped report; settles a finished one once. */
   const readBack = async (workspaceId: WorkspaceId, given: RunRow, known?: Map<string, string>, quiet = false): Promise<OrchestrationRunView> => {
     const run = syncMode(workspaceId, given);
@@ -439,10 +461,10 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
           // The chat is gone (its history was deleted): the step reads as failed.
           sessionState = 'error';
         }
-        report = makeStatusReport({ stepId: step.stepId, worker: step.worker, state: sessionState, text: lastReply(workspaceId, sid, step.instruction, step.chat !== 'new') });
+        report = makeStatusReport({ stepId: step.stepId, worker: step.worker, state: sessionState, text: lastReply(workspaceId, sid, step.instruction, step.chat !== 'new', step.reviewOf !== null) });
         const live = step.state === 'dispatched' && !isRunOver(run.state as OrchestrationRunState);
         // A Deny of one of the worker's permission cards ends this step (15.9), whatever the worker does next: the run stops and the manager is told.
-        const denied = live && sessionState !== 'error' ? deniedSince(workspaceId, sid, step.instruction, step.chat !== 'new') : undefined;
+        const denied = live && sessionState !== 'error' ? deniedSince(workspaceId, sid, step.instruction, step.chat !== 'new', step.reviewOf !== null) : undefined;
         if (denied !== undefined) {
           const summary = `${ORCHESTRATION_DENIED_RESULT}${denied.title === '' ? '' : ` The request was: ${denied.title}.`}`;
           const deniedReport = makeStatusReport({ stepId: step.stepId, worker: step.worker, state: 'error', text: summary });
@@ -498,7 +520,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
           }
         }
       }
-      views.push(OrchestrationStepView.parse({ ...step, workerLabel: names.get(step.worker) ?? step.worker, sessionState, report }));
+      views.push(OrchestrationStepView.parse({ ...step, workerLabel: names.get(step.worker) ?? step.worker, sessionState, report, review: step.reviewOf === null ? null : reviewTargetOf(run.id, step.reviewOf) }));
     }
     const fresh = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? run;
     // A read that settled a step lets the run go on (the listener does the same when the worker's chat changes): its next decision, and the next step of an automatic run.
@@ -546,6 +568,31 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     if (agent.unavailable !== undefined) return refuse(reasonOf(agent.unavailable.code));
     if (rostered !== undefined && !rostered.ready) return refuse('worker_not_ready');
     return label;
+  };
+
+  /**
+   * The message a review step sends (15.10), built here from the manager's question and the reviewed step's result, never by the manager:
+   * checked first that the worker is still the project's reviewer and, where another agent is ready, a different agent from the one that did
+   * the reviewed work ({@link DispatchRefusedError} `not_the_reviewer`, before anything is created). The summary is the reviewed step's own
+   * capped, masked report with paths scrubbed and code and diff hunks left out ({@link buildReviewMessage}); nothing else of it goes.
+   */
+  const reviewMessageFor = async (workspaceId: WorkspaceId, run: RunRow, row: StepRow, label: string): Promise<string> => {
+    const refuse = (): never => {
+      throw new DispatchRefusedError('not_the_reviewer', dispatchRefusalWords('not_the_reviewer', label));
+    };
+    const reviewer = team === undefined ? undefined : await team.reviewer(workspaceId);
+    if (team === undefined || reviewer?.agentId !== row.worker) return refuse();
+    const reviewed = stepsOf(run.id).find((other) => other.stepId === row.reviewOf);
+    if (reviewed === undefined || reviewed.state !== 'done' || reviewed.sessionId === null) throw new StepNotApprovedError();
+    if (reviewed.worker === row.worker && (await team.workers(workspaceId)).some((worker) => worker.ready && worker.agentId !== row.worker)) return refuse();
+    const names = await labels(workspaceId);
+    const result = makeStatusReport({
+      stepId: reviewed.stepId,
+      worker: reviewed.worker,
+      state: 'done',
+      text: lastReply(workspaceId, reviewed.sessionId as SessionId, reviewed.instruction, reviewed.chat !== 'new', reviewed.reviewOf !== null),
+    });
+    return buildReviewMessage({ question: row.instruction, reviewedStep: reviewed.stepId, reviewedBy: names.get(reviewed.worker) ?? reviewed.worker, resultText: cleanForManager(result.summary) });
   };
 
   /** Whether the chat a step names can take an instruction now (read as it is, no await): the worker's own, a plain chat, idle, not in the terminal. */
@@ -834,8 +881,12 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     // Only the rostered workers (15.5): the project's worker and its reviewer when that is an agent. Without a roster, every agent.
     const rostered = team === undefined ? undefined : await team.workers(workspaceId);
     const addressable = rostered === undefined ? agents : rostered.flatMap((worker) => agents.filter((agent) => agent.agentId === worker.agentId));
+    // 15.10: the roster's reviewer, when it is an agent that is ready now: the only one a review step may go to.
+    const reviewer = team === undefined ? undefined : await team.reviewer(workspaceId);
+    const reviewerId = reviewer?.ready === true && addressable.some((agent) => agent.agentId === reviewer.agentId) ? reviewer.agentId : undefined;
     return {
       goal,
+      ...(reviewerId === undefined ? {} : { reviewer: reviewerId }),
       projectSummary: 'A software project in the folder the user opened.',
       workers: addressable.map((agent) => ({
         agentId: agent.agentId,
@@ -853,7 +904,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     goal: run.goal,
     steps: rows.map((row) => {
       const step = stepOf(row);
-      return { id: step.stepId, worker: step.worker, chat: step.chat, instruction: step.instruction, mode: 'ask' as const, depends_on: step.dependsOn };
+      return { id: step.stepId, worker: step.worker, chat: step.chat, instruction: step.instruction, mode: 'ask' as const, depends_on: step.dependsOn, ...(step.reviewOf === null ? {} : { review_of: step.reviewOf }) };
     }),
   });
   const statesOf = (rows: readonly StepRow[]): Record<string, OrchestrationStepState> => Object.fromEntries(rows.map((row) => [row.stepId, row.state as OrchestrationStepState]));
@@ -1193,7 +1244,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         plan.steps.forEach((step, position) => {
           orm
             .insert(orchestrationSteps)
-            .values({ runId, stepId: step.id, position, worker: step.worker, chat: step.chat, instruction: step.instruction, dependsOn: JSON.stringify(step.depends_on), state: 'proposed', approvedBy: null, sessionId: null })
+            .values({ runId, stepId: step.id, position, worker: step.worker, chat: step.chat, instruction: step.instruction, dependsOn: JSON.stringify(step.depends_on), state: 'proposed', approvedBy: null, sessionId: null, reviewOf: step.review_of ?? null })
             .run();
         });
         moveRun(runId, 'awaiting_user');
@@ -1249,6 +1300,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       const text = parsed.data.instruction;
       events.transaction(() => {
         const step = requireStep(run.id, stepId);
+        // A question for the reviewer stays bounded (15.10), whoever writes it.
+        if (step.reviewOf !== null && text.length > REVIEW_LIMITS.maxQuestionChars) throw new ValidationError(ORCHESTRATION_REVIEW_QUESTION_TOO_LONG_MESSAGE, []);
         const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
         if (live === undefined || !isLive(live.state) || (step.state !== 'proposed' && step.state !== 'approved')) throw new StepNotChangeableError();
         if (step.instruction === text) return;
@@ -1404,6 +1457,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       try {
         // Everything that can be refused is checked before a chat is made, so a refusal leaves every chat as it was (15.7).
         const label = await requireWorkerReady(workspaceId, row);
+        // A review step sends the manager's question with a capped, masked summary of the reviewed result, built here (15.10).
+        const message = row.reviewOf === null ? row.instruction : await reviewMessageFor(workspaceId, run, row, label);
         const named = row.chat === 'new' ? undefined : row.chat;
         if (named !== undefined) requireChatReady(workspaceId, row, named, label);
         // The run may have been stopped, or the step edited, while the worker was checked: nothing is created then.
@@ -1447,7 +1502,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         }
         if (named !== undefined) requireChatReady(workspaceId, row, named, label);
         try {
-          const sent = chat.sendMessage(workspaceId, session.id, current.instruction, { origin: current.approvedBy === 'mode' ? 'manager_auto' : 'manager' });
+          const sent = chat.sendMessage(workspaceId, session.id, current.reviewOf === null ? current.instruction : message, { origin: current.approvedBy === 'mode' ? 'manager_auto' : 'manager' });
           if (sent.queued) {
             // The chat took it to wait behind a turn that was still ending: it is not an instruction at once, so it is taken back.
             let taken = true;

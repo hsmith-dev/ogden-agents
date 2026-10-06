@@ -61,7 +61,7 @@ describe('blocked runs and runs ready for review in Needs you (story 11.4)', () 
 
   it('joins Needs you with the count, a notification that names the project and the build and never what happened', () => {
     const entries = needs([run('1.3', { outcome: 'verified', reason: 'secret-sk-123 in a path /Users/me/x' })]);
-    const model = buildSidebar([workspace], [], { windows: new Map() } as never, Date.now(), undefined, undefined, undefined, entries);
+    const model = buildSidebar([workspace], [], { windows: new Map(), install: { events: [] } } as never, Date.now(), undefined, undefined, undefined, entries);
     expect(model.needsYou).toHaveLength(1);
     expect(notificationText(entries[0]!)).toEqual({ title: 'Ready for review', body: 'Letterpress: Build 1.3' });
   });

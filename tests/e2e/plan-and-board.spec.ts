@@ -377,7 +377,7 @@ test('the Plan home (story 4.6): tabs and g shortcuts, groups in order, names in
       // Planning off: no Plan tab, and g p does nothing.
       await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board'] });
       await page.goto(`${server.url}/w/${wsId}/board`);
-      await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Board']);
+      await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Board', 'Terminals']);
       await page.keyboard.press('g');
       await page.keyboard.press('p');
       // A shortcut navigates in its own keydown; give a wrong one a moment to show, then check g p did nothing.

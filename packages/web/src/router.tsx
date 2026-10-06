@@ -119,6 +119,13 @@ const workspaceRunsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-runs-page'), 'WorkspaceRunsPage'),
 });
 
+/** A project's Terminals page (epic 16, story 16.2): its terminal panes, in Developer mode. */
+const workspaceTerminalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/terminals',
+  component: lazyRouteComponent(() => import('./routes/workspace-terminals-page'), 'WorkspaceTerminalsPage'),
+});
+
 /** A ticket's build review (story 5.2, the tracer), `/w/:wsId/review/:ref`. */
 const workspaceReviewRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -149,6 +156,7 @@ const routeTree = rootRoute.addChildren([
   workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),
   workspaceReviewRoute,
   workspaceRunsRoute,
+  workspaceTerminalsRoute,
   sessionRoute,
   settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, aboutRoute]),
 ]);

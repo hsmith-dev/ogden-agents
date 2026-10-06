@@ -299,6 +299,13 @@ jobs:
       - name: Install the pinned Grok package and check its binary's SHA-256
         run: node scripts/agent-pins.mjs --agent grok --check --with-binary
 
+      # The Local model's pinned OpenCode archive for this OS (epic 14 story 14.2):
+      # every pin checked against the ACP registry's own record, then this OS's
+      # archive (and Windows' ripgrep) downloaded and its SHA-256 and size
+      # compared with the pin. Never run: no test starts the real harness.
+      - name: Check the pinned Local model archive (OpenCode) and its ripgrep
+        run: node scripts/agent-pins.mjs --check --agent local
+
   # UI layout in a real browser (architecture Conventions: jsdom doesn't
   # evaluate media queries): sidebar forms and overflow at 1440, 900 and 390
   # px, theme and density switching, and the signed-out launch page.

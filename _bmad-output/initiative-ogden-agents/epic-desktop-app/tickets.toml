@@ -186,3 +186,16 @@ after = [7]
 hitl = false
 risk = "low"
 references = ["packages/server/src/update-check.ts", "packages/shared/src/release-source.ts", "RELEASING.md"]
+
+[[entry]]
+id = 15
+type = "story"
+title = "Linux desktop app: AppImage for x64 and arm64, built, updated and released"
+description = "Brings back the Linux half of E13-R1 that the first build left out (user, 2026-10-05: macOS and Windows first, Linux next). The Desktop workflow gains two native legs on `ubuntu-22.04` and `ubuntu-22.04-arm` that stage the pinned Linux Node (13.4's pins already cover it), build an unsigned AppImage and a `.deb` (the `.deb` depends on `libwebkit2gtk-4.1-0`, `libgtk-3-0` and `libsecret-1-0`), check the artifacts and run the same smoke, lifecycle and update tests under Xvfb and a session D-Bus (so a second launch focuses the first window, quit leaves no `ogden-node` or agent behind, and the AppImage updates itself to the next version). The release pipeline (13.9) builds both and attaches `Ogden-Agents_<version>_amd64.AppImage`, `..._aarch64.AppImage`, their `.deb` files and the AppImage updater signatures, and `latest.json` gains `linux-x86_64` and `linux-aarch64`. The updater replaces only an AppImage (the file named by `APPIMAGE`); an install that is not an AppImage, such as the `.deb`, does not check and says where to download the newest version. The keychain module's Linux behaviour (Secret Service through D-Bus, a plain \"no keychain\" refusal when there is none, no on-disk fallback, AD-16) is checked in the Linux legs. The README and RELEASING.md gain the Linux download and live check steps: making the AppImage executable, FUSE (`libfuse2`), Wayland and X11, and the sandbox and compositing workarounds."
+verify = "CI builds the AppImage and `.deb` on both Ubuntu 22.04 runners, the artifact check finds each file and every `.sig`, the smoke, lifecycle and update tests pass on both legs, a Linux server with no Secret Service starts and refuses a saved key with the plain message, a release dry run collects the Linux files and writes `linux-x86_64` and `linux-aarch64` into `latest.json`, and the user's live checks on a real Linux machine are recorded under Live check result before the ticket is done."
+covers = ["E13-R1", "E13-R2", "E13-R5", "E13-R6", "E13-R8", "E13-R9", "E13-R10"]
+after = [13]
+hitl = true
+risk = "medium"
+unknown = "Whether an AppImage updates and relaunches itself on the runners and on the user's desktop (Wayland or X11, FUSE or not), and whether `@napi-rs/keyring` loads and refuses cleanly with no Secret Service on both architectures."
+references = ["packages/desktop/src-tauri/src/update.rs", "packages/adapters/src/secrets-keyring/index.ts", ".github/workflows/desktop.yml", ".github/actions/desktop-build/action.yml", "RELEASING.md", "https://v2.tauri.app/distribute/appimage/", "https://v2.tauri.app/distribute/debian/"]

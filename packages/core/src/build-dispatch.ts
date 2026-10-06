@@ -130,6 +130,32 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
     return resumed;
   };
 
+  /**
+   * Check again (story 11.2): the end checks run once more on a failed or
+   * ready-for-review run's worktree (the plan's status, the tests re-run in
+   * the run's sandbox, the diff), with the project's test command as it is
+   * now. The agent does not run. Never for a decided run or one that is not
+   * the ticket's latest.
+   */
+  const checkAgainLocked = async (workspaceId: WorkspaceId, repoPath: string, runId: RunId): Promise<Run> => {
+    await guarded(workspaceId);
+    const run = entities.getRun(runId);
+    if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', runId);
+    if (
+      (run.outcome !== 'failed' && run.outcome !== 'verified') || run.decision !== null || run.worktreePath === null ||
+      entities.latestRunForTicket(workspaceId, run.ticketRef)?.id !== run.id
+    ) {
+      throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+    }
+    await requireGit();
+    await prepareContinue(workspaceId, repoPath, run);
+    bump(run.id);
+    const checking = entities.setRunOutcome(run.id, 'running', null);
+    // The checks run on their own, so the repo's lock is free for Stop.
+    void track(run.id, () => decideOutcome(entities.getRun(run.id) ?? checking, 'idle', { passedDone: true }));
+    return checking;
+  };
+
   /** The plan statuses a blocked plan may be marked with to resume (its `blocked_at`, else ready for dev). */
   const RESUME_STATUSES: ReadonlySet<string> = new Set(['ready-for-dev', 'in-progress', 'in-review']);
 
@@ -289,5 +315,5 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
   fn.armDeadline = armDeadline;
   fn.scheduleDrain = scheduleDrain;
 
-  return { timeUp, armDeadline, startAgain, dispatchAgain, resumeLocked, rebaseLocked, applyFixLocked, RESUME_STATUSES, retryLocked, launchQueued, extendAll, drainQueue, scheduleDrain };
+  return { timeUp, armDeadline, startAgain, dispatchAgain, resumeLocked, rebaseLocked, applyFixLocked, checkAgainLocked, RESUME_STATUSES, retryLocked, launchQueued, extendAll, drainQueue, scheduleDrain };
 }

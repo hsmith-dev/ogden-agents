@@ -17,8 +17,10 @@ import { createTabPresence, type TabPresence } from './tab-presence';
  * group and the tab title are the visual signal.
  */
 export function AttentionNotifier() {
-  const { model } = useSidebarData();
-  const { caughtUp } = useEventStream();
+  const { model, runsSettled } = useSidebarData();
+  const { caughtUp: streamCaughtUp } = useEventStream();
+  // Run needs are read over REST after the stream: what they hold at first is not news either (story 11.4).
+  const caughtUp = streamCaughtUp && runsSettled;
   const { settings } = useNotificationSettings();
   const router = useRouter();
   const notifier = useRef<Notifier | undefined>(undefined);
@@ -37,7 +39,9 @@ export function AttentionNotifier() {
           const notification = new Notification(text.title, { body: text.body, tag: need.id });
           notification.onclick = () => {
             window.focus();
-            void router.navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: need.wsId, sesId: need.sesId } });
+            void (need.reviewRef === undefined
+              ? router.navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: need.wsId, sesId: need.sesId } })
+              : router.navigate({ to: '/w/$wsId/review/$ref', params: { wsId: need.wsId, ref: need.reviewRef } }));
             notification.close();
           };
           return notification;
@@ -56,7 +60,8 @@ export function AttentionNotifier() {
 
   const sessions = useMemo(() => new Set(model.groups.flatMap((group) => [...group.rows, ...group.earlier].map((row) => row.sesId))), [model.groups]);
   useEffect(() => {
-    notifier.current?.update(model.needsYou, settings, caughtUp, sessions);
+    // A terminal pane's attention is opt in per pane (story 16.8): it never makes a sound or a desktop notification by itself.
+    notifier.current?.update(model.needsYou.filter((need) => need.kind !== 'pane'), settings, caughtUp, sessions);
   }, [model.needsYou, settings, caughtUp, sessions]);
 
   return null;

@@ -133,6 +133,23 @@ describe('the Grok slot (epic 12 entries 4 and 8)', () => {
   });
 });
 
+describe('the Local model slot (epic 14 story 14.2)', () => {
+  it('is left out by `local: false`, registered by a shipped install now that its chat is complete, and a test registers it after Grok', async () => {
+    const listed = async (server: TestServer, signed: SignedIn) =>
+      ChatAgentsResponse.parse(await (await request(server, signed, 'GET', API_ROUTES.chatAgents)).json()).agents.map((agent) => agent.agentId);
+    const bare = await startTestServer();
+    expect(await listed(bare, await signIn(bare))).toEqual(['claude-code']);
+    const shipped = await startTestServer({ local: undefined });
+    expect(await listed(shipped, await signIn(shipped))).toEqual(['claude-code', 'local']);
+    const withLocal = await startTestServer({ grok: {}, local: {} });
+    const tab = await signIn(withLocal);
+    expect(await listed(withLocal, tab)).toEqual(['claude-code', 'grok', 'local']);
+    const local = ChatAgentsResponse.parse(await (await request(withLocal, tab, 'GET', API_ROUTES.chatAgents)).json()).agents.find((agent) => agent.agentId === 'local');
+    // Ask only, no sign in, no project trust, no terminal.
+    expect(local).toMatchObject({ displayName: 'Local model', signInMethods: [], noAccount: true, permissionModes: ['ask'], needsProjectTrust: false, terminalResume: false });
+  });
+});
+
 describe('two agents side by side in one project (epic 6, entry 2)', () => {
   it('lists the agents a chat can start with, Claude Code first and the default', async () => {
     const { server, tab } = await setUp();

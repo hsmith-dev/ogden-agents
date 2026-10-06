@@ -36,6 +36,10 @@ function downloaded({ signed = true } = {}) {
   put('ogden-desktop-macos-universal', 'release/bundle/macos/Ogden Agents.app.tar.gz', 'mac update bytes', 'MAC-SIGNATURE\n');
   put('ogden-desktop-windows-x64', `release/bundle/nsis/Ogden Agents_${VERSION}_x64-setup.exe`, 'x64 bytes', 'X64-SIGNATURE\n');
   put('ogden-desktop-windows-arm64', `release/bundle/nsis/Ogden Agents_${VERSION}_arm64-setup.exe`, 'arm64 bytes', 'ARM64-SIGNATURE\n');
+  put('ogden-desktop-linux-x64', `release/bundle/appimage/Ogden Agents_${VERSION}_amd64.AppImage`, 'appimage x64', 'LINUX-X64-SIGNATURE\n');
+  put('ogden-desktop-linux-x64', `release/bundle/deb/Ogden Agents_${VERSION}_amd64.deb`, 'deb x64');
+  put('ogden-desktop-linux-arm64', `release/bundle/appimage/Ogden Agents_${VERSION}_aarch64.AppImage`, 'appimage arm64', 'LINUX-ARM64-SIGNATURE\n');
+  put('ogden-desktop-linux-arm64', `release/bundle/deb/Ogden Agents_${VERSION}_arm64.deb`, 'deb arm64');
   return root;
 }
 
@@ -47,6 +51,10 @@ describe('release artifacts', () => {
       `Ogden-Agents_${VERSION}_universal.app.tar.gz`,
       `Ogden-Agents_${VERSION}_x64-setup.exe`,
       `Ogden-Agents_${VERSION}_arm64-setup.exe`,
+      `Ogden-Agents_${VERSION}_amd64.AppImage`,
+      `Ogden-Agents_${VERSION}_aarch64.AppImage`,
+      `Ogden-Agents_${VERSION}_amd64.deb`,
+      `Ogden-Agents_${VERSION}_arm64.deb`,
     ]);
     for (const artifact of artifacts) expect(artifact.name).not.toMatch(/\s/);
   });
@@ -59,6 +67,10 @@ describe('release artifacts', () => {
       `Ogden-Agents_${VERSION}_universal.dmg`,
       `Ogden-Agents_${VERSION}_x64-setup.exe`,
       `Ogden-Agents_${VERSION}_arm64-setup.exe`,
+      `Ogden-Agents_${VERSION}_amd64.AppImage`,
+      `Ogden-Agents_${VERSION}_aarch64.AppImage`,
+      `Ogden-Agents_${VERSION}_amd64.deb`,
+      `Ogden-Agents_${VERSION}_arm64.deb`,
     ]);
   });
 
@@ -75,7 +87,9 @@ describe('latest.json', () => {
     const artifacts = collectArtifacts(downloaded(), VERSION).map((a) => ({ ...a, signature: a.sigSource === undefined ? undefined : readFileSync(a.sigSource, 'utf8') }));
     const manifest = buildLatestJson({ version: VERSION, notes: 'Notes', pubDate: '2026-10-05T00:00:00.000Z', repo: 'hsmith-dev/ogden-agents', tag: `v${VERSION}`, artifacts });
     expect(manifest.version).toBe(VERSION);
-    expect(Object.keys(manifest.platforms).sort()).toEqual(['darwin-aarch64', 'darwin-x86_64', 'windows-aarch64', 'windows-x86_64']);
+    expect(Object.keys(manifest.platforms).sort()).toEqual(['darwin-aarch64', 'darwin-x86_64', 'linux-aarch64', 'linux-x86_64', 'windows-aarch64', 'windows-x86_64']);
+    expect(manifest.platforms['linux-x86_64']!.signature).toBe('LINUX-X64-SIGNATURE');
+    expect(manifest.platforms['linux-aarch64']!.url).toBe(`https://github.com/hsmith-dev/ogden-agents/releases/download/v${VERSION}/Ogden-Agents_${VERSION}_aarch64.AppImage`);
     expect(manifest.platforms['darwin-aarch64']).toEqual(manifest.platforms['darwin-x86_64']);
     expect(manifest.platforms['windows-x86_64']).toEqual({ signature: 'X64-SIGNATURE', url: `https://github.com/hsmith-dev/ogden-agents/releases/download/v${VERSION}/Ogden-Agents_${VERSION}_x64-setup.exe` });
     expect(manifest.platforms['windows-aarch64']!.signature).toBe('ARM64-SIGNATURE');

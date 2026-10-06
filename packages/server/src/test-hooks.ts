@@ -21,6 +21,12 @@
  *   suite's terminal runs the fake CLI on every OS (Windows takes only a real
  *   `claude.exe` from `PATH`). It is narrower than `OGDEN_AGENTS_CLAUDE_ACP_PATH`,
  *   which already picks the agent's script for anyone.
+ * - {@link PANE_SHELL_ENV}: a Node script inside the temp folder that terminal
+ *   panes run in place of the user's shell (epic 16), so the suites open panes
+ *   with a fake program on every OS.
+ * - {@link PANE_PATH_ENV}: a folder inside the temp folder that terminal pane
+ *   detection treats as its whole PATH (epic 16), holding fake programs. In a
+ *   test run with none named, detection finds nothing.
  * - {@link BMAD_PROBE_ENV} = `1`: registers the test-only route that serves
  *   the `planning` BMad piece behind core's guard (story 10.1), so a test can
  *   see `feature_off` while the piece is off.
@@ -65,6 +71,12 @@
  *   through the fake agent's Grok personality (the real Grok is never run in a
  *   test). It also registers Grok in a shipped-style server, which otherwise leaves it out.
  *
+ * - {@link LOCAL_SERVER_ENV}: a Node script inside the temp folder plays the
+ *   Local model's pinned harness (epic 14), so a suite can chat through the
+ *   fake agent's OpenCode personality (the real harness is never run in a test).
+ *   {@link LOCAL_ENDPOINT_ENV} names the loopback endpoint its chats talk to.
+ *   Either registers the Local model in a shipped-style server, which otherwise leaves it out.
+ *
  * - {@link GROK_INSTALL_ENV}: Grok's Install takes its pins, npm and binary hashes from a
  *   local fixture lock (and never runs the unpacked fixture binary), so a suite can install Grok.
  *
@@ -94,6 +106,21 @@ export const API_KEY_CHECK_ENV = 'OGDEN_AGENTS_TEST_API_KEY_CHECK';
 
 /** Absolute path to a `claude` stand-in inside the temp folder, run as the agents' `CLAUDE_CODE_EXECUTABLE` (tests only). */
 export const CLAUDE_CLI_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_CLI';
+
+/**
+ * Absolute path to a Node script inside the temp folder that a terminal pane
+ * runs in place of the user's own shell (epic 16, story 16.2; tests only), so
+ * a suite's panes run a fake on every OS and never the real shell or a CLI.
+ */
+export const PANE_SHELL_ENV = 'OGDEN_AGENTS_TEST_PANE_SHELL';
+
+/**
+ * Absolute path to a folder inside the temp folder that holds fake programs
+ * (a `claude`, a `codex` ...): terminal pane detection looks only there, as
+ * its whole PATH and home (epic 16, story 16.5; tests only), so no suite ever
+ * finds or runs a real CLI.
+ */
+export const PANE_PATH_ENV = 'OGDEN_AGENTS_TEST_PANE_PATH';
 
 /** `1`: register `TEST_ROUTES.bmadProbe`, a route guarded by the `planning` piece (tests only; story 10.1). */
 export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
@@ -130,6 +157,10 @@ export const CODEX_INSTALL_ENV = 'OGDEN_AGENTS_TEST_CODEX_INSTALL';
 export const GROK_INSTALL_ENV = 'OGDEN_AGENTS_TEST_GROK_INSTALL';
 /** Absolute path to a Node script inside the temp folder, run under Node in place of Grok's checked binary (tests only; epic 12 entry 7). */
 export const GROK_SERVER_ENV = 'OGDEN_AGENTS_TEST_GROK_SERVER';
+/** Absolute path to a Node script inside the temp folder, run under Node in place of the Local model's pinned harness (tests only; epic 14 story 14.2). */
+export const LOCAL_SERVER_ENV = 'OGDEN_AGENTS_TEST_LOCAL_SERVER';
+/** JSON `{ "baseUrl": "http://127.0.0.1:<port>/v1", "key"?: "<dummy key>", "model"?: "<id>" }`: the endpoint the Local model's chats talk to, loopback only (tests only; epic 14 story 14.2). */
+export const LOCAL_ENDPOINT_ENV = 'OGDEN_AGENTS_TEST_LOCAL_ENDPOINT';
 /** Absolute path to a Node script inside the temp folder, run under Node as Codex's `codex-acp` adapter (tests only; epic 12 entry 5). */
 export const CODEX_SERVER_ENV = 'OGDEN_AGENTS_TEST_CODEX_SERVER';
 /** Absolute path to a Node script inside the temp folder, registered as a test agent that needs a trusted project (tests only; epic 6 entry 10). */
@@ -285,6 +316,30 @@ export function testClaudeCli(env: Env, dataDir: string, tmp: string = tmpdir())
   return testNodeScript(CLAUDE_CLI_ENV, env, dataDir, tmp);
 }
 
+/** The Node script {@link PANE_SHELL_ENV} names (see {@link testClaudeCli}), or `undefined` (the user's own shell); throws when allowed but unusable. */
+export function testPaneShell(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  return testNodeScript(PANE_SHELL_ENV, env, dataDir, tmp);
+}
+
+/** The folder {@link PANE_PATH_ENV} names, by its real path; `''` (finds nothing) in a test run that names none; `undefined` when hooks are not allowed or the folder is outside the temp folder: not inside the temp folder, or not an absolute folder (allowed but unusable throws). */
+export function testPanePath(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  const folder = env[PANE_PATH_ENV];
+  if (!testHooksAllowed(env, dataDir, tmp)) return undefined;
+  // A test run with no folder named finds nothing at all: detection never looks at the real computer, so no suite ever runs a real CLI.
+  if (folder === undefined || folder === '') return '';
+  if (!isAbsolute(folder)) throw new Error(`${PANE_PATH_ENV}: must be an absolute path`);
+  let real: string;
+  try {
+    real = realpathSync(folder);
+    if (!statSync(real).isDirectory()) throw new Error('not a folder');
+  } catch {
+    throw new Error(`${PANE_PATH_ENV}: must be an existing folder`);
+  }
+  // Allowed but unusable throws, so a test never falls back to looking at the real computer.
+  if (!insideTemp(real, tmp)) throw new Error(`${PANE_PATH_ENV}: must be a folder inside the temp folder`);
+  return real;
+}
+
 /**
  * The Node script {@link ANTIGRAVITY_SERVER_ENV} names, checked as
  * {@link testClaudeCli}'s is (inside the temp folder by its real path, a
@@ -364,6 +419,39 @@ export function testGrokInstall(env: Env, dataDir: string, tmp: string = tmpdir(
 /** The Node script {@link GROK_SERVER_ENV} names (see {@link testClaudeCli}), or `undefined` (Grok's checked binary); throws when allowed but unusable. */
 export function testGrokServer(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
   return testNodeScript(GROK_SERVER_ENV, env, dataDir, tmp);
+}
+
+/** The Node script {@link LOCAL_SERVER_ENV} names (see {@link testClaudeCli}), or `undefined` (the Local model's checked harness); throws when allowed but unusable. */
+export function testLocalServer(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  return testNodeScript(LOCAL_SERVER_ENV, env, dataDir, tmp);
+}
+
+/** What a Local model chat asks at each start for the endpoint to talk to. */
+export type TestLocalEndpoint = () => Promise<{ baseUrl: string; key?: string; model?: string }>;
+
+/**
+ * The endpoint {@link LOCAL_ENDPOINT_ENV} names, as the source a Local model chat asks at each start, or
+ * `undefined` (the user's own endpoints): unset or hooks not allowed. Allowed but unusable (bad JSON, a base URL
+ * that is not `http://127.0.0.1` or `http://localhost`) throws, so a test fails loudly rather than reaching anywhere else.
+ */
+export function testLocalEndpoint(env: Env, dataDir: string, tmp: string = tmpdir()): TestLocalEndpoint | undefined {
+  const raw = env[LOCAL_ENDPOINT_ENV];
+  if (raw === undefined || raw === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
+  let parsed: { baseUrl?: unknown; key?: unknown; model?: unknown };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    throw new Error(`${LOCAL_ENDPOINT_ENV}: not JSON`);
+  }
+  let url: URL | undefined;
+  try {
+    url = typeof parsed.baseUrl === 'string' ? new URL(parsed.baseUrl) : undefined;
+  } catch {
+    url = undefined;
+  }
+  if (url?.protocol !== 'http:' || (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost')) throw new Error(`${LOCAL_ENDPOINT_ENV}: baseUrl must be http://127.0.0.1 or http://localhost`);
+  const target = { baseUrl: parsed.baseUrl as string, ...(typeof parsed.key === 'string' ? { key: parsed.key } : {}), ...(typeof parsed.model === 'string' ? { model: parsed.model } : {}) };
+  return async () => target;
 }
 
 /** The trust-needing test agent's script from {@link TRUST_AGENT_ENV} (see {@link testClaudeCli}), or `undefined`; throws when allowed but unusable. */
@@ -483,7 +571,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'extraAgents' | 'sandbox'> & {
+export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -494,12 +582,16 @@ export interface TestHooks {
   claudeInstall: TestClaudeInstall | undefined;
   apiKeyCheck: ((value: string, signal: AbortSignal) => Promise<ApiKeyVerification>) | undefined;
   claudeCli: string | undefined;
+  paneShell: string | undefined;
+  panePath: string | undefined;
   antigravityServer: string | undefined;
   antigravityInstall: TestAntigravityInstall | undefined;
   codexServer: string | undefined;
   codexInstall: TestClaudeInstall | undefined;
   grokServer: string | undefined;
   grokInstall: TestClaudeInstall | undefined;
+  localServer: string | undefined;
+  localEndpoint: TestLocalEndpoint | undefined;
   trustAgent: string | undefined;
   bmadProbe: boolean;
   bmadAvailable: BmadPieceName[];
@@ -523,6 +615,9 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     claudeInstall: options.claudeInstall === undefined ? testClaudeInstall(env, dataDir, tmp) : undefined,
     apiKeyCheck: options.verifyApiKey === undefined ? testApiKeyCheck(env, dataDir, tmp) : undefined,
     claudeCli: options.extraAgentEnv?.CLAUDE_CODE_EXECUTABLE === undefined ? testClaudeCli(env, dataDir, tmp) : undefined,
+    // A shell a test passes decides it: the hook is not read.
+    paneShell: options.paneShell === undefined ? testPaneShell(env, dataDir, tmp) : undefined,
+    panePath: options.paneLaunchers === undefined ? testPanePath(env, dataDir, tmp) : undefined,
     // Antigravity's ports given (or left out) by a test decide it: the hook is not read.
     antigravityServer: options.antigravity === undefined ? testAntigravityServer(env, dataDir, tmp) : undefined,
     antigravityInstall: options.antigravity === undefined ? testAntigravityInstall(env, dataDir, tmp) : undefined,
@@ -532,6 +627,9 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     // Grok's ports given (or left out) by a test decide it: the hook is not read.
     grokServer: options.grok === undefined ? testGrokServer(env, dataDir, tmp) : undefined,
     grokInstall: options.grok === undefined ? testGrokInstall(env, dataDir, tmp) : undefined,
+    // The Local model's ports given (or left out) by a test decide it: the hooks are not read.
+    localServer: options.local === undefined ? testLocalServer(env, dataDir, tmp) : undefined,
+    localEndpoint: options.local === undefined ? testLocalEndpoint(env, dataDir, tmp) : undefined,
     // Agents a test registers decide it: the hook is not read.
     trustAgent: options.extraAgents === undefined ? testTrustAgent(env, dataDir, tmp) : undefined,
     bmadProbe: testBmadProbe(env, dataDir, tmp),
@@ -553,12 +651,16 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.claudeInstall !== undefined ||
     hooks.apiKeyCheck !== undefined ||
     hooks.claudeCli !== undefined ||
+    hooks.paneShell !== undefined ||
+    (hooks.panePath !== undefined && hooks.panePath !== '') ||
     hooks.antigravityServer !== undefined ||
     hooks.antigravityInstall !== undefined ||
     hooks.codexServer !== undefined ||
     hooks.codexInstall !== undefined ||
     hooks.grokServer !== undefined ||
     hooks.grokInstall !== undefined ||
+    hooks.localServer !== undefined ||
+    hooks.localEndpoint !== undefined ||
     hooks.trustAgent !== undefined ||
     hooks.bmadProbe ||
     hooks.bmadAvailable.length > 0 ||
@@ -570,12 +672,16 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     claudeInstall: hooks.claudeInstall !== undefined,
     apiKeyCheck: hooks.apiKeyCheck !== undefined,
     claudeCli: hooks.claudeCli !== undefined,
+    paneShell: hooks.paneShell !== undefined,
+    panePath: hooks.panePath !== undefined && hooks.panePath !== '',
     antigravityServer: hooks.antigravityServer !== undefined,
     antigravityInstall: hooks.antigravityInstall !== undefined,
     codexServer: hooks.codexServer !== undefined,
     codexInstall: hooks.codexInstall !== undefined,
     grokServer: hooks.grokServer !== undefined,
     grokInstall: hooks.grokInstall !== undefined,
+    localServer: hooks.localServer !== undefined,
+    localEndpoint: hooks.localEndpoint !== undefined,
     trustAgent: hooks.trustAgent !== undefined,
     bmadProbe: hooks.bmadProbe,
     bmadAvailable: hooks.bmadAvailable.join(','),

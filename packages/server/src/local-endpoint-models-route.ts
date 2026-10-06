@@ -1,0 +1,65 @@
+/**
+ * `GET /api/v1/local-endpoints/:endpointId/models` (epic 14 story 14.5): the
+ * models an endpoint serves with the size, context length and tool support it
+ * reports, cautions in plain words, and the chosen model when the server no
+ * longer lists it. Behind the gate; only the server asks the endpoint. Core
+ * refuses an unconfirmed host before anything is called.
+ */
+import { CoreError, EndpointConfirmationRequiredError, NotFoundError, SecretsUnavailableError, type LocalModels } from '@ogden-agents/core';
+import { API_ROUTES, LocalEndpointId, LocalEndpointModelsResponse, ManagerTestRequest, ManagerTestResponse, modelCautions } from '@ogden-agents/shared';
+import type { Context, Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { apiError, notImplemented } from './errors.js';
+import type { Logger } from './log.js';
+
+export function registerLocalEndpointModelsRoute(app: Hono, { localModels, log }: { localModels?: LocalModels | undefined; log: Logger }): void {
+  if (localModels === undefined) {
+    app.get(API_ROUTES.localEndpointModels, notImplemented);
+    app.post(API_ROUTES.localEndpointManagerTest, notImplemented);
+    return;
+  }
+  app.get(API_ROUTES.localEndpointModels, async (c: Context) => {
+    c.header('Cache-Control', 'no-store');
+    const id = LocalEndpointId.safeParse(c.req.param('endpointId'));
+    if (!id.success) return apiError(c, 404, 'not_found', 'That server is not set up.');
+    try {
+      const answer = await localModels.models(id.data);
+      return c.json(
+        LocalEndpointModelsResponse.parse({
+          ...answer,
+          models: answer.models.map((model) => ({ ...model, cautions: modelCautions(model) })),
+        }),
+      );
+    } catch (error) {
+      if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', 'That server is not set up.');
+      if (error instanceof EndpointConfirmationRequiredError) return apiError(c, 409, 'endpoint_confirmation_required', error.message, { host: error.host });
+      if (error instanceof SecretsUnavailableError) return apiError(c, 503, 'secrets_unavailable', error.message);
+      log.error('listing a local endpoint\'s models failed', { code: error instanceof CoreError ? error.code : 'unexpected' });
+      return apiError(c, 500, 'internal_error', "Ogden Agents couldn't list that server's models. Try again.");
+    }
+  });
+
+  // Test as a manager (epic 14 story 14.8): one fixed small request to one of the endpoint's models.
+  app.post(API_ROUTES.localEndpointManagerTest, bodyLimit({ maxSize: 2 * 1024, onError: (c) => apiError(c, 413, 'invalid_request', 'The request is too large.') }), async (c: Context) => {
+    c.header('Cache-Control', 'no-store');
+    const id = LocalEndpointId.safeParse(c.req.param('endpointId'));
+    if (!id.success) return apiError(c, 404, 'not_found', 'That server is not set up.');
+    let body: unknown;
+    try {
+      body = JSON.parse(await c.req.text());
+    } catch {
+      return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
+    }
+    const parsed = ManagerTestRequest.safeParse(body);
+    if (!parsed.success) return apiError(c, 400, 'invalid_request', 'Choose a model to test.');
+    try {
+      return c.json(ManagerTestResponse.parse(await localModels.managerTest(id.data, parsed.data.model)));
+    } catch (error) {
+      if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', 'That server is not set up.');
+      if (error instanceof EndpointConfirmationRequiredError) return apiError(c, 409, 'endpoint_confirmation_required', error.message, { host: error.host });
+      if (error instanceof SecretsUnavailableError) return apiError(c, 503, 'secrets_unavailable', error.message);
+      log.error('the manager test failed', { code: error instanceof CoreError ? error.code : 'unexpected' });
+      return apiError(c, 500, 'internal_error', "Ogden Agents couldn't run that test. Try again.");
+    }
+  });
+}

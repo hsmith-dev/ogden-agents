@@ -68,11 +68,23 @@ export interface AgentDescriptor {
   homeEnv?: string | undefined;
   signInMethods: readonly AgentSignInMethodDescriptor[];
   /**
+   * The agent needs no account and no key of its own (epic 14: a model served
+   * on the user's own computer or endpoint): the card shows its endpoint's
+   * state instead of a sign in, and a chat is never refused for a missing
+   * sign in. Only with no sign in methods.
+   */
+  noAccount?: boolean | undefined;
+  /**
    * The permission modes it declares, each with its own name for that mode
    * (a mode id, or the flag it takes). Ask is every agent's. It must list
    * exactly the modes its `AgentPort.permissionModes` declares.
    */
   permissionModes: Readonly<{ ask: string } & Partial<Record<Exclude<PermissionMode, 'ask'>, string>>>;
+  /**
+   * One plain sentence appended to "<agent> doesn't offer <mode>." when a mode it doesn't declare is asked for
+   * (epic 14: why a small local model is Ask only), so the picker says why, not only that.
+   */
+  modesNote?: string | undefined;
   /**
    * The agent runs the project's own agent settings or hooks, so a chat with
    * it starts only in a project the user trusted.
@@ -201,6 +213,7 @@ export function agentDescriptorProblems(descriptor: AgentDescriptor): string[] {
     for (const name of method.apiKey?.envNames ?? []) if (!ENV_NAME.test(name)) at(`${name} is not an environment variable name`);
     if (descriptor.homeEnv !== undefined && method.apiKey?.envNames.includes(descriptor.homeEnv)) at(`${descriptor.homeEnv} is both the home and a key variable`);
   }
+  if (descriptor.noAccount === true && descriptor.signInMethods.length > 0) at('it needs no account but lists sign in methods');
   const modes = Object.entries(descriptor.permissionModes);
   for (const [mode, nativeId] of modes) {
     if (!(PERMISSION_MODES as readonly string[]).includes(mode)) at(`${mode} is not a permission mode`);
@@ -235,6 +248,7 @@ export function agentDescriptorProblems(descriptor: AgentDescriptor): string[] {
     at(`the handoff budget ${String(budget)} is not a whole number from 1000 to ${MAX_HANDOFF_BRIEF_CHARS}`);
   }
   if (descriptor.sendNow !== undefined && !(SEND_NOW_STYLES as readonly string[]).includes(descriptor.sendNow)) at(`${String(descriptor.sendNow)} is not a send now style`);
+  if (descriptor.modesNote !== undefined && (descriptor.modesNote.trim() === '' || /[\u2013\u2014]/.test(descriptor.modesNote))) at('the modes note is empty or has a dash');
   if (!isRelativeFolder(descriptor.skillsFolder)) at(`the skills folder ${JSON.stringify(descriptor.skillsFolder)} is not a plain repo-relative path`);
   return problems;
 }

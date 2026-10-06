@@ -367,11 +367,13 @@ describe('security gate', () => {
     expect((await send(server, TAB_CHECK_PATH, { headers: bearer(tab) })).status).toBe(204);
   });
 
-  it('terminal socket (story 3.1): /ws/terminal/* needs the tab token subprotocol and a matching Origin exactly like /ws, and echoes only ogden.v1', async () => {
+  it.each([
+    ['terminal socket (story 3.1): /ws/terminal/*', '/ws/terminal/ses_00000000000000000000000000'],
+    ['pane socket (epic 16): /ws/pane/*', '/ws/pane/pan_00000000000000000000000000'],
+  ])('%s needs the tab token subprotocol and a matching Origin exactly like /ws, and echoes only ogden.v1', async (_name, path) => {
     const server = await startTestServer();
     const tab = await connectTab(server);
     const other = await connectTab(server, server.issueLaunchUrl());
-    const path = '/ws/terminal/ses_00000000000000000000000000';
     const origin = { origin: server.url };
     const status = async (protocols: string[], headers: Record<string, string>) => (await upgradeWith(server, protocols, headers, path)).status;
 
@@ -573,6 +575,15 @@ describe('security gate', () => {
 /** Every API route with its methods, as the lanes' route files register them (stories 2.2, 2.3 and 9.1). */
 const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.tabCheck}`,
+  // Terminal panes (epic 16): behind the gate; Developer mode is enforced by core on every call.
+  `GET ${API_ROUTES.workspacePanes}`,
+  `POST ${API_ROUTES.workspacePanes}`,
+  `DELETE ${API_ROUTES.workspacePane}`,
+  `GET ${API_ROUTES.terminalLaunchers}`,
+  `POST ${API_ROUTES.terminalLaunchers}`,
+  `PUT ${API_ROUTES.workspacePaneLayout}`,
+  `PATCH ${API_ROUTES.workspacePane}`,
+  `POST ${API_ROUTES.workspacePaneRestart}`,
   `POST ${API_ROUTES.launchCodes}`,
   `POST ${API_ROUTES.serverQuit}`,
   `GET ${API_ROUTES.toolchain}`,
@@ -680,6 +691,21 @@ const EXPECTED_API_ROUTES = [
   `PATCH ${API_ROUTES.notificationWebhook}`,
   `DELETE ${API_ROUTES.notificationWebhook}`,
   `POST ${API_ROUTES.notificationWebhookTest}`,
+  // The Local model's endpoints (epic 14 story 14.3): install-level, behind the gate only.
+  `GET ${API_ROUTES.localEndpoints}`,
+  `POST ${API_ROUTES.localEndpoints}`,
+  `PATCH ${API_ROUTES.localEndpoint}`,
+  `DELETE ${API_ROUTES.localEndpoint}`,
+  `PUT ${API_ROUTES.localEndpointKey}`,
+  `DELETE ${API_ROUTES.localEndpointKey}`,
+  `POST ${API_ROUTES.localEndpointConfirm}`,
+  `PUT ${API_ROUTES.localEndpointDefault}`,
+  // Using them (story 14.4): the presets, Test connection and Detect, behind the gate only.
+  `GET ${API_ROUTES.localEndpointPresets}`,
+  `POST ${API_ROUTES.localEndpointTest}`,
+  `POST ${API_ROUTES.localEndpointDetect}`,
+  `GET ${API_ROUTES.localEndpointModels}`,
+  `POST ${API_ROUTES.localEndpointManagerTest}`,
 ] as const;
 
 describe('gate placement', () => {

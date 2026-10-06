@@ -109,6 +109,7 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
     <OrchestrateView
       wsId={wsId}
       managerReady={settings.data.managerReady === true}
+      managerMessage={settings.data.manager?.message}
       run={run}
       busy={busy}
       error={error ?? (runs.error instanceof Error ? runs.error.message : undefined)}

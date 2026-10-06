@@ -560,14 +560,16 @@ describe('epic 16: core, shared and acp-base name no pane program', () => {
  * model product (the model is whatever endpoint the user configured), and
  * imports no shell, file, agent or credential port and no Node module, so it
  * cannot run a command, touch a file or read a key. The real adapter, 15.4,
- * calls only `LocalModelPort`.
+ * calls only `LocalModelPort`. Story 15.4 adds the real manager to core (`manager-input`,
+ * `manager-source`, `model-manager`), held to the same rules: it reaches the model only through
+ * `LocalModelPort` and the endpoint only through `LocalEndpoints.target`.
  */
 const MODEL_PRODUCT_WORDS = /(?<![A-Za-z0-9])(gpt|llama|qwen|mistral|mixtral|gemma|deepseek|claude|anthropic|openai|ollama|lm[ -]?studio|gemini|grok|codex|copilot|antigravity|opencode)(?![A-Za-z0-9])/gi;
 /** The ports and modules that give a shell, files, a terminal, a credential or an agent. */
 const FORBIDDEN_ORCHESTRATION_IMPORTS =
   /^(?:node:|child_process$|fs$|fs\/promises$|os$|net$|http$|https$|(?:\.{1,2}\/)+(?:[\w-]+\/)*(?:terminal-port|terminal-reasons|sandbox-port|secret-store-port|vcs-port|build-runner-port|build-object-store|build-worktrees|ticket-store-port|bmad-source-port|bmad-catalog-port|agent-port|agent-setup-port|app-shortcut-port|panes|pane-launchers|notifier-port|fs-safe|process-tree|child-env)(?:\.js)?$)/;
 /** Core, shared and fake-manager files that are the orchestration contracts. */
-const ORCHESTRATION_FILE = /(^|[\\/])packages[\\/](?:core|shared)[\\/]src[\\/](?:orchestration[\w-]*|events-orchestration|manager-port)\.ts$|(^|[\\/])packages[\\/]adapters[\\/]src[\\/]manager-memory[\\/]/;
+const ORCHESTRATION_FILE = /(^|[\\/])packages[\\/](?:core|shared)[\\/]src[\\/](?:orchestration[\w-]*|events-orchestration|manager-[\w-]+|model-manager)\.ts$|(^|[\\/])packages[\\/]adapters[\\/]src[\\/]manager-memory[\\/]/;
 
 /** One message per model product named, and per forbidden import, in the orchestration files (comments aside for the names). */
 export function findOrchestrationViolations(files: readonly SourceFile[]): string[] {
@@ -590,6 +592,9 @@ describe('E15: orchestration code is tool-free and names no model product (story
     expect(matched).toEqual(
       expect.arrayContaining([
         'packages/core/src/manager-port.ts',
+        'packages/core/src/manager-input.ts',
+        'packages/core/src/manager-source.ts',
+        'packages/core/src/model-manager.ts',
         'packages/core/src/orchestration-feature.ts',
         'packages/core/src/orchestration.ts',
         'packages/shared/src/events-orchestration.ts',

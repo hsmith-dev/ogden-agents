@@ -17,6 +17,10 @@ import {
 } from './events-settings.js';
 
 export { AppUpdateAvailableEvent, AppUpdateRequestedEvent, SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsUpdateNoticeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
+// The Local model's endpoint events (epic 14 story 14.3).
+import { SettingsLocalEndpointsChangedEvent, SettingsLocalEndpointsChangedInput } from './events-local.js';
+
+export { LOCAL_ENDPOINT_CHANGES, SettingsLocalEndpointsChangedEvent } from './events-local.js';
 // Build run events and the builds and notification settings events (stories 5.2, 5.3).
 import * as runs from './events-runs.js';
 
@@ -372,6 +376,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SettingsWhileWorkingChangedEvent,
   runs.SettingsRunLimitsChangedEvent,
   runs.SettingsNotificationsChangedEvent,
+  SettingsLocalEndpointsChangedEvent,
   SettingsUpdateNoticeChangedEvent,
   AppUpdateAvailableEvent,
   AppUpdateRequestedEvent,
@@ -434,6 +439,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SettingsWhileWorkingChangedInput,
   runs.SettingsRunLimitsChangedInput,
   runs.SettingsNotificationsChangedInput,
+  SettingsLocalEndpointsChangedInput,
   SettingsUpdateNoticeChangedInput,
   AppUpdateAvailableInput,
   AppUpdateRequestedInput,

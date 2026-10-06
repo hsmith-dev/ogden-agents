@@ -11,6 +11,8 @@ import {
   type BoardUseCases,
   type RetrospectiveUseCases,
   type BuildSettings,
+  type LocalEndpoints,
+  type LocalModels,
   type BuildsUseCases,
   type Chat,
   type EventLog,
@@ -40,6 +42,8 @@ import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
 import { registerRetrospectiveRoutes } from './retrospective-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
+import { registerLocalEndpointRoutes } from './local-endpoint-routes.js';
+import { registerLocalEndpointUseRoutes, type EndpointPresetData } from './local-endpoint-use-routes.js';
 import { registerRunSettingsRoutes } from './run-settings-routes.js';
 import { registerUpdateRoutes } from './update-routes.js';
 import type { UpdateCheck } from './update-check.js';
@@ -130,6 +134,12 @@ export interface AppOptions {
   builds?: BuildsUseCases;
   /** The install's run limits and a project's build settings (story 5.8). */
   buildSettings?: BuildSettings;
+  /** The Local model's endpoints (epic 14 story 14.3); without it those routes answer 501. */
+  localEndpoints?: LocalEndpoints | undefined;
+  /** Test connection and Detect (epic 14 story 14.4); without it those routes answer 501. */
+  localModels?: LocalModels | undefined;
+  /** The one-click presets served to the page (story 14.4). */
+  endpointPresets?: readonly EndpointPresetData[] | undefined;
   /** The pinned upstream BMad Method's status and its user-initiated download (story 4.14); without it those routes answer 501. */
   bmadSource?: BmadSourceUseCases;
   /** BMad Method's setup in a project (story 4.3), behind Planning or Board; without it those routes answer 501 once the guard passes. */
@@ -182,6 +192,9 @@ export function createApp({
   retrospectives,
   builds,
   buildSettings,
+  localEndpoints,
+  localModels,
+  endpointPresets,
   bmadSource,
   bmadSetup,
   agentSetup,
@@ -302,6 +315,9 @@ export function createApp({
   registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
   // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
   registerRunSettingsRoutes(app, { buildSettings, builds, log });
+  // The Local model's endpoints (epic 14 story 14.3): app-wide, behind the gate, never a piece's guard; a key never leaves.
+  registerLocalEndpointRoutes(app, { localEndpoints, log });
+  registerLocalEndpointUseRoutes(app, { localModels, presets: endpointPresets ?? [], log });
   registerUpdateRoutes(app, { updates, desktop: desktopUpdate, shell });
 
   registerEventSocket(app, { events, log, tabs });

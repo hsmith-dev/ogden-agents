@@ -67,11 +67,11 @@ context:
 
 ## Tasks & Acceptance
 
-- [ ] shared contracts, events, routes
-- [ ] core: once per project confirmation, defaults store, mode sync, automatic engine, limits, refusal events, Stop, activity
-- [ ] server routes and wiring
-- [ ] web: mode toggle and confirmation, defaults and limits, activity log, stop reasons
-- [ ] tests (core, server, DOM, architecture, e2e)
+- [x] shared contracts, events, routes
+- [x] core: once per project confirmation, defaults store, mode sync, automatic engine, limits, refusal events, Stop, activity
+- [x] server routes and wiring
+- [x] web: mode toggle and confirmation, defaults and limits, activity log, stop reasons
+- [x] tests (core, server, DOM, architecture, e2e)
 
 **Acceptance Criteria:**
 - Given a project that never confirmed, switching to automatic without `confirm` is refused and writes nothing; with it the project is automatic and the event records the confirmation; later switches ask nothing.
@@ -84,15 +84,27 @@ context:
 
 ## Implementation Notes
 
-(Filled in when built.)
+- Mode is the project's setting, read at each use (`readOrchestrationMode`). A run is stored with the mode and limits in force at its start, and `syncMode` brings its mode to the project's at every read, dispatch and engine pass, appending `orchestration.mode_changed` when they differ. Back to Approve each instruction, a step the mode approved and did not send goes back to `proposed` (also whatever else left one so in that mode), and `dispatchStep` re-reads the mode after the worker is checked, so a switch while a chat is being made still refuses. Switching a run that began under approve each to automatic starts the engine on it (a `workspace.settings_changed` listener).
+- Once per project (E15-R3, AD-15): `readAutomaticConfirmed` finds a `workspace.settings_changed` with `orchestrationAutomaticConfirmed` on the project's own stream (the `events_stream_idx` index, so its chats are not scanned). A project with the mark switches without `confirm`; one without is refused `confirmation_required` and nothing is written; the mark is written when the confirmation is given (even if the mode did not change), never twice. `getSettings` carries `orchestrationAutomaticConfirmed: true` when present. Delete history takes the record with it, so the user is asked again, never the other way. No migration.
+- App-wide default (follows 15.5's roster default): `preferences.json` `newProjects.orchestrationMode` and `orchestrationLimits` (read on their own, a damaged one reads as the default; every save of the file keeps them), `GET` and `PUT /api/v1/settings/orchestration`, `settings.orchestration_defaults_changed` when something changed, the page in Settings for new projects. Making automatic the default needs `confirm: true` every time it is set. **Decision, recorded:** the default is never copied into a project. A new project starts on Approve each instruction and the settings page says the default is automatic and waits for the project's own confirmation. This is the safe equivalent of "a new project copying an automatic default stays on approve each until confirmed" with no state that could hold a project in automatic without a confirmation.
+- Limits: 20 instructions, depth 3, 30 minutes by default, adjustable in Settings for new projects within 1 to 20, 1 to 5 and 1 to 120 (`ORCHESTRATION_LIMIT_BOUNDS`, `BoundedRunLimits`; the run's stored shape stays wider so older rows read). A new run takes the limits as they are then. **Depth is defined** as the longest `depends_on` chain: a step with no prerequisite is depth 1, any other one deeper than the deepest step it needs (`stepDepths`); until the loop (entry 9) nothing else nests, and the loop will count a decision that follows a result as one more level. Limits apply to what the mode sends (the user's own approvals are the control in the default mode). The instruction count is the steps that have a chat (`sessionId`), checked before each send: the run stops with `instruction_limit` instead of sending one more; depth is checked against the next step (`depth_limit`); time is `clock() - createdAt` (`time_limit`), also while a worker is busy (an unref'd timer and the worker chat's state changes re-check; a busy worker's turn is asked to stop).
+- The engine (`scheduleAdvance`, `advanceOnce`, in `orchestration.ts`): per run one pass at a time; each pass re-reads the piece, the project's mode, the run and its steps, so a late or repeated pass is harmless. It settles finished steps, then takes the first step that is not done or skipped: a dispatched step or a failed one means wait or stop; a step the user approved is the user's to send; limits; prerequisites that are not done (a skipped one) make the run wait for the user; a subscription agent's step makes the run wait (`awaiting_user`, one `run_paused` per step); otherwise the mode approves (`by: mode`) and `dispatchStep` sends it, marked `manager_auto`. The first refusal stops the run (`dispatch_refused`), the first other error fails it (`worker_error`), a refusal for `approve_each_only` hands the step back to the user. Triggers: `startRun` (awaited, so the first step is sent when the run starts), a worker chat leaving `working`, a settings change of the mode, a read that settled a step, the time limit timer. `whenIdle()` lets a test wait for the passes. The engine names none of the user's own actions and no settings mutator (architecture test, with a guarded slice for it).
+- Vendor terms (15.7 rule changed on purpose): a subscription agent takes an instruction the user approved, in either mode (`approvedBy === 'user'`); what the mode approved is refused `approve_each_only`. The 15.7 text "never in a run under the automatic mode" is replaced by the pause: the user approves that step and sends it, then the run goes on by itself. The roster (15.5) still refuses to switch a project to automatic while its worker or reviewer is such an agent, so the pause is reached only through a reviewer or a team changed after, a direct row, or a later relaxation of the roster rule (deferred as a decision for the user).
+- Stop: `stopRun` no longer calls the Orchestration guard, and its route is registered through `orchestrationRoutes` with `guarded: false` (the project must exist and the run must be its own; the gate still applies). It closes the run in one transaction (`closeRun`), cancels the manager call and each worker turn in flight. With the piece off, the engine sends nothing and Stop still works; turned on again, the run reads as stopped.
+- Refused dispatch: `orchestration.dispatch_refused {runId, stepId, worker, reason, message}` is appended whenever `dispatchStep` throws a `DispatchRefusedError`, in both modes (resolves the 15.7 deferral; the manager is not yet told, see Deferred).
+- Activity log (`activity`, `GET .../orchestration/activity`): the newest 400 approval, dispatch and refusal events of the project's stream, folded into at most 100 entries (when, worker, chat new or existing, who approved, the start of the instruction masked and cut to 200, result `working`, `finished`, `failed`, `stopped` or `refused`, the refusal's words); the Orchestrate page lists them. The counter on a run is "N of M instructions sent", no money anywhere (a test looks for money words).
+- Honest transcript: a new message origin `manager_auto` ("Sent by the manager automatically") for what the mode sent; `manager` keeps "approved by you".
+- New project layout: `orchestrate/mode-api.ts`, `orchestrate/mode-section.tsx` (`ModeChoiceView`, `ProjectMode`, `DefaultsView`, `OrchestrationDefaultsSection`), the mode and limits under Orchestration in the project settings and in Settings for new projects, the Orchestrate page's mode line, counter, stop reasons, wait note and `ActivityLog`.
+- Tests: shared (+11), core `orchestration-mode` (22) plus changes to the 15.7 tests, server `orchestration-mode` (9), web DOM `orchestrate-mode` (21), architecture (+3), Playwright (+3).
 
 ## Spec proposals
 
-(Filled in when built.)
+Written to the memlogs with `_bmad/scripts/memlog.py` (never to the frozen documents): the architecture memlog gets the fifteenth `orchestration.dispatch_refused` event, the install level `settings.orchestration_defaults_changed`, the stop reason `dispatch_refused`, the message origin `manager_auto`, the run's mode following the project's, an AD-15 note (the once per project confirmation is the mark on `workspace.settings_changed`, read from the project's stream; the default is never copied), an AD-22 note (Stop is outside the piece guard) and the routes; the spec memlog gets a CAP-22 mode and limits note. `covers` stays empty.
 
 ## Plan Change Log
 
-None yet.
+- 2026-10-06 (build): the 15.7 refusal `approve_each_only` applied to every subscription agent whenever the run was automatic. The user's instruction for this story is that such a step waits for the user's approval rather than being dispatched, so the rule now refuses only what the mode approved (`approvedBy` not `user`); the user's own approval of that instruction is allowed in either mode. The 15.7 test was changed to match. Frozen intent unchanged (the vendor rule is "approve each only").
+- 2026-10-06 (build): the app-wide default is stored but never copied into a project (a project asks for its own confirmation), the safe equivalent the user allowed, instead of copying and holding a project on approve each.
 
 ## Review Triage Log
 

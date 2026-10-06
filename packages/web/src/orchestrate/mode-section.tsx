@@ -210,7 +210,6 @@ export function DefaultsView({ mode, limits, saving, error, saved, onMode, onLim
               inputMode="numeric"
               min={ORCHESTRATION_LIMIT_BOUNDS[key].min}
               max={ORCHESTRATION_LIMIT_BOUNDS[key].max}
-              step={1}
               value={shown(key)}
               disabled={saving || limits === undefined}
               aria-describedby={`orchestration-limit-${key}-description`}

@@ -50,6 +50,7 @@ export * from './new-projects.js';
 export * from './onboarding.js';
 export * from './pane-launchers.js';
 export * from './pane-layout.js';
+export * from './pane-status.js';
 export * from './panes.js';
 export * from './permissions.js';
 export * from './planning.js';

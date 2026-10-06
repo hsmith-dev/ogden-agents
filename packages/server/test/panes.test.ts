@@ -468,3 +468,66 @@ describe('launchers and install detection over the API (story 16.5)', () => {
     expect(listed.panes).toEqual([]);
   }, 60_000);
 });
+
+describe('a pane\'s status over the API (story 16.6)', () => {
+  const statusOf = async (setup: Setup, paneId: string) => PanesResponse.parse(await (await fetch(panesUrl(setup), { headers: setup.tab.headers })).json()).panes.find((p) => p.id === paneId)!.status;
+  const poll = (setup: Setup, paneId: string, want: string, what: string, ms = 20_000) => waitFor(async () => (await statusOf(setup, paneId)) === want, what, ms);
+
+  async function startWithCli() {
+    const folder = makeFakeCliFolder(['codex']);
+    dirs.push(folder);
+    process.env.OGDEN_AGENTS_TEST_PANE_PATH = folder;
+    try {
+      return await startPaneServer();
+    } finally {
+      delete process.env.OGDEN_AGENTS_TEST_PANE_PATH;
+    }
+  }
+  const openCli = async (setup: Setup) => {
+    const response = await fetch(panesUrl(setup), { method: 'POST', headers: jsonHeaders(setup.tab), body: JSON.stringify({ cols: 100, rows: 30, launcherId: 'codex' }) });
+    expect(response.status).toBe(201);
+    return PaneResponse.parse(await response.json()).pane;
+  };
+
+  it('a CLI at a permission question needs attention; typing the answer makes it working, then idle; silent work reads idle, never needs attention', async () => {
+    const setup = await startWithCli();
+    const pane = await openCli(setup);
+    const viewer = viewPane(setup, pane.id);
+    await viewer.opened;
+    await waitFor(() => viewer.state.output.includes('fake-shell-ready'), 'the CLI to start', 20_000);
+    await poll(setup, pane.id, 'idle', 'idle once quiet');
+
+    viewer.type('perm\r');
+    await poll(setup, pane.id, 'needs_attention', 'the question to be noticed');
+    viewer.type('y\r');
+    await waitFor(() => viewer.state.output.includes('answered:y'), 'the answer to be taken', 15_000);
+    await poll(setup, pane.id, 'idle', 'idle again');
+
+    // Silent work for 3 seconds: never "needs attention", only idle.
+    viewer.type('think\r');
+    const seen = new Set<string>();
+    await waitFor(async () => {
+      seen.add(await statusOf(setup, pane.id));
+      return viewer.state.output.includes('think-done');
+    }, 'the silent work to end', 20_000);
+    expect(seen.has('needs_attention')).toBe(false);
+    expect(seen.has('idle')).toBe(true);
+  }, 90_000);
+
+  it('the plain shell at the same question is never needs attention; its status events carry the pane name and no text', async () => {
+    const setup = await startPaneServer();
+    const pane = await openPane(setup);
+    const viewer = viewPane(setup, pane.id);
+    await viewer.opened;
+    await waitFor(() => viewer.state.output.includes('fake-shell-ready'), 'the prompt', 15_000);
+    viewer.type('perm\r');
+    await waitFor(() => viewer.state.output.includes('(y/n)'), 'the question', 15_000);
+    await poll(setup, pane.id, 'idle', 'idle (the shell has no patterns)');
+    const changes = setup.server.core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_status_changed');
+    expect(changes.length).toBeGreaterThan(0);
+    for (const event of changes) expect(event.payload).toMatchObject({ paneId: pane.id, title: 'Terminal 1' });
+    expect(changes.some((e) => e.payload.status === 'needs_attention')).toBe(false);
+    expect(JSON.stringify(changes)).not.toContain('proceed');
+    expect(setup.lines.join('\n')).not.toContain('proceed');
+  }, 60_000);
+});

@@ -176,7 +176,11 @@ function StatusSidebarBody() {
       >
         <NeedsYouGroup
           items={model.needsYou}
-          onOpenFirst={first === undefined ? undefined : () => void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: first.wsId, sesId: first.sesId } })}
+          onOpenFirst={
+            first === undefined
+              ? undefined
+              : () => void (first.paneId === undefined ? navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: first.wsId, sesId: first.sesId } }) : navigate({ to: '/w/$wsId/terminals' as never, params: { wsId: first.wsId } as never }))
+          }
         />
         <SidebarGroup aria-labelledby={projectsId}>
           <SidebarGroupLabel id={projectsId}>Projects</SidebarGroupLabel>

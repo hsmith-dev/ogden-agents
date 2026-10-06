@@ -6,6 +6,7 @@ import { Text } from '@/ui/typography';
 import { tokenNumber } from '@/ui/tokens';
 import { cn } from '@/ui/utils';
 import { MAX_NAME_LENGTH } from './layout-edit';
+import { STATUS_WORDS } from './pane-status-words';
 import { connectPane, type PaneConnection } from './pane-socket';
 import { restartPane } from './panes-api';
 import { RECONNECT_DELAYS_MS, STABLE_CONNECTION_MS } from './terminal-panel';
@@ -257,6 +258,9 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
           </button>
         )}
         <span className="flex items-center gap-2">
+          <Text variant="caption" data-testid="pane-status-chip" data-status={pane.status} title="A guess from what the program prints" className="text-terminal-foreground">
+            {STATUS_WORDS[pane.status]}
+          </Text>
           {onSplit === undefined ? null : (
             <>
               <Button variant="outline" size="sm" onClick={() => onSplit(pane.id, 'row')} disabled={splitDisabledReason !== undefined} title={splitDisabledReason} data-testid="pane-split-row">

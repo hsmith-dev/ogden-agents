@@ -42,9 +42,14 @@ export interface SidebarWorkspace {
  * What kind of thing waits on the user: a permission request, a waiting
  * session whose request is older than the window, a working agent that went
  * quiet (`session.check_in`, story 2.10), or a chat stopped until its agent
- * is signed in again (`auth_required`, 9.4). Build checkpoints join later.
+ * is signed in again (`auth_required`, 9.4). A terminal pane that seems to be
+ * waiting for the user (`pane`, epic 16: a guess from its status event).
+ * Build checkpoints join later.
  */
-export type NeedKind = 'permission' | 'waiting' | 'check_in' | 'sign_in';
+export type NeedKind = 'permission' | 'waiting' | 'check_in' | 'sign_in' | 'pane';
+
+/** The kinds that can make a sound or a desktop notification and have a setting: a terminal pane's attention is opt in per pane (story 16.8), so it is not among them. */
+export type NotifiableNeedKind = Exclude<NeedKind, 'pane'>;
 
 /** One thing waiting on the user, of one {@link NeedKind}. */
 export interface NeedsYouEntry {
@@ -63,6 +68,8 @@ export interface NeedsYouEntry {
   at: string;
   /** The announcement for a new request ("run npm test"); absent for a waiting session with no request in view. */
   request?: string;
+  /** The pane a `pane` need is about (it has no chat: `sesId` is empty). */
+  paneId?: string;
   /** Set on a sign in need of an agent that takes only an API key: its key was rejected, there is no sign in. */
   keyRejected?: true;
 }
@@ -168,6 +175,51 @@ function pendingRequests(folded: FoldedStream | undefined, session: Session): { 
  * Needs you built from each session's event window. `now` decides which done
  * sessions are "Earlier".
  */
+/**
+ * The panes of a workspace that seem to be waiting for the user (epic 16,
+ * story 16.6), folded from its pane events: state only, so nothing here can
+ * hold terminal text. A pane is listed from the status event that said
+ * `needs_attention` until its next status, its exit or its close.
+ */
+export function paneNeeds(store: EventStoreState, wsId: string, workspaceName: string): NeedsYouEntry[] {
+  const events = streamEvents(store, wsId, wsId);
+  const panes = new Map<string, { title: string; waiting: { seq: number; at: string } | undefined }>();
+  for (const event of events) {
+    switch (event.type) {
+      case 'terminal.pane_opened':
+        panes.set(event.payload.paneId, { title: event.payload.title, waiting: undefined });
+        break;
+      case 'terminal.pane_renamed': {
+        const pane = panes.get(event.payload.paneId);
+        if (pane !== undefined) pane.title = event.payload.title;
+        break;
+      }
+      case 'terminal.pane_status_changed': {
+        const pane = panes.get(event.payload.paneId) ?? { title: event.payload.title ?? 'Terminal', waiting: undefined };
+        if (event.payload.title !== undefined) pane.title = event.payload.title;
+        pane.waiting = event.payload.status === 'needs_attention' ? { seq: event.seq, at: event.at } : undefined;
+        panes.set(event.payload.paneId, pane);
+        break;
+      }
+      case 'terminal.pane_exited': {
+        const pane = panes.get(event.payload.paneId);
+        if (pane !== undefined) pane.waiting = undefined;
+        break;
+      }
+      case 'terminal.pane_closed':
+        panes.delete(event.payload.paneId);
+        break;
+      default:
+        break;
+    }
+  }
+  return [...panes].flatMap(([paneId, pane]) =>
+    pane.waiting === undefined
+      ? []
+      : [{ id: `pane:${paneId}:${pane.waiting.seq}`, kind: 'pane' as const, wsId, sesId: '', paneId, workspaceName, chatName: pane.title, text: `${pane.title} may need you`, agentName: '', at: pane.waiting.at }],
+  );
+}
+
 export function buildSidebar(
   workspaces: readonly Workspace[],
   sessions: readonly Session[],
@@ -246,6 +298,7 @@ export function buildSidebar(
     const summary = STATE_ORDER.flatMap((state) => (counts.has(state) ? [{ state, count: counts.get(state)! }] : []));
     groups.push({ wsId: workspace.id, name, rows, earlier, summary });
   }
+  for (const workspace of ordered) needsYou.push(...paneNeeds(store, workspace.id, workspaceName(workspace)));
   needsYou.sort((a, b) => time(a.at) - time(b.at) || (a.id < b.id ? -1 : 1));
   return { groups, needsYou };
 }

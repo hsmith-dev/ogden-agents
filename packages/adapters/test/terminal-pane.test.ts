@@ -149,6 +149,26 @@ describe('the screen mirror', () => {
   });
 });
 
+describe('the screen\'s last lines (story 16.6)', () => {
+  it('reads the last non empty lines of the visible screen, after everything written before, oldest first', async () => {
+    const mirror = await createPaneMirror({ cols: 40, rows: 6, scrollback: 100 });
+    mirror.write('one\r\n\r\ntwo\r\nDo you want to proceed? (y/n)');
+    const lines = await new Promise<string[]>((resolve) => mirror.lastLines(2, resolve));
+    expect(lines).toEqual(['two', 'Do you want to proceed? (y/n)']);
+    const all = await new Promise<string[]>((resolve) => mirror.lastLines(10, resolve));
+    expect(all).toEqual(['one', 'two', 'Do you want to proceed? (y/n)']);
+    mirror.dispose();
+  });
+
+  it('follows a redrawing screen: only what is on it now', async () => {
+    const mirror = await createPaneMirror({ cols: 40, rows: 4, scrollback: 10 });
+    mirror.write('first screen\r\nold line');
+    mirror.write('\x1b[2J\x1b[Hnew screen\r\nProceed? (y/n)');
+    expect(await new Promise<string[]>((resolve) => mirror.lastLines(5, resolve))).toEqual(['new screen', 'Proceed? (y/n)']);
+    mirror.dispose();
+  });
+});
+
 describe('a real pane (node-pty and the fake shell)', { timeout: 30_000 }, () => {
   const dirs: string[] = [];
   const panes: PaneProcess[] = [];
@@ -217,6 +237,17 @@ describe('a real pane (node-pty and the fake shell)', { timeout: 30_000 }, () =>
     pane.attach((shown) => (snapshot = shown), () => {});
     await until(() => snapshot !== '', 'the last screen');
     expect(stripTerminalEscapes(snapshot)).toContain('bye');
+  });
+
+  it('reads its own screen for the status guess', async () => {
+    const pane = await open();
+    let seen = '';
+    pane.onData((data) => (seen += data));
+    await until(() => stripTerminalEscapes(seen).includes('fake-shell-ready'), 'the prompt');
+    pane.write('perm\r');
+    await until(() => stripTerminalEscapes(seen).includes('(y/n)'), 'the question');
+    const lines = await pane.screenLines(1);
+    expect(lines.join('\n')).toContain('Do you want to proceed? (y/n)');
   });
 
   it('follows a resize with its mirror too', async () => {

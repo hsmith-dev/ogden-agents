@@ -31,6 +31,16 @@ export type PaneState = z.infer<typeof PaneState>;
 export const PaneLauncherId = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/);
 export type PaneLauncherId = z.infer<typeof PaneLauncherId>;
 
+/**
+ * What a pane seems to be doing, a guess (story 16.6; E16-R6): derived in
+ * memory from the pane's activity and a launcher's prompt patterns, never from
+ * stored output. `working` while it prints, `needs_attention` at a prompt
+ * waiting for the user (silence alone never says it), `idle` after it has been
+ * quiet, `exited` once its program ended.
+ */
+export const PaneStatus = z.enum(['working', 'needs_attention', 'idle', 'exited']);
+export type PaneStatus = z.infer<typeof PaneStatus>;
+
 /** A pane's or tab's name: plain words with no control or format characters. It is stored and broadcast, so it is never taken from terminal output. */
 export const PaneTitle = z.string().min(1).max(80).regex(/^[^\p{Cc}\p{Cf}]+$/u, 'a name has no control characters');
 
@@ -41,20 +51,13 @@ export const Pane = z.object({
   /** What the pane is called in the page (plain words). */
   title: PaneTitle,
   state: PaneState,
+  /** A guess at what it is doing (story 16.6). Never certain: the page says so. */
+  status: PaneStatus.default('working'),
   /** The program's own exit code once `exited`; `null` while it runs or when it was stopped. */
   exitCode: z.number().int().nullable(),
 });
 export type Pane = z.infer<typeof Pane>;
 
-/**
- * What a pane seems to be doing, a guess (story 16.6; E16-R6): derived in
- * memory from the pane's activity and a launcher's prompt patterns, never from
- * stored output. `working` while it prints, `needs_attention` at a prompt
- * waiting for the user (silence alone never says it), `idle` after it has been
- * quiet, `exited` once its program ended.
- */
-export const PaneStatus = z.enum(['working', 'needs_attention', 'idle', 'exited']);
-export type PaneStatus = z.infer<typeof PaneStatus>;
 
 /**
  * One prompt pattern of a launcher, as data so a change in a CLI's wording

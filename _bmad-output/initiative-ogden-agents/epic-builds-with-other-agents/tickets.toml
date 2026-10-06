@@ -1,0 +1,133 @@
+# Epic 17 breakdown (builds with Codex, Grok and Antigravity). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-05; the user approved the scope (their decision of that day is in the epic's Notes), the entries are for review. Open questions are in the epic's Notes, each with a recommended default marked as an assumption.
+# References to other epics use "<epic id>.<entry id>".
+# Tests never run a real agent, the real keychain, the real network or read ~/.claude, ~/.codex, ~/.gemini or ~/.grok: every test uses a fake ACP build agent personality per agent, the fake sandbox and the memory ports. What only a real agent can show is the user's live check (hitl).
+# The user's rules (binding): Codex and Grok are API-key only; only Claude Code and Antigravity use a subscription sign-in; Copilot is not included; if an agent cannot be driven safely it is a no-go reported with evidence, and no frozen safety rule is weakened (protected paths, no network in the sandbox, fail closed with no sandbox quirk).
+# Lanes: 2 (tracer) proves the path with one agent; 3 then owns every shared file; 4 (conformance suite) before the lanes; 5, 6 and 7 (Codex, Grok, Antigravity) run in parallel after 4; 8 after 3 and one lane; 9 after all lanes.
+
+[[entry]]
+id = 1
+type = "spike"
+title = "Can Ogden run a safe headless build over ACP with Codex, Grok and Antigravity? Probe each and decide go or no-go"
+description = "Adds a temporary CI job on Windows, Linux and macOS that, for each agent, runs a fake ACP agent personality reproducing that agent's recorded behaviour (Codex: `read-only` fixed start mode, `decline` and `cancel` reject options, config-set sandbox mode and approval policy; Grok: no session modes, mode in the `_meta` of `session/new`, option kinds `allow_once` and `reject_once`; Antigravity: Ask and Skip all, an `auto_edit` that approves protected files) against the shipped build session code in a scratch repo and worktree with the fake sandbox, and records per agent: whether the headless session starts with the run's sandbox and mode in the agent's own place, whether every request reaches core's rule and is answered (protected path, outside the worktree, shell, network) with no card, whether a request arriving in a mode that asks less is refused, the tool-path fields each agent sends (so the policy sees real paths), whether `bmad-build-auto` and its skills are found in a worktree through the agent's skill folder (only committed files exist there) and how it is invoked (`skillInvocation`), the halt and per-run result contract end to end, the failure words for a rejected key, a usage limit and an expired sign-in, the process-tree stop, the environment allowlist with only that agent's key, and which of the agent's own sandbox modes exist per OS (and what config gives them the run's roots and no network) from the pinned agents' own docs and `--help`, with each unverified claim listed. It also reads each agent's own terms for unattended background use and records Copilot's exclusion. The plan lists what only a real agent can answer as the user's live checks (does its sandbox hold: a write outside the roots, a protected path, a network call; does the skill load in a worktree; does a halt reach the result file; time and token cost of one small build as a finding only). The hitl step is the user reading the results and deciding go or no-go per agent (Codex, Grok, Antigravity)."
+verify = "The probe's logs on all three OSes answer each question per agent, a table of what each agent needs (sandbox quirk, mode at start, tool-path fields, skill reach, failure words, per-OS sandbox, attended fallback) is written into the plan with a proposed agent-matrix.md update, every claim not measured is marked unverified, the user's live checks are listed per agent, the user's go or no-go per agent is recorded as a dated Decision in the epic's Notes (a no-go carries its evidence and stops that agent's entries), and the temporary job is removed."
+covers = ["CAP-15", "CAP-8", "CAP-4"]
+after = ["5.6", "5.7", "6.4", "12.3"]
+hitl = true
+risk = "high"
+unknown = "Whether each agent's own sandbox can be given the run's roots and no network through config the session carries (Codex through the fixed start mode, Grok through `_meta` or config, Antigravity at all); whether each reports tool paths core can read; whether skills in a worktree reach each agent; whether Antigravity's OAuth terms and unattended use are acceptable (the user's call)."
+references = ["https://developers.openai.com/codex/config", "https://developers.openai.com/codex/security", "https://docs.x.ai/build/features/permissions.md", "https://docs.x.ai/build/features/sandbox.md", "https://docs.x.ai/build/cli/headless-scripting.md", "https://antigravity.google", "https://docs.github.com/en/copilot"]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Tracer bullet: one ticket built by a second agent against its fake personality, end to end"
+description = "Adds the thinnest path that proves the agent-neutral seam with the first agent the spike calls go (Codex first): a build runner registry in server wiring keyed by agent id beside the Claude Code runner, the run's session `agentId` taken from the run's agent instead of the runner's constant, that agent's runner (skill invocation and halt wording) and its build quirk (the sandbox and mode in its own place, written once with fixed sample roots), the fake personality's build mode (writes the plan and the per-run result, exits `built`), and the existing bare Build action choosing the agent through the existing request field with the agent fixed in code."
+verify = "On all three OSes a test creates a build with the fake personality through the real server API in a scratch repo, the run's worktree is created, the session streams read-only, the plan reaches `built`, verification runs and Approve merges it locally; the same test with Claude Code is unchanged; with no sandbox quirk for the agent the build is refused `sandbox_unavailable`; and the agent's process receives only the environment allowlist and its own key."
+covers = ["CAP-15", "CAP-8"]
+after = [1]
+hitl = false
+risk = "high"
+unknown = "How much of the quirk's shape the first agent fixes for the others; the entry is rewritten to the first go agent if Codex is a no-go."
+
+[[entry]]
+id = 3
+type = "story"
+title = "Epic contracts and stubs: build runner registry, build quirk, per-agent sandbox check, failure words and build personalities"
+description = "Freezes every shared shape, port and fake the lanes touch, naming no agent in core or shared: the `BuildRunnerPort` registry and a lookup by agent id with a plain refusal for an agent with none; `AcpAgentQuirks.buildSession` (how the agent's own sandbox and fixed mode are given for a build session, its tool-path fields, its skill invocation, its halt wording, its refused modes) with the existing fail-closed refusal when it is absent; `SandboxCheckRequest.agent` answered per agent by the chain, with per-agent plain words and choices (another agent now lists the agents that can build here); `Workspace settings` field `defaultBuildAgentId` (nullable) with its use-case and route and the fallback rule; the build failure reasons per agent kind in shared (`rejected_key`, `usage_limit`, `auth_expired`, `model_missing`, `sandbox_failed`) as blocked codes with plain-language words and the agent-words hook in the quirk (`failureReason` style, read in memory only, never logged); the run's agent carried through core's dispatcher, Retry and Quit; and the fake build personalities promoted to shared fixtures (Codex, Grok and Antigravity shapes, each with a halt, a result, a rejected key, a usage limit and an expired sign-in). Resolves the Build dialog's picker contract (the list of agents with their availability and reasons) for entry 8."
+verify = "Unit and architecture tests: core and shared name no agent; an agent with no build quirk refuses to start a build session; a quirk that would set Skip all, always-approve, yolo, `danger-full-access` or folder-trust-off is refused by the contract test; the default build agent falls back as written; the picker contract lists availability with reasons; Claude Code's flows and tests pass unchanged; the fakes satisfy the contract tests."
+covers = ["CAP-15", "CAP-8", "CAP-9", "CAP-4"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Cross-agent safety conformance suite with fake personalities"
+description = "Adds one table-driven test suite that runs the same safety cases for every build-capable agent in the registry (Claude Code and each fake personality): an edit in a protected path is rejected, an edit outside the worktree (a `..` path, a symlink, a case or 8.3 variant) is rejected, an edit inside the worktree is allowed, a git commit path is allowed and `.git/hooks` and `.git/config` are rejected, a shell command is allowed only inside the sandbox, a request that arrives in a mode that asks less than the mode core set is refused and the run stops, no sandbox means refused, the child environment is exactly the allowlist plus that agent's own key, the key appears in no database row, event, log, worktree or run folder, a halt maps to its blocked code, the result file is read, a checkpoint pauses and resumes, and Stop kills the process tree. Each agent lane adds its row by registering its personality; the suite fails when a build-capable agent is not in it."
+verify = "The suite passes on all three OSes for Claude Code and the fake personalities, fails when a case is broken on purpose (a quirk that loosens a rule), and a test fails when a registered build-capable agent has no row."
+covers = ["CAP-8", "CAP-15", "CAP-4"]
+after = [3]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Codex builds: sandbox mode, approval policy, permission rules and skills in the worktree"
+description = "Adds Codex as a build agent on the spike's findings: its build quirk (the sandbox mode with only the run's writable roots, the protected paths and git hooks and config denied and no network, and an approval policy under which what the sandbox refuses reaches Ogden's rule, set through its config in the run's own `CODEX_HOME` at start; never `agent-full-access`, never `danger-full-access`), its tool-path fields and reject option (`decline`, else `cancel`), its skill invocation and `bmad-build-auto` reaching it through `.agents/skills` in the worktree, its halt wording, its attended fallback at Ask, the OpenAI key only in its process as `CODEX_API_KEY`, and its availability reasons (no key, no sandbox on this OS)."
+verify = "With the Codex personality and the conformance suite a build is created, an edit in a protected path and one outside the worktree are rejected with no card, the config written for the run carries no key and no looser mode, a build with no sandbox is refused and offered attended, the key is in the child's environment only, and Windows and the other OSes pass; live checks (hitl list from the spike): a real Codex build in a scratch repo on a Mac and a Windows machine."
+covers = ["CAP-15", "CAP-8", "CAP-16", "CAP-4"]
+after = [4]
+hitl = false
+risk = "high"
+unknown = "Whether the adapter's fixed start mode carries the sandbox and approval policy for a build; if not the entry stops and Codex is attended only."
+
+[[entry]]
+id = 6
+type = "story"
+title = "Grok builds: mode once at start, sandbox, permission rules and skills in the worktree"
+description = "Adds Grok as a build agent on the spike's findings: its build quirk (the mode given once in the `_meta` of `session/new`, `resume` and `load` with `yoloMode` false and `autoMode` false explicit; its own sandbox with only the run's roots writable and no network if the spike shows config can give it that, else attended only), never `--always-approve`, never folder-trust-off, `GROK_FOLDER_TRUST` and the trust gate unchanged, its option kinds (`allow_once`, the first `reject_once`), its tool-path fields, its skill invocation (`/name idea`) and `bmad-build-auto` reaching it through `.claude/skills` in the worktree, its halt wording, the xAI access token only in its process, and its availability reasons (no token, no sandbox, Windows attended only)."
+verify = "With the Grok personality and the conformance suite a build is created with the explicit mode in the session `_meta`, a project's own settings cannot loosen it, an edit in a protected path and one outside the worktree are rejected with no card, a build with no sandbox is refused and offered attended, the token is in the child's environment only, and the three OSes pass; live checks: a real Grok build on a Mac and, for attended, on Windows."
+covers = ["CAP-15", "CAP-8", "CAP-16", "CAP-4"]
+after = [4]
+hitl = false
+risk = "high"
+unknown = "Whether Grok's sandbox can be given the run's roots by config the session carries; whether its trust gate blocks a worktree path that is new on every run."
+
+[[entry]]
+id = 7
+type = "story"
+title = "Antigravity builds: Ogden answers every card, no Skip all, and a sandbox or attended only"
+description = "Adds Antigravity as a build agent only if the spike says go: its build quirk (Ask mode only, set at start and verified by what it reports, never Skip all, never `auto_edit` which approves protected files; every card answered by core's rule, none shown), its tool-path fields, its skill invocation and `bmad-build-auto` reaching it through its skills folder in the worktree, its halt wording, its Google sign-in or Gemini API key as chat keeps it (with the terms notice repeated where the user chooses it, the user's decision from the spike), its expired sign-in failure word, and its sandbox if the spike found one; with none, Antigravity builds are attended only and the unattended path stays refused (`sandbox_unavailable`)."
+verify = "With the Antigravity personality and the conformance suite an edit in a protected path is rejected even though a fake `auto_edit` would approve it, Skip all is never sent, a request in a mode that asks less is refused, with no sandbox an unattended build is refused and an attended build works with every request a card, an expired sign-in ends the run `blocked` with its words and Retry, and the three OSes pass; live checks: a real Antigravity attended build and, if a sandbox exists, an unattended one."
+covers = ["CAP-15", "CAP-8", "CAP-16", "CAP-4"]
+after = [4]
+hitl = false
+risk = "high"
+unknown = "Whether Antigravity has any sandbox Ogden can use; whether its ACP server reports the tool paths and option kinds core needs; whether its terms allow unattended use (the user's call)."
+
+[[entry]]
+id = 8
+type = "story"
+title = "Build dialog agent picker per run and a default build agent per project"
+description = "Adds the picker on the Build dialog and the setting it reads: the dialog opens from a card's Build when more than one agent can build here, or on a refusal, listing the agents that are set up with each unavailable one shown with its plain reason (not set up, no key, no sandbox on this computer, attended only) and the choice applying to that run only; \"Use another agent\" in the sandbox-unavailable dialog is enabled and lists the agents that can build; the project's default build agent in Workspace settings (`defaultBuildAgentId`, falling back to the project's default chat agent if it can build, else Claude Code), a note under Antigravity's choice with the terms notice if the user's decision from the spike asks for it, and Build all ready using the project's default; with one choice Build behaves as it does now. New copy is plain language with no dashes."
+verify = "Component and e2e tests with the fake personalities: Build on a card with two build-capable agents opens the picker, an unavailable agent shows its reason and cannot be chosen, the choice starts the run with that agent and is not remembered, the default build agent is saved per project and used by Build all ready, with a single build-capable agent Build starts at once, and the keyboard and screen reader paths and the dialog's focus work."
+covers = ["CAP-15", "CAP-8", "CAP-19"]
+after = [3, 5, "11.3"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 9
+type = "story"
+title = "Per-agent failure words with Retry: rejected key, usage limit, auth expired"
+description = "Maps each build-capable agent's own failure words to Ogden's plain reasons on a blocked run, using each quirk's agent-words hook and `usageLimitPatterns` read in memory only: a rejected OpenAI key (Codex) or xAI token (Grok) names the key and sends the user to Settings, Agents; a usage limit names the agent and offers Retry and Build with another agent (which changes the run's agent and resumes from the plan's status in the same worktree, never automatically); an expired sign-in (Antigravity) offers sign in again then Retry; a missing model and a sandbox that failed to start have their own words; a rejected key or an expired sign-in never loops; the raw error text is never shown or logged. The reasons show in the run view's header, on the board card and in Needs you through the existing blocked path."
+verify = "With each personality a run that fails with each word ends `blocked` with the agent's plain reason (no raw error text in the UI, events or logs), Retry resumes from the plan's status, Build with another agent changes the agent and keeps the worktree, a rejected key does not retry by itself, the words appear in the run view, the board card and Needs you, and no dashes appear in the new copy."
+covers = ["CAP-9", "CAP-16", "CAP-15"]
+after = [5, 6, 7, 8]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 10
+type = "story"
+title = "Refactor sweep"
+description = "Behaviour-preserving cleanups across the code epic 17 touched: the build runner registry, the quirks, the sandbox chain and the Build dialog, the near-duplicate lane code in the three agent adapters' build quirks, files over the size limit, the epic's open review items and deferred-work entries, and the provenance and Open items index lines kept in sync. Covers no requirement."
+verify = "Typecheck, the full test suite and the conformance suite pass unchanged on all three OSes, no behaviour test changed, and every Open items line for this epic is resolved or carried with its reason."
+covers = []
+after = [9]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 11
+type = "story"
+title = "End-to-end suite and release (live checks with real agents are the user's)"
+description = "Adds the epic's end-to-end suite (Playwright on the installed package with the fake personalities: two tickets built at once, one by Claude Code and one by a second agent, picker and default build agent, a refusal with no sandbox and its choices, an attended build, a failure word with Retry, approve and reject) on all three OSes, the docs and RELEASING.md live-check list per agent for the user (a real Codex build with an OpenAI key, a real Grok build with an xAI token, a real Antigravity build, each: the sandbox holds (a write outside the roots, a protected path, a network call fail), the skill loads in a worktree, a halt reaches the result file, one small build's time and cost as a finding), the CHANGELOG entry and the version bump. The release is the user's: no tag and no publish without them."
+verify = "The suite passes on all three OSes in CI, the live-check list is in RELEASING.md and the user's results are recorded before release, the CHANGELOG names the agents that shipped and the ones that were no-go, and the user releases."
+covers = ["CAP-15", "CAP-8", "CAP-9", "CAP-10", "CAP-12"]
+after = [10]
+hitl = true
+risk = "medium"

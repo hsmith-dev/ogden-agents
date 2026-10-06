@@ -35,14 +35,38 @@ export async function startOrchestrationRun(wsId: string, goal: string, auth: Au
 }
 
 /** `POST …/steps/:stepId/approve`: the user approves one instruction. */
-export async function approveOrchestrationStep(wsId: string, runId: string, stepId: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
-  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStepApprove, { wsId, runId, stepId }), { method: 'POST' }, "The instruction couldn't be approved");
+export async function approveOrchestrationStep(wsId: string, runId: string, stepId: string, instruction?: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStepApprove, { wsId, runId, stepId }), instruction === undefined ? { method: 'POST' } : postJson({ instruction }), "The instruction couldn't be approved");
   return OrchestrationRunResponse.parse(json).run;
 }
 
 /** `POST …/steps/:stepId/dispatch`: sends an approved instruction into a new worker chat. */
 export async function dispatchOrchestrationStep(wsId: string, runId: string, stepId: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStepDispatch, { wsId, runId, stepId }), { method: 'POST' }, "The instruction couldn't be sent");
+  return OrchestrationRunResponse.parse(json).run;
+}
+
+/** `POST …/steps/:stepId/edit`: the user changes an instruction; the step waits for approval again. */
+export async function editOrchestrationStep(wsId: string, runId: string, stepId: string, instruction: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStepEdit, { wsId, runId, stepId }), postJson({ instruction }), "The instruction couldn't be changed");
+  return OrchestrationRunResponse.parse(json).run;
+}
+
+/** `POST …/steps/:stepId/skip`: the user skips a step; it is never sent and the steps that need it wait. */
+export async function skipOrchestrationStep(wsId: string, runId: string, stepId: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStepSkip, { wsId, runId, stepId }), { method: 'POST' }, "The step couldn't be skipped");
+  return OrchestrationRunResponse.parse(json).run;
+}
+
+/** `POST …/reorder`: the whole new order of the steps. The server refuses one that puts a step before its prerequisite. */
+export async function reorderOrchestrationSteps(wsId: string, runId: string, order: string[], auth: Auth = tabAuth): Promise<OrchestrationRunView> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationReorder, { wsId, runId }), postJson({ order }), "The steps couldn't be moved");
+  return OrchestrationRunResponse.parse(json).run;
+}
+
+/** `POST …/stop`: Stop. The run ends and a worker turn in flight is cancelled. */
+export async function stopOrchestrationRun(wsId: string, runId: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStop, { wsId, runId }), { method: 'POST' }, "The run couldn't be stopped");
   return OrchestrationRunResponse.parse(json).run;
 }
 

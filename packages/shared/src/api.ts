@@ -534,6 +534,14 @@ export const API_ROUTES = {
   workspaceOrchestrationStepApprove: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/approve`,
   /** `POST` → `OrchestrationRunResponse`: sends an approved step's instruction into a new worker chat. 409 `step_not_approved` for any other step. */
   workspaceOrchestrationStepDispatch: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/dispatch`,
+  /** `POST EditOrchestrationStepRequest` → `OrchestrationRunResponse` (15.6): the user changes a step's instruction; an approved step goes back to waiting. 400 for bad text or a secret, 409 `step_not_changeable`. */
+  workspaceOrchestrationStepEdit: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/edit`,
+  /** `POST` → `OrchestrationRunResponse` (15.6): the user skips a step that was not sent; it never dispatches and the steps that need it wait. 409 `step_not_changeable`. */
+  workspaceOrchestrationStepSkip: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/skip`,
+  /** `POST ReorderOrchestrationStepsRequest` → `OrchestrationRunResponse` (15.6): the whole new order; 409 `bad_order` when a step would come before its prerequisite or a sent step moves, 409 `run_not_open`. */
+  workspaceOrchestrationReorder: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/reorder`,
+  /** `POST` → `OrchestrationRunResponse` (15.6): Stop. The run ends (`stopped`, reason `user`) and a worker turn in flight is cancelled. 409 `run_not_open` for a run that already ended. */
+  workspaceOrchestrationStop: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/stop`,
   /**
    * `GET` → `RunLimitSettingsResponse`; `PATCH UpdateRunLimitSettingsRequest`
    * (5.8): the install's limits (builds at a time, time limit). Install-level,

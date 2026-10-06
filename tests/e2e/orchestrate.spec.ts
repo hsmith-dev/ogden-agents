@@ -224,3 +224,98 @@ test('the team for new projects is set in Settings, and a project added afterwar
     expect(await rosterOf(before)).toBeUndefined();
   });
 });
+
+test('the user reviews a three step plan: an edit needs a fresh approval, a skipped step never sends and its dependents wait, a bad reorder is refused, and Stop halts the run', async ({ page }) => {
+  const { createMemoryManager } = await serverModule();
+  const plan = {
+    version: 'ogden.manager.plan.v1',
+    goal: 'Add a contact form',
+    steps: [
+      { id: 's1', worker: 'claude-code', chat: 'new', instruction: 'Write the failing test first.', mode: 'ask', depends_on: [] },
+      { id: 's2', worker: 'claude-code', chat: 'new', instruction: 'Add the form fields.', mode: 'ask', depends_on: [] },
+      { id: 's3', worker: 'claude-code', chat: 'new', instruction: 'Wire the form to the page.', mode: 'ask', depends_on: ['s2'] },
+    ],
+  };
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const wsId = await addProject(page, repo);
+      const origin = server.url;
+      const headers = { authorization: `Bearer ${(await storedToken(page))!}`, origin, 'content-type': 'application/json' };
+      await fetch(`${origin}${apiPath(API_ROUTES.workspaceSettings, { wsId })}`, { method: 'PATCH', headers, body: JSON.stringify({ orchestrationEnabled: true }) });
+      const call = (method: string, path: string, body?: unknown) => fetch(`${origin}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      const refusal = async (reply: Response) => ({ status: reply.status, code: ((await reply.json()) as { error: { code: string } }).error.code });
+      const chats = async () => ((await (await call('GET', apiPath(API_ROUTES.workspaceSessions, { wsId }))).json()) as { sessions: unknown[] }).sessions.length;
+
+      await page.goto(`${origin}/w/${wsId}/orchestrate`);
+      await page.getByTestId('orchestrate-goal').fill('Add a contact form');
+      await page.getByTestId('orchestrate-plan').click();
+      const rows = page.getByTestId('orchestrate-step');
+      await expect(rows).toHaveCount(3);
+      const order = () => rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-step-id')));
+      const row = (id: string) => page.locator(`[data-testid="orchestrate-step"][data-step-id="${id}"]`);
+
+      // Every step shows its worker, chat, instruction, mode and prerequisites.
+      await expect(row('s3').getByTestId('orchestrate-step-worker')).toHaveText('Claude Code');
+      await expect(row('s3').getByTestId('orchestrate-step-target')).toHaveText('Goes to a new chat');
+      await expect(row('s3').getByTestId('orchestrate-step-mode')).toHaveText('Mode: Ask');
+      await expect(row('s3').getByTestId('orchestrate-step-needs')).toHaveText('Needs s2 first');
+      await expect(row('s1').getByTestId('orchestrate-step-needs')).toHaveText('Needs nothing first');
+
+      // A reorder that puts a step before its prerequisite is refused, in plain words, and nothing moves. One that keeps them is taken.
+      await page.getByRole('button', { name: 'Move step s3 up' }).click();
+      await expect(page.getByTestId('orchestrate-error')).toContainText('Step s3 needs step s2 first, so it cannot come before it.');
+      expect(await order()).toEqual(['s1', 's2', 's3']);
+      await page.getByRole('button', { name: 'Move step s2 up' }).click();
+      await expect.poll(order).toEqual(['s2', 's1', 's3']);
+      await expect(page.getByTestId('orchestrate-error')).toHaveCount(0);
+
+      // An edit of an approved step takes the approval back. The approval here is a direct call, as the page would make it.
+      const runs = (await (await call('GET', apiPath(API_ROUTES.workspaceOrchestrationRuns, { wsId }))).json()) as { runs: Array<{ run: { id: string } }> };
+      const runId = runs.runs[0]!.run.id;
+      const stepPath = (key: 'workspaceOrchestrationStepApprove' | 'workspaceOrchestrationStepDispatch', stepId: string) => apiPath(API_ROUTES[key], { wsId, runId, stepId });
+      expect((await call('POST', stepPath('workspaceOrchestrationStepApprove', 's1'))).status).toBe(200);
+      await expect(row('s1').getByTestId('orchestrate-step-state')).toHaveText('Approved, not sent yet');
+      await row('s1').getByTestId('orchestrate-edit').click();
+      await expect(row('s1').getByTestId('orchestrate-edit-note')).toContainText('you will need to approve it again');
+      await row('s1').getByTestId('orchestrate-edit-text').fill('Write two failing tests first.');
+      await row('s1').getByTestId('orchestrate-edit-save').click();
+      await expect(row('s1').getByTestId('orchestrate-step-state')).toHaveText('Waiting for you');
+      await expect(row('s1').getByTestId('orchestrate-step-instruction')).toHaveText('Write two failing tests first.');
+      await expect(row('s1').getByTestId('orchestrate-send')).toHaveCount(0);
+      // The old approval cannot send the new text: a direct send is refused and no chat appears.
+      expect(await refusal(await call('POST', stepPath('workspaceOrchestrationStepDispatch', 's1')))).toEqual({ status: 409, code: 'step_not_approved' });
+      expect(await chats()).toBe(0);
+      // A fresh approval sends the edited text.
+      await row('s1').getByTestId('orchestrate-approve').click();
+      await expect(row('s1')).toHaveAttribute('data-state', 'done');
+      await row('s1').getByTestId('orchestrate-step-chat').click();
+      await expect(page.getByTestId('message-user').first()).toHaveText('Write two failing tests first.');
+      await page.goBack();
+      await expect(page.getByTestId('orchestrate-steps')).toBeVisible();
+      expect(await chats()).toBe(1);
+
+      // A skipped step never sends, and the step that needs it waits.
+      await row('s2').getByTestId('orchestrate-skip').click();
+      await expect(row('s2')).toHaveAttribute('data-state', 'skipped');
+      await expect(row('s3').getByTestId('orchestrate-step-waits')).toContainText('s2 was skipped, so this step will not go ahead');
+      await expect(row('s3').getByTestId('orchestrate-approve')).toHaveCount(0);
+      expect(await refusal(await call('POST', stepPath('workspaceOrchestrationStepApprove', 's2')))).toEqual({ status: 409, code: 'step_not_proposed' });
+      expect(await refusal(await call('POST', stepPath('workspaceOrchestrationStepApprove', 's3')))).toEqual({ status: 409, code: 'step_not_proposed' });
+      expect(await refusal(await call('POST', stepPath('workspaceOrchestrationStepDispatch', 's2')))).toEqual({ status: 409, code: 'step_not_approved' });
+      expect(await refusal(await call('POST', stepPath('workspaceOrchestrationStepDispatch', 's3')))).toEqual({ status: 409, code: 'step_not_approved' });
+      expect(await chats()).toBe(1);
+
+      // Stop halts the run: nothing more can be approved or sent, and the page offers nothing more.
+      await page.getByTestId('orchestrate-stop').click();
+      await expect(page.getByTestId('orchestrate-run-state')).toHaveText('Stopped');
+      await expect(page.getByTestId('orchestrate-stop')).toHaveCount(0);
+      await expect(page.getByTestId('orchestrate-approve')).toHaveCount(0);
+      await expect(page.getByTestId('orchestrate-edit')).toHaveCount(0);
+      await expect(row('s3').getByTestId('orchestrate-step-state')).toHaveText('Not sent. The run was stopped.');
+      expect(await refusal(await call('POST', stepPath('workspaceOrchestrationStepApprove', 's3')))).toEqual({ status: 409, code: 'step_not_proposed' });
+      expect(await chats()).toBe(1);
+    },
+    { extra: { manager: createMemoryManager({ plans: [plan] }) } },
+  );
+});

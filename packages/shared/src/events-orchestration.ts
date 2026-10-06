@@ -76,7 +76,7 @@ export const OrchestrationStepEditedInput = z.object({
   ...onWorkspaceStream,
   payload: z.object({ ...step, instruction: ManagerInstruction }),
 });
-/** The user changed an instruction before it was sent (the masked new text). */
+/** The user changed an instruction before it was sent (the new text). The step waits for approval again, whatever it was. */
 export const OrchestrationStepEditedEvent = OrchestrationStepEditedInput.extend(assigned);
 export type OrchestrationStepEditedEvent = z.infer<typeof OrchestrationStepEditedEvent>;
 
@@ -88,6 +88,15 @@ export const OrchestrationStepSkippedInput = z.object({
 /** The user skipped a step. */
 export const OrchestrationStepSkippedEvent = OrchestrationStepSkippedInput.extend(assigned);
 export type OrchestrationStepSkippedEvent = z.infer<typeof OrchestrationStepSkippedEvent>;
+
+export const OrchestrationStepsReorderedInput = z.object({
+  type: z.literal('orchestration.steps_reordered'),
+  ...onWorkspaceStream,
+  payload: z.object({ ...runId, order: z.array(ManagerStepId).min(1).max(MANAGER_LIMITS.maxSteps) }),
+});
+/** The user put the steps in a new order (the whole order, every prerequisite still first). */
+export const OrchestrationStepsReorderedEvent = OrchestrationStepsReorderedInput.extend(assigned);
+export type OrchestrationStepsReorderedEvent = z.infer<typeof OrchestrationStepsReorderedEvent>;
 
 export const OrchestrationStepDispatchedInput = z.object({
   type: z.literal('orchestration.step_dispatched'),
@@ -173,6 +182,7 @@ export const ORCHESTRATION_INPUTS = [
   OrchestrationStepApprovedInput,
   OrchestrationStepEditedInput,
   OrchestrationStepSkippedInput,
+  OrchestrationStepsReorderedInput,
   OrchestrationStepDispatchedInput,
   OrchestrationResultReadInput,
   OrchestrationRunPausedInput,

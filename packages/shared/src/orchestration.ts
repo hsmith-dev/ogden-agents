@@ -456,7 +456,8 @@ export type OrchestrationStepState = z.infer<typeof OrchestrationStepState>;
 
 export const ORCHESTRATION_STEP_TRANSITIONS: Readonly<Record<OrchestrationStepState, readonly OrchestrationStepState[]>> = {
   proposed: ['approved', 'skipped'],
-  approved: ['dispatched', 'skipped', 'failed'],
+  // An edit of an approved step that was not sent puts it back to waiting: the old approval never covers new text.
+  approved: ['dispatched', 'skipped', 'failed', 'proposed'],
   skipped: [],
   dispatched: ['done', 'failed'],
   done: [],
@@ -595,3 +596,29 @@ export const ORCHESTRATION_NO_MANAGER_MESSAGE = MANAGER_STATE_WORDS.not_chosen;
 export const ORCHESTRATION_STEP_NOT_APPROVED_MESSAGE = 'This instruction has not been approved, so it was not sent.';
 export const ORCHESTRATION_STEP_NOT_PROPOSED_MESSAGE = 'This instruction is not waiting for your approval, or a step it needs is not finished yet.';
 export const ORCHESTRATION_MANAGER_MARK = 'Sent by the manager, approved by you';
+
+// ---- the plan review (15.6) ----
+
+/** What the user types to change an instruction. The same text rules as a manager's instruction apply, and a secret in it is refused. */
+export const EditOrchestrationStepRequest = z.object({
+  instruction: z
+    .string()
+    .transform((text) => text.replace(/\r\n?/g, '\n').trim())
+    .pipe(ManagerInstruction),
+});
+export type EditOrchestrationStepRequest = z.infer<typeof EditOrchestrationStepRequest>;
+
+/** The whole new order of the plan's steps, by step id: every step once. */
+export const ReorderOrchestrationStepsRequest = z.object({ order: z.array(ManagerStepId).min(1).max(MANAGER_LIMITS.maxSteps) });
+export type ReorderOrchestrationStepsRequest = z.infer<typeof ReorderOrchestrationStepsRequest>;
+
+/** Plain words for the plan review's refusals. No dashes. */
+export const ORCHESTRATION_STEP_NOT_CHANGEABLE_MESSAGE = 'This step cannot be changed any more. It was already sent, finished or skipped, or the run has ended.';
+export const ORCHESTRATION_RUN_NOT_OPEN_MESSAGE = 'This run has already ended.';
+export const ORCHESTRATION_EDIT_SECRET_MESSAGE = 'That text looks like it holds a key or a secret. Take it out and try again.';
+export const ORCHESTRATION_EDIT_BAD_TEXT_MESSAGE = 'That text is empty, too long, or has characters that are not allowed.';
+export const ORCHESTRATION_ORDER_WORDS = {
+  not_every_step: 'The new order must list every step once.',
+  sent_step_moved: 'A step that was already sent cannot move.',
+  prerequisite: (step: string, needs: string): string => `Step ${step} needs step ${needs} first, so it cannot come before it.`,
+} as const;

@@ -2,7 +2,17 @@ import { ORCHESTRATION_OFF_MESSAGE, PLAN_OPEN_SETTINGS_LABEL, type Orchestration
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
 import { useState } from 'react';
-import { approveOrchestrationStep, dispatchOrchestrationStep, startOrchestrationRun, useOrchestrationRuns, useOrchestrationSettings } from '@/orchestrate/orchestrate-api';
+import {
+  approveOrchestrationStep,
+  dispatchOrchestrationStep,
+  editOrchestrationStep,
+  reorderOrchestrationSteps,
+  skipOrchestrationStep,
+  startOrchestrationRun,
+  stopOrchestrationRun,
+  useOrchestrationRuns,
+  useOrchestrationSettings,
+} from '@/orchestrate/orchestrate-api';
 import { OrchestrateView } from '@/orchestrate/orchestrate-view';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
@@ -78,21 +88,45 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
   const [error, setError] = useState<string | undefined>(undefined);
   // The newest run from the list; an answer to a start or step shows at once, before the list catches up.
   const [fresh, setFresh] = useState<OrchestrationRunView | undefined>(undefined);
-  const run = runs.data?.[0] ?? fresh;
+  // The newer of the list's latest run and the answer to the last action, so a start never shows (or stops) the previous run.
+  const listed = runs.data?.[0];
+  const run = listed === undefined ? fresh : fresh === undefined || fresh.run.id === listed.run.id || fresh.run.createdAt <= listed.run.createdAt ? listed : fresh;
 
-  const act = (work: () => Promise<OrchestrationRunView>) => {
+  const [stopping, setStopping] = useState(false);
+
+  /** Runs one request and shows what came back or why it was refused; resolves true when it was kept. */
+  const act = (work: () => Promise<OrchestrationRunView>): Promise<boolean> => {
     setBusy(true);
     setError(undefined);
-    work().then(
+    return work().then(
       async (view) => {
         setFresh(view);
         await queryClient.invalidateQueries({ queryKey: ['orchestration-runs', wsId] });
         setBusy(false);
+        return true;
       },
       async (failure: unknown) => {
         setError(failure instanceof Error ? failure.message : 'That did not work. Try again.');
         await queryClient.invalidateQueries({ queryKey: ['orchestration-runs', wsId] });
         setBusy(false);
+        return false;
+      },
+    );
+  };
+  /** Stop never waits for another request: the manager may still be thinking when the user presses it. */
+  const stop = (runId: string) => {
+    setStopping(true);
+    setError(undefined);
+    stopOrchestrationRun(wsId, runId).then(
+      async (view) => {
+        setFresh(view);
+        await queryClient.invalidateQueries({ queryKey: ['orchestration-runs', wsId] });
+        setStopping(false);
+      },
+      async (failure: unknown) => {
+        setError(failure instanceof Error ? failure.message : 'That did not work. Try again.');
+        await queryClient.invalidateQueries({ queryKey: ['orchestration-runs', wsId] });
+        setStopping(false);
       },
     );
   };
@@ -113,17 +147,22 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
       run={run}
       busy={busy}
       error={error ?? (runs.error instanceof Error ? runs.error.message : undefined)}
-      onStart={(goal) => act(() => startOrchestrationRun(wsId, goal))}
+      stopping={stopping}
+      onStart={(goal) => void act(() => startOrchestrationRun(wsId, goal))}
+      onStop={() => (run === undefined ? undefined : stop(run.run.id))}
+      onEdit={(stepId, instruction) => (run === undefined ? Promise.resolve(false) : act(() => editOrchestrationStep(wsId, run.run.id, stepId, instruction)))}
+      onSkip={(stepId) => (run === undefined ? undefined : void act(() => skipOrchestrationStep(wsId, run.run.id, stepId)))}
+      onReorder={(order) => (run === undefined ? undefined : void act(() => reorderOrchestrationSteps(wsId, run.run.id, order)))}
       onApprove={(stepId) =>
         run === undefined
           ? undefined
-          : act(async () => {
+          : void act(async () => {
               // Approve and send in one press; a send that fails leaves the step approved, with Send to try again.
-              await approveOrchestrationStep(wsId, run.run.id, stepId);
+              await approveOrchestrationStep(wsId, run.run.id, stepId, run.steps.find((one) => one.stepId === stepId)?.instruction);
               return dispatchOrchestrationStep(wsId, run.run.id, stepId);
             })
       }
-      onSend={(stepId) => (run === undefined ? undefined : act(() => dispatchOrchestrationStep(wsId, run.run.id, stepId)))}
+      onSend={(stepId) => (run === undefined ? undefined : void act(() => dispatchOrchestrationStep(wsId, run.run.id, stepId)))}
     />
   );
 }

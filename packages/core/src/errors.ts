@@ -12,6 +12,8 @@ import {
   ORCHESTRATION_NO_MANAGER_MESSAGE,
   ORCHESTRATION_STEP_NOT_APPROVED_MESSAGE,
   ORCHESTRATION_STEP_NOT_PROPOSED_MESSAGE,
+  ORCHESTRATION_STEP_NOT_CHANGEABLE_MESSAGE,
+  ORCHESTRATION_RUN_NOT_OPEN_MESSAGE,
   ORCHESTRATION_UNAVAILABLE_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
   SCRIPTS_CHANGED_MESSAGE,
@@ -133,6 +135,30 @@ export class StepNotProposedError extends CoreError {
   override readonly name = 'StepNotProposedError';
   constructor() {
     super('step_not_proposed', ORCHESTRATION_STEP_NOT_PROPOSED_MESSAGE);
+  }
+}
+
+/** A step was to be edited or skipped but was already sent, finished or skipped, or its run ended. Nothing changed. */
+export class StepNotChangeableError extends CoreError {
+  override readonly name = 'StepNotChangeableError';
+  constructor() {
+    super('step_not_changeable', ORCHESTRATION_STEP_NOT_CHANGEABLE_MESSAGE);
+  }
+}
+
+/** A new order of the steps was refused (a step before its prerequisite, a missing step, a sent step moved); `message` says which. Nothing changed. */
+export class BadOrderError extends CoreError {
+  override readonly name = 'BadOrderError';
+  constructor(message: string) {
+    super('bad_order', message);
+  }
+}
+
+/** The run has already ended, so there is nothing to stop or change. */
+export class RunNotOpenError extends CoreError {
+  override readonly name = 'RunNotOpenError';
+  constructor() {
+    super('run_not_open', ORCHESTRATION_RUN_NOT_OPEN_MESSAGE);
   }
 }
 

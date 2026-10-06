@@ -168,7 +168,7 @@ Risks and conditions to carry into 14.2 onward:
 
 ## Decision
 
-(filled when the user answers; the go or no-go question is in the PR description and the hand-off)
+2026-10-05, user: GO for route 2 with OpenCode 1.18.34. Recorded in full as a dated Decision in the epic's Notes.
 
 ## Review Triage Log
 

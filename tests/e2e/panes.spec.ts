@@ -248,6 +248,21 @@ test('programs: detection shows found and not found with the install page, Detec
         await page.keyboard.type('args');
         await page.keyboard.press('Enter');
         await expect(terminal.locator('.xterm-rows')).toContainText('args=["--model","big"]');
+
+        // Status is a guess: quiet reads idle, a permission style question reads needs attention, and it shows in Needs you and the tab title.
+        const chip = page.getByTestId('pane-status-chip');
+        await expect(chip).toHaveText('Idle');
+        await page.keyboard.type('perm');
+        await page.keyboard.press('Enter');
+        await expect(chip).toHaveText('Needs attention');
+        await expect(page.getByTestId('terminal-tab').first()).toContainText('Needs attention');
+        await expect(page.getByTestId('needs-you-item')).toContainText('Codex 1 may need you');
+        await expect(page).toHaveTitle(/^\(1\)/);
+        // Answering it makes it working, then idle again; the row goes.
+        await page.keyboard.type('y');
+        await page.keyboard.press('Enter');
+        await expect(chip).toHaveText('Idle');
+        await expect(page.getByTestId('needs-you-item')).toHaveCount(0);
       },
     );
   } finally {

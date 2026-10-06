@@ -60,7 +60,8 @@ export function AttentionNotifier() {
 
   const sessions = useMemo(() => new Set(model.groups.flatMap((group) => [...group.rows, ...group.earlier].map((row) => row.sesId))), [model.groups]);
   useEffect(() => {
-    notifier.current?.update(model.needsYou, settings, caughtUp, sessions);
+    // A terminal pane's attention is opt in per pane (story 16.8): it never makes a sound or a desktop notification by itself.
+    notifier.current?.update(model.needsYou.filter((need) => need.kind !== 'pane'), settings, caughtUp, sessions);
   }, [model.needsYou, settings, caughtUp, sessions]);
 
   return null;

@@ -124,6 +124,12 @@ export interface StartOptions {
    * {@link claudeAdapterPath}) or installs it into the data folder.
    */
   agentSetup?: readonly AgentSetupPort[];
+  /**
+   * The program terminal panes run in place of the user's own shell (epic 16;
+   * tests: a fake, so none opens the real shell). Default: the user's shell, or,
+   * in a test run, `$OGDEN_AGENTS_TEST_PANE_SHELL`.
+   */
+  paneShell?: { file: string; args: readonly string[] };
   /** Loads `node-pty` for the hidden sign-in terminal (tests: one that fails, AD-19). Default: `terminal-pty`'s lazy loader. */
   loadPty?: PtyLoader;
   /**
@@ -152,6 +158,13 @@ export interface StartOptions {
   launcherEntry?: string;
   /** Override the app shortcut (tests). Default: see {@link launcherEntry}. */
   appShortcut?: AppShortcutPort;
+  /**
+   * The BMad pieces this install ships, in place of `SHIPPED_BMAD_PIECES`
+   * (story 7.1): a test starts an install that ships fewer, to check what a
+   * piece the install lacks does. The launcher never sets it. Ignored when
+   * {@link core} is given.
+   */
+  shippedBmadPieces?: readonly BmadPiece[];
   /**
    * BMad pieces to report as available on top of `SHIPPED_BMAD_PIECES`
    * (story 10.2), so a test can turn on a piece no epic ships yet. The

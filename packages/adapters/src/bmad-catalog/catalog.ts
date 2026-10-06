@@ -22,7 +22,8 @@
  * - Agents: the `[[members]]` of a record's `roster.toml` whose `skill` is
  *   installed: named by the skill, labelled with its mapped label, else the
  *   member's `title`, else the skill's name; described as the skill is.
- * - Capabilities (AD-14, never a version): `plain_labels` when an installed
+ * - Capabilities (AD-14, never a version): `look_back` when an installed
+ *   verified skill has an epic scope in the mapping (epic 7); `plain_labels` when an installed
  *   verified skill has a label in the mapping; `ticket_tree` when the repo's
  *   `_bmad/scripts/config_utils.py` is a regular file reached through real
  *   folders whose first 64 KB define `load_central_config(` (what the
@@ -81,7 +82,7 @@ async function labelledSkills(repoReal: string, recordFolders: ReadonlySet<strin
 export const MAX_ROSTER_MEMBERS = 200;
 
 /** A catalog with nothing in it. */
-const EMPTY_CATALOG: Catalog = { modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false } };
+const EMPTY_CATALOG: Catalog = { modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false, look_back: false } };
 
 /** A module record, read. */
 interface ModuleRecord {
@@ -194,15 +195,16 @@ export async function buildCatalog(repoPath: string, options: LabelOptions = {})
     skills,
     agents: [...agents.values()].sort(byKey((agent) => agent.name)),
     entryAction: labelled.entryAction,
-    capabilities: { plain_labels: labelled.labelled, ticket_tree: ticketTree },
+    capabilities: { plain_labels: labelled.labelled, ticket_tree: ticketTree, look_back: skills.some((skill) => skill.scope === 'epic') },
   };
 }
 
-/** Whether an installed verified skill (not a module record) has a label: the `plain_labels` capability. */
-async function hasPlainLabels(repoReal: string, options: LabelOptions): Promise<boolean> {
+/** The labelled skills of the repo (read once for the capabilities that need them). */
+async function labelledOf(repoReal: string, options: LabelOptions) {
   const { recordFolders } = await readModuleRecords(repoReal);
-  return (await labelledSkills(repoReal, recordFolders, options)).labelled;
+  return labelledSkills(repoReal, recordFolders, options);
 }
+
 
 /**
  * Which of `wanted` the repo at `repoPath` lacks (entry 4.11, AD-14; see the
@@ -215,6 +217,10 @@ export async function missingCapabilities(repoPath: string, wanted: readonly Bma
   if (asked.length === 0) return [];
   const repoReal = await realRepoRoot(repoPath);
   if (repoReal === undefined) return asked;
-  const has = await Promise.all(asked.map((capability) => (capability === 'ticket_tree' ? hasTicketTree(repoReal) : hasPlainLabels(repoReal, options))));
+  // The skills are read once for the capabilities that need them, so both answers come from the same read.
+  const labelled = asked.some((capability) => capability !== 'ticket_tree') ? await labelledOf(repoReal, options) : undefined;
+  const has = await Promise.all(
+    asked.map(async (capability) => (capability === 'ticket_tree' ? hasTicketTree(repoReal) : capability === 'look_back' ? labelled!.skills.some((skill) => skill.scope === 'epic') : labelled!.labelled)),
+  );
   return asked.filter((_capability, index) => !has[index]);
 }

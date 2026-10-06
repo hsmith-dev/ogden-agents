@@ -2,6 +2,7 @@ import {
   APPLY_FIX_LABEL,
   blockedSentence,
   HIDE_DETAILS_LABEL,
+  REVIEW_CHECKS_TITLE,
   RUN_AGENT_LABEL,
   RUN_SANDBOX_LABEL,
   RUN_TIME_LEFT_LABEL,
@@ -17,7 +18,8 @@ import { agentNameOf } from '@/chat/chat-api';
 import { useChatAgents } from '@/chat/use-chat-agents';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
-import { useRunAction } from './builds-api';
+import { useRunAction, useRunDetail } from './builds-api';
+import { CheckAgainButton, VerificationChecks } from './verification-checks';
 
 /** The words on the run view's Retry buttons. */
 export const RETRY_LABEL = 'Retry';
@@ -60,6 +62,7 @@ export function BuildRunPanel({ wsId, run }: { wsId: string; run: Run | undefine
   const applyFix = useRunAction(wsId, 'apply_fix');
   const [open, setOpen] = useState(false);
   const [failure, setFailure] = useState<string | undefined>();
+  const detail = useRunDetail(wsId, run?.id);
   const running = run?.outcome === 'running' && run.queuePosition === null;
   const now = useNow(running, 10_000);
   if (run === undefined) return null;
@@ -155,6 +158,15 @@ export function BuildRunPanel({ wsId, run }: { wsId: string; run: Run | undefine
           ) : null}
         </dl>
       ) : null}
+      {detail.data?.verification == null || run.outcome === 'running' ? null : (
+        <section aria-label={REVIEW_CHECKS_TITLE} className="flex flex-col gap-2" data-testid="build-run-checks">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="text-label">{REVIEW_CHECKS_TITLE}</span>
+            <CheckAgainButton wsId={wsId} run={run} onError={setFailure} />
+          </span>
+          <VerificationChecks verification={detail.data.verification} idPrefix="run" />
+        </section>
+      )}
       {failure === undefined ? null : (
         <span role="alert" className="text-caption text-state-error" data-testid="build-run-panel-error">
           {failure}

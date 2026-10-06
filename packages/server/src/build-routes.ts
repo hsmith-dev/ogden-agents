@@ -212,8 +212,6 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, buil
     }
   });
 
-  // Story 5.3: every other route of epics 5 and 11, guarded and trusted, 501 until its lane fills it.
-  const notYet = (c: Context): Response => notImplemented(c);
   // Story 5.8: the workspace's runs and its queue (the board's Queued), and one run with its verification; 11.1 builds the views on them.
   routes.get('builds', API_ROUTES.workspaceRuns, async (c, { workspaceId }) => {
     if (builds === undefined) return notImplemented(c);
@@ -267,7 +265,17 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, buil
     });
     return response ?? tooLarge ?? apiError(c, 413, 'invalid_request', 'That request is too large.');
   });
-  routes.post('builds', API_ROUTES.runCheckAgain, notYet);
+  // Story 11.2: Check again (no body).
+  routes.post('builds', API_ROUTES.runCheckAgain, async (c, { workspaceId }) => {
+    if (builds === undefined) return notImplemented(c);
+    try {
+      const run = await builds.checkAgain(workspaceId, c.req.param('runId') ?? '');
+      log.info('build checked again', { workspaceId, runId: run.id });
+      return c.json(RunResponse.parse({ run }));
+    } catch (error) {
+      return refused(c, workspaceId, error);
+    }
+  });
   // Story 5.8: the project's build settings (its limit; 11.2 adds the test command's editor).
   routes.get('builds', API_ROUTES.workspaceBuildSettings, (c, { workspaceId }) => {
     if (buildSettings === undefined) return notImplemented(c);

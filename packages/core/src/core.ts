@@ -1,6 +1,7 @@
 import type { AgentId } from '@ogden-agents/shared';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
+import { createLookBackOffers, type LookBackOffers } from './look-back-offers.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-pieces.js';
 import { createBmadModulesSeen, type BmadModulesSeen } from './bmad-modules-seen.js';
 import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
@@ -33,6 +34,8 @@ export interface Core {
   readonly bmad: BmadFeatures;
   /** Whether a project's repo already uses BMad Method, and Not now on the offer (story 10.3). */
   readonly bmadDetection: BmadDetectionUseCases;
+  /** The finished-epic offer's Not now (epic 7, story 7.2), behind the Retrospectives guard. */
+  readonly lookBackOffers: LookBackOffers;
   /** The per-project script trust (story 4.2): checked with the pieces guard for every use of the project's own scripts. */
   readonly bmadScriptTrust: BmadScriptTrust;
   /** When each BMad Method module first appeared in a project (story 4.4): fills the catalog's `installedAt`. */
@@ -98,6 +101,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
   // Which pieces this install ships is the server wiring's list (story 10.2), never core's.
   const bmad = createBmadFeatures(db, { availableBmadPieces });
   const bmadDetection = createBmadDetection({ orm: db.orm, events, entities, catalog: options.bmadCatalog });
+  const lookBackOffers = createLookBackOffers({ orm: db.orm, events, bmad });
   const catalog = options.bmadCatalog;
   const bmadScriptTrust = createBmadScriptTrust({
     orm: db.orm,
@@ -139,6 +143,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     permissions,
     bmad,
     bmadDetection,
+    lookBackOffers,
     bmadScriptTrust,
     bmadModulesSeen,
     bmadSetup,

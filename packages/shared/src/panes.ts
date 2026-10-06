@@ -180,10 +180,20 @@ function measure(node: PaneLayoutNode, depth = 1): { leaves: number; depth: numb
   const b = measure(node.second, depth + 1);
   return { leaves: a.leaves + b.leaves, depth: Math.max(a.depth, b.depth) };
 }
+/** Every pane id a tree holds, in order. */
+function leafIds(node: PaneLayoutNode): PaneId[] {
+  return node.type === 'pane' ? [node.paneId] : [...leafIds(node.first), ...leafIds(node.second)];
+}
 export const PaneLayout = z
   .object({ tabs: z.array(PaneLayoutTab).max(MAX_PANES_PER_PROJECT), activeTabId: PaneTabId.nullable() })
   .refine((layout) => layout.tabs.reduce((sum, tab) => sum + measure(tab.root).leaves, 0) <= MAX_PANES_PER_PROJECT, 'more panes than a project may have')
-  .refine((layout) => layout.tabs.every((tab) => measure(tab.root).depth <= 16), 'a layout nested too deep');
+  .refine((layout) => layout.tabs.every((tab) => measure(tab.root).depth <= 16), 'a layout nested too deep')
+  .refine((layout) => {
+    const ids = layout.tabs.flatMap((tab) => leafIds(tab.root));
+    return new Set(ids).size === ids.length;
+  }, 'a pane in two places')
+  .refine((layout) => new Set(layout.tabs.map((tab) => tab.id)).size === layout.tabs.length, 'two tabs with one id')
+  .refine((layout) => layout.activeTabId === null || layout.tabs.some((tab) => tab.id === layout.activeTabId), 'an active tab that does not exist');
 export type PaneLayout = z.infer<typeof PaneLayout>;
 
 /**

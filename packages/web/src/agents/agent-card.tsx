@@ -10,6 +10,7 @@ import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
 import { cn } from '@/ui/utils';
 import { useAgentActions, useApiKey, useInstall, useSignIn, type AgentActions, type ApiKeyActions, type InstallAction, type SignIn } from './agent-setup-api';
+import { LocalEndpointsSection } from './local-endpoints';
 import { SigningIn } from './signing-in';
 
 /**
@@ -70,6 +71,8 @@ export function AgentCard({ agent, selected = false }: { agent: AgentSetupStatus
           ))}
         </ul>
       )}
+      {/* An agent that needs no account shows its servers instead of a sign in (epic 14 story 14.4). */}
+      {agent.install === 'installed' && agent.noAccount === true ? <LocalEndpointsSection /> : null}
       {agent.install === 'installed' && agent.apiKey !== undefined && agent.auth !== 'signing_in' ? (
         <ApiKeySection agent={agent} saved={agent.apiKey} actions={apiKey} />
       ) : null}
@@ -165,6 +168,8 @@ function InstallButton({ install, label }: { install: InstallAction; label: stri
 
 function AgentState({ agent, signIn, actions }: { agent: AgentSetupStatus; signIn: SignIn; actions: AgentActions }) {
   const start = () => signIn.start(agent.signInTab);
+  // No account and no key (the Local model): ready once installed, and its servers are set up below.
+  if (agent.noAccount === true) return <StateGlyph state="done" label="Installed, no account needed" data-testid="agent-state" />;
   // An agent that takes only an API key (Codex; user decision, 2026-10-05) has no sign-in: ready with a key, else it needs one.
   // Its notices (on the card) say why.
   if (agent.apiKeyOnly === true) {

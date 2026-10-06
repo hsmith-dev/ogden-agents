@@ -30,6 +30,18 @@ describe('tickets-memory (story 4.2)', () => {
     expect((await store.tree('/repo', GUARD)).tickets[0]!.title).toBe('One');
   });
 
+  it('tree carries each epic with its retrospective (story 7.2), null when there is none', async () => {
+    const epics = [
+      { slug: 'epic-a', id: 1, status: 'done', after: [], blocks: [], retrospective: { path: '_bmad-output/i/epic-a/epic-a-retrospective.md', verdict: 'rejected', date: '2026-10-05' } },
+      { slug: 'epic-b', id: 2, status: 'in-progress', after: [], blocks: [] },
+    ];
+    const answer = await createMemoryTicketStore({ repos: { '/repo': { ...tree, epics } } }).tree('/repo', GUARD);
+    expect(answer.epics.map((epic) => [epic.slug, epic.retrospective?.verdict ?? null])).toEqual([
+      ['epic-a', 'rejected'],
+      ['epic-b', null],
+    ]);
+  });
+
   it('find answers a ticket with its text, and a missing one is NotFoundError', async () => {
     const store = createMemoryTicketStore({ repos: { '/repo': tree }, text: { '1.2': { description: 'Do two.' } } });
     expect(await store.find('/repo', '1.2', GUARD)).toMatchObject({ ref: '1.2', description: 'Do two.', verify: '', references: [], hasPlan: false });

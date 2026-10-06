@@ -1,6 +1,6 @@
 // TEMPORARY spike 17.1 probe (removed before review). Runs the shipped session code against the
 // fake personalities of Codex, Grok and Antigravity and prints `PROBE17 {json}` lines.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { decideBuildPermission, nodePathNormalizer, PROTECTED_PATHS, type AgentEvent, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
@@ -10,7 +10,8 @@ import { createAntigravityAgent, createCodexAgent, createGrokAgent } from '../sr
 const fx = (name: string) => join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', name);
 const dirs: string[] = [];
 const sessions: AgentSession[] = [];
-const tmp = (p: string) => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push(d); return d; };
+// The long form of the path: a runner's temp folder is an 8.3 short name, which the build policy refuses by design.
+const tmp = (p: string) => { const d = realpathSync.native(mkdtempSync(join(tmpdir(), p))); dirs.push(d); return d; };
 afterEach(async () => {
   await Promise.all(sessions.splice(0).map((s) => s.close()));
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

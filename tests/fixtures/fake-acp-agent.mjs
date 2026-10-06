@@ -73,6 +73,17 @@
 //                  session's cwd (never outside it), reports an `edit` tool
 //                  call, then completes it with a diff of the file's absolute
 //                  path; replies "Wrote <relpath>." (story 4.7)
+//   "/bmad-retrospective <folder>"  the look-back (epic 7): writes
+//                  <folder>/<folder name>-retrospective.md under the session's
+//                  cwd, with `verdict` (FAKE_ACP_RETRO_VERDICT, default
+//                  `accepted-with-open-items`) and `date` in its frontmatter and
+//                  a proposed pitfall in its body, as an `edit` tool call
+//                  completed with a diff (a document card), then replies
+//                  `command=<text> primed=<n>` and "Wrote <path>."
+//   "/bmad-project-context <retrospective path>"  the lessons (epic 7):
+//                  appends one pitfall line to AGENTS.md at the cwd (made if
+//                  missing), as an `edit` tool call, then replies
+//                  `command=<text> primed=<n>` and "Updated AGENTS.md."
 //   "write-file <relpath> <base64>"  as "write-doc", but writes the decoded
 //                  bytes (an agent writing a plan file or `tickets.toml`;
 //                  story 4.13)
@@ -685,6 +696,28 @@ async function runPrompt(params, client, session) {
     if (text === 'fail') throw acp.RequestError.internalError(undefined, 'the fake agent failed on purpose');
     if (text === 'usage-limit') throw acp.RequestError.internalError(undefined, 'Claude AI usage limit reached|1760000000');
     if (text === 'auth-expired') throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
+    // The look-back and the lessons (epic 7, story 7.2): the retrospective skill writes its document, the project-context skill edits AGENTS.md.
+    if (text.startsWith('/bmad-retrospective ') || text.startsWith('/bmad-project-context ')) {
+      const retro = text.startsWith('/bmad-retrospective ');
+      const argument = text.slice(text.indexOf(' ') + 1).trim();
+      const cwd = session.opened.cwd ?? process.cwd();
+      const relpath = retro ? `${argument.replace(/\/+$/, '')}/${argument.replace(/\/+$/, '').split('/').pop()}-retrospective.md` : 'AGENTS.md';
+      const file = resolve(cwd, relpath);
+      const inside = relative(cwd, file);
+      if (argument === '' || inside === '' || inside.startsWith('..') || isAbsolute(inside)) throw acp.RequestError.invalidParams(undefined, 'the fake agent writes only inside the session cwd');
+      const before = existsSync(file) ? readFileSync(file, 'utf8') : null;
+      const content = retro
+        ? `---\nepic: ${argument.split('/').pop()}\ndate: 2026-10-05T12:00:00-0600\nverdict: ${process.env.FAKE_ACP_RETRO_VERDICT ?? 'accepted-with-open-items'}\n---\n\n# Retrospective\n\n## Proposed AGENTS.md pitfalls\n\n- Run the fake check before you say a fake change is done.\n`
+        : `${before ?? '# Project instructions\n'}${before === null || before.endsWith('\n') ? '' : '\n'}\n- Run the fake check before you say a fake change is done.\n`;
+      const toolCallId = `call-write-${randomUUID()}`;
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', toolCallId, title: `Write ${relpath}`, kind: 'edit', status: 'in_progress', locations: [{ path: file }] });
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, content);
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', content: [{ type: 'diff', path: file, oldText: before, newText: content }] });
+      await say(client, params.sessionId, `command=${text} primed=${primed}`);
+      await say(client, params.sessionId, retro ? `Wrote ${relpath}.` : 'Updated AGENTS.md.');
+      return { stopReason: 'end_turn' };
+    }
     // Any slash command but the build (story 5.2), which is played below.
     if (text.startsWith('/') && !text.startsWith('/bmad-build-auto ticket ')) {
       await say(client, params.sessionId, `command=${text} primed=${primed}`);

@@ -31,7 +31,7 @@ const base = {
 };
 const run = (fields: Record<string, unknown>): Run => ({ ...base, ...fields }) as unknown as Run;
 
-const state = vi.hoisted(() => ({ calls: [] as string[], bodies: [] as unknown[], runs: undefined as unknown, limits: { maxConcurrentRunsPerInstall: 3, maxRunMinutes: 45 }, settings: { maxConcurrentRuns: 2, testCommand: null } }));
+const state = vi.hoisted(() => ({ agents: undefined as unknown, calls: [] as string[], bodies: [] as unknown[], runs: undefined as unknown, limits: { maxConcurrentRunsPerInstall: 3, maxRunMinutes: 45 }, settings: { maxConcurrentRuns: 2, testCommand: null } }));
 
 vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [], caughtUp: true }), useSessionEvents: () => [] }));
 vi.mock('@tanstack/react-router', () => ({
@@ -52,6 +52,8 @@ vi.mock('@/auth/tab-token', () => ({
         return answer(TicketsResponse.parse({ tickets: [{ ref: '1.1', id: 1, epic: 'epic-first', title: 'First', type: 'story', status: 'ready-for-dev', state: 'backlog', blocked_reason: '' }], problems: [] }));
       }
       if (method === 'GET' && path.endsWith('/runs')) return answer(state.runs ?? { runs: [], queue: [] });
+      if (method === 'GET' && path.endsWith('/build-agents')) return answer(state.agents ?? { agents: [], defaultAgentId: 'claude-code' });
+      if (method === 'POST' && path.endsWith('/reject')) return answer({ error: { code: 'internal_error', message: 'The fake does not answer a review.' } }, 500);
       if (method === 'POST' && (path.endsWith('/stop') || path.endsWith('/retry'))) return answer({ run: { ...base, outcome: 'running' } });
       if (path.endsWith('/run-limits')) {
         if (method === 'PATCH') {
@@ -94,6 +96,7 @@ beforeEach(() => {
   state.calls.length = 0;
   state.bodies.length = 0;
   state.runs = undefined;
+  state.agents = undefined;
   state.limits = { maxConcurrentRunsPerInstall: 3, maxRunMinutes: 45 };
   state.settings = { maxConcurrentRuns: 2, testCommand: null };
 });
@@ -229,5 +232,39 @@ describe('the limits (story 5.8)', () => {
     fireEvent.click(screen.getByTestId('run-limit-project-save'));
     await settle();
     expect(state.bodies).toContainEqual({ maxConcurrentRuns: 4 });
+  });
+});
+
+describe('failure words for a build (epic 17)', () => {
+  it("a rejected key shows the agent's own plain reason and Retry, and no other agent is offered", async () => {
+    mount(<BuildRunPanel wsId={WS} run={run({ agent: 'codex', outcome: 'blocked', blockedCode: 'auth_required', reason: 'Codex needs a valid API key. Check it in Settings, Agents.' })} />);
+    await settle();
+    expect(screen.getByTestId('build-run-reason').textContent).toBe('Codex needs a valid API key. Check it in Settings, Agents.');
+    expect(screen.getByTestId('build-run-retry').textContent).toBe('Retry');
+    expect(screen.queryByTestId('build-run-again-claude-code')).toBeNull();
+  });
+
+  it("a usage limit shows that agent's words, Retry, and a button for each other agent that can build, which builds again in a fresh copy with it", async () => {
+    state.agents = {
+      defaultAgentId: 'claude-code',
+      agents: [
+        { agentId: 'claude-code', displayName: 'Claude Code', way: 'unattended', reason: null },
+        { agentId: 'codex', displayName: 'Codex', way: 'attended_only', reason: 'Codex builds with you watching.' },
+        { agentId: 'grok', displayName: 'Grok', way: 'unavailable', reason: 'Grok needs a token.' },
+      ],
+    };
+    mount(<BuildRunPanel wsId={WS} run={run({ agent: 'claude-code', outcome: 'blocked', blockedCode: 'usage_limit', reason: 'Claude Code has reached its usage limit. Try again later.' })} />);
+    await settle();
+    expect(screen.getByTestId('build-run-reason').textContent).toBe('Claude Code has reached its usage limit. Try again later.');
+    // Not itself, and not an agent that is not ready.
+    expect(screen.queryByTestId('build-run-again-claude-code')).toBeNull();
+    expect(screen.queryByTestId('build-run-again-grok')).toBeNull();
+    const again = screen.getByTestId('build-run-again-codex');
+    expect(again.textContent).toBe('Build again with Codex');
+    expect(again.getAttribute('title')).toContain('fresh copy');
+    fireEvent.click(again);
+    await settle();
+    expect(state.calls).toContain(`POST /api/v1/workspaces/${WS}/builds/1.1/reject`);
+    expect(state.bodies).toContainEqual({ retry: true, agent: 'codex' });
   });
 });

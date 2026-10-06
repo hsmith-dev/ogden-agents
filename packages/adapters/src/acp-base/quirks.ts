@@ -6,7 +6,7 @@
  */
 import type * as acp from '@agentclientprotocol/sdk';
 import type { AgentDescriptor, AgentSandbox, AgentTerminalResume, ProtectedPaths } from '@ogden-agents/core';
-import { PERMISSION_MODES, type PermissionMode } from '@ogden-agents/shared';
+import { PERMISSION_MODES, USAGE_LIMIT_CHAT_TAIL, type PermissionMode } from '@ogden-agents/shared';
 import type { AcpToolInputPaths } from './tool-paths.js';
 
 /** The plain reasons the UI shows for an agent, by its product name. */
@@ -21,7 +21,7 @@ export function acpReasons(displayName: string, options: { apiKeyOnly?: boolean;
     couldNotSwitchMode: `${displayName} couldn't switch its permission mode.`,
     noSuchModel: `${displayName} doesn't offer that model here.`,
     couldNotSwitchModel: `${displayName} couldn't switch its model.`,
-    usageLimit: `${displayName} has reached its usage limit. Continue this chat with another agent while it cools down, or try again later.`,
+    usageLimit: `${displayName} has reached its usage limit.${USAGE_LIMIT_CHAT_TAIL}`,
   } as const;
 }
 

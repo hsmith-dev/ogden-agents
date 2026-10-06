@@ -3,12 +3,12 @@
  * verification, the per-run result read back, the outcome and the done
  * checkpoint.
  */
-import { ATTENDED_SANDBOX, blockedSentence, RUN_REASON_AGENT_ERROR, RUN_REASON_EMPTY_DIFF, RUN_REASON_NO_NETWORK, RUN_REASON_NOT_BUILT, RUN_REASON_PROTECTED_DIFF, RUN_REASON_RESULT_MISMATCH, RUN_REASON_SCRIPTS_CHANGED, RUN_REASON_UNREADABLE, type BlockedCode, type Run, type TicketDetail, type VerificationResult } from '@ogden-agents/shared';
+import { ATTENDED_SANDBOX, blockedSentence, USAGE_LIMIT_BUILD_TAIL, USAGE_LIMIT_CHAT_TAIL, RUN_REASON_AGENT_ERROR, RUN_REASON_EMPTY_DIFF, RUN_REASON_NO_NETWORK, RUN_REASON_NOT_BUILT, RUN_REASON_PROTECTED_DIFF, RUN_REASON_RESULT_MISMATCH, RUN_REASON_SCRIPTS_CHANGED, RUN_REASON_UNREADABLE, type BlockedCode, type Run, type TicketDetail, type VerificationResult } from '@ogden-agents/shared';
 import { detectTestCommand, verifyRun } from './build-verify.js';
 import { runFolderOf, runShortOf } from './build-run-folder.js';
 import { ScriptsChangedError } from './errors.js';
 import { workspaceRepoPath } from './planning.js';
-import { forbiddenChanges } from './build-names.js';
+import { forbiddenChanges, MAX_RESULT_TEXT } from './build-names.js';
 import type { BuildCtx } from './build-context.js';
 
 export function createOutcome(ctx: BuildCtx) {
@@ -68,7 +68,7 @@ export function createOutcome(ctx: BuildCtx) {
   };
 
   /** Works out a finished turn's outcome (see the header). */
-  const decideOutcome = async (run: Run, ended: 'idle' | 'error', options: { passedDone?: boolean } = {}): Promise<void> => {
+  const decideOutcome = async (run: Run, ended: 'idle' | 'error', options: { passedDone?: boolean; errorCode?: 'auth_required' | 'usage_limit' | undefined; agentReason?: string | undefined } = {}): Promise<void> => {
     if (run.worktreePath === null) return;
     // The turn is over: the time limit no longer applies (the tests have their own).
     disarmDeadline(run.id);
@@ -115,6 +115,14 @@ export function createOutcome(ctx: BuildCtx) {
         // The halt's code is the runner's to say (AD-12; story 5.3): core never reads the skill's words.
         blockedCode = runnerOf(run)?.blockedCode(ticket.blocked_reason ?? '') ?? 'other';
         reason = `${said} ${RUN_REASON_NO_NETWORK}`;
+      } else if (ended === 'error' && options.errorCode !== undefined) {
+        // The agent said it could not go on for want of a key, a sign in or its usage (epic 17): blocked, in that agent's own plain
+        // words (its name, the key it needs), with Retry. Never retried by itself, so a rejected key or a limit never loops.
+        outcome = 'blocked';
+        blockedCode = options.errorCode;
+        // The adapter's usage limit sentence ends with the chat's offer; in a build it ends with the build's.
+        const said = options.agentReason === undefined ? '' : mask(options.agentReason).trim();
+        reason = said === '' ? blockedSentence(options.errorCode) : (said.endsWith(USAGE_LIMIT_CHAT_TAIL.trim()) ? `${said.slice(0, said.length - USAGE_LIMIT_CHAT_TAIL.trim().length).trimEnd()}${USAGE_LIMIT_BUILD_TAIL}` : said).slice(0, MAX_RESULT_TEXT);
       } else {
         outcome = 'failed';
         reason = `${ended === 'error' ? RUN_REASON_AGENT_ERROR : RUN_REASON_NOT_BUILT(status)} ${RUN_REASON_NO_NETWORK}`;
@@ -173,13 +181,13 @@ export function createOutcome(ctx: BuildCtx) {
   };
   const unsubscribe = events.subscribe(events.lastSeq(), (event) => {
     if (event.type !== 'session.state_changed') return;
-    const { sessionId, state, previous, resumable } = event.payload;
+    const { sessionId, state, previous, resumable, errorCode, reason: agentReason } = event.payload;
     if ((state !== 'idle' && state !== 'error') || (previous !== 'working' && previous !== 'waiting')) return;
     // An agent stopped under it (a server stop, a dropped agent) did not finish its turn: the server start settles it.
     if (resumable === true) return;
     const run = entities.getRunBySession(sessionId);
     if (run === undefined || run.outcome !== 'running') return;
-    void track(run.id, () => decideOutcome(run, state));
+    void track(run.id, () => decideOutcome(run, state, { errorCode: state === 'error' && (errorCode === 'auth_required' || errorCode === 'usage_limit') ? errorCode : undefined, agentReason }));
   });
 
   return { doneCheckpointOf, verifyBuilt, decideOutcome, resultHolds, deciding, track, unsubscribe };

@@ -115,6 +115,8 @@ export const BLOCKED_CODES = [
   'checkpoint_plan',
   'checkpoint_done',
   'agent_error',
+  'auth_required',
+  'usage_limit',
   'other',
 ] as const;
 export const BlockedCode = z.enum(BLOCKED_CODES);
@@ -122,6 +124,13 @@ export type BlockedCode = z.infer<typeof BlockedCode>;
 
 /** The blocked codes that are a checkpoint pause: Retry resumes the same run's work (5.4, 5.7). */
 export const CHECKPOINT_BLOCKED_CODES: readonly BlockedCode[] = ['checkpoint_plan', 'checkpoint_done'];
+
+/**
+ * What an agent's usage limit reason ends with in a chat (the handoff offer), and in a build (epic 17): the reason itself is the
+ * adapter's one sentence; the tail follows where it is shown.
+ */
+export const USAGE_LIMIT_CHAT_TAIL = ' Continue this chat with another agent while it cools down, or try again later.';
+export const USAGE_LIMIT_BUILD_TAIL = ' Try again later, or build it again with another agent.';
 
 /** The plain sentence for each blocked code but `time_limit`, whose sentence names its minutes ({@link blockedSentence}). */
 export const BLOCKED_SENTENCES: Readonly<Record<Exclude<BlockedCode, 'time_limit'>, string>> = {
@@ -139,6 +148,9 @@ export const BLOCKED_SENTENCES: Readonly<Record<Exclude<BlockedCode, 'time_limit
   checkpoint_plan: 'The plan is ready. Check it, then continue the build.',
   checkpoint_done: 'The build is finished. Check it, then continue.',
   agent_error: 'The agent stopped with an error before it finished.',
+  // Epic 17: the run shows the agent's own plain reason (its name, its key or limit); these are the words when it has none.
+  auth_required: 'The agent needs a valid key or sign in. Fix that in Settings, then retry.',
+  usage_limit: 'The agent has reached its usage limit. Retry later, or build again with another agent.',
   other: 'The build stopped. Show details says why.',
 };
 

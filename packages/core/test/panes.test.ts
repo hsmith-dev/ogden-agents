@@ -51,15 +51,17 @@ describe('Developer mode gates every operation in core (E16-R3)', () => {
     expect(fake.processes).toEqual([]);
   });
 
-  it('stops every pane when Developer mode is turned off, and tells their viewers', async () => {
+  it('stops every program when Developer mode is turned off, keeps each pane as stopped, and tells their viewers', async () => {
     const { panes, workspace, fake, core } = setup();
     const pane = await panes.open(workspace.id, SIZE);
-    const closed: string[] = [];
-    panes.attach(pane.id)!.onClose(() => closed.push('closed'));
+    const states: string[] = [];
+    panes.attach(pane.id)!.onState((p) => states.push(p.state));
     core.installSettings.setDeveloperMode(false);
     expect(fake.processes[0]!.kills()).toBe(1);
-    expect(closed).toEqual(['closed']);
-    expect(panes.count()).toBe(0);
+    expect(states).toEqual(['stopped']);
+    expect(panes.count()).toBe(1);
+    core.installSettings.setDeveloperMode(true);
+    expect(panes.list(workspace.id)[0]).toMatchObject({ id: pane.id, state: 'stopped' });
   });
 });
 
@@ -239,19 +241,18 @@ describe('pane events: state only (story 16.3)', () => {
     expect(JSON.stringify(events)).not.toContain('SECRET-OUTPUT-MARKER');
   });
 
-  it('says why a pane closed: Developer mode off, or the server stopping', async () => {
+  it('says a pane\'s program ended when Developer mode turns off (the pane stays), and closed only when the user closes it', async () => {
     const { core, panes, workspace } = setup();
-    await panes.open(workspace.id, SIZE);
+    const pane = await panes.open(workspace.id, SIZE);
     core.installSettings.setDeveloperMode(false);
     await new Promise((resolve) => setImmediate(resolve));
     core.installSettings.setDeveloperMode(true);
-    await panes.open(workspace.id, SIZE);
-    panes.dispose();
-    const causes = paneEvents(core).flatMap((e) => (e.type === 'terminal.pane_closed' ? [e.payload.cause] : []));
-    expect(causes).toEqual(['developer_mode_off', 'server_stopped']);
+    panes.close(workspace.id, pane.id);
+    const kinds = paneEvents(core).filter((e) => e.type !== 'terminal.layout_changed').map((e) => e.type);
+    expect(kinds).toEqual(['terminal.pane_opened', 'terminal.pane_exited', 'terminal.pane_closed']);
   });
 
-  it('delivers the Developer mode change to a later subscriber before the pane closes, in order (no lost event)', async () => {
+  it('delivers the Developer mode change to a later subscriber before the pane event, in order (no lost event)', async () => {
     const { core, panes, workspace } = setup();
     await panes.open(workspace.id, SIZE);
     const heard: string[] = [];
@@ -259,7 +260,7 @@ describe('pane events: state only (story 16.3)', () => {
     core.events.subscribe(core.events.lastSeq(), (event) => void heard.push(event.type));
     core.installSettings.setDeveloperMode(false);
     await new Promise((resolve) => setImmediate(resolve));
-    expect(heard).toEqual(['settings.developer_mode_changed', 'terminal.layout_changed', 'terminal.pane_closed']);
+    expect(heard).toEqual(['settings.developer_mode_changed', 'terminal.pane_exited']);
   });
 
   it('announces nothing for a pane closed while it was starting', async () => {
@@ -353,13 +354,13 @@ describe('layout review findings (16.4)', () => {
     expect(pane.id).toBeTruthy();
   });
 
-  it('the layout is empty once Developer mode turned off the panes, and arrange needs Developer mode', async () => {
+  it('the layout stays when Developer mode turns the panes off, and arrange needs Developer mode', async () => {
     const { core, panes, workspace } = setup();
     await panes.open(workspace.id, SIZE);
     core.installSettings.setDeveloperMode(false);
     expect(() => panes.arrange(workspace.id, { tabs: [], activeTabId: null })).toThrow(DeveloperModeRequiredError);
     core.installSettings.setDeveloperMode(true);
-    expect(panes.layout(workspace.id)).toEqual({ tabs: [], activeTabId: null });
+    expect(panes.layout(workspace.id).tabs).toHaveLength(1);
   });
 
   it('a split whose target closes while the new pane starts still gets a place, and nothing opens after dispose', async () => {
@@ -504,7 +505,7 @@ describe('review findings (security review of 16.2)', () => {
     expect(running).toHaveLength(1);
   });
 
-  it('a live viewer typing after Developer mode went off (no event) stops the pane instead of reaching the shell', async () => {
+  it('a live viewer typing after Developer mode went off (no event) stops the panes and keeps them, and nothing reaches the shell', async () => {
     const { panes, workspace, fake, core } = setup();
     const pane = await panes.open(workspace.id, SIZE);
     const viewer = panes.attach(pane.id)!;
@@ -513,7 +514,8 @@ describe('review findings (security review of 16.2)', () => {
     viewer.write('rm -rf x\r');
     expect(fake.processes[0]!.writes).toEqual([]);
     expect(fake.processes[0]!.kills()).toBe(1);
-    expect(panes.count()).toBe(0);
+    expect(panes.count()).toBe(1);
+    expect(viewer.pane.state).toBe('stopped');
   });
 });
 

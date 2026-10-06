@@ -152,6 +152,8 @@ describe('the route helper', () => {
     // Every route under a project's orchestration path is one the helper registered (the install's defaults are not a project's): a new one cannot skip the guard.
     const served = [...new Set(app.routes.filter((route) => /\/workspaces\/:wsId\/orchestration(\/|$)/.test(route.path)).map((route) => `${route.method} ${route.path}`))].sort();
     expect(served).toEqual(orchestrationRouteKeys(app));
+    // 15.11: the one route about a build only records a run the Build dialog started; none of them starts, approves or sends a build.
+    expect(served.filter((key) => /build|start/i.test(key.replace('/orchestration/runs/:runId/steps/:stepId/dispatch', '')))).toEqual([`POST ${API_ROUTES.workspaceOrchestrationStepBuild}`]);
   });
 
   it('refuses a path outside a workspace, and registers nothing without core wiring', () => {

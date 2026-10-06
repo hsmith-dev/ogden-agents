@@ -317,6 +317,8 @@ describe.skipIf(PINNED === undefined)('Antigravity builds: Ogden never selects S
     await answerCards(s, session.id, 3);
     const ended = await s.settled();
     expect(ended.outcome).toBe('verified');
+    // It opened in Ask, so nothing had to be asked for at all.
+    expect(modesAsked(log)).toEqual([]);
     for (const mode of modesAsked(log)) expect(FORBIDDEN).not.toContain(mode);
     const cards = s.server.core.events.readAfter(0).filter((event) => event.streamId === session.id && event.type === 'permission.requested');
     // The write inside, the one outside and the protected file: three cards, none auto-answered, none with an always allow.
@@ -341,7 +343,9 @@ describe.skipIf(PINNED === undefined)('Antigravity builds: Ogden never selects S
     const s = await setup(row, { env: { FAKE_ACP_BUILD_DELAY_MS: '60000' } });
     const { session } = BuildResponse.parse(await (await s.build({ mode: 'attended' })).json());
     const reply = await request(s.server, s.tab, 'PUT', apiPath(API_ROUTES.sessionPermissionMode, { wsId: s.wsId, sesId: session.id }), { mode: 'skip_all', confirm: true });
-    expect(reply.status).toBeGreaterThanOrEqual(400);
+    // A build session's mode is read only for everyone: refused as busy, before any Skip all gate.
+    expect(reply.status).toBe(409);
+    expect(ApiErrorBody.parse(await reply.json()).error.code).toBe('session_busy');
     expect(s.server.core.entities.getSession(session.id)!.permissionMode).toBe('ask');
   });
 

@@ -60,4 +60,4 @@ Interpretation (Notes, 2026-10-06): "Ogden answers every card" means no agent sw
 
 ## Review Triage Log
 
-(filled after the review)
+One combined security and correctness review (an independent agent), loop 1; no blocker, the product code is sound (an attended build cannot send yolo or auto_edit through core; the auto_edit start is told Ask before the first prompt, not racy). Fixed: the switch to Skip all test now asserts 409 `session_busy` (it proves builds are read only for everyone, said so); the first test asserts the mode log is empty (it opened in Ask); the adapter refusal asserts its message.

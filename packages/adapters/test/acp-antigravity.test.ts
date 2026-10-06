@@ -268,6 +268,6 @@ describe('builds (epic 17: attended only)', () => {
     expect(ANTIGRAVITY_ATTENDED_ONLY_REASON).not.toMatch(/[\u2013\u2014]/);
     const cwd = tempDir();
     const refused = await agent.startSession({ cwd, env: envOf({ GEMINI_API_KEY: KEY }), sandbox: { kind: 'test', writableRoots: [cwd], deniedPaths: [], deniedReads: [], allowedReads: [cwd] } }).catch((error: unknown) => error);
-    expect(refused).toMatchObject({ code: 'agent_unavailable' });
+    expect(refused).toMatchObject({ code: 'agent_unavailable', message: "Antigravity can't run a sandboxed build." });
   });
 });

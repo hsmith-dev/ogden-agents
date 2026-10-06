@@ -30,7 +30,7 @@ export interface PaneLaunchers {
 export type { PaneDetection };
 
 /** The most arguments a launcher's field may hold. */
-export const MAX_LAUNCHER_ARGS = 32;
+const MAX_LAUNCHER_ARGS = 32;
 
 /**
  * Splits the text of a launcher's argument field into arguments, the way a

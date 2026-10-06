@@ -13,11 +13,18 @@
  *   lacks the skill; the board's refusals (409 `bmad_not_downloaded`,
  *   `reduced_mode`, `scripts_changed`, 503 `tickets_unavailable`) as the board.
  *
+ * - `GET …/look-back-offers` → `LookBackOffersResponse`; `DELETE …/epics/:epic/look-back-offer`
+ *   → 204 (Not now, story 7.2); 400 for a malformed epic.
+ * - `POST …/epics/:epic/retrospective/sessions` and `…/retrospective/save` (frozen by 7.2,
+ *   served by 7.5): 501 `not_implemented` after the guards until then.
+ *
  * Without the use-cases (an app wired without them) it answers 501 once the
  * guards have passed.
  */
 import {
+  LessonsRefusedError,
   NotFoundError,
+  NotImplementedError,
   TicketsUnavailableError,
   ValidationError,
   type BmadFeatures,
@@ -28,12 +35,17 @@ import {
   API_ROUTES,
   BMAD_NOT_DOWNLOADED_MESSAGE,
   LOOK_BACK_EPIC_NOT_FOUND_MESSAGE,
+  LOOK_BACK_STEP_NOT_OFFERED_MESSAGE,
   LOOK_BACK_UNAVAILABLE_MESSAGE,
+  LookBackOffersResponse,
+  SaveLessonsResponse,
   SessionResponse,
+  StartRetrospectiveStepRequest,
 } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { bmadPieceRoutes } from './bmad-pieces.js';
 import { apiError, notImplemented } from './errors.js';
+import { readBody } from './request-input.js';
 import type { Logger } from './log.js';
 
 export interface RetrospectiveRoutesOptions {
@@ -66,6 +78,56 @@ export function registerRetrospectiveRoutes(app: Hono, { bmad, scriptTrust, retr
       // Which thing was missing: the epic (the board has no such epic) or the skill (the project's BMad Method lacks it).
       if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', error.message.startsWith('skill ') ? LOOK_BACK_UNAVAILABLE_MESSAGE : LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
       throw error;
+    }
+  });
+
+  routes.get('retrospectives', API_ROUTES.workspaceLookBackOffers, async (c, { workspaceId }) => {
+    if (retrospectives === undefined) return notImplemented(c);
+    return c.json(LookBackOffersResponse.parse({ dismissed: retrospectives.dismissedOffers(workspaceId) }));
+  });
+
+  routes.delete('retrospectives', API_ROUTES.workspaceEpicLookBackOffer, async (c, { workspaceId }) => {
+    if (retrospectives === undefined) return notImplemented(c);
+    try {
+      retrospectives.dismissOffer(workspaceId, c.req.param('epic') ?? '');
+      return c.body(null, 204);
+    } catch (error) {
+      if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
+      throw error;
+    }
+  });
+
+  /** The refusals both of story 7.5's routes share: `not_implemented` until then, and the lessons' own 409s. */
+  const stepRefusal = (c: Parameters<Parameters<typeof routes.post>[2]>[0], error: unknown): Response => {
+    if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
+    if (error instanceof NotImplementedError) return apiError(c, 501, 'not_implemented', error.message);
+    if (error instanceof LessonsRefusedError) return apiError(c, 409, error.code, error.message);
+    // The epic, or a skill that is not one of the retrospective's next steps.
+    if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', error.message.startsWith('skill ') ? LOOK_BACK_STEP_NOT_OFFERED_MESSAGE : LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
+    throw error;
+  };
+
+  routes.post('retrospectives', API_ROUTES.workspaceRetrospectiveSessions, async (c, { workspaceId }) => {
+    if (retrospectives === undefined) return notImplemented(c);
+    const body = await readBody(c, StartRetrospectiveStepRequest);
+    if (!body.ok) return body.response;
+    try {
+      const session = await retrospectives.startStep(workspaceId, c.req.param('epic') ?? '', body.value.skill);
+      log.info('retrospective step started', { workspaceId, sessionId: session.id });
+      return c.json(SessionResponse.parse({ session }), 201);
+    } catch (error) {
+      return stepRefusal(c, error);
+    }
+  });
+
+  routes.post('retrospectives', API_ROUTES.workspaceRetrospectiveSave, async (c, { workspaceId }) => {
+    if (retrospectives === undefined) return notImplemented(c);
+    try {
+      const saved = await retrospectives.saveLessons(workspaceId, c.req.param('epic') ?? '');
+      log.info('lessons saved', { workspaceId });
+      return c.json(SaveLessonsResponse.parse(saved));
+    } catch (error) {
+      return stepRefusal(c, error);
     }
   });
 }

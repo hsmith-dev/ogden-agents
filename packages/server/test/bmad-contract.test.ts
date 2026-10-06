@@ -90,7 +90,7 @@ describe('what the install ships (story 10.2)', () => {
       bmadPieces: [],
       bmadScriptsTrusted: false,
     });
-    // Every shipped piece turns on (Retrospectives needs Unattended builds until story 7.2 changes it to Board).
+    // Every shipped piece turns on (Retrospectives needs Board, story 7.2).
     const on = await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning', 'board', 'builds', 'retrospectives'] });
     expect(WorkspaceSettingsResponse.parse(await on.json()).settings.bmadPieces).toEqual(['planning', 'board', 'builds', 'retrospectives']);
 
@@ -127,7 +127,7 @@ describe('what the install ships (story 10.2)', () => {
     const tab = await signIn(server);
     const workspace = await addProject(server, tab);
     const before = server.core.events.lastSeq();
-    for (const bmadPieces of [['builds'], ['retrospectives'], ['board', 'retrospectives']]) {
+    for (const bmadPieces of [['builds'], ['retrospectives'], ['planning', 'retrospectives']]) {
       const refused = await refusalOf(await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces }));
       expect(refused.status, JSON.stringify(bmadPieces)).toBe(400);
       expect(refused.code).toBe('invalid_request');

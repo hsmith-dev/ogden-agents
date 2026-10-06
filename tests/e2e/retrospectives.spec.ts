@@ -27,7 +27,7 @@ function stubTicketStore() {
       tickets: TICKETS.map((ticket) => ({ ...ticket })),
       problems: [],
       folder: 'initiative-demo',
-      epics: [{ slug: 'epic-first', id: 1, status: 'active', after: [], blocks: [] }],
+      epics: [{ slug: 'epic-first', id: 1, status: 'active', after: [], blocks: [], retrospective: null }],
     }),
     find: () => Promise.reject(new Error('not used in this test')),
     mark: () => Promise.reject(new Error('not used in this test')),

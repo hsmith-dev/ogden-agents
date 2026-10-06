@@ -11,13 +11,11 @@ import { homedir } from 'node:os';
 import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
 import { createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type VcsPort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
+import { createPerAgentSandbox } from './build-agent-sandbox.js';
 import type { Logger } from './log.js';
 import { agentEnvironment, withoutAgentKeys } from './start-env.js';
 import type { StartOptions } from './start-types.js';
 import type { TestHooks } from './test-hooks.js';
-
-/** Why an agent that cannot take the build's sandbox here is refused an unattended build (plain words, no dashes). */
-export const AGENT_ATTENDED_ONLY_REASON = "This agent can't build unattended on this computer yet. It can build with you watching.";
 
 /** The empty folder every git call gets as `core.hooksPath`, so no repo or agent-written hook runs (story 5.2). */
 export function gitHooksDir(dataDir: string): string {
@@ -79,22 +77,8 @@ export function createBuildsWiring({
           steps: [createNativeSandboxStep({ path: () => agentEnvironment().PATH ?? agentEnvironment().Path }), createDockerStep({ env: () => withoutAgentKeys(agentEnvironment()) })],
         })
       : createFixedSandbox(hooks.sandbox));
-  // The sandbox answer is per agent (epic 17): an agent that cannot take the build's sandbox at start, or whose own sandbox is
-  // not verified yet, builds only with the user watching, whatever this computer's sandbox is. Never a guess that it can.
-  const sandbox: SandboxPort = {
-    async check(request) {
-      const agent = request?.agent;
-      if (agent !== undefined && !unattendedAgents(agent)) return { available: false, reason: attendedOnlyReason(agent) ?? AGENT_ATTENDED_ONLY_REASON, choices: ['attended', 'other_agent'] };
-      return machineSandbox.check(request);
-    },
-    async status(request) {
-      const agent = request?.agent;
-      const status = await machineSandbox.status(request);
-      if (agent === undefined || unattendedAgents(agent)) return status;
-      return { ...status, available: false, kind: null, summary: attendedOnlyReason(agent) ?? AGENT_ATTENDED_ONLY_REASON, choices: ['attended', 'other_agent'], installHint: null };
-    },
-    run: (request) => machineSandbox.run(request),
-  };
+  // The sandbox answer is per agent (epic 17), see `build-agent-sandbox.ts`.
+  const sandbox: SandboxPort = createPerAgentSandbox({ machine: machineSandbox, unattendedAgents, attendedOnlyReason });
   // The build skill must be where the agent reads skills, in the run's worktree (committed): a plain refusal naming it otherwise.
   const skillReach = (agent: string, worktree: string): string | undefined => {
     const described = describeAgent(agent);

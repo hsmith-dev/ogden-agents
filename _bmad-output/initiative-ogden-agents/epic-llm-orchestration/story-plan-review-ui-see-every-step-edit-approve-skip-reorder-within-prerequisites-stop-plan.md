@@ -10,7 +10,7 @@ review: 'quick'
 review_source: 'pinned'
 lenses_ran: []
 review_loop_iteration: 0
-baseline_revision: 'REPLACED'
+baseline_revision: 'bdd742c77d14eb879929ed24277ad4967e3cee14'
 context:
   - '{project-root}/AGENTS.md'
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-llm-orchestration/epic-llm-orchestration.md'

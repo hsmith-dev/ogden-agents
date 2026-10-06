@@ -245,6 +245,13 @@ export function workersOf(roster: TeamRoster, ctx: RosterContext): RosterWorker[
   return workers;
 }
 
+/** The agent that holds the reviewer role (15.10), with whether it can be given an instruction now; `undefined` when a model or nobody does. */
+export function reviewerOf(roster: TeamRoster, ctx: RosterContext): { agentId: string; ready: boolean } | undefined {
+  const holder = roster.reviewer;
+  if (holder?.kind !== 'agent') return undefined;
+  return { agentId: holder.agentId, ready: assess('reviewer', holder, ctx).available };
+}
+
 /**
  * Refuses the first role of `next` that changed and cannot be taken now, with its reason in plain words
  * ({@link ValidationError}). A role left as it was is never checked, so something that stopped being ready
@@ -268,6 +275,8 @@ export interface Team {
   defaultView(): Promise<{ roster: RosterView; stored: TeamRoster }>;
   /** The agents the project's manager may address now. */
   workers(workspaceId: WorkspaceId): Promise<RosterWorker[]>;
+  /** The project's reviewer when it is an agent (15.10), whether or not it is ready; the manager may send a review step only to it. */
+  reviewer(workspaceId: WorkspaceId): Promise<{ agentId: string; ready: boolean } | undefined>;
   /** Refuses a roster (and mode) the project cannot take, before it is saved. {@link ValidationError}. */
   check(workspaceId: WorkspaceId, roster: TeamRoster | undefined, mode?: OrchestrationMode): Promise<void>;
   /**
@@ -316,6 +325,10 @@ export function createTeam({ db, events, chat, endpoints, tests, defaults }: Tea
     async workers(workspaceId) {
       const ctx = await context(workspaceId);
       return workersOf(effectiveRoster(storedOf(workspaceId), ctx).roster, ctx);
+    },
+    async reviewer(workspaceId) {
+      const ctx = await context(workspaceId);
+      return reviewerOf(effectiveRoster(storedOf(workspaceId), ctx).roster, ctx);
     },
     async check(workspaceId, roster, mode) {
       const current = storedOf(workspaceId);

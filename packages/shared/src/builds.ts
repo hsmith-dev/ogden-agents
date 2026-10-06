@@ -247,6 +247,13 @@ export const RUN_REASON_START_FAILED = "The build couldn't start its agent.";
 /** The Build dialog's words (5.6): plain, no dashes. */
 export const BUILD_DIALOG_TITLE = "Claude Code can't build unattended on this computer yet.";
 export const BUILD_DIALOG_LOAD_FAILED = "Ogden Agents couldn't check what this computer can use. You can still build with you watching.";
+/**
+ * The Build dialog opened for a build the manager proposed (epic 15, 15.11): the same dialog, the same choices, and a Build button when a
+ * sandbox is ready. Nothing starts until the person presses a button in it.
+ */
+export const buildDialogConfirmTitle = (ticketRef: string): string => `Build ticket ${ticketRef}?`;
+export const BUILD_DIALOG_CONFIRM_TEXT = 'The manager proposed this build. Nothing starts until you press a button here. Claude Code builds it in its own copy of the project, and you review the result before anything is kept.';
+export const BUILD_DIALOG_CONFIRM_BUTTON = 'Build';
 export const BUILD_DIALOG_READY_TEXT = 'A sandbox is ready now. Close this and press Build again.';
 export const OTHER_AGENT_DISABLED_TEXT = 'Other agents arrive in a later version.';
 export const DOCKER_READY_BUT_UNSUPPORTED_TEXT = "Docker is running here, but this version of Ogden Agents can't build inside it yet.";

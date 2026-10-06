@@ -23,7 +23,7 @@
  *   (worker report first), and if even the least version does not fit the
  *   input is refused as `context_too_small`.
  */
-import { MANAGER_LIMITS, redactSecrets } from '@ogden-agents/shared';
+import { BUILD_STEP_LIMITS, MANAGER_LIMITS, REVIEW_LIMITS, isManagerBuildStep, redactSecrets } from '@ogden-agents/shared';
 import type { ManagerContext, ManagerDecisionContext } from './manager-port.js';
 
 /** A conservative guess at characters per token (code and JSON run shorter than prose). */
@@ -154,12 +154,31 @@ export function buildManagerInput(kind: 'plan' | 'decision', context: ManagerCon
       level.project === 0 ? '' : datum('project', cut(project, level.project)),
       `Ready workers (name only these ids):\n${roster === '' ? '(none)' : roster}`,
     ];
+    // 15.10: the reviewer, when there is one: the only agent a review step may go to.
+    if (kind === 'plan' && context.reviewer !== undefined && workers.some((worker) => worker.agentId === context.reviewer)) {
+      parts.push(
+        `The reviewer is ${cleanForManager(context.reviewer)}. To ask it about the result of an earlier step, add a step for it with review_of set to that step's id, that step listed in depends_on, chat "new", and a question of at most ${REVIEW_LIMITS.maxQuestionChars} characters. Ogden adds a short summary of the result itself. A review must not be the same agent as the one that did the work when another agent is ready.`,
+      );
+    }
+    // 15.11: the tickets a build may be proposed for. A build is only ever started by the user, in the Build dialog.
+    if (kind === 'plan' && context.buildable !== undefined && context.buildable.length > 0) {
+      const tickets = context.buildable.map((ticket) => `- ${cleanForManager(ticket.ref)}: ${cut(cleanForManager(ticket.title).replace(/\s+/g, ' '), level.instruction)}`).join('\n');
+      parts.push(
+        `Tickets on the board that are ready to build:\n${datum('tickets', tickets)}\nTo propose building one, add a step with build set to an object holding only the ticket's reference, a reason of at most ${BUILD_STEP_LIMITS.maxReasonChars} characters, id and depends_on, and no other field. Only the user starts a build, in the Build dialog, where the user chooses how it runs: you cannot name an agent, a mode, a sandbox or a flag.`,
+      );
+    }
     if (plan !== undefined) {
       const states = 'stepStates' in context ? context.stepStates : undefined;
-      parts.push(`The plan so far:\n${datum('plan', plan.steps.map((step) => `- ${step.id}${states?.[step.id] === undefined ? '' : ` (${states[step.id] === 'proposed' ? 'waiting' : states[step.id]})`} for ${cleanForManager(step.worker)}, after [${step.depends_on.join(' ')}]: ${cut(cleanForManager(step.instruction).replace(/\s+/g, ' '), level.instruction)}`).join('\n'))}`);
+      parts.push(`The plan so far:\n${datum('plan', plan.steps.map((step) => `- ${step.id}${states?.[step.id] === undefined ? '' : ` (${states[step.id] === 'proposed' ? 'waiting' : states[step.id]})`} ${isManagerBuildStep(step) ? `a build of ticket ${cleanForManager(step.build.ticket)}, started by the user in the Build dialog` : `for ${cleanForManager(step.worker)}${step.review_of === undefined ? '' : `, a review of ${step.review_of}`}`}, after [${step.depends_on.join(' ')}]: ${cut(cleanForManager(isManagerBuildStep(step) ? step.reason : step.instruction).replace(/\s+/g, ' '), level.instruction)}`).join('\n'))}`);
     }
     if (report !== undefined) {
-      parts.push(`The last step, ${report.step_id}, done by ${cleanForManager(report.worker)}, ended as ${report.state}${report.truncated ? ' (its output was already cut)' : ''}. Its output is the worker's own text:`);
+      const reportStep = plan?.steps.find((step) => step.id === report.step_id);
+      const reviewed = reportStep === undefined || isManagerBuildStep(reportStep) ? undefined : reportStep.review_of;
+      parts.push(
+        reportStep !== undefined && isManagerBuildStep(reportStep)
+          ? `The last step, ${report.step_id}, was the build of ticket ${cleanForManager(reportStep.build.ticket)} that the user started, and ended as ${report.state}. Ogden's summary of it, with the end checks' counts and no code:`
+          : `The last step, ${report.step_id}${reviewed === undefined ? '' : ` (a review of ${reviewed})`}, done by ${cleanForManager(report.worker)}, ended as ${report.state}${report.truncated ? ' (its output was already cut)' : ''}. Its output is the worker's own text:`,
+      );
       parts.push(datum('worker-output', level.report === 0 ? '[left out to make room]' : cut(report.summary, level.report)));
     }
     if ('userAnswer' in context && context.userAnswer !== undefined && context.userAnswer !== '') {

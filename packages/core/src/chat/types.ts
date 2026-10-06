@@ -227,12 +227,13 @@ export interface Chat {
    * by the manager, so the transcript says so. Only the message stored at
    * once is marked: a message queued behind a working agent is not, so the
    * caller sends it only to an idle chat.
+   * `origin: 'manager_auto'` (15.8) marks one the manager sent on its own under Dispatch automatically.
    */
   sendMessage(
     workspaceId: WorkspaceId,
     sessionId: SessionId,
     text: string,
-    options?: { delivery?: WhileWorking | undefined; build?: boolean | undefined; origin?: 'manager' | undefined },
+    options?: { delivery?: WhileWorking | undefined; build?: boolean | undefined; origin?: 'manager' | 'manager_auto' | undefined },
   ): { messageId: string; queued: boolean };
   /**
    * Send now or wait: changes one message waiting to be sent, its text or its

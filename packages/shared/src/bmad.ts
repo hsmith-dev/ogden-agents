@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AgentId } from './events-common.js';
 import { PermissionMode } from './entities.js';
+import { OrchestrationMode, RunLimits } from './orchestration.js';
 import { TeamRoster } from './team.js';
 
 /**
@@ -274,6 +275,13 @@ export const NewProjectDefaults = z.object({
    * defaults then. Absent: every role uses the defaults.
    */
   orchestrationRoster: TeamRoster.optional(),
+  /**
+   * The mode new projects are offered (epic 15, 15.8). Absent: Approve each instruction. It is never copied into a project: a
+   * project starts on Approve each instruction and confirms Dispatch automatically for itself.
+   */
+  orchestrationMode: OrchestrationMode.optional(),
+  /** The limits of every run (15.8), kept with the defaults. Absent: 20 instructions, depth 3, 30 minutes. */
+  orchestrationLimits: RunLimits.optional(),
 });
 export type NewProjectDefaults = z.infer<typeof NewProjectDefaults>;
 /** The app-wide default before the user changes it: Simple (every piece off). */

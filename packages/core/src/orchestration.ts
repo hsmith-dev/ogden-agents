@@ -34,7 +34,11 @@ import {
   OrchestrationStep,
   OrchestrationStepView,
   OrchestrationRunView,
+  OrchestrationActivityEntry,
+  ORCHESTRATION_ACTIVITY_PAGE,
+  RunLimits as RunLimitsSchema,
   RUN_LIMITS,
+  stepDepths,
   StartOrchestrationRunRequest,
   EditOrchestrationStepRequest,
   ReorderOrchestrationStepsRequest,
@@ -54,13 +58,16 @@ import {
   type ManagerPlan,
   type ManagerStatusReport,
   type OrchestrationRunState,
+  type OrchestrationStopReason,
   type OrchestrationStepState,
+  type RunLimits,
   type SessionId,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Database } from './db/database.js';
-import { orchestrationRuns, orchestrationSteps } from './db/schema.js';
+import { events as eventsTable, orchestrationRuns, orchestrationSteps } from './db/schema.js';
+import { readOrchestrationMode } from './workspace-settings.js';
 import { AgentNotReadyError, BadOrderError, DispatchRefusedError, DriverIsTerminalError, ManagerFailedError, ManagerUnavailableError, NotFoundError, QueueFullError, RunNotOpenError, SessionBusyError, SessionNotIdleError, StepNotApprovedError, StepNotChangeableError, StepNotProposedError, UnknownAgentError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { OrchestrationFeature } from './orchestration-feature.js';
@@ -113,6 +120,15 @@ export interface Orchestration {
    * worker or the chat cannot take it: both before anything is created or sent, so every chat is as it was.
    */
   dispatchStep(workspaceId: WorkspaceId, runId: string, stepId: string): Promise<OrchestrationRunView>;
+  /**
+   * Every instruction that was sent or refused in the project, newest first, read from the events (15.8): who approved it, which worker and
+   * chat, when, and how it stands. No money, only what was sent.
+   */
+  activity(workspaceId: WorkspaceId): Promise<OrchestrationActivityEntry[]>;
+  /**
+   * Resolves when no automatic dispatch is pending (15.8). A test awaits it after a worker finishes; the server never needs it.
+   */
+  whenIdle(): Promise<void>;
 }
 
 export interface OrchestrationOptions {
@@ -126,6 +142,10 @@ export interface OrchestrationOptions {
   managers?: ManagerSource | undefined;
   /** The project's team roster (15.5): the manager addresses only its rostered workers. Absent: every agent the install lists. */
   team?: Team | undefined;
+  /** The limits a new run is given (15.8: the install's setting). Absent: {@link RUN_LIMITS}. */
+  limits?: (() => RunLimits) | undefined;
+  /** The time in milliseconds, for a run's time limit (a test's fake clock). Absent: the real clock. */
+  clock?: (() => number) | undefined;
 }
 
 /** The words when the project's team has no worker that can be given an instruction now. */
@@ -176,9 +196,10 @@ const stepOf = (row: StepRow): OrchestrationStep =>
     sessionId: row.sessionId,
   });
 
-export function createOrchestration({ db, events, feature, chat, manager: fixedManager, managers, team }: OrchestrationOptions): Orchestration {
+export function createOrchestration({ db, events, feature, chat, manager: fixedManager, managers, team, limits: runLimits, clock }: OrchestrationOptions): Orchestration {
   const { orm } = db;
-  const now = () => new Date().toISOString();
+  const nowMs = clock ?? Date.now;
+  const now = () => new Date(nowMs()).toISOString();
   /** Steps being sent right now: a second dispatch of the same step is refused, not raced. */
   const sending = new Set<string>();
   /** The manager call of each run still planning, so Stop can abandon it. */
@@ -206,6 +227,29 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     orm.update(orchestrationRuns).set({ state: to, stopReason: stopReason ?? row.stopReason, updatedAt: now() }).where(eq(orchestrationRuns.id, runId)).run();
   };
 
+  /**
+   * The run with its mode brought to the project's own (15.8): the mode is the project's setting, read at each use, so switching it
+   * back mid-run takes effect on the next step. Back to Approve each instruction, a step the mode approved but did not send waits for
+   * the user again. `orchestration.mode_changed` records it. A run that is over keeps the mode it ended under.
+   */
+  const syncMode = (workspaceId: WorkspaceId, run: RunRow): RunRow => {
+    const fresh = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? run;
+    if (isRunOver(fresh.state as OrchestrationRunState)) return fresh;
+    const projectMode = readOrchestrationMode(orm, workspaceId) ?? DEFAULT_ORCHESTRATION_MODE;
+    if (projectMode === fresh.mode) return fresh;
+    events.transaction(() => {
+      orm.update(orchestrationRuns).set({ mode: projectMode, updatedAt: now() }).where(eq(orchestrationRuns.id, run.id)).run();
+      events.append({ type: 'orchestration.mode_changed', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], mode: projectMode, previous: fresh.mode as OrchestrationRun['mode'] } });
+      if (projectMode === 'approve_each') {
+        // What the mode approved and did not send waits for the user again; what the user approved stays approved.
+        for (const step of stepsOf(run.id)) {
+          if (step.state === 'approved' && step.approvedBy === 'mode') orm.update(orchestrationSteps).set({ state: 'proposed', approvedBy: null }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
+        }
+      }
+    });
+    return orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? fresh;
+  };
+
   const labels = async (workspaceId: WorkspaceId): Promise<Map<string, string>> => {
     try {
       const { agents } = await chat.chatAgents(workspaceId);
@@ -230,7 +274,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       if (event.type === 'session.message_completed') {
         if (event.payload.role === 'agent') {
           if (reply === '') reply = event.payload.content;
-        } else if (event.payload.origin === 'manager' && event.payload.content === instruction) {
+        } else if ((event.payload.origin === 'manager' || event.payload.origin === 'manager_auto') && event.payload.content === instruction) {
           found = true;
           break;
         }
@@ -247,9 +291,11 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
   };
 
   /** Reads back every dispatched step: its chat's state and a masked, capped report; settles a finished one once. */
-  const readBack = async (workspaceId: WorkspaceId, run: RunRow, known?: Map<string, string>): Promise<OrchestrationRunView> => {
+  const readBack = async (workspaceId: WorkspaceId, given: RunRow, known?: Map<string, string>, quiet = false): Promise<OrchestrationRunView> => {
+    const run = syncMode(workspaceId, given);
     const names = known ?? (await labels(workspaceId));
     const views: OrchestrationStepView[] = [];
+    let settledAny = false;
     for (const row of stepsOf(run.id)) {
       let step = stepOf(row);
       let sessionState: OrchestrationStepView['sessionState'] = null;
@@ -287,12 +333,17 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
             } else if (!states.includes('dispatched')) moveRun(run.id, 'awaiting_user');
             return true;
           });
-          if (settled) step = { ...step, state: to };
+          if (settled) {
+            step = { ...step, state: to };
+            settledAny = true;
+          }
         }
       }
       views.push(OrchestrationStepView.parse({ ...step, workerLabel: names.get(step.worker) ?? step.worker, sessionState, report }));
     }
     const fresh = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? run;
+    // A read that settled a step of a run that dispatches on its own lets it go on (the listener does the same when the worker's chat changes).
+    if (settledAny && !quiet && fresh.mode === 'automatic') scheduleAdvance(workspaceId, run.id);
     return OrchestrationRunView.parse({ run: runOf(fresh), steps: views });
   };
 
@@ -314,7 +365,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
    * approved by the user one by one, not signed in, project not trusted, or not ready. The worker's own readiness is read again here: the
    * plan was checked when it was proposed, and the roster, the sign in or the mode may have changed since.
    */
-  const requireWorkerReady = async (workspaceId: WorkspaceId, run: RunRow, row: StepRow): Promise<string> => {
+  const requireWorkerReady = async (workspaceId: WorkspaceId, row: StepRow): Promise<string> => {
     const { agents } = await chat.chatAgents(workspaceId);
     const agent = agents.find((candidate) => candidate.agentId === row.worker);
     const label = agent?.displayName ?? row.worker;
@@ -324,9 +375,10 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     if (agent === undefined) return refuse('worker_not_on_team');
     const rostered = team === undefined ? undefined : (await team.workers(workspaceId)).find((worker) => worker.agentId === row.worker);
     if (team !== undefined && rostered === undefined) return refuse('worker_not_on_team');
-    // The vendor's terms, in code: an agent only a person may drive is never sent an instruction, and a subscription agent only takes the user's own approval.
+    // The vendor's terms, in code: an agent only a person may drive is never sent an instruction, and a subscription agent only takes the
+    // user's own approval of that instruction, in either mode (an automatic run waits for the user at such a step, 15.8).
     if (agent.interactiveOnly !== undefined) return refuse('interactive_only');
-    if (isSubscription(agent) && (run.mode === 'automatic' || row.approvedBy !== 'user')) return refuse('approve_each_only');
+    if (isSubscription(agent) && row.approvedBy !== 'user') return refuse('approve_each_only');
     if (agent.unavailable !== undefined) return refuse(reasonOf(agent.unavailable.code));
     if (rostered !== undefined && !rostered.ready) return refuse('worker_not_ready');
     return label;
@@ -378,7 +430,277 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
 
   const masked = (plan: ManagerPlan): ManagerPlan => ({ ...plan, goal: redactSecrets(plan.goal), steps: plan.steps.map((step) => ({ ...step, instruction: redactSecrets(step.instruction) })) });
 
-  return {
+  // ---- Stop, the limits and the activity log (15.8) ----
+
+  /** The limits a new run is given: the install's setting when it is within the bounds, else the defaults. */
+  const limitsNow = (): RunLimits => {
+    const given = RunLimitsSchema.safeParse(runLimits?.());
+    return given.success ? given.data : { ...RUN_LIMITS };
+  };
+  const limitsOf = (run: RunRow): RunLimits => {
+    try {
+      return RunLimitsSchema.parse(JSON.parse(run.limits));
+    } catch {
+      return { ...RUN_LIMITS };
+    }
+  };
+
+  /** The steps whose worker is in the middle of a turn, read before a run is closed (the chat states are read, not changed). */
+  const workersInFlight = (workspaceId: WorkspaceId, run: RunRow): StepRow[] =>
+    stepsOf(run.id)
+      .filter((step) => step.state === 'dispatched' && step.sessionId !== null)
+      .filter((step) => {
+        try {
+          const state = chat.getSession(workspaceId, step.sessionId as SessionId).state;
+          return state === 'working' || state === 'waiting';
+        } catch {
+          return false;
+        }
+      });
+
+  /** Asks each worker turn to stop. A turn that ended on its own meanwhile, or a chat that is gone, is no error. */
+  const cancelTurns = (workspaceId: WorkspaceId, steps: readonly StepRow[]): void => {
+    for (const step of steps) {
+      try {
+        chat.cancel(workspaceId, step.sessionId as SessionId);
+      } catch {
+        // Not busy any more, or the chat is gone: nothing left to stop.
+      }
+    }
+  };
+
+  /** The timers that look at an automatic run's time limit while its worker is busy: unref'd, so they never keep the server alive. */
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const disarm = (runId: string): void => {
+    const timer = timers.get(runId);
+    if (timer !== undefined) clearTimeout(timer);
+    timers.delete(runId);
+  };
+
+  /**
+   * Ends a run that is still open: `stopped` (the user, a limit or a refusal) or `failed`, with its reason, in one transaction with the
+   * `run_stopped` event; a step whose worker was cut off did not finish, so it is failed. Returns whether this call ended it. With
+   * `strict`, a run that already ended is {@link RunNotOpenError} (the user's Stop); otherwise it is left as it is.
+   */
+  const closeRun = (workspaceId: WorkspaceId, run: RunRow, to: 'stopped' | 'failed', reason: OrchestrationStopReason, inFlight: readonly StepRow[], strict: boolean): boolean => {
+    const ended = events.transaction(() => {
+      const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
+      if (live === undefined || isRunOver(live.state as OrchestrationRunState)) {
+        if (strict) throw new RunNotOpenError();
+        return false;
+      }
+      moveRun(run.id, to, reason);
+      for (const step of inFlight) orm.update(orchestrationSteps).set({ state: 'failed' }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId), eq(orchestrationSteps.state, 'dispatched'))).run();
+      events.append({ type: 'orchestration.run_stopped', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], reason } });
+      return true;
+    });
+    if (ended) disarm(run.id);
+    return ended;
+  };
+
+  /** Records a refused dispatch as an event (15.8). Best effort: the refusal itself is what the caller gets. */
+  const noteRefusal = (workspaceId: WorkspaceId, runId: string, row: StepRow, error: DispatchRefusedError): void => {
+    try {
+      events.append({
+        type: 'orchestration.dispatch_refused',
+        workspaceId,
+        streamId: workspaceId,
+        payload: { runId: runId as OrchestrationRun['id'], stepId: row.stepId, worker: row.worker, reason: error.reason, message: error.message.slice(0, 400) },
+      });
+    } catch {
+      // A damaged database is not this call's to report.
+    }
+  };
+
+  /** The activity log: every instruction sent or refused, newest first, read from the events and the steps they point at. */
+  const activityOf = async (workspaceId: WorkspaceId): Promise<OrchestrationActivityEntry[]> => {
+    const rows = orm
+      .select()
+      .from(eventsTable)
+      .where(and(eq(eventsTable.streamId, workspaceId), inArray(eventsTable.type, ['orchestration.step_approved', 'orchestration.step_dispatched', 'orchestration.dispatch_refused'])))
+      .orderBy(desc(eventsTable.seq))
+      .limit(ORCHESTRATION_ACTIVITY_PAGE * 4)
+      .all()
+      .reverse();
+    const names = await labels(workspaceId);
+    const approvers = new Map<string, 'user' | 'mode'>();
+    const entries: OrchestrationActivityEntry[] = [];
+    for (const row of rows) {
+      const payload = row.payload as { runId?: string; stepId?: string; worker?: string; sessionId?: string; by?: 'user' | 'mode'; message?: string };
+      if (payload.runId === undefined || payload.stepId === undefined) continue;
+      const key = `${payload.runId}:${payload.stepId}`;
+      if (row.type === 'orchestration.step_approved') {
+        if (payload.by !== undefined) approvers.set(key, payload.by);
+        continue;
+      }
+      const step = orm.select().from(orchestrationSteps).where(and(eq(orchestrationSteps.runId, payload.runId), eq(orchestrationSteps.stepId, payload.stepId))).get();
+      const run = step === undefined ? undefined : orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, payload.runId)).get();
+      if (step === undefined || run === undefined || run.workspaceId !== workspaceId) continue;
+      const worker = payload.worker ?? step.worker;
+      const refused = row.type === 'orchestration.dispatch_refused';
+      let result: OrchestrationActivityEntry['result'] = 'refused';
+      if (!refused) {
+        if (step.state === 'done') result = 'finished';
+        else if (step.state === 'failed') result = run.stopReason === 'user' ? 'stopped' : 'failed';
+        else result = 'working';
+      }
+      const parsed = OrchestrationActivityEntry.safeParse({
+        at: row.at,
+        runId: payload.runId,
+        stepId: payload.stepId,
+        kind: refused ? 'refused' : 'sent',
+        worker,
+        workerLabel: names.get(worker) ?? worker,
+        sessionId: refused ? null : (payload.sessionId ?? null),
+        chat: step.chat === 'new' ? 'new' : 'existing',
+        approvedBy: refused ? null : (approvers.get(key) ?? null),
+        instruction: redactSecrets(step.instruction).replace(/\s+/g, ' ').trim().slice(0, 200),
+        result,
+        note: refused ? redactSecrets(payload.message ?? '').slice(0, 300) : '',
+      });
+      if (parsed.success) entries.push(parsed.data);
+    }
+    return entries.reverse().slice(0, ORCHESTRATION_ACTIVITY_PAGE);
+  };
+
+  // ---- Dispatch automatically (15.8) ----
+
+  /**
+   * Core itself sends an automatic run's steps, one at a time, in the plan's order, when the one before has finished: `scheduleAdvance`
+   * is the only way in, run one at a time per run. Each pass re-reads everything (the project's mode, the piece, the run, the steps), so
+   * a pass that is late or repeated does nothing wrong. It stops at the first refusal, error or limit with a plain reason. The manager
+   * has no way to call it; it names no settings mutator and never the user's own actions (an architecture test).
+   */
+  const chains = new Map<string, Promise<void>>();
+  const pending = new Set<Promise<void>>();
+  const asked = new Set<string>();
+  const scheduleAdvance = (workspaceId: WorkspaceId, runId: string): Promise<void> => {
+    const next = (chains.get(runId) ?? Promise.resolve()).then(() => advanceOnce(workspaceId, runId)).catch(() => undefined);
+    chains.set(runId, next);
+    pending.add(next);
+    void next.then(() => {
+      pending.delete(next);
+      if (chains.get(runId) === next) chains.delete(runId);
+    });
+    return next;
+  };
+  const advanceNow = scheduleAdvance;
+
+  const timeUp = (run: RunRow, limits: RunLimits): boolean => nowMs() - Date.parse(run.createdAt) >= limits.maxMinutes * 60_000;
+  const armTimer = (workspaceId: WorkspaceId, run: RunRow, limits: RunLimits): void => {
+    if (timers.has(run.id)) return;
+    const wait = Date.parse(run.createdAt) + limits.maxMinutes * 60_000 - nowMs() + 1_000;
+    const timer = setTimeout(() => {
+      timers.delete(run.id);
+      void scheduleAdvance(workspaceId, run.id);
+    }, Math.min(Math.max(wait, 1_000), 2_147_000_000));
+    (timer as { unref?: () => void }).unref?.();
+    timers.set(run.id, timer);
+  };
+
+  /** The mode approves one step (the user's own approval is never replaced: only a step still waiting, in a run that is automatic and open). */
+  const approveByMode = (workspaceId: WorkspaceId, runId: string, stepId: string): boolean =>
+    events.transaction(() => {
+      const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, runId)).get();
+      if (live === undefined || live.mode !== 'automatic' || !isOpen(live.state)) return false;
+      const step = requireStep(runId, stepId);
+      if (step.state !== 'proposed' || !canMoveStep('proposed', 'approved')) return false;
+      orm.update(orchestrationSteps).set({ state: 'approved', approvedBy: 'mode' }).where(and(eq(orchestrationSteps.runId, runId), eq(orchestrationSteps.stepId, stepId))).run();
+      events.append({ type: 'orchestration.step_approved', workspaceId, streamId: workspaceId, payload: { runId: runId as OrchestrationRun['id'], stepId, by: 'mode' } });
+      return true;
+    });
+
+  /** The run waits for the user (a step only they may approve, or one that needs a step that was skipped); said once per step. */
+  const waitForUser = (workspaceId: WorkspaceId, run: RunRow, stepId: string): void => {
+    const key = `${run.id}:${stepId}`;
+    events.transaction(() => {
+      moveRun(run.id, 'awaiting_user');
+      if (!asked.has(key)) {
+        asked.add(key);
+        events.append({ type: 'orchestration.run_paused', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], reason: 'awaiting_user' } });
+      }
+    });
+  };
+
+  const advanceOnce = async (workspaceId: WorkspaceId, runId: string): Promise<void> => {
+    let run: RunRow;
+    try {
+      run = requireRun(workspaceId, runId);
+      // With the piece switched off nothing is sent on its own; Stop still works.
+      if (!feature.enabled(workspaceId)) return;
+    } catch {
+      return;
+    }
+    run = syncMode(workspaceId, run);
+    if (run.mode !== 'automatic' || !isOpen(run.state)) return;
+    // What the workers finished is settled first (a step done, the run finished when none is left).
+    await readBack(workspaceId, run, undefined, true);
+    run = syncMode(workspaceId, requireRun(workspaceId, runId));
+    if (run.mode !== 'automatic' || !isOpen(run.state)) return;
+    const limits = limitsOf(run);
+    armTimer(workspaceId, run, limits);
+    const rows = stepsOf(run.id);
+    const halt = (reason: OrchestrationStopReason, inFlight: readonly StepRow[] = []): void => {
+      if (closeRun(workspaceId, run, 'stopped', reason, inFlight, false)) cancelTurns(workspaceId, inFlight);
+    };
+    if (rows.some((step) => step.state === 'dispatched')) {
+      // A worker is on a step: nothing more goes until it is done, unless the run has run out of time (then its turn is asked to stop).
+      if (timeUp(run, limits)) halt('time_limit', workersInFlight(workspaceId, run));
+      return;
+    }
+    if (rows.some((step) => step.state === 'failed')) return;
+    const next = rows.find((step) => step.state === 'proposed' || step.state === 'approved');
+    if (next === undefined) return;
+    // A step the user approved is the user's to send (their own Send button); only what the mode approved, or still waits, is sent here.
+    if (next.state === 'approved' && next.approvedBy === 'user') return;
+    if (timeUp(run, limits)) return halt('time_limit');
+    if (rows.filter((step) => step.sessionId !== null).length >= limits.maxInstructions) return halt('instruction_limit');
+    if ((stepDepths(rows.map((step) => ({ stepId: step.stepId, dependsOn: stepOf(step).dependsOn }))).get(next.stepId) ?? 1) > limits.maxDepth) return halt('depth_limit');
+    // A step that needs one that is not done (one the user skipped) waits for the user, as in the default mode.
+    if (stepOf(next).dependsOn.some((id) => rows.find((other) => other.stepId === id)?.state !== 'done')) return waitForUser(workspaceId, run, next.stepId);
+    // An agent that signs in with the user's account takes only instructions the user approves one by one: the run waits at that step.
+    const { agents } = await chat.chatAgents(workspaceId);
+    const agent = agents.find((candidate) => candidate.agentId === next.worker);
+    if (next.state === 'proposed' && agent !== undefined && isSubscription(agent)) return waitForUser(workspaceId, run, next.stepId);
+    if (next.state === 'proposed' && !approveByMode(workspaceId, run.id, next.stepId)) return;
+    try {
+      await api.dispatchStep(workspaceId, run.id, next.stepId);
+    } catch (error) {
+      if (error instanceof StepNotApprovedError) return;
+      if (error instanceof DispatchRefusedError && error.reason === 'approve_each_only') {
+        // The worker turned out to be one only the user may send to: the step is the user's again.
+        events.transaction(() => {
+          const step = requireStep(run.id, next.stepId);
+          if (step.state === 'approved' && step.approvedBy === 'mode') orm.update(orchestrationSteps).set({ state: 'proposed', approvedBy: null }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, next.stepId))).run();
+        });
+        return waitForUser(workspaceId, run, next.stepId);
+      }
+      // The first refusal or error stops the run (a refusal is already an event; the stop is its own).
+      if (error instanceof DispatchRefusedError) closeRun(workspaceId, run, 'stopped', 'dispatch_refused', [], false);
+      else closeRun(workspaceId, run, 'failed', 'worker_error', [], false);
+      return;
+    }
+    // Look again: the worker may already be done, and the step after it goes next.
+    void scheduleAdvance(workspaceId, run.id);
+  };
+
+  // A worker's chat going quiet, or the project's mode changing, lets an automatic run go on, or go back to asking the user.
+  events.subscribe(events.lastSeq(), (event) => {
+    try {
+      if (event.type === 'session.state_changed' && event.payload.state !== 'working') {
+        const step = orm.select({ runId: orchestrationSteps.runId }).from(orchestrationSteps).where(and(eq(orchestrationSteps.sessionId, event.payload.sessionId), eq(orchestrationSteps.state, 'dispatched'))).get();
+        if (step !== undefined && event.workspaceId !== null) void scheduleAdvance(event.workspaceId, step.runId);
+      } else if (event.type === 'workspace.settings_changed' && (event.payload.orchestrationMode !== undefined || event.payload.orchestrationEnabled === true)) {
+        for (const live of orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.workspaceId, event.workspaceId)).all()) {
+          if (!isRunOver(live.state as OrchestrationRunState)) void scheduleAdvance(event.workspaceId, live.id);
+        }
+      }
+    } catch {
+      // A listener never throws into the one who appended.
+    }
+  });
+
+  const api: Orchestration = {
     managerStatus(workspaceId) {
       feature.requireOrchestration(workspaceId);
       return statusOf(workspaceId);
@@ -412,9 +734,12 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       if (team !== undefined && !context.workers.some((worker) => worker.ready)) throw new ManagerUnavailableError(NO_READY_WORKER);
       const runId = newId('orc') as OrchestrationRun['id'];
       const at = now();
+      // The run goes under the project's own mode and the install's limits as they are now (15.8); a later change of the mode reaches the run itself.
+      const mode = readOrchestrationMode(orm, workspaceId) ?? DEFAULT_ORCHESTRATION_MODE;
+      const limits = limitsNow();
       events.transaction(() => {
-        orm.insert(orchestrationRuns).values({ id: runId, workspaceId, goal, state: 'planning', mode: DEFAULT_ORCHESTRATION_MODE, limits: JSON.stringify(RUN_LIMITS), stopReason: null, createdAt: at, updatedAt: at }).run();
-        events.append({ type: 'orchestration.run_started', workspaceId, streamId: workspaceId, payload: { runId, goal, mode: DEFAULT_ORCHESTRATION_MODE, limits: RUN_LIMITS } });
+        orm.insert(orchestrationRuns).values({ id: runId, workspaceId, goal, state: 'planning', mode, limits: JSON.stringify(limits), stopReason: null, createdAt: at, updatedAt: at }).run();
+        events.append({ type: 'orchestration.run_started', workspaceId, streamId: workspaceId, payload: { runId, goal, mode, limits } });
       });
 
       let result: Awaited<ReturnType<ManagerPort['proposePlan']>>;
@@ -455,6 +780,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         events.append({ type: 'orchestration.plan_proposed', workspaceId, streamId: workspaceId, payload: { runId, plan } });
         for (const step of plan.steps) events.append({ type: 'orchestration.step_proposed', workspaceId, streamId: workspaceId, payload: { runId, stepId: step.id } });
       });
+      // Under Dispatch automatically the run begins at once: core sends the first step itself, within the run's limits.
+      if (requireRun(workspaceId, runId).mode === 'automatic') await advanceNow(workspaceId, runId);
       return readBack(workspaceId, requireRun(workspaceId, runId));
     },
 
@@ -564,42 +891,30 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     },
 
     async stopRun(workspaceId, runId) {
-      feature.requireOrchestration(workspaceId);
+      // Stop is never blockable (15.8): it does not ask the Orchestration piece's guard, so it works with the piece switched off. It still
+      // reaches only a run of this project (an unknown project or run is not found).
       const run = requireRun(workspaceId, runId);
-      // Worker turns still going are found before the run is closed (the chat states are read, not changed).
-      const inFlight = stepsOf(run.id)
-        .filter((step) => step.state === 'dispatched' && step.sessionId !== null)
-        .filter((step) => {
-          try {
-            const state = chat.getSession(workspaceId, step.sessionId as SessionId).state;
-            return state === 'working' || state === 'waiting';
-          } catch {
-            return false;
-          }
-        });
-      events.transaction(() => {
-        const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
-        if (live === undefined || isRunOver(live.state as OrchestrationRunState)) throw new RunNotOpenError();
-        moveRun(run.id, 'stopped', 'user');
-        // A step whose worker was cut off did not finish: it is failed, not done.
-        for (const step of inFlight) orm.update(orchestrationSteps).set({ state: 'failed' }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId), eq(orchestrationSteps.state, 'dispatched'))).run();
-        events.append({ type: 'orchestration.run_stopped', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], reason: 'user' } });
-      });
-      // The manager call in flight is abandoned, and each worker turn in flight is asked to stop. A turn that ended on its own meanwhile is no error.
+      const inFlight = workersInFlight(workspaceId, run);
+      closeRun(workspaceId, run, 'stopped', 'user', inFlight, true);
+      // The manager call in flight is abandoned, and each worker turn in flight is asked to stop.
       planning.get(run.id)?.abort();
-      for (const step of inFlight) {
-        try {
-          chat.cancel(workspaceId, step.sessionId as SessionId);
-        } catch {
-          // Not busy any more, or the chat is gone: nothing left to stop.
-        }
-      }
+      cancelTurns(workspaceId, inFlight);
       return readBack(workspaceId, requireRun(workspaceId, runId));
+    },
+
+    async activity(workspaceId) {
+      feature.requireOrchestration(workspaceId);
+      return activityOf(workspaceId);
+    },
+
+    whenIdle: async () => {
+      while (pending.size > 0) await Promise.allSettled([...pending]);
     },
 
     async dispatchStep(workspaceId, runId, stepId) {
       feature.requireOrchestration(workspaceId);
-      const run = requireRun(workspaceId, runId);
+      // The mode is the project's own as it is now: a run switched back to Approve each instruction no longer takes the mode's approvals.
+      const run = syncMode(workspaceId, requireRun(workspaceId, runId));
       const row = requireStep(run.id, stepId);
       // The rule that matters, in code: only a step the user approved is ever sent. Checked before anything is created.
       if (row.state !== 'approved' || row.approvedBy === null || !isOpen(run.state)) throw new StepNotApprovedError();
@@ -612,15 +927,16 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       sending.add(key);
       try {
         // Everything that can be refused is checked before a chat is made, so a refusal leaves every chat as it was (15.7).
-        const label = await requireWorkerReady(workspaceId, run, row);
+        const label = await requireWorkerReady(workspaceId, row);
         const named = row.chat === 'new' ? undefined : row.chat;
         if (named !== undefined) requireChatReady(workspaceId, row, named, label);
         // The run may have been stopped, or the step edited, while the worker was checked: nothing is created then.
         const stillApproved = (): StepRow => {
-          const again = requireRun(workspaceId, runId);
+          const again = syncMode(workspaceId, requireRun(workspaceId, runId));
           const current = requireStep(run.id, row.stepId);
           // What is sent is the text the user approved: an edit meanwhile sent the step back to waiting, and a changed text is never sent.
           if (current.state !== 'approved' || current.approvedBy === null || current.instruction !== row.instruction || !isOpen(again.state)) throw new StepNotApprovedError();
+          if (again.mode === 'approve_each' && current.approvedBy !== 'user') throw new StepNotApprovedError();
           return current;
         };
         stillApproved();
@@ -655,7 +971,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         }
         if (named !== undefined) requireChatReady(workspaceId, row, named, label);
         try {
-          const sent = chat.sendMessage(workspaceId, session.id, current.instruction, { origin: 'manager' });
+          const sent = chat.sendMessage(workspaceId, session.id, current.instruction, { origin: current.approvedBy === 'mode' ? 'manager_auto' : 'manager' });
           if (sent.queued) {
             // The chat took it to wait behind a turn that was still ending: it is not an instruction at once, so it is taken back.
             let taken = true;
@@ -696,10 +1012,15 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
           moveRun(run.id, 'running');
           events.append({ type: 'orchestration.step_dispatched', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], stepId: row.stepId, worker: row.worker, sessionId: session.id } });
         });
+      } catch (error) {
+        // A refused dispatch leaves an event (15.8), so a restart and the activity log still show it, and the plain words with it.
+        if (error instanceof DispatchRefusedError) noteRefusal(workspaceId, run.id, row, error);
+        throw error;
       } finally {
         sending.delete(key);
       }
       return readBack(workspaceId, requireRun(workspaceId, runId));
     },
   };
+  return api;
 }

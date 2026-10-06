@@ -22,12 +22,16 @@ import {
   canonicalBmadPieces,
   DEFAULT_NEW_PROJECT_DEFAULTS,
   NewProjectDefaults as NewProjectDefaultsSchema,
+  OrchestrationMode as OrchestrationModeSchema,
+  RunLimits as RunLimitsSchema,
   PermissionMode as PermissionModeSchema,
   TeamRoster as TeamRosterSchema,
   UpdateNewProjectDefaultsRequest,
   type AgentId,
   type BmadPiece,
   type NewProjectDefaults,
+  type OrchestrationMode,
+  type RunLimits,
   type PermissionMode,
   type TeamRoster,
   type Workspace,
@@ -50,12 +54,15 @@ type PreferencesRecord = z.infer<typeof PreferencesRecord>;
  * the pieces (10.4).
  */
 const StoredRecord = z.object({
-  newProjects: NewProjectDefaultsSchema.omit({ defaultAgentId: true, defaultPermissionMode: true, orchestrationRoster: true }).extend({
+  newProjects: NewProjectDefaultsSchema.omit({ defaultAgentId: true, defaultPermissionMode: true, orchestrationRoster: true, orchestrationMode: true, orchestrationLimits: true }).extend({
     defaultAgentId: z.unknown().optional(),
     // Read on its own too (default permission mode): a damaged value reads as Ask.
     defaultPermissionMode: z.unknown().optional(),
     // Read on its own as well (epic 15, 15.5): a damaged roster reads as none and never costs the pieces.
     orchestrationRoster: z.unknown().optional(),
+    // And the mode and limits (15.8): each read on its own, a damaged one reads as the default.
+    orchestrationMode: z.unknown().optional(),
+    orchestrationLimits: z.unknown().optional(),
   }),
 });
 
@@ -97,6 +104,11 @@ export interface NewProjectDefaultsStore {
    */
   setRoster(roster: unknown): TeamRoster;
   /**
+   * Keeps the mode new projects are offered and the limits of every run (epic 15, 15.8), as the caller checked them (the rest of the
+   * file is kept). Returns what is kept. `ValidationError` for a wrong shape.
+   */
+  setOrchestration(input: { mode: OrchestrationMode; limits: RunLimits }): { mode: OrchestrationMode; limits: RunLimits };
+  /**
    * Developer mode was turned off: a Skip all default becomes Ask (the file is
    * rewritten; it already reads as Ask). Returns whether it changed.
    */
@@ -113,6 +125,14 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
   let storedMode: PermissionMode | undefined;
   /** The roster the file holds as last read, so a save that leaves it out keeps it. */
   let storedRoster: TeamRoster | undefined;
+  /** The orchestration mode and limits the file holds as last read (15.8). */
+  let storedOrchestrationMode: OrchestrationMode | undefined;
+  let storedOrchestrationLimits: RunLimits | undefined;
+  /** What the file holds beyond the pieces, the agent, the mode and the roster, so every save keeps it. */
+  const orchestrationFields = () => ({
+    ...(storedOrchestrationMode === undefined ? {} : { orchestrationMode: storedOrchestrationMode }),
+    ...(storedOrchestrationLimits === undefined ? {} : { orchestrationLimits: storedOrchestrationLimits }),
+  });
   /** The mode as shown: Skip all only while Developer mode is on. */
   const shownMode = (mode: PermissionMode | undefined) => (mode === undefined || (mode === 'skip_all' && !developerMode()) ? {} : { defaultPermissionMode: mode });
 
@@ -148,6 +168,8 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
       storedAgent = undefined;
       storedMode = undefined;
       storedRoster = undefined;
+      storedOrchestrationMode = undefined;
+      storedOrchestrationLimits = undefined;
       return { bmadPieces: [...DEFAULT_NEW_PROJECT_DEFAULTS.bmadPieces] };
     }
     try {
@@ -160,12 +182,17 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
         storedMode = mode.success ? mode.data : undefined;
         const roster = TeamRosterSchema.safeParse(parsed.data.newProjects.orchestrationRoster);
         storedRoster = roster.success && Object.values(roster.data).some((assignee) => assignee !== null) ? roster.data : undefined;
+        const orchestrationMode = OrchestrationModeSchema.safeParse(parsed.data.newProjects.orchestrationMode);
+        storedOrchestrationMode = orchestrationMode.success ? orchestrationMode.data : undefined;
+        const orchestrationLimits = RunLimitsSchema.safeParse(parsed.data.newProjects.orchestrationLimits);
+        storedOrchestrationLimits = orchestrationLimits.success ? orchestrationLimits.data : undefined;
         // An agent this install doesn't have now reads as the install's default; the file keeps it.
         return {
           bmadPieces: canonicalBmadPieces(parsed.data.newProjects.bmadPieces),
           ...(agent.success && isAgentRegistered(agent.data) ? { defaultAgentId: agent.data } : {}),
           ...shownMode(storedMode),
           ...(storedRoster === undefined ? {} : { orchestrationRoster: storedRoster }),
+          ...orchestrationFields(),
         };
       }
     } catch {
@@ -176,6 +203,8 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
     storedAgent = undefined;
     storedMode = undefined;
     storedRoster = undefined;
+    storedOrchestrationMode = undefined;
+    storedOrchestrationLimits = undefined;
     return { bmadPieces: [...DEFAULT_NEW_PROJECT_DEFAULTS.bmadPieces] };
   };
 
@@ -212,12 +241,13 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
           ...(keptAgent === undefined ? {} : { defaultAgentId: keptAgent }),
           ...(keptMode === undefined ? {} : { defaultPermissionMode: keptMode }),
           ...(storedRoster === undefined ? {} : { orchestrationRoster: storedRoster }),
+          ...orchestrationFields(),
         },
       });
       storedAgent = keptAgent;
       storedMode = keptMode;
       const shown = keptAgent !== undefined && isAgentRegistered(keptAgent) ? keptAgent : undefined;
-      return { bmadPieces: pieces, ...(shown === undefined ? {} : { defaultAgentId: shown }), ...shownMode(keptMode), ...(storedRoster === undefined ? {} : { orchestrationRoster: storedRoster }) };
+      return { bmadPieces: pieces, ...(shown === undefined ? {} : { defaultAgentId: shown }), ...shownMode(keptMode), ...(storedRoster === undefined ? {} : { orchestrationRoster: storedRoster }), ...orchestrationFields() };
     },
 
     setRoster(input) {
@@ -231,10 +261,31 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
           ...(storedAgent === undefined ? {} : { defaultAgentId: storedAgent }),
           ...(storedMode === undefined ? {} : { defaultPermissionMode: storedMode }),
           ...(roster === undefined ? {} : { orchestrationRoster: roster }),
+          ...orchestrationFields(),
         },
       });
       storedRoster = roster;
       return parsed.data;
+    },
+
+    setOrchestration(input) {
+      const mode = OrchestrationModeSchema.safeParse(input.mode);
+      const limits = RunLimitsSchema.safeParse(input.limits);
+      if (!mode.success || !limits.success) throw new ValidationError('Choose a mode and limits Ogden Agents offers.', [{ path: ['orchestration'], message: 'not a mode and limits' }]);
+      const current = read();
+      write({
+        newProjects: {
+          bmadPieces: current.bmadPieces,
+          ...(storedAgent === undefined ? {} : { defaultAgentId: storedAgent }),
+          ...(storedMode === undefined ? {} : { defaultPermissionMode: storedMode }),
+          ...(storedRoster === undefined ? {} : { orchestrationRoster: storedRoster }),
+          orchestrationMode: mode.data,
+          orchestrationLimits: limits.data,
+        },
+      });
+      storedOrchestrationMode = mode.data;
+      storedOrchestrationLimits = limits.data;
+      return { mode: mode.data, limits: limits.data };
     },
 
     dropSkipAll() {

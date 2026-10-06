@@ -324,7 +324,7 @@ export function createTurns(
         return { messageId, queued: true };
       }
       const messageId = newMessageId();
-      sessionEvents.completeMessage(sessionId, { messageId, role: 'user', content: text, ...(sendOptions.origin === 'manager' ? { origin: 'manager' as const } : {}) });
+      sessionEvents.completeMessage(sessionId, { messageId, role: 'user', content: text, ...(sendOptions.origin === 'manager' || sendOptions.origin === 'manager_auto' ? { origin: sendOptions.origin } : {}) });
       entities.setSessionState(sessionId, 'working');
       const turn: Turn = { queue: [], reasons: [], quiet: undefined, stopTimer: undefined, stopping: false, failed: false };
       busy.set(sessionId, turn);

@@ -540,8 +540,17 @@ export const API_ROUTES = {
   workspaceOrchestrationStepSkip: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/skip`,
   /** `POST ReorderOrchestrationStepsRequest` → `OrchestrationRunResponse` (15.6): the whole new order; 409 `bad_order` when a step would come before its prerequisite or a sent step moves, 409 `run_not_open`. */
   workspaceOrchestrationReorder: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/reorder`,
-  /** `POST` → `OrchestrationRunResponse` (15.6): Stop. The run ends (`stopped`, reason `user`) and a worker turn in flight is cancelled. 409 `run_not_open` for a run that already ended. */
+  /** `POST` → `OrchestrationRunResponse` (15.6): Stop. The run ends (`stopped`, reason `user`) and a worker turn in flight is cancelled. Works with the Orchestration piece off: a Stop is never blockable (15.8). 409 `run_not_open` for a run that already ended. */
   workspaceOrchestrationStop: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/stop`,
+  /** `GET` → `OrchestrationActivityResponse` (15.8): every instruction that was sent or refused, newest first, read from the events. Behind the Orchestration piece. */
+  workspaceOrchestrationActivity: `${API_BASE}/workspaces/:wsId/orchestration/activity`,
+  /**
+   * `GET` → `OrchestrationDefaultsResponse`; `PUT UpdateOrchestrationDefaultsRequest` → `OrchestrationDefaultsResponse` (15.8): the mode new
+   * projects are offered and the limits of every run (instructions, depth, minutes, each within its bounds), install-level preferences
+   * beside the default for new projects. Dispatch automatically needs `confirm: true` (400 `confirmation_required`). A change appends
+   * `settings.orchestration_defaults_changed`; no project's own mode changes with it.
+   */
+  orchestrationDefaults: `${API_BASE}/settings/orchestration`,
   /**
    * `GET` → `RunLimitSettingsResponse`; `PATCH UpdateRunLimitSettingsRequest`
    * (5.8): the install's limits (builds at a time, time limit). Install-level,

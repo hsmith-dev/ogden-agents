@@ -1,4 +1,4 @@
-import type { AgentId } from '@ogden-agents/shared';
+import type { AgentId, RunLimits } from '@ogden-agents/shared';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
 import { createLookBackOffers, type LookBackOffers } from './look-back-offers.js';
@@ -7,6 +7,7 @@ import { createOrchestration, type Orchestration, type OrchestrationChat } from 
 import type { ManagerPort } from './manager-port.js';
 import { createManagerSource, type ManagerSource } from './manager-source.js';
 import { createTeam, type RosterContext, type Team } from './team-roster.js';
+import { createOrchestrationDefaults, type OrchestrationDefaultsUseCase } from './orchestration-defaults.js';
 import type { Chat } from './chat/types.js';
 import type { NewProjectDefaultsStore } from './new-projects.js';
 import type { LocalModelPort } from './local-model-port.js';
@@ -81,7 +82,21 @@ export interface Core {
    * The Orchestration use-case (epic 15, 15.3) over the chat the server holds and a manager when there is one.
    * Every call is behind {@link Core.orchestration}'s guard. The server calls it once, after it has its chat.
    */
-  createOrchestration(ports: { chat: OrchestrationChat; manager?: ManagerPort | undefined; managers?: ManagerSource | undefined; team?: Team | undefined }): Orchestration;
+  createOrchestration(ports: {
+    chat: OrchestrationChat;
+    manager?: ManagerPort | undefined;
+    managers?: ManagerSource | undefined;
+    team?: Team | undefined;
+    /** The limits a new run is given (15.8; the install's setting). Absent: 20 instructions, depth 3, 30 minutes. */
+    limits?: (() => RunLimits) | undefined;
+    /** The time in milliseconds, for a run's time limit (a test's fake clock). Absent: the real clock. */
+    clock?: (() => number) | undefined;
+  }): Orchestration;
+  /**
+   * The install's orchestration defaults (15.8): the mode new projects are offered and the limits of every run, kept beside the
+   * new project defaults. The server calls it once, with the store it holds.
+   */
+  createOrchestrationDefaults(ports: { defaults: Pick<NewProjectDefaultsStore, 'get' | 'setOrchestration'> }): OrchestrationDefaultsUseCase;
   /**
    * The team roster (epic 15, 15.5): who takes each role, the defaults, whether each agent or model can, and the
    * check every assignment passes. The server calls it once, after it has its chat, endpoints and new project defaults.
@@ -197,6 +212,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     createOrchestration: (ports) => createOrchestration({ db, events, feature: orchestration, ...ports }),
     createManagerSource: (ports) => createManagerSource({ db, ...ports }),
     createTeam: (ports) => createTeam({ db, events, ...ports }),
+    createOrchestrationDefaults: (ports) => createOrchestrationDefaults({ events, ...ports }),
     close: () => {
       try {
         permissions.close();

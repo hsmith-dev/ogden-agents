@@ -423,7 +423,15 @@ async function listenAndAnnounce({
   const managers = core.createManagerSource({ endpoints: () => localEndpoints, port: localModelPort, tests: managerTests });
   // The team roster (15.5): who takes each role, over the chat's agents, the endpoints, the manager tests and the new project defaults.
   const team = core.createTeam({ chat, endpoints: () => localEndpoints, tests: managerTests, defaults: newProjectDefaults });
-  const orchestrationRuns = core.createOrchestration({ chat, manager: options.manager ?? (hooks.manager === 'memory' ? createMemoryManager() : undefined), managers, team });
+  // The install's mode default and run limits (15.8), beside the defaults for new projects; a new run takes the limits as they are then.
+  const orchestrationDefaults = core.createOrchestrationDefaults({ defaults: newProjectDefaults });
+  const orchestrationRuns = core.createOrchestration({
+    chat,
+    manager: options.manager ?? (hooks.manager === 'memory' ? createMemoryManager() : undefined),
+    managers,
+    team,
+    limits: () => orchestrationDefaults.get().limits,
+  });
   const app = createApp({
     events: core.events,
     webRoot: options.webRoot ?? defaultWebRoot(),
@@ -442,6 +450,7 @@ async function listenAndAnnounce({
     bmad: core.bmad,
     orchestration: core.orchestration,
     orchestrationRuns,
+    orchestrationDefaults,
     team,
     // The test-only BMad probe route (story 10.1): a test run on a temp data folder, with its own variable set.
     bmadProbe: hooks.bmadProbe,

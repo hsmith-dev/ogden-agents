@@ -42,6 +42,7 @@ import {
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
+import { FULL_FLOW_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
 import { removeAfterTest, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -64,14 +65,6 @@ async function reviewOf(server: Parameters<typeof request>[0], tab: Parameters<t
 async function refusalOf(reply: Response) {
   return { status: reply.status, ...ApiErrorBody.parse(await reply.json()).error };
 }
-
-/**
- * A whole build, review and Approve is real work: a server, a fixture repo, a worktree and run object store, the fake agent,
- * and a dozen `git` processes (merge, `fsck`). It takes ~1.4 s on a quiet machine and 3.5x that on a macOS CI runner running
- * the other test files beside it, past Vitest's 5 s default (main runs 37444572876, 37427267242, 37415804606 timed out at
- * its limit with the file's other tests green). Only these full-flow tests (and the one that sets up three whole servers and fixture repos: it took 32 s on a loaded Windows runner, main run 37458461174) get the longer limit; the rest keep the default.
- */
-const FULL_BUILD_TEST_TIMEOUT_MS = 30_000;
 
 const TICKETS = [
   { ref: '1.1', title: 'Build the thing', plan: FAKE_BUILD_PLAN },
@@ -239,7 +232,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(fixtureGit(repo.path, 'cat-file', '-t', reviewed!).trim()).toBe('commit');
     expect(existsSync(runStore)).toBe(false);
     expect(() => fixtureGit(repo.path, 'fsck', '--strict', '--no-dangling')).not.toThrow();
-  }, FULL_BUILD_TEST_TIMEOUT_MS);
+  }, FULL_FLOW_TEST_TIMEOUT_MS);
 
   it('a conflicting merge is aborted with the checkout unchanged and blocks the run; Reject discards the worktree and branch, keeps the ticket', async () => {
     const { tab, server, wsId, build, settled, review, repo, store } = await setup();
@@ -285,7 +278,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(branches(repo.path)).toEqual(['main']);
     expect(store.marks).toEqual([]);
     expect(readFileSync(join(repo.path, ...FAKE_BUILD_PLAN.split('/')), 'utf8')).toMatch(/^status: ready-for-dev$/m);
-  }, FULL_BUILD_TEST_TIMEOUT_MS);
+  }, FULL_FLOW_TEST_TIMEOUT_MS);
 
   it('a run whose plan ends blocked is blocked with the plan reason, and cannot be approved', async () => {
     const repo = buildRepo();
@@ -347,7 +340,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     // The saved fix is beside the plan in the run's worktree, and the code change was reverted.
     expect(readFileSync(join(run.worktreePath!, ...FAKE_BUILD_PLAN.replace(/\.md$/, '.patch').split('/')), 'utf8')).toContain('+++ b/src/fix-1.1.txt');
     expect(existsSync(join(run.worktreePath!, 'src', 'built-1.1.txt'))).toBe(false);
-  }, FULL_BUILD_TEST_TIMEOUT_MS);
+  }, FULL_FLOW_TEST_TIMEOUT_MS);
 
   it("epics 5 and 11's other routes (story 5.3): behind the piece's guard, then 501 until their lanes; an unknown agent 400", async () => {
     const off = await setup({ builds: false });
@@ -401,7 +394,7 @@ describe('the sandbox status and attended builds over REST (story 5.6)', () => {
 
     const off = await setup({ builds: false });
     expect((await refusalOf(await request(off.server, off.tab, 'GET', apiPath(API_ROUTES.workspaceBuildSandbox, { wsId: off.wsId })))).code).toBe('feature_off');
-  }, FULL_BUILD_TEST_TIMEOUT_MS);
+  }, FULL_FLOW_TEST_TIMEOUT_MS);
 
   it('with no sandbox, only an explicit attended build starts: a card at ask_every_time for each tool call, no sandbox, the same review', async () => {
     const { server, tab, wsId, build, settled, repo } = await setup({ sandbox: false });

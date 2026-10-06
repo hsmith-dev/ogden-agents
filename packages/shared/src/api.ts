@@ -181,6 +181,35 @@ export const API_ROUTES = {
    * 404 `agent_unknown` for an agent this install doesn't have.
    */
   chatAgentDefaultModel: `${API_BASE}/chat-agents/:agentId/default-model`,
+  /**
+   * `GET` → `LocalEndpointsResponse` (epic 14 story 14.3): the OpenAI-compatible
+   * endpoints the Local model talks to. `POST AddLocalEndpointRequest` → 201
+   * `LocalEndpointResponse`; 400 `invalid_request` for an address that can't be
+   * used, 503 `secrets_unavailable` when a key is given and the keychain can't hold it,
+   * 409 `endpoint_confirmation_required` when the host is not this computer and
+   * `confirmHost` does not match it. Never carries a key (AD-16).
+   */
+  localEndpoints: `${API_BASE}/local-endpoints`,
+  /**
+   * `PATCH UpdateLocalEndpointRequest` → `LocalEndpointResponse`; `DELETE` → 204
+   * (also removes its key). A changed host drops its confirmation (epic 14
+   * story 14.3). 404 `not_found`.
+   */
+  localEndpoint: `${API_BASE}/local-endpoints/:endpointId`,
+  /**
+   * `PUT SetEndpointKeyRequest` → `LocalEndpointResponse`; `DELETE` →
+   * `LocalEndpointResponse`: saves or removes the endpoint's key in the keychain
+   * (`agent-endpoint-key/<id>`). Sent `no-store`; the key is never answered,
+   * logged or evented (AD-16). 503 `secrets_unavailable` with plain words.
+   */
+  localEndpointKey: `${API_BASE}/local-endpoints/:endpointId/key`,
+  /**
+   * `POST ConfirmRemoteRequest` → `LocalEndpointResponse`: the user confirmed that
+   * prompts and project text go to `host`, which must be the endpoint's current host.
+   */
+  localEndpointConfirm: `${API_BASE}/local-endpoints/:endpointId/confirm`,
+  /** `PUT SetDefaultEndpointRequest` → `LocalEndpointsResponse`: the endpoint new chats use. */
+  localEndpointDefault: `${API_BASE}/local-endpoints-default`,
   /** `GET` → `AgentsResponse` (9.1): every supported agent's install and sign-in state. */
   agents: `${API_BASE}/agents`,
   /**

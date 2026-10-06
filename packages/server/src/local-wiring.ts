@@ -28,7 +28,7 @@ import {
   type LocalModel,
   type LocalSetupOptions,
 } from '@ogden-agents/adapters';
-import { AgentError, type AgentPort, type AgentSetupPort } from '@ogden-agents/core';
+import { AgentError, CoreError, type AgentPort, type AgentSetupPort } from '@ogden-agents/core';
 import type { AgentWiring } from './agent-wiring.js';
 
 /** What a test gives in place of the Local model's own ports (the fake agent's personality, a memory setup). */
@@ -70,7 +70,14 @@ export function localWiring(input: {
 }): AgentWiring {
   const source = input.given?.target ?? input.target;
   const prepareChat: AgentWiring['prepareChat'] = async () => {
-    const target = await source?.();
+    let target: LocalChatTarget | undefined;
+    try {
+      target = await source?.();
+    } catch (error) {
+      // An endpoint nobody confirmed, or a key the keychain no longer holds: said in plain words, nothing is called.
+      if (error instanceof CoreError) throw new AgentError('agent_unavailable', error.message, { details: { code: error.code } });
+      throw error;
+    }
     if (target === undefined) throw new AgentError('agent_unavailable', NO_ENDPOINT);
     const probe = await probeEndpoint({ baseUrl: target.baseUrl, key: target.key, fetch: input.fetch });
     if (!probe.ok) {

@@ -24,6 +24,8 @@ describe("the Local model's descriptor", () => {
     expect(LOCAL_DESCRIPTOR.displayName).toBe('Local model');
     expect(declaredModes(LOCAL_DESCRIPTOR)).toEqual(['ask']);
     expect(LOCAL_DESCRIPTOR.signInMethods).toEqual([]);
+    expect(LOCAL_DESCRIPTOR.noAccount).toBe(true);
+    expect(agentDescriptorProblems({ ...LOCAL_DESCRIPTOR, signInMethods: [{ id: 'x', kind: 'subscription', label: 'x' }] })).toEqual(['local: it needs no account but lists sign in methods']);
     expect(LOCAL_DESCRIPTOR.needsProjectTrust).toBe(false);
     expect(LOCAL_DESCRIPTOR.homeEnv).toBeUndefined();
   });

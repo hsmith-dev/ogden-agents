@@ -367,6 +367,7 @@ Epic 14's stories 14.2 to 14.11 are in `main` (14.11's tests and docs); the rele
 15. Hardware notes: the card's notes about memory and model size read correctly for your machine.
 
 When every check has passed on all three OSes, tell the maintainer; epic 15 (planning with local models, `structuredComplete`) builds on the same endpoints.
+
 ## Epic 15 live check: can a real model be the manager
 
 Epic 15 lets a model manage and the other agents be told what to do. CI never runs a real model, so whether a model is dependable enough to manage is your live check. CI proves Ogden handles every kind of manager answer, good, wrapped, cut off, over the rules and hostile (the table in `tests/fixtures/manager-cases.ts`, played by the fake manager of story 15.1). It cannot say how often a real model gets it right. The report function `measureModel` in `tests/fixtures/manager-harness.ts` tallies that over three sample goals; a later story wires it to a button, and until then the Test as a manager button (Settings, Agents, the endpoint's model list) is the way to ask a real model by hand.

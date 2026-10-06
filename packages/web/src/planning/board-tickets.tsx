@@ -6,6 +6,11 @@ import {
   BOARD_LOADING_TEXT,
   BOARD_SHOW_DETAILS_LABEL,
   BOARD_SHOW_DROPPED_LABEL,
+  BUILD_ALL_FOLLOW_LABEL,
+  BUILD_ALL_NONE_READY_TEXT,
+  BUILD_ALL_NOTHING_STARTED_TEXT,
+  BUILD_ALL_READY_LABEL,
+  buildAllStartedText,
   boardDroppedHiddenText,
   boardMarkFailedText,
   boardMovedText,
@@ -18,6 +23,8 @@ import {
   TICKET_SAVING_TEXT,
   type TicketsResponse,
 } from '@ogden-agents/shared';
+import { Hammer } from '@phosphor-icons/react';
+import { Link } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { isApiError } from '@/api/http';
@@ -32,7 +39,8 @@ import { BmadDownloadPrompt } from './bmad-download-prompt';
 import { BoardEpic } from './board-epic';
 import { useBoardLookBack, type BoardLookBack } from './board-look-back';
 import { BuildDialog } from './build-dialog';
-import { commitPlanFiles, startBuild, useWorkspaceRuns } from './builds-api';
+import { BoardBuildContext } from './board-build-context';
+import { commitPlanFiles, startBuild, startBuildAll, useWorkspaceRuns } from './builds-api';
 import { cardStatusLine, groupBoard, indexTickets, unmetPrerequisites, type CardStatus } from './board-model';
 import { useBoardEvents, useMarkTicket, useTickets } from './planning-api';
 import { ReducedModeNotice } from './reduced-mode-notice';
@@ -86,6 +94,12 @@ export function BoardTickets({
 
 function BoardTicketsBody({ wsId, sheet, tickets, builds, lookBack }: { wsId: string; sheet?: ReactNode; tickets: ReturnType<typeof useTickets>; builds?: BoardBuilds | undefined; lookBack?: BoardLookBack | undefined }) {
   const highlighted = useBoardEvents(wsId);
+  // The board's Build actions: owned here so the detail sheet over it can ask for a build too (story 11.3).
+  const build = useBoardBuild(wsId, builds);
+  const actions = useMemo(
+    () => (build.onBuild === undefined ? undefined : { onBuild: build.onBuild, building: build.building, failure: build.buildFailure?.message }),
+    [build.onBuild, build.building, build.buildFailure?.message],
+  );
   if (isApiError(tickets.error, 'scripts_not_trusted')) return <ScriptTrustPrompt wsId={wsId} onTrusted={() => void tickets.refetch()} />;
   // Story 4.13: the scripts changed since the user allowed them; Allow allows them as they are now.
   if (isApiError(tickets.error, 'scripts_changed')) return <ScriptTrustPrompt wsId={wsId} changed onTrusted={() => void tickets.refetch()} />;
@@ -116,8 +130,10 @@ function BoardTicketsBody({ wsId, sheet, tickets, builds, lookBack }: { wsId: st
           {tickets.error.message}
         </Notice>
       )}
-      <Board wsId={wsId} data={tickets.data} updatedAt={tickets.dataUpdatedAt} highlighted={highlighted} builds={builds} lookBack={lookBack} />
-      {sheet}
+      <BoardBuildContext.Provider value={actions}>
+        <Board wsId={wsId} data={tickets.data} updatedAt={tickets.dataUpdatedAt} highlighted={highlighted} build={build} hasBuilds={builds !== undefined} lookBack={lookBack} />
+        {sheet}
+      </BoardBuildContext.Provider>
     </>
   );
 }
@@ -207,6 +223,8 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
   const [building, setBuilding] = useState(false);
   const [buildFailure, setBuildFailure] = useState<BuildFailure | undefined>();
   const [committing, setCommitting] = useState(false);
+  /** How many builds Build all ready started (runs and queued), until the next action. */
+  const [allStarted, setAllStarted] = useState<number | undefined>();
   const [committed, setCommitted] = useState<'committed' | 'nothing' | undefined>();
   // The ticket whose Build was refused for want of a sandbox: the Build dialog is open for it (story 5.6).
   const [dialogRef, setDialogRef] = useState<string | undefined>();
@@ -220,6 +238,7 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
       setBuilding(true);
       setBuildFailure(undefined);
       setCommitted(undefined);
+      setAllStarted(undefined);
       startBuild(wsId, ref)
         .then(
           ({ session }) => started.current?.(session.id),
@@ -243,6 +262,23 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
     },
     [wsId],
   );
+  const buildAll = useCallback(() => {
+    if (pending.current) return;
+    pending.current = true;
+    setBuilding(true);
+    setBuildFailure(undefined);
+    setCommitted(undefined);
+    setAllStarted(undefined);
+    startBuildAll(wsId)
+      .then(
+        (result) => setAllStarted(result.runs.length + result.queue.length),
+        (error: unknown) => setBuildFailure({ message: error instanceof Error ? error.message : String(error) }),
+      )
+      .finally(() => {
+        pending.current = false;
+        setBuilding(false);
+      });
+  }, [wsId]);
   const commit = useCallback(
     (ref: string) => {
       if (pending.current) return;
@@ -265,7 +301,7 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
   );
   const closeDialog = useCallback(() => setDialogRef(undefined), []);
   const onAttendedStarted = useCallback((sessionId: string) => started.current?.(sessionId), []);
-  return { onBuild: builds === undefined ? undefined : build, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted };
+  return { onBuild: builds === undefined ? undefined : build, onBuildAll: builds === undefined ? undefined : buildAll, allStarted, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted };
 }
 
 /** Build on the board (story 5.2): given only with Unattended builds on; `onStarted` opens the new build session. */
@@ -278,24 +314,27 @@ function Board({
   data,
   updatedAt,
   highlighted,
-  builds,
+  build,
+  hasBuilds,
   lookBack,
 }: {
   wsId: string;
   data: TicketsResponse;
   /** When `data` was fetched. */ updatedAt: number;
   highlighted: ReadonlySet<string>;
-  builds?: BoardBuilds | undefined;
+  build: ReturnType<typeof useBoardBuild>;
+  /** Whether Unattended builds are on (the board offers Build actions). */
+  hasBuilds: boolean;
   lookBack?: BoardLookBack | undefined;
 }) {
   const [showDropped, setShowDropped] = useState(false);
   const droppedId = useId();
   const { onChoose, saving, announcement, failure } = useBoardMarks(wsId, updatedAt, showDropped, droppedId);
-  const { onBuild, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted } = useBoardBuild(wsId, builds);
+  const { onBuild, onBuildAll, allStarted, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted } = build;
   const { controls: lookBackControls, reducedText: lookBackReduced, failure: lookBackFailure } = useBoardLookBack(wsId, lookBack);
   const commitRef = buildFailure?.commitRef;
   // Story 5.8: a ticket whose build waits for a slot says Queued on its card.
-  const runs = useWorkspaceRuns(wsId, builds !== undefined);
+  const runs = useWorkspaceRuns(wsId, hasBuilds);
   // The latest run of each ticket that failed its checks (runs come newest first): its failing check, in words (story 11.2).
   const failures = useMemo(() => {
     const seen = new Set<string>();
@@ -316,6 +355,8 @@ function Board({
     for (const row of data.tickets) map.set(row.ref, cardStatusLine(row, unmetPrerequisites(row, index)));
     return map;
   }, [data]);
+  // Stories Build all ready would start: Ready, with every prerequisite met (never one that waits), not already queued (story 11.3).
+  const readyCount = data.tickets.filter((row) => row.status === 'ready-for-dev' && statuses.get(row.ref)?.kind !== 'waits' && !queued.has(row.ref)).length;
   return (
     <div className="flex max-w-(--space-content-max) min-w-0 flex-col gap-6" data-testid="board">
       <span role="status" className="sr-only" data-testid="board-announcement">
@@ -343,6 +384,23 @@ function Board({
         </Notice>
       )}
       {lookBackReduced === undefined ? null : <ReducedModeNotice wsId={wsId} texts={[lookBackReduced]} className="flex max-w-(--space-chat-column) flex-col gap-3" />}
+      {allStarted === undefined ? null : (
+        <Notice
+          role="status"
+          data-testid="board-build-all-started"
+          action={
+            allStarted === 0 ? undefined : (
+              <Button size="sm" variant="outline" asChild>
+                <Link to="/w/$wsId/runs" params={{ wsId }} data-testid="board-build-all-follow">
+                  {BUILD_ALL_FOLLOW_LABEL}
+                </Link>
+              </Button>
+            )
+          }
+        >
+          {allStarted === 0 ? BUILD_ALL_NOTHING_STARTED_TEXT : buildAllStartedText(allStarted)}
+        </Notice>
+      )}
       {lookBackFailure === undefined ? null : (
         <Notice variant="blocked" role="alert" data-testid="board-look-back-error">
           {lookBackFailure}
@@ -355,6 +413,28 @@ function Board({
         </Notice>
       )}
       <div className="flex flex-col gap-2">
+        {onBuildAll === undefined ? null : (
+          <span className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              className="self-start"
+              data-testid="board-build-all"
+              aria-disabled={building || readyCount === 0 || undefined}
+              aria-describedby={readyCount === 0 ? 'board-build-all-none' : undefined}
+              onClick={() => {
+                if (!building && readyCount > 0) onBuildAll();
+              }}
+            >
+              <Hammer aria-hidden />
+              {BUILD_ALL_READY_LABEL}
+            </Button>
+            {readyCount === 0 ? (
+              <span id="board-build-all-none" className="text-caption text-muted-foreground" data-testid="board-build-all-none">
+                {BUILD_ALL_NONE_READY_TEXT}
+              </span>
+            ) : null}
+          </span>
+        )}
         {data.problems.length === 0 ? null : <BoardProblems problems={data.problems} />}
         <CheckboxOption
           id={droppedId}

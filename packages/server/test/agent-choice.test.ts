@@ -134,13 +134,13 @@ describe('the Grok slot (epic 12 entries 4 and 8)', () => {
 });
 
 describe('the Local model slot (epic 14 story 14.2)', () => {
-  it('is left out by `local: false` and by a shipped install until its chat is complete, and a test registers it after Grok', async () => {
+  it('is left out by `local: false`, registered by a shipped install now that its chat is complete, and a test registers it after Grok', async () => {
     const listed = async (server: TestServer, signed: SignedIn) =>
       ChatAgentsResponse.parse(await (await request(server, signed, 'GET', API_ROUTES.chatAgents)).json()).agents.map((agent) => agent.agentId);
     const bare = await startTestServer();
     expect(await listed(bare, await signIn(bare))).toEqual(['claude-code']);
     const shipped = await startTestServer({ local: undefined });
-    expect(await listed(shipped, await signIn(shipped))).toEqual(['claude-code']);
+    expect(await listed(shipped, await signIn(shipped))).toEqual(['claude-code', 'local']);
     const withLocal = await startTestServer({ grok: {}, local: {} });
     const tab = await signIn(withLocal);
     expect(await listed(withLocal, tab)).toEqual(['claude-code', 'grok', 'local']);

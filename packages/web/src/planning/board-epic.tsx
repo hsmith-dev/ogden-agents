@@ -1,8 +1,20 @@
-import { BOARD_COLUMN_LABELS, BOARD_DROPPED_LABEL, LOOK_BACK_LABEL, type TicketRow } from '@ogden-agents/shared';
+import {
+  BOARD_COLUMN_LABELS,
+  BOARD_DROPPED_LABEL,
+  LOOK_BACK_OFFER_ACCEPT_LABEL,
+  LOOK_BACK_OFFER_DISMISS_LABEL,
+  LOOK_BACK_OFFER_TEXT,
+  LOOK_BACK_UNFINISHED_NOTE,
+  RETROSPECTIVE_VERDICT_LABELS,
+  type TicketRow,
+} from '@ogden-agents/shared';
 import { memo, useId } from 'react';
+import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
+import { Notice } from '@/ui/notice';
 import { Text } from '@/ui/typography';
 import { cn } from '@/ui/utils';
+import type { EpicLookBackControls } from './board-look-back';
 import type { BoardEpicGroup, CardStatus } from './board-model';
 import { TicketCard } from './ticket-card';
 import type { TicketStatusChoice } from './ticket-status-menu';
@@ -24,13 +36,11 @@ export interface BoardEpicProps {
   failures?: ReadonlyMap<string, string> | undefined;
   /** While a build is being started: every Build waits. */
   building?: boolean;
-  /** Look back on this epic (story 7.1), with Retrospectives on; stable across renders. */
-  onLookBack?: ((epic: string) => void) | undefined;
-  /** While a look-back is being started: every Look back waits. */
-  lookingBack?: boolean;
+  /** Look back on this epic (epic 7), with Retrospectives on and a look-back action in the catalog; stable across renders. */
+  lookBack?: EpicLookBackControls | undefined;
 }
 
-interface CardListProps extends Omit<BoardEpicProps, 'epic' | 'onLookBack' | 'lookingBack'> {
+interface CardListProps extends Omit<BoardEpicProps, 'epic' | 'lookBack'> {
   rows: readonly TicketRow[];
   label: string;
 }
@@ -55,8 +65,11 @@ function CardList({ wsId, rows, statuses, highlighted, label, onChoose, saving =
  * dropped filter on, its dropped tickets follow. Story 7.1: with Retrospectives
  * on, its header has **Look back on this epic**.
  */
-export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlighted, onChoose, saving = false, onBuild, building = false, queued, failures, onLookBack, lookingBack = false }: BoardEpicProps) {
+export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlighted, onChoose, saving = false, onBuild, building = false, queued, failures, lookBack: lookBackGiven }: BoardEpicProps) {
+  // Tickets in no epic have no folder to look back on.
+  const lookBack = epic.slug === '' ? undefined : lookBackGiven;
   const headingId = useId();
+  const retrospective = epic.retrospective;
   return (
     <section data-testid="board-epic" data-epic={epic.slug} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -64,12 +77,47 @@ export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlig
           {epic.id === null ? null : <span className="font-mono text-mono-compact text-muted-foreground">{epic.id}</span>}
           <span>{epic.title}</span>
         </Text>
-        {onLookBack === undefined ? null : (
-          <Button variant="outline" size="sm" aria-disabled={lookingBack || undefined} aria-busy={lookingBack || undefined} data-testid="board-look-back" onClick={() => (lookingBack ? undefined : onLookBack(epic.slug))}>
-            {LOOK_BACK_LABEL}
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {retrospective?.verdict == null ? null : (
+            <Badge variant="outline" data-testid="board-retrospective-verdict" data-verdict={retrospective.verdict}>
+              {RETROSPECTIVE_VERDICT_LABELS[retrospective.verdict]}
+              {retrospective.date === null ? '' : `, ${retrospective.date.slice(0, 10)}`}
+            </Badge>
+          )}
+          {lookBack === undefined ? null : (
+            <Button variant="outline" size="sm" aria-disabled={lookBack.busy || undefined} aria-busy={lookBack.busy || undefined} data-testid="board-look-back" onClick={() => (lookBack.busy ? undefined : lookBack.start(epic.slug))}>
+              {lookBack.label}
+            </Button>
+          )}
+        </div>
       </div>
+      {retrospective !== null && retrospective.verdict === null && retrospective.problem !== null ? (
+        <Text variant="caption" tone="muted" data-testid="board-retrospective-problem">
+          {retrospective.problem}
+        </Text>
+      ) : null}
+      {lookBack === undefined || epic.finished || retrospective !== null ? null : (
+        <Text variant="caption" tone="muted" data-testid="board-look-back-note">
+          {LOOK_BACK_UNFINISHED_NOTE}
+        </Text>
+      )}
+      {lookBack === undefined || !epic.finished || retrospective !== null || lookBack.dismissed === undefined || lookBack.dismissed.has(epic.slug) ? null : (
+        <Notice
+          data-testid="board-look-back-offer"
+          action={
+            <span className="flex gap-2">
+              <Button size="sm" aria-disabled={lookBack.busy || undefined} data-testid="board-look-back-accept" onClick={() => (lookBack.busy ? undefined : lookBack.start(epic.slug))}>
+                {LOOK_BACK_OFFER_ACCEPT_LABEL}
+              </Button>
+              <Button size="sm" variant="outline" data-testid="board-look-back-dismiss" onClick={() => lookBack.dismiss(epic.slug)}>
+                {LOOK_BACK_OFFER_DISMISS_LABEL}
+              </Button>
+            </span>
+          }
+        >
+          {LOOK_BACK_OFFER_TEXT}
+        </Notice>
+      )}
       <div
         role="region"
         aria-labelledby={headingId}

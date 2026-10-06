@@ -24,10 +24,11 @@ import {
   DocumentResponse,
   FEATURE_OFF_MESSAGE,
   LOOK_BACK_EPIC_NOT_FOUND_MESSAGE,
-  LOOK_BACK_UNAVAILABLE_MESSAGE,
+  REDUCED_MODE_MESSAGE,
   LookBackOffersResponse,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
   SessionResponse,
+  TicketsResponse,
   WorkspaceResponse,
   type BmadPiece,
   type SessionId,
@@ -39,6 +40,7 @@ import { removeAfterTest, signIn, startTestServer, waitFor, type SignedIn, type 
 
 const SKILL_FILE = '---\nname: bmad-retrospective\ndescription: Look back.\n---\n\n# bmad-retrospective\n';
 const EPIC = { slug: 'epic-one', id: 1, status: 'active', after: [], blocks: [] };
+const RETRO_TEXT = '---\nverdict: accepted\ndate: 2026-10-05\n---\n\n# Retrospective\n';
 const RETRO_PIECES: BmadPiece[] = ['board', 'builds', 'retrospectives'];
 
 function request(server: TestServer, tab: SignedIn, method: string, path: string, body?: unknown) {
@@ -60,7 +62,7 @@ async function setup({ pieces = RETRO_PIECES, trust = true, skills = ['bmad-retr
     { [real]: skills.map((name) => ({ name, description: SKILL_FILE, ...(name === 'bmad-retrospective' ? { scope: 'epic' as const } : {}) })) },
     {
       setup: { [real]: { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] } },
-      documents: { [real]: { '_bmad-output/initiative-demo/epic-one/epic-epic-one-retrospective.md': '# Retrospective\n' } },
+      documents: { [real]: { '_bmad-output/initiative-demo/epic-one/epic-epic-one-retrospective.md': RETRO_TEXT } },
     },
   );
   const server = await startTestServer({ ticketStore, bmadCatalog });
@@ -122,7 +124,7 @@ describe('look back on an epic over REST (story 7.1)', () => {
     expect(server.core.entities.listSessions(workspace.id)).toHaveLength(1);
   });
 
-  it('a malformed epic is 400, an epic the board lacks 404, and a project without the skill 404; each creates nothing', async () => {
+  it('a malformed epic is 400, an epic the board lacks 404, and a project without the look-back step 409 reduced_mode; each creates nothing', async () => {
     const { server, tab, workspace, lookBack } = await setup();
     const bad = await request(server, tab, 'POST', lookBack('-x'));
     expect(bad.status).toBe(400);
@@ -134,8 +136,9 @@ describe('look back on an epic over REST (story 7.1)', () => {
 
     const bare = await setup({ skills: ['bmad-spec'] });
     const noSkill = await request(bare.server, bare.tab, 'POST', bare.lookBack('epic-one'));
-    expect(noSkill.status).toBe(404);
-    expect(await errorOf(noSkill)).toEqual({ code: 'not_found', message: LOOK_BACK_UNAVAILABLE_MESSAGE });
+    // No epic-scoped action in the catalog: reduced mode, not a 404.
+    expect(noSkill.status).toBe(409);
+    expect(await errorOf(noSkill)).toEqual({ code: 'reduced_mode', message: REDUCED_MODE_MESSAGE });
     expect(bare.server.core.entities.listSessions(bare.workspace.id)).toEqual([]);
   });
 
@@ -145,9 +148,25 @@ describe('look back on an epic over REST (story 7.1)', () => {
     const url = `${apiPath(API_ROUTES.workspaceDocument, { wsId: workspace.id })}?${new URLSearchParams({ path })}`;
     const opened = await request(server, tab, 'GET', url);
     expect(opened.status).toBe(200);
-    expect(DocumentResponse.parse(await opened.json()).document.content).toBe('# Retrospective\n');
+    expect(DocumentResponse.parse(await opened.json()).document.content).toBe(RETRO_TEXT);
     expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId: workspace.id }), { bmadPieces: [] })).status).toBe(200);
     expect((await request(server, tab, 'GET', url)).status).toBe(409);
+  });
+});
+
+describe('the board\'s epics with their retrospectives (story 7.4)', () => {
+  it('carry the verdict and date read from the file with Retrospectives on, and nothing with it off', async () => {
+    const on = await setup();
+    const reply = await request(on.server, on.tab, 'GET', apiPath(API_ROUTES.workspaceTickets, { wsId: on.workspace.id }));
+    expect(reply.status).toBe(200);
+    const { epics } = TicketsResponse.parse(await reply.json());
+    expect(epics[0]!.retrospective).toEqual({ path: '_bmad-output/initiative-demo/epic-one/epic-epic-one-retrospective.md', verdict: 'accepted', date: '2026-10-05', problem: null });
+    expect(on.bmadCatalog.retrospectiveCalls).toHaveLength(1);
+
+    const off = await setup({ pieces: ['board'] });
+    const none = TicketsResponse.parse(await (await request(off.server, off.tab, 'GET', apiPath(API_ROUTES.workspaceTickets, { wsId: off.workspace.id }))).json());
+    expect(none.epics[0]!.retrospective).toBeNull();
+    expect(off.bmadCatalog.retrospectiveCalls).toEqual([]);
   });
 });
 
@@ -239,7 +258,7 @@ describe('the rest of epic 7\'s routes (story 7.2)', () => {
     const ticketStore = createMemoryTicketStore({ repos: { [real]: { tickets: [], folder: 'initiative-demo', epics: [{ slug: RETRO_EPIC, id: 1, status: 'done', after: [], blocks: [] }] } } });
     const bmadCatalog = createMemoryBmadCatalog(
       { [real]: { hasBmad: true, hasOutput: true } },
-      { [real]: [{ name: 'bmad-retrospective', description: 'Look back.' }, { name: 'bmad-project-context', description: 'Keep AGENTS.md current.' }] },
+      { [real]: [{ name: 'bmad-retrospective', description: 'Look back.', scope: 'epic' as const }, { name: 'bmad-project-context', description: 'Keep AGENTS.md current.' }] },
       { setup: { [real]: { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] } } },
     );
     const server = await startTestServer({ ticketStore, bmadCatalog });

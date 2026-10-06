@@ -30,7 +30,8 @@ import type { BmadFeatures } from './bmad-pieces.js';
 import type { BoardUseCases } from './board.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
-import { NotFoundError, NotImplementedError, ValidationError } from './errors.js';
+import { NotFoundError, NotImplementedError, ReducedModeError, ValidationError } from './errors.js';
+import { summaryLine, type BuildSummaries } from './build-summaries.js';
 import type { LookBackOffers } from './look-back-offers.js';
 import { insideOutputFolder } from './planning-documents.js';
 import { workspaceRepoPath } from './planning.js';
@@ -80,8 +81,8 @@ export interface RetrospectiveDeps {
   agent: Pick<AgentPort, 'skillInvocation'>;
   /** The agent a session runs (epic 6 entry 8), so its first message is in that agent's own syntax (AD-12). */
   agentOf?: ((session: Session) => Pick<AgentPort, 'skillInvocation'> | undefined) | undefined;
-  /** The retrospective skill's name (the bmad-catalog adapter's data, never core's: AD-12). */
-  skill: string;
+  /** Ogden's own run records, for the short summaries the look-back is given (story 7.4). Without it none is given. */
+  summaries?: Pick<BuildSummaries, 'forTickets'> | undefined;
   /** The finished-epic offer's Not now (story 7.2). */
   offers: Pick<LookBackOffers, 'dismissed' | 'dismiss'>;
 }
@@ -90,7 +91,7 @@ export interface RetrospectiveDeps {
 const OUTPUT_SEGMENT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 
 /** The epic's folder, repo-relative: `<output folder>/<initiative folder>/<epic>`, or `undefined` when any part isn't one safe name. */
-function epicFolder(outputFolder: string | null, initiative: string | null, epic: string): string | undefined {
+export function epicFolderOf(outputFolder: string | null, initiative: string | null, epic: string): string | undefined {
   if (outputFolder === null || initiative === null || !EPIC_SLUG_PATTERN.test(initiative) || !EPIC_SLUG_PATTERN.test(epic)) return undefined;
   const base = outputFolder.split('/').filter((segment) => segment !== '' && segment !== '.');
   // The output folder is the repo's own setting and goes into the first message: each part is one plain name too.
@@ -107,7 +108,7 @@ function checkedEpic(epic: unknown): asserts epic is string {
   }
 }
 
-export function createRetrospectives({ bmad, entities, board, catalog, chat, agent, agentOf, skill, offers }: RetrospectiveDeps): RetrospectiveUseCases {
+export function createRetrospectives({ bmad, entities, board, catalog, chat, agent, agentOf, summaries, offers }: RetrospectiveDeps): RetrospectiveUseCases {
   return {
     async lookBack(workspaceId, epic) {
       bmad.requireBmadFeature(workspaceId, 'retrospectives');
@@ -117,14 +118,20 @@ export function createRetrospectives({ bmad, entities, board, catalog, chat, age
       if (!tree.epics.some((each) => each.slug === epic)) throw new NotFoundError('epic', epic);
       const repoPath = workspaceRepoPath(entities, workspaceId);
       const { outputFolder } = await catalog.setupStatus(repoPath);
-      const folder = epicFolder(outputFolder, tree.folder, epic);
+      const folder = epicFolderOf(outputFolder, tree.folder, epic);
       if (folder === undefined) throw new NotFoundError('epic', epic);
+      // The look-back is the catalog's epic-scoped action (AD-12: core names no skill); a project without one is in reduced mode.
       const { skills } = await catalog.catalog(repoPath);
-      if (!skills.some((candidate) => candidate.name === skill)) throw new NotFoundError('skill', skill);
+      const action = skills.find((candidate) => candidate.scope === 'epic');
+      if (action === undefined) throw new ReducedModeError('look_back');
+      const refs = new Set(tree.tickets.filter((ticket) => ticket.epic === epic).map((ticket) => ticket.ref));
+      const facts = summaries === undefined ? [] : summaries.forTickets(workspaceId, refs);
       // Checked again after the (async) reads: a Retrospectives turned off meanwhile starts nothing.
       bmad.requireBmadFeature(workspaceId, 'retrospectives');
       const session = await chat.createChatSession(workspaceId, { kind: 'planning', autoTitle: `${LOOK_BACK_LABEL}, ${epic}` });
-      chat.sendMessage(workspaceId, session.id, (agentOf?.(session) ?? agent).skillInvocation(skill, folder));
+      // The epic's folder, then (only when runs exist) their short summaries; the first line is what names the skill and the epic.
+      const argument = facts.length === 0 ? folder : `${folder}\n\nOgden Agents' build records for this epic (short facts, oldest first):\n${facts.map(summaryLine).join('\n')}`;
+      chat.sendMessage(workspaceId, session.id, (agentOf?.(session) ?? agent).skillInvocation(action.name, argument));
       return session;
     },
 

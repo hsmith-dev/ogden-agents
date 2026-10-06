@@ -7,6 +7,7 @@ import {
   boardColumnOf,
   boardWaitsForText,
   type BoardColumn,
+  type EpicRetrospective,
   type TicketEpic,
   type TicketLink,
   type TicketRow,
@@ -28,6 +29,15 @@ export interface BoardEpicGroup {
   columns: ReadonlyArray<{ column: BoardColumn; rows: readonly TicketRow[] }>;
   /** Dropped tickets, filled only with the dropped filter on. */
   dropped: readonly TicketRow[];
+  /** Whether every ticket of the epic is done or dropped, and there is at least one (epic 7's finished-epic offer, E7-R3). */
+  finished: boolean;
+  /** The epic's retrospective, read from its file's frontmatter (epic 7), or `null`. */
+  retrospective: EpicRetrospective | null;
+}
+
+/** A ticket is finished once it is `done` or `dropped` (epic 7's offer waits for approval, so `built` is not finished). */
+export function isFinishedTicket(row: Pick<TicketRow, 'status' | 'state'>): boolean {
+  return row.state === 'done' || row.state === 'dropped' || row.status === 'done' || row.status === 'dropped';
 }
 
 /** `epic-planning-and-board` → "Planning and board". */
@@ -48,7 +58,12 @@ export function humanEpicTitle(slug: string): string {
 export function groupBoard(response: Pick<TicketsResponse, 'tickets' | 'epics'>, showDropped: boolean): BoardEpicGroup[] {
   const epicsBySlug = new Map<string, TicketEpic>(response.epics.map((epic) => [epic.slug, epic]));
   const groups = new Map<string, { columns: Map<BoardColumn, TicketRow[]>; dropped: TicketRow[] }>();
+  // Finished is judged over every ticket, whether or not the dropped filter shows them.
+  const unfinished = new Set<string>();
+  const all = new Set<string>();
   for (const row of response.tickets) {
+    all.add(row.epic ?? '');
+    if (!isFinishedTicket(row)) unfinished.add(row.epic ?? '');
     const column = boardColumnOf(row);
     if (column === null && !showDropped) continue;
     const slug = row.epic ?? '';
@@ -66,6 +81,8 @@ export function groupBoard(response: Pick<TicketsResponse, 'tickets' | 'epics'>,
     id: epicsBySlug.get(slug)?.id ?? null,
     columns: BOARD_COLUMNS.map((column) => ({ column, rows: group.columns.get(column)! })),
     dropped: group.dropped,
+    finished: all.has(slug) && !unfinished.has(slug),
+    retrospective: epicsBySlug.get(slug)?.retrospective ?? null,
   }));
 }
 

@@ -12,6 +12,8 @@ export * from './bmad-script-trust.js';
 export * from './bmad-setup.js';
 export * from './bmad-source-port.js';
 export * from './board.js';
+export * from './build-summaries.js';
+export * from './retrospective-verdict.js';
 export * from './bmad-skill-folders.js';
 export * from './build-permission-policy.js';
 export * from './build-runner-port.js';

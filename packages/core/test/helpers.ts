@@ -86,11 +86,12 @@ export function openTestCore(dataDir: string = tempDir(), onListenerError?: (err
  * skills) never reaches (story 4.2): each rejects, so a test that did reach
  * one fails loudly; `scriptsFingerprint` answers no scripts.
  */
-export const unusedCatalogParts: Pick<BmadCatalogPort, 'catalog' | 'setupStatus' | 'setup' | 'readDocument' | 'missingCapabilities' | 'scriptsFingerprint'> = {
+export const unusedCatalogParts: Pick<BmadCatalogPort, 'catalog' | 'setupStatus' | 'setup' | 'readDocument' | 'readRetrospective' | 'missingCapabilities' | 'scriptsFingerprint'> = {
   catalog: () => Promise.reject(new Error('catalog is not used in this test')),
   setupStatus: () => Promise.reject(new Error('setupStatus is not used in this test')),
   setup: () => Promise.reject(new Error('setup is not used in this test')),
   readDocument: () => Promise.reject(new Error('readDocument is not used in this test')),
+  readRetrospective: () => Promise.reject(new Error('readRetrospective is not used in this test')),
   missingCapabilities: () => Promise.reject(new Error('missingCapabilities is not used in this test')),
   // The script trust reads it (story 4.13): a repo with no scripts of its own, unless a test says otherwise.
   scriptsFingerprint: async () => 'none',

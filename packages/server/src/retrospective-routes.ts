@@ -36,7 +36,6 @@ import {
   BMAD_NOT_DOWNLOADED_MESSAGE,
   LOOK_BACK_EPIC_NOT_FOUND_MESSAGE,
   LOOK_BACK_STEP_NOT_OFFERED_MESSAGE,
-  LOOK_BACK_UNAVAILABLE_MESSAGE,
   LookBackOffersResponse,
   SaveLessonsResponse,
   SessionResponse,
@@ -75,8 +74,8 @@ export function registerRetrospectiveRoutes(app: Hono, { bmad, scriptTrust, retr
         log.warn('tickets unavailable', { workspaceId, reason: error.reason });
         return error.reason === 'not_downloaded' ? apiError(c, 409, 'bmad_not_downloaded', BMAD_NOT_DOWNLOADED_MESSAGE) : apiError(c, 503, 'tickets_unavailable', error.message);
       }
-      // Which thing was missing: the epic (the board has no such epic) or the skill (the project's BMad Method lacks it).
-      if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', error.message.startsWith('skill ') ? LOOK_BACK_UNAVAILABLE_MESSAGE : LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
+      // The board has no such epic. A project whose BMad Method has no look-back step answers 409 `reduced_mode` through the guarded helper.
+      if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
       throw error;
     }
   });

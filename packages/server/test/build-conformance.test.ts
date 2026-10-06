@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  ANTIGRAVITY_ATTENDED_ONLY_REASON,
   ANTIGRAVITY_PINS,
   createAntigravityAgent,
   createAntigravitySetup,
@@ -251,8 +252,7 @@ describe.each(ROWS)('every agent that builds: $id', { timeout: 90_000 }, (row) =
   });
 
   it('an agent that builds only attended says so in its own words, naming itself, in the picker', async () => {
-    // Antigravity's own words come with its story (17.7).
-    if (row.unattended || row.id === 'antigravity') return;
+    if (row.unattended) return;
     const s = await setup(row);
     const list = BuildAgentsResponse.parse(await (await request(s.server, s.tab, 'GET', apiPath(API_ROUTES.workspaceBuildAgents, { wsId: s.wsId }))).json());
     const mine = list.agents.find((agent) => agent.agentId === row.id)!;
@@ -302,6 +302,58 @@ describe.each(ROWS)('every agent that builds: $id', { timeout: 90_000 }, (row) =
     expect(body).toMatchObject({ status: 409, code: 'plan_uncommitted' });
     expect(body.message).toContain('bmad-build-auto');
     expect(s.server.core.entities.listSessions(s.wsId)).toEqual([]);
+  });
+});
+
+describe.skipIf(PINNED === undefined)('Antigravity builds: Ogden never selects Skip all or auto_edit, and every request is a card', { timeout: 90_000 }, () => {
+  const row = ROWS.find((each) => each.id === 'antigravity')!;
+  const FORBIDDEN = ['yolo', 'auto_edit'];
+  const modesAsked = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter((line) => line !== '') : []);
+
+  it('asks for no mode that approves for you, and shows each request as a card at the ask level that no rule allows', async () => {
+    const log = join(temp('p-modes-'), 'modes.log');
+    const s = await setup(row, { env: { FAKE_ACP_MODE_LOG: log, FAKE_ACP_BUILD_PROTECTED: '1' } });
+    const { session } = BuildResponse.parse(await (await s.build({ mode: 'attended' })).json());
+    await answerCards(s, session.id, 3);
+    const ended = await s.settled();
+    expect(ended.outcome).toBe('verified');
+    // It opened in Ask, so nothing had to be asked for at all.
+    expect(modesAsked(log)).toEqual([]);
+    for (const mode of modesAsked(log)) expect(FORBIDDEN).not.toContain(mode);
+    const cards = s.server.core.events.readAfter(0).filter((event) => event.streamId === session.id && event.type === 'permission.requested');
+    // The write inside, the one outside and the protected file: three cards, none auto-answered, none with an always allow.
+    expect(cards).toHaveLength(3);
+    for (const card of cards) if (card.type === 'permission.requested') expect(card.payload).toMatchObject({ cautionLevel: 'ask_every_time', alwaysAllowScope: null });
+    expect(ended.files).not.toContain('AGENTS.md');
+  });
+
+  it('an Antigravity that starts in auto_edit is put back in Ask, never left approving edits, and its protected-file write is still a card', async () => {
+    const log = join(temp('p-modes-'), 'modes.log');
+    const s = await setup(row, { env: { FAKE_ACP_MODE_LOG: log, FAKE_ACP_START_MODE: 'auto_edit', FAKE_ACP_BUILD_PROTECTED: '1' } });
+    const { session } = BuildResponse.parse(await (await s.build({ mode: 'attended' })).json());
+    await answerCards(s, session.id, 3);
+    const ended = await s.settled();
+    // Core told it Ask (`default`) before the prompt, and never asked for another mode.
+    expect(modesAsked(log)).toEqual(['default']);
+    expect(ended.files).not.toContain('AGENTS.md');
+    expect(s.server.core.entities.getSession(session.id)!.permissionMode).toBe('ask');
+  });
+
+  it('the person cannot switch a build session into Skip all either', async () => {
+    const s = await setup(row, { env: { FAKE_ACP_BUILD_DELAY_MS: '60000' } });
+    const { session } = BuildResponse.parse(await (await s.build({ mode: 'attended' })).json());
+    const reply = await request(s.server, s.tab, 'PUT', apiPath(API_ROUTES.sessionPermissionMode, { wsId: s.wsId, sesId: session.id }), { mode: 'skip_all', confirm: true });
+    // A build session's mode is read only for everyone: refused as busy, before any Skip all gate.
+    expect(reply.status).toBe(409);
+    expect(ApiErrorBody.parse(await reply.json()).error.code).toBe('session_busy');
+    expect(s.server.core.entities.getSession(session.id)!.permissionMode).toBe('ask');
+  });
+
+  it('an unattended Antigravity build is refused whatever the sandbox, with its own reason', async () => {
+    const s = await setup(row);
+    const refused = await s.refusal(await s.build());
+    expect(refused).toMatchObject({ status: 409, code: 'sandbox_unavailable' });
+    expect(refused.message).toContain(ANTIGRAVITY_ATTENDED_ONLY_REASON);
   });
 });
 

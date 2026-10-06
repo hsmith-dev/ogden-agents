@@ -16,7 +16,7 @@ import { workspaceRepoPath } from './planning.js';
 import { serializedByRepo } from './repo-serialization.js';
 import type { AgentSandbox } from './sandbox-port.js';
 import type { TicketRunGuard } from './ticket-store-port.js';
-import { AGENTS_FILE, BMAD_OUTPUT_PREFIX, CREDENTIAL_FOLDERS, isBuildBranch, intentGapPatchOf, RESULT_STATUSES, MAX_RESULT_TEXT } from './build-names.js';
+import { AGENTS_FILE, BMAD_OUTPUT_PREFIX, credentialReadFences, isBuildBranch, intentGapPatchOf, RESULT_STATUSES, MAX_RESULT_TEXT } from './build-names.js';
 import type { BuildsDeps } from './builds-types.js';
 
 export interface BuildFns {
@@ -138,7 +138,7 @@ export function createBuildContext(deps: BuildsDeps) {
       ...PROTECTED_PATHS.files.map((file) => join(worktreePath, file)),
     ];
     const home = deps.homeDir;
-    const deniedReads = [paths.realpath(dataDir) ?? dataDir, ...(home === undefined ? [] : CREDENTIAL_FOLDERS.map((folder) => join(home, folder)))];
+    const deniedReads = [paths.realpath(dataDir) ?? dataDir, ...(home === undefined ? [] : credentialReadFences(home, (path) => paths.realpath(path)))];
     return { sandbox: { kind, writableRoots: [worktreePath, ...gitWritable], deniedPaths, deniedReads, allowedReads: [worktreePath, store] }, gitWritable, env };
   };
 
@@ -185,6 +185,22 @@ export function createBuildContext(deps: BuildsDeps) {
     generation.set(runId, next);
     return next;
   };
+  /** A run's test re-run in progress, so Stop, discarding the run and the server quitting can end it (story 5.8 review). */
+  const reruns = new Map<RunId, AbortController>();
+  const rerunSignal = (runId: RunId): { signal: AbortSignal; done(): void } => {
+    reruns.get(runId)?.abort();
+    const controller = new AbortController();
+    reruns.set(runId, controller);
+    return { signal: controller.signal, done: () => void (reruns.get(runId) === controller && reruns.delete(runId)) };
+  };
+  const abortRerun = (runId: RunId): void => {
+    reruns.get(runId)?.abort();
+    reruns.delete(runId);
+  };
+  const abortAllReruns = (): void => {
+    for (const controller of reruns.values()) controller.abort();
+    reruns.clear();
+  };
   /** Workspaces with Build all ready going: the tickets already tried, so a failed one is not tried again. */
   const draining = new Map<WorkspaceId, Set<string>>();
   const state = { closed: false };
@@ -213,6 +229,7 @@ export function createBuildContext(deps: BuildsDeps) {
 
   /** Stops the run's agent and forgets its session's setup. */
   const release = async (run: Run): Promise<void> => {
+    abortRerun(run.id);
     await chat.releaseAgent(run.workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
     buildSessions.delete(run.sessionId);
   };
@@ -241,7 +258,7 @@ export function createBuildContext(deps: BuildsDeps) {
     deps, bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, chat, buildSessions, dataDir, settings, commandEnv,
     aware, paths, mask, report, recorder, writeResult, guarded, uncommittedPlanFiles, requirePlanCommitted, requireGit, cleanupDeps,
     sandboxFor, requireSandbox, unattendedSetup, hasCapacity, deadlineFromNow, inDispatch, setTimer, timers, pendingNotes, generation,
-    bump, draining, state, stopAgent, disarmDeadline, verificationOf, latestRun, release, cleanUp, requireCleanCheckout, fn
+    bump, draining, state, rerunSignal, abortRerun, abortAllReruns, stopAgent, disarmDeadline, verificationOf, latestRun, release, cleanUp, requireCleanCheckout, fn
   };
 }
 

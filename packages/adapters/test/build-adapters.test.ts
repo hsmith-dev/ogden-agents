@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTECTED_PATHS, type AgentEvent, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { claudeSandboxSettings, claudeSessionOptions } from '../src/acp-claude-code/claude-guards.js';
+import { claudeAttendedSettings, claudeSandboxSettings, claudeSessionOptions } from '../src/acp-claude-code/claude-guards.js';
 import { BUILD_AUTO_SKILL, createAcpBuildRunner, createClaudeCodeAgent, createFixedSandbox } from '../src/index.js';
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
@@ -80,6 +80,10 @@ describe("a build session's lockdown in Claude Code's options (story 5.2, review
     });
     expect(claudeSessionOptions(undefined, undefined)).toBeUndefined();
     expect(claudeSessionOptions(undefined, sandbox)).toEqual({ managedSettings: claudeSandboxSettings(sandbox), settingSources: ['project'], strictMcpConfig: true });
+    // An attended build (story 5.6): managed rules, hooks and MCP only and no bypass, so the user's own settings cannot skip a card; no sandbox.
+    expect(claudeSessionOptions(undefined, undefined, true)).toEqual({ managedSettings: claudeAttendedSettings() });
+    expect(claudeAttendedSettings()).toMatchObject({ allowManagedPermissionRulesOnly: true, allowManagedHooksOnly: true, allowManagedMcpServersOnly: true, permissions: { disableBypassPermissionsMode: 'disable' } });
+    expect(JSON.stringify(claudeAttendedSettings())).not.toContain('sandbox');
     // A chat in Auto keeps only its guards as flag settings.
     expect(Object.keys(claudeSessionOptions(PROTECTED_PATHS, undefined)!)).toEqual(['settings']);
   });
@@ -97,5 +101,19 @@ describe("a build session's lockdown in Claude Code's options (story 5.2, review
     const started = JSON.parse(reply) as { meta: { claudeCode: { options: Record<string, unknown> } }; cwd: string };
     expect(started.cwd).toBe(cwd);
     expect(started.meta.claudeCode.options).toEqual({ managedSettings: claudeSandboxSettings(sandbox), settingSources: ['project'], strictMcpConfig: true });
+  });
+
+  it('an attended build session starts with the attended managed settings and no sandbox', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'ogden-agents-build-acp-'));
+    dirs.push(cwd);
+    const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
+    const session = await agent.startSession({ cwd, env: { PATH: process.env.PATH ?? '' }, attended: true });
+    sessions.push(session);
+    const events: AgentEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    await session.prompt('session-start');
+    const reply = events.flatMap((event) => (event.type === 'message_chunk' ? [event.text] : [])).join('');
+    const started = JSON.parse(reply) as { meta: { claudeCode: { options: Record<string, unknown> } } };
+    expect(started.meta.claudeCode.options).toEqual({ managedSettings: claudeAttendedSettings() });
   });
 });

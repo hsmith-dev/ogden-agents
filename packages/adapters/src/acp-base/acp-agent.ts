@@ -178,6 +178,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
       onPermissionRequest?: PermissionCallback | undefined;
       protectedPaths?: ProtectedPaths | undefined;
       sandbox?: AgentSandbox | undefined;
+      attended?: true | undefined;
       model?: string | undefined;
       permissionMode?: PermissionMode | undefined;
     },
@@ -208,6 +209,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
         onPermissionRequest: input.onPermissionRequest,
         protectedPaths: input.protectedPaths,
         sandbox: input.sandbox,
+        attended: input.attended === true,
         startModel,
         permissionMode,
         fixed,
@@ -267,6 +269,8 @@ interface StartContext {
   protectedPaths: ProtectedPaths | undefined;
   /** An unattended build session's sandbox (story 5.2), in the same `sessionMeta` quirk. */
   sandbox: AgentSandbox | undefined;
+  /** An attended build session (story 5.6): the agent's own policy tier keeps the user's settings from skipping a card. */
+  attended: boolean;
   /** The static-list model the process was started on (story 11), if any. */
   startModel: string | undefined;
   /** The chat's mode at start: given at start to an agent that fixes it (`startOptions`). */
@@ -282,7 +286,7 @@ function killTree(child: ChildProcessWithoutNullStreams): void {
 
 async function startOnChild(
   child: ChildProcessWithoutNullStreams,
-  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, startModel, fixed }: StartContext,
+  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, attended, startModel, fixed }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
   const { couldNotStart: COULD_NOT_START, stopped: STOPPED, failed: FAILED } = reasons;
@@ -293,9 +297,9 @@ async function startOnChild(
   // An agent whose mode is given at start gets it, and the guards, in one `_meta` (epic 12, 12.3).
   // The agent's own way to keep the protected paths guarded; it can't be changed later.
   const guards =
-    fixed !== undefined || ((protectedPaths === undefined && sandbox === undefined) || quirks.sessionMeta === undefined)
+    fixed !== undefined || ((protectedPaths === undefined && sandbox === undefined && !attended) || quirks.sessionMeta === undefined)
       ? undefined
-      : quirks.sessionMeta(protectedPaths, sandbox);
+      : quirks.sessionMeta(protectedPaths, sandbox, attended);
   const sessionMeta = fixed !== undefined ? fixed.sessionMeta : guards === undefined ? {} : { _meta: guards };
   /** While `session/load` replays history the chat already has: those updates are swallowed. */
   let replaying = false;

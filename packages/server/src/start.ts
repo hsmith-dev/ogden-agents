@@ -89,12 +89,24 @@ const INSTALL_STOP_MS = 10_000;
 /** Session states that keep the server from restarting (AD-4, AD-20). */
 const BUSY_STATES = new Set(['working', 'waiting']);
 
-/** Sessions across every workspace that are `working` or `waiting`. */
+/**
+ * Work that stopping the server would cut off: sessions across every workspace that are `working` or `waiting`,
+ * and each build run still running whose session is not (the tests' re-run and the end checks have no agent
+ * working, story 5.8 review). Queued runs are not counted: they start again with the server. One rule for Quit
+ * and "Restart to update".
+ */
 export function countBusySessions(core: Core): number {
   let busy = 0;
+  const counted = new Set<string>();
   for (const workspace of core.entities.listWorkspaces()) {
-    for (const session of core.entities.listSessions(workspace.id)) if (BUSY_STATES.has(session.state)) busy++;
+    for (const session of core.entities.listSessions(workspace.id)) {
+      if (BUSY_STATES.has(session.state)) {
+        busy++;
+        counted.add(session.id);
+      }
+    }
   }
+  for (const run of core.entities.listRunningRuns()) if (!counted.has(run.sessionId)) busy++;
   return busy;
 }
 

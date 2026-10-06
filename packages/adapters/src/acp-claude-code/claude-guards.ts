@@ -59,6 +59,20 @@ export function claudeSandboxSettings(sandbox: AgentSandbox): Record<string, unk
 }
 
 /**
+ * Claude Code's managed settings for an attended build (story 5.6: every tool call is a card): only managed
+ * permission rules, hooks and MCP servers count, and bypass is off, so no user or project allow rule, hook or
+ * `bypassPermissions` can skip a card. No sandbox (the user is watching), so nothing else is set.
+ */
+export function claudeAttendedSettings(): Record<string, unknown> {
+  return {
+    allowManagedPermissionRulesOnly: true,
+    allowManagedHooksOnly: true,
+    allowManagedMcpServersOnly: true,
+    permissions: { disableBypassPermissionsMode: 'disable' },
+  };
+}
+
+/**
  * What a session starts with in `_meta.claudeCode.options` (claude-agent-acp
  * 0.84 passes `settings`, `managedSettings`, `settingSources` and
  * `strictMcpConfig` through): the Auto guards as flag settings; for a build
@@ -66,10 +80,11 @@ export function claudeSandboxSettings(sandbox: AgentSandbox): Record<string, unk
  * skills load; user and local settings don't) and no MCP config but Ogden's
  * (none). `undefined` for a session with neither.
  */
-export function claudeSessionOptions(protectedPaths: ProtectedPaths | undefined, sandbox: AgentSandbox | undefined): Record<string, unknown> | undefined {
-  if (protectedPaths === undefined && sandbox === undefined) return undefined;
+export function claudeSessionOptions(protectedPaths: ProtectedPaths | undefined, sandbox: AgentSandbox | undefined, attended = false): Record<string, unknown> | undefined {
+  if (protectedPaths === undefined && sandbox === undefined && !attended) return undefined;
   return {
     ...(protectedPaths === undefined ? {} : { settings: claudeGuardSettings(protectedPaths) }),
     ...(sandbox === undefined ? {} : { managedSettings: claudeSandboxSettings(sandbox), settingSources: ['project'], strictMcpConfig: true }),
+    ...(sandbox === undefined && attended ? { managedSettings: claudeAttendedSettings() } : {}),
   };
 }

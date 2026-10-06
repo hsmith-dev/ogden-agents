@@ -77,16 +77,18 @@ function kindOf(path: string): 'dir' | 'file' | undefined {
 }
 
 /** Runs `file` with `args` as the request asks (cwd, environment only as given, bounded output and time). Never throws. */
-export function runBounded(file: string, args: readonly string[], request: Pick<SandboxRunRequest, 'cwd' | 'env' | 'timeoutMs' | 'maxOutputBytes'>, options: { shell?: boolean } = {}): Promise<SandboxRunResult> {
+export function runBounded(file: string, args: readonly string[], request: Pick<SandboxRunRequest, 'cwd' | 'env' | 'timeoutMs' | 'maxOutputBytes' | 'signal'>, options: { shell?: boolean } = {}): Promise<SandboxRunResult> {
   return new Promise((resolve) => {
     let output = '';
     let timedOut = false;
+    let aborted = false;
     let settled = false;
     const done = (exitCode: number | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ exitCode, timedOut, output });
+      request.signal?.removeEventListener('abort', stop);
+      resolve({ exitCode: aborted ? null : exitCode, timedOut, output });
     };
     let child: ReturnType<typeof spawn>;
     try {
@@ -107,12 +109,19 @@ export function runBounded(file: string, args: readonly string[], request: Pick<
       timedOut = true;
       killProcessTree(child.pid);
     }, request.timeoutMs);
+    // Stop or Quit: the whole tree goes now and the result is neither a pass nor a timeout.
+    const stop = () => {
+      aborted = true;
+      killProcessTree(child.pid);
+    };
+    if (request.signal?.aborted === true) stop();
+    else request.signal?.addEventListener('abort', stop, { once: true });
     child.on('error', () => done(null));
     // A process that left the group may hold the pipes open for ever: after the child itself exits, wait only a moment for them.
-    child.on('exit', (code) => setTimeout(() => done(timedOut ? null : code), 2000).unref());
+    child.on('exit', (code) => setTimeout(() => done(timedOut || aborted ? null : code), 2000).unref());
     child.on('close', (code) => {
       output = output.slice(-request.maxOutputBytes);
-      done(timedOut ? null : code);
+      done(timedOut || aborted ? null : code);
     });
   });
 }

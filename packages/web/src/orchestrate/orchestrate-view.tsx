@@ -52,6 +52,7 @@ const STOPPED_STEP_WORDS: Partial<Record<OrchestrationStepView['state'], string>
   approved: 'Not sent. The run was stopped.',
   failed: 'Stopped before it finished',
 };
+/** A failed step the worker's own error caused keeps its own words even in a stopped run. */
 
 const isLive = (state: OrchestrationRunView['run']['state']): boolean => state === 'planning' || state === 'awaiting_user' || state === 'running' || state === 'paused';
 const canChange = (state: OrchestrationStepView['state']): boolean => state === 'proposed' || state === 'approved';
@@ -236,7 +237,7 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, actions }: S
   const skippedNeeds = waitingOn.filter((id) => stateOf.get(id) === 'skipped');
   const ready = waitingOn.length === 0;
   const changeable = live && canChange(step.state);
-  const stateWords = (stopped ? STOPPED_STEP_WORDS[step.state] : undefined) ?? STEP_STATE_WORDS[step.state];
+  const stateWords = (stopped && !(step.state === 'failed' && step.sessionState === 'error') ? STOPPED_STEP_WORDS[step.state] : undefined) ?? STEP_STATE_WORDS[step.state];
   const save = () => {
     if (busy || text.trim() === '') return;
     void onEdit(step.stepId, text).then((kept) => {
@@ -263,7 +264,7 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, actions }: S
           {step.dependsOn.length === 0 ? 'Needs nothing first' : `Needs ${step.dependsOn.join(', ')} first`}
         </Text>
       </div>
-      {editing ? (
+      {editing && changeable ? (
         <div className="flex flex-col gap-2" data-testid="orchestrate-edit-form">
           <Textarea
             aria-label={`Instruction for step ${step.stepId}`}

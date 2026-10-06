@@ -3,12 +3,12 @@ title: 'Plan review UI: see every step, edit, approve, skip, reorder within prer
 type: 'feature'
 ticket: '15.6'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: 'bdd742c77d14eb879929ed24277ad4967e3cee14'
 context:
@@ -62,11 +62,11 @@ context:
 
 ## Tasks & Acceptance
 
-- [ ] shared contracts, event and routes
-- [ ] core use-cases and dispatch re-checks
-- [ ] server routes
-- [ ] web review UI
-- [ ] tests (core, server, DOM, architecture, e2e)
+- [x] shared contracts, event and routes
+- [x] core use-cases and dispatch re-checks
+- [x] server routes
+- [x] web review UI
+- [x] tests (core, server, DOM, architecture, e2e)
 
 **Acceptance Criteria:**
 - Given a three step plan, editing an approved step makes it need a fresh approval and a direct send is refused until then.
@@ -77,9 +77,17 @@ context:
 
 ## Implementation Notes
 
-(Filled in when built.)
+- Core (`orchestration.ts`): `editStep` (text through `EditOrchestrationStepRequest`, which is the manager's `ManagerInstruction` rules after folding line breaks and trimming; a secret is refused with plain words, not masked; an edit of a waiting or approved step sets it to `proposed` with no approver, the same text is no change), `skipStep` (waiting or approved to `skipped`; the run finishes when every step is done or skipped and the run can move there), `reorderSteps` (the whole order; permutation, sent steps keep their index, every step after its prerequisites; `BadOrderError` with the step names), `stopRun` (run `stopped` with reason `user`, in the same transaction a step whose worker turn was in flight becomes `failed`; then the manager call in flight is aborted and `chat.cancel` is asked for each worker turn, best effort). Stop therefore does cancel worker turns here, not only in 15.8, because a dispatch can be in flight. `startRun` passes an abort signal and, if the run was stopped meanwhile, keeps the manager's reply in the log only and makes no step. `readBack` still settles steps of an ended run but never moves it again.
+- Dispatch in the default mode also refuses a step whose approver is not the user, whose prerequisites are not done, or whose text changed since the approval, and sends the stored text. `approveStep` takes an optional text the page read and refuses a step edited since.
+- Step transitions gain `approved` to `proposed`. New event `orchestration.steps_reordered`; error codes `step_not_changeable`, `bad_order`, `run_not_open`.
+- Routes (all through `orchestrationRoutes`, behind the tab token): `POST .../steps/:stepId/edit`, `.../skip`, `.../runs/:runId/reorder`, `.../stop`. No body names an approver.
+- Web: each step shows worker, chat, instruction, mode (Ask), prerequisites; Edit (inline editor), Skip, Move up and Move down, Approve and send, Send; Stop while the run is live; plain "The manager is thinking" status (with Stop) that holds nothing; a line saying where the manager runs (this computer or another computer, with the server's name).
+- Architecture test E15 (15.6): the manager files and the `startRun`, `readBack` and `dispatchStep` code never name approve, edit, skip, reorder or stop; only `orchestration-routes.ts` calls them in the server.
+- Tests: shared (4), core (+19), server `orchestration-review` (9), web DOM (+8), architecture (2), Playwright (1: three step review).
 
 ## Spec proposals
+
+Written to the memlogs with `_bmad/scripts/memlog.py`: the architecture memlog gets the `orchestration.steps_reordered` event, the step transition, the new error codes and an AD-15 note (approval only from a user action); the spec memlog gets a CAP-22 plan review note. `covers` stays empty.
 
 (Filled in when built.)
 
@@ -89,8 +97,8 @@ None yet.
 
 ## Review Triage Log
 
-(After review.)
+2026-10-05, security and correctness reviewers, no critical or high findings. Patched: skipping the last open step of a paused run logged `run_finished` while the run could not move (medium), now only when it can; the edit form stayed open after the step stopped being changeable (medium), now closes; Approve bound to the step id, not the text read, so a step edited from another tab could be approved unseen (medium), now the page sends the text it showed and a mismatch is refused; a start could briefly show and Stop the previous run (low), now the newer run wins; a step failed by its own worker error read "Stopped before it finished" in a stopped run (low), now keeps its own words; edit and reorder checked the request before the run (low), now the run first; approve re-reads the run inside the transaction (low). Tests added for each, including an edit during a send. Not changed: Stop is refused when the piece is switched off (low, the guard is uniform; a decision for the user); an orphan empty worker chat remains when a dispatch is refused after the chat was made (low, as in 15.3); a cancel that fails (other than not busy) is swallowed and the page does not warn that a worker may still be finishing (low); an oversized chunked body with no length answers 400 instead of 413 (low, memory is bounded); skipping a step leaves its dependents waiting and only Stop ends the run, by design (info); a move button next to a sent step looks enabled and the server refuses with plain words (low).
 
 ## Verification
 
-(After the runs.)
+**Commands:** `pnpm typecheck`, `pnpm test`, `npx playwright test tests/e2e/orchestrate.spec.ts` (after `pnpm run build`), `PROVENANCE_BASE=origin/main pnpm provenance`.

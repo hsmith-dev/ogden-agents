@@ -88,7 +88,9 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
   const [error, setError] = useState<string | undefined>(undefined);
   // The newest run from the list; an answer to a start or step shows at once, before the list catches up.
   const [fresh, setFresh] = useState<OrchestrationRunView | undefined>(undefined);
-  const run = runs.data?.[0] ?? fresh;
+  // The newer of the list's latest run and the answer to the last action, so a start never shows (or stops) the previous run.
+  const listed = runs.data?.[0];
+  const run = listed === undefined ? fresh : fresh === undefined || fresh.run.id === listed.run.id || fresh.run.createdAt <= listed.run.createdAt ? listed : fresh;
 
   const [stopping, setStopping] = useState(false);
 
@@ -156,7 +158,7 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
           ? undefined
           : void act(async () => {
               // Approve and send in one press; a send that fails leaves the step approved, with Send to try again.
-              await approveOrchestrationStep(wsId, run.run.id, stepId);
+              await approveOrchestrationStep(wsId, run.run.id, stepId, run.steps.find((one) => one.stepId === stepId)?.instruction);
               return dispatchOrchestrationStep(wsId, run.run.id, stepId);
             })
       }

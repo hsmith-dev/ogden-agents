@@ -184,9 +184,17 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
 
   routes.get(API_ROUTES.workspaceOrchestrationRun, (c, { workspaceId }) => run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.getRun(workspaceId, c.req.param('runId') ?? '') }))));
 
-  routes.post(API_ROUTES.workspaceOrchestrationStepApprove, (c, { workspaceId }) =>
-    run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.approveStep(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '') }))),
-  );
+  routes.post(API_ROUTES.workspaceOrchestrationStepApprove, async (c, { workspaceId }) => {
+    // An optional body names the text the user read; any other field (an approver, say) is ignored: the approver is always the user.
+    let seen: string | undefined;
+    try {
+      const body = JSON.parse(await c.req.text()) as { instruction?: unknown };
+      if (typeof body.instruction === 'string') seen = body.instruction;
+    } catch {
+      // No body, or not JSON: approve without a text check.
+    }
+    return run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.approveStep(workspaceId, c.req.param('runId') ?? '', c.req.param('stepId') ?? '', seen) })));
+  });
 
   routes.post(API_ROUTES.workspaceOrchestrationStepDispatch, (c, { workspaceId }) =>
     run(c, async (use) => {

@@ -35,8 +35,8 @@ export async function startOrchestrationRun(wsId: string, goal: string, auth: Au
 }
 
 /** `POST …/steps/:stepId/approve`: the user approves one instruction. */
-export async function approveOrchestrationStep(wsId: string, runId: string, stepId: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
-  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStepApprove, { wsId, runId, stepId }), { method: 'POST' }, "The instruction couldn't be approved");
+export async function approveOrchestrationStep(wsId: string, runId: string, stepId: string, instruction?: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStepApprove, { wsId, runId, stepId }), instruction === undefined ? { method: 'POST' } : postJson({ instruction }), "The instruction couldn't be approved");
   return OrchestrationRunResponse.parse(json).run;
 }
 

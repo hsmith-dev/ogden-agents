@@ -303,6 +303,18 @@ describe('the Orchestrate page', () => {
     expect(screen.getByTestId('orchestrate-approve')).toBeTruthy();
   });
 
+  it('closes the editor when the step stops being changeable', async () => {
+    fake.runs = [view([step('s1')])];
+    await mount(<WorkspaceOrchestratePage />);
+    fireEvent.click(screen.getByTestId('orchestrate-edit'));
+    expect(screen.getByTestId('orchestrate-edit-form')).toBeTruthy();
+    const stopped = view([step('s1')], 'stopped');
+    fake.next = stopped;
+    fireEvent.click(screen.getByTestId('orchestrate-stop'));
+    await settle();
+    expect(screen.queryByTestId('orchestrate-edit-form')).toBeNull();
+  });
+
   it('Cancel closes the editor without asking the server', async () => {
     fake.runs = [view([step('s1')])];
     await mount(<WorkspaceOrchestratePage />);

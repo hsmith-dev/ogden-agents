@@ -568,3 +568,46 @@ describe('plan review (15.6): approval is the user\'s, in code', () => {
     expect(created).toEqual([]);
   });
 });
+
+describe('plan review (15.6): review fixes', () => {
+  it('approves only the text the user saw when the page says which', async () => {
+    const { workspace, orchestration } = setUp(stubManager(PLAN3));
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Add a form' });
+    await orchestration.editStep(workspace.id, run.id, 's1', { instruction: 'Edited elsewhere.' });
+    await expect(orchestration.approveStep(workspace.id, run.id, 's1', 'Write the failing test first.')).rejects.toBeInstanceOf(StepNotProposedError);
+    expect(stepOf(await orchestration.approveStep(workspace.id, run.id, 's1', 'Edited elsewhere.'), 's1').state).toBe('approved');
+  });
+
+  it('does not log a finish for a paused run that skipping cannot finish', async () => {
+    const { core, workspace, orchestration, tamper } = setUp(stubManager(PLAN3));
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Add a form' });
+    await orchestration.skipStep(workspace.id, run.id, 's1');
+    await orchestration.skipStep(workspace.id, run.id, 's2');
+    tamper("UPDATE orchestration_runs SET state = 'paused' WHERE id = ?", run.id);
+    const view = await orchestration.skipStep(workspace.id, run.id, 's3');
+    expect(view.run.state).toBe('paused');
+    expect(eventTypes(core, 0)).not.toContain('orchestration.run_finished');
+  });
+
+  it('sends nothing when the step is edited while its chat is being made', async () => {
+    const { core, workspace, orchestration, sent } = setUp(stubManager(PLAN3));
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Add a form' });
+    await orchestration.approveStep(workspace.id, run.id, 's1');
+    const original = core.entities.createSession.bind(core.entities);
+    let edited: Promise<unknown> | undefined;
+    core.entities.createSession = ((input: Parameters<typeof original>[0]) => {
+      edited = orchestration.editStep(workspace.id, run.id, 's1', { instruction: 'Changed mid send.' });
+      return original(input);
+    }) as typeof core.entities.createSession;
+    await expect(orchestration.dispatchStep(workspace.id, run.id, 's1')).rejects.toBeInstanceOf(StepNotApprovedError);
+    await edited;
+    expect(sent).toEqual([]);
+    expect(stepOf(await orchestration.getRun(workspace.id, run.id), 's1')).toMatchObject({ state: 'proposed', instruction: 'Changed mid send.' });
+  });
+
+  it('answers an unknown run with not found before it looks at the request', async () => {
+    const { workspace, orchestration } = setUp(stubManager(PLAN3));
+    await expect(orchestration.editStep(workspace.id, 'orc_01J9Z3K4M5N6P7Q8R9S0T1V2W3', 's1', { instruction: '' })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(orchestration.reorderSteps(workspace.id, 'orc_01J9Z3K4M5N6P7Q8R9S0T1V2W3', {})).rejects.toBeInstanceOf(NotFoundError);
+  });
+});

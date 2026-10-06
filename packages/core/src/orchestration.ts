@@ -86,7 +86,7 @@ export interface Orchestration {
   /** One run of the project, its steps read back. {@link NotFoundError} for another project's or an unknown run. */
   getRun(workspaceId: WorkspaceId, runId: string): Promise<OrchestrationRunView>;
   /** The user approves one proposed step whose needed steps are done. {@link StepNotProposedError} otherwise. */
-  approveStep(workspaceId: WorkspaceId, runId: string, stepId: string): Promise<OrchestrationRunView>;
+  approveStep(workspaceId: WorkspaceId, runId: string, stepId: string, expectedInstruction?: string): Promise<OrchestrationRunView>;
   /**
    * The user changes a waiting or approved step's instruction (15.6). The text passes the manager's text rules and holds no
    * secret ({@link ValidationError}); the step is back to waiting, so it needs a fresh approval. {@link StepNotChangeableError}
@@ -382,7 +382,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       return readBack(workspaceId, requireRun(workspaceId, runId));
     },
 
-    async approveStep(workspaceId, runId, stepId) {
+    async approveStep(workspaceId, runId, stepId, expectedInstruction) {
       feature.requireOrchestration(workspaceId);
       const run = requireRun(workspaceId, runId);
       events.transaction(() => {
@@ -390,8 +390,10 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         const all = stepsOf(run.id);
         // Approval is the user's, never the manager's, and only while the run is open and what the step needs is done.
         const needsDone = stepOf(step).dependsOn.every((id) => all.find((other) => other.stepId === id)?.state === 'done');
-        const open = isOpen(run.state);
-        if (step.state !== 'proposed' || !canMoveStep('proposed', 'approved') || !needsDone || !open) throw new StepNotProposedError();
+        const open = isOpen(orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get()?.state ?? run.state);
+        // When the page says which text the user read, a step edited since (another tab) is not approved: the user approves what they saw.
+        const sameText = expectedInstruction === undefined || expectedInstruction === step.instruction;
+        if (step.state !== 'proposed' || !canMoveStep('proposed', 'approved') || !needsDone || !open || !sameText) throw new StepNotProposedError();
         orm.update(orchestrationSteps).set({ state: 'approved', approvedBy: 'user' }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
         events.append({ type: 'orchestration.step_approved', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], stepId: step.stepId, by: 'user' } });
       });
@@ -400,12 +402,12 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
 
     async editStep(workspaceId, runId, stepId, request) {
       feature.requireOrchestration(workspaceId);
+      const run = requireRun(workspaceId, runId);
       const parsed = EditOrchestrationStepRequest.safeParse(request);
       if (!parsed.success) throw new ValidationError(ORCHESTRATION_EDIT_BAD_TEXT_MESSAGE, parsed.error.issues);
       // The same rule as the manager's text: a secret is refused, not quietly changed, so the user sees what is kept.
       if (redactSecrets(parsed.data.instruction) !== parsed.data.instruction) throw new ValidationError(ORCHESTRATION_EDIT_SECRET_MESSAGE, []);
       const text = parsed.data.instruction;
-      const run = requireRun(workspaceId, runId);
       events.transaction(() => {
         const step = requireStep(run.id, stepId);
         const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
@@ -430,7 +432,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         const id = run.id as OrchestrationRun['id'];
         events.append({ type: 'orchestration.step_skipped', workspaceId, streamId: workspaceId, payload: { runId: id, stepId: step.stepId } });
         // Nothing left to do: the run is finished.
-        if (stepsOf(run.id).every((other) => other.state === 'done' || other.state === 'skipped')) {
+        if (canMoveRun(live.state as OrchestrationRunState, 'finished') && stepsOf(run.id).every((other) => other.state === 'done' || other.state === 'skipped')) {
           moveRun(run.id, 'finished');
           events.append({ type: 'orchestration.run_finished', workspaceId, streamId: workspaceId, payload: { runId: id } });
         }
@@ -440,10 +442,10 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
 
     async reorderSteps(workspaceId, runId, request) {
       feature.requireOrchestration(workspaceId);
+      const run = requireRun(workspaceId, runId);
       const parsed = ReorderOrchestrationStepsRequest.safeParse(request);
       if (!parsed.success) throw new BadOrderError(ORCHESTRATION_ORDER_WORDS.not_every_step);
       const order = parsed.data.order;
-      const run = requireRun(workspaceId, runId);
       events.transaction(() => {
         const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
         if (live === undefined || !isLive(live.state)) throw new RunNotOpenError();

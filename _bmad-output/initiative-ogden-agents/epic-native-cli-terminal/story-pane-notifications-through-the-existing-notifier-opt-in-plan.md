@@ -43,7 +43,7 @@ context:
 ## Code Map
 
 - `shared/src/panes.ts` (`Pane.notify`, `UpdatePaneRequest`), `events-panes.ts` (`notify` on the status event).
-- `core/src/db/schema.ts`, `drizzle/0023_pane_notify.sql`, `pane-store.ts`, `panes.ts` (`setNotify`, `notifyLaunchers`).
+- `core/src/db/schema.ts`, `drizzle/0025_pane_notify.sql`, `pane-store.ts`, `panes.ts` (`setNotify`, `notifyLaunchers`).
 - `server/src/pane-routes.ts` (PATCH takes a name and/or notify); `web/src/shell/sidebar-model.ts` (`notify` on a pane need), `notifications/notifier.ts`, `attention-notifier.tsx`, `terminal/pane-view.tsx` (Notify me).
 - Tests: `web/test/notifier.test.ts`, `pane-needs.test.tsx`, `terminals.dom.test.tsx`, `core/test/panes.test.ts`, `pane-persistence.test.ts`, `server/test/panes.test.ts`.
 

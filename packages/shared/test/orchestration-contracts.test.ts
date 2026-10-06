@@ -102,7 +102,8 @@ describe('the plan schema', () => {
     expect(checkPlan(plan(Array.from({ length: MANAGER_LIMITS.maxSteps }, (_, index) => step(`s${index}`)))).ok).toBe(true);
     expect(code(checkPlan(plan([step('s1', { instruction: 'a'.repeat(MANAGER_LIMITS.maxInstructionChars + 1) })])))).toBe('instruction_too_long');
     expect(checkPlan(plan([step('s1', { instruction: 'a'.repeat(MANAGER_LIMITS.maxInstructionChars) })])).ok).toBe(true);
-    expect(code(checkPlan(plan([step('s1')], { goal: 'g'.repeat(MANAGER_LIMITS.maxGoalChars + 1) })))).toBe('missing_field');
+    expect(code(checkPlan(plan([step('s1')], { goal: 'g'.repeat(MANAGER_LIMITS.maxGoalChars + 1) })))).toBe('bad_text');
+    expect(code(checkPlan(plan([step('s1', { worker: 'Rogue Agent' })])))).toBe('bad_reference');
   });
 
   it('checks the roster, ids, dependencies and circles', () => {
@@ -196,6 +197,9 @@ describe('the status report', () => {
     const long = makeStatusReport({ stepId: 's1', worker: 'agent-a', state: 'working', text: 'x'.repeat(MANAGER_LIMITS.maxSummaryChars + 50) });
     expect(long.summary).toHaveLength(MANAGER_LIMITS.maxSummaryChars);
     expect(long.truncated).toBe(true);
+    const pairs = makeStatusReport({ stepId: 's1', worker: 'agent-a', state: 'done', text: `${'x'.repeat(MANAGER_LIMITS.maxSummaryChars - 1)}\u{1F600}` });
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(pairs.summary)).toBe(false);
+    expect(pairs.summary.length).toBeLessThanOrEqual(MANAGER_LIMITS.maxSummaryChars);
     expect(ManagerStatusReport.safeParse({ ...report, extra: 1 }).success).toBe(false);
     expect(ManagerStatusReport.safeParse({ ...report, state: 'sleeping' }).success).toBe(false);
   });

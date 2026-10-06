@@ -200,13 +200,21 @@ export function makeStatusReport(input: { stepId: string; worker: string; state:
   const stripped = Array.from(input.text).filter((char) => !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\p{Co}\p{Cn}]/u.test(char) || char === '\n' || char === '\t').join('');
   const clean = redactSecrets(stripped);
   const truncated = clean.length > MANAGER_LIMITS.maxSummaryChars;
-  const cut = truncated ? redactSecrets(Array.from(clean).slice(0, MANAGER_LIMITS.maxSummaryChars).join('')) : clean;
+  // Cut on whole characters, to the length zod counts (UTF-16 units), so a pair is never split.
+  let kept = '';
+  if (truncated) {
+    for (const char of clean) {
+      if (kept.length + char.length > MANAGER_LIMITS.maxSummaryChars) break;
+      kept += char;
+    }
+  }
+  const cut = truncated ? redactSecrets(kept) : clean;
   return ManagerStatusReport.parse({
     version: MANAGER_STATUS_VERSION,
     step_id: input.stepId,
     worker: input.worker,
     state: input.state,
-    summary: cut.slice(0, MANAGER_LIMITS.maxSummaryChars),
+    summary: cut,
     truncated,
   });
 }
@@ -292,6 +300,7 @@ function codeFor(error: z.ZodError, value: unknown): ManagerRefusalCode {
     else if (last === 'steps' && issue.code === 'too_small') consider(2, 'empty_plan');
     else if (last === 'instruction' && issue.code === 'too_big') consider(2, 'instruction_too_long');
     else if (issue.code === 'custom' && issue.message === BAD_TEXT) consider(2, 'bad_text');
+    else if (last === 'worker' || last === 'goal' || last === 'reason' || last === 'question') consider(2, last === 'worker' ? 'bad_reference' : 'bad_text');
     else if (issue.message === BAD_REFERENCE || last === 'chat' || last === 'id' || last === 'step_id' || path.at(-2) === 'depends_on') consider(2, 'bad_reference');
     else consider(3, 'missing_field');
   }

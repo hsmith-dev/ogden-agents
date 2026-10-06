@@ -8,7 +8,7 @@ route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '2ae407fec67c55f776e0dc9004c85ad364c6efce'
 context:
@@ -96,6 +96,8 @@ Written to the memlogs with `_bmad/scripts/memlog.py`, never to the frozen docum
 - 2026-10-05 (build): the entry says the `workspace.settings_changed` keys cover "the Orchestration piece". Adding `orchestration` to `BMAD_PIECES` would list it in BMad Method's settings, the main switch, the new project defaults and the welcome question, all of which are about BMad, and would break every test that counts four pieces. Chosen instead: the same shape (opt-in, off by default, one core guard, one route helper, turned on only where shipped) as its own `orchestrationEnabled` key. Frozen intent unchanged; the AD-22 note is in the memlog proposal.
 
 ## Review Triage Log
+
+2026-10-05, security and correctness reviewers (2 lenses), no critical findings. Patched: a step's `chat` was only format checked, so a manager could aim at any session (medium high), now `new` or a chat of that step's own worker (`bad_reference`; core builds the map from the context's workers); a secret inside any manager string was accepted and would reach the log (medium), now refused as `forbidden_field`; `makeStatusReport` stripped hidden characters after masking, which could re-form a key (medium), now strip, mask, cut on whole characters, mask again; the text deny list missed tag characters, soft hyphen, line separators and lone surrogates (medium), now Unicode categories Cc, Cf, Zl, Zp, Cs, Co, Cn; a decision's `step_id` was checked only for `dispatch` (medium low), now for every action; events skipped the text rules (low), now share the schemas' goal, instruction and reason; an over long goal, reason or question and a badly spelled worker answered "left something out" (medium), now `bad_text` and `bad_reference`. Tests added for each. Not changed: a manager role filled by an agent (`TeamAssignee` allows it, medium low): the roster story (15.4) owns what may take the manager role; the reply byte cap is the adapter's (15.4); `confirm` is required whenever automatic is set, even when already automatic, and not asked again when the piece is toggled (the once per project rule is 15.8's); a step's mode support is not checked against the worker's declared modes (the mode is fixed at Ask); the roster `model` text has only a length cap (15.4 checks the endpoint and model); the entry's verify says routes are "absent" with the piece off and the code answers 409 `feature_off` like every AD-22 route (the plan's matrix says so). One unrelated web test (`terminals.dom`) failed once under full load and passed alone.
 
 ## Verification
 

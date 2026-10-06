@@ -25,6 +25,7 @@ const fakes = vi.hoisted(() => ({
   terminal: { available: true } as unknown,
   denied: false,
   launchers: [] as unknown[],
+  settings: { notifyNeedsAttention: false, notifyExited: false, notifyLaunchers: [] as string[], passProxies: false, passSshAgent: false, launcherArgs: {} as Record<string, string>, hidden: false },
 }));
 
 vi.mock('@xterm/xterm', () => ({
@@ -77,6 +78,7 @@ vi.mock('@/auth/tab-token', () => ({
     fetch: async (path: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       fakes.requests.push({ method, path, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+      if (path.endsWith('/settings/terminals')) return new Response(JSON.stringify({ settings: fakes.settings }));
       if (path.endsWith('/terminals/launchers')) return new Response(JSON.stringify({ launchers: fakes.launchers }));
       if (fakes.denied) return new Response(JSON.stringify({ error: { code: 'developer_mode_required', message: 'Terminals are only offered in Developer mode.' } }), { status: 403 });
       if (method === 'GET') {
@@ -136,6 +138,7 @@ beforeEach(() => {
   fakes.terminal = { available: true };
   fakes.denied = false;
   fakes.launchers = [];
+  fakes.settings = { notifyNeedsAttention: false, notifyExited: false, notifyLaunchers: [], passProxies: false, passSshAgent: false, launcherArgs: {}, hidden: false };
 });
 afterEach(() => {
   cleanup();
@@ -260,6 +263,25 @@ const two = () => {
   fakes.panes.push(pane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WC', title: 'Terminal 3', state: 'running' }));
 };
 const puts = () => fakes.requests.filter((r) => r.method === 'PUT').map((r) => JSON.parse(r.body!).layout);
+
+describe('Terminals settings on the page (story 16.9)', () => {
+  it('hidden says so in one sentence, with no list and no New terminal', async () => {
+    fakes.settings = { ...fakes.settings, hidden: true };
+    await mount();
+    expect(screen.getByTestId('terminals-hidden-notice').textContent).toContain('Terminals are hidden');
+    expect(screen.queryByTestId('terminals-new')).toBeNull();
+  });
+
+  it('a program\'s own arguments from Settings fill its field, and Start sends them', async () => {
+    fakes.launchers = [launcher('claude-code', 'Claude Code', 'found')];
+    fakes.settings = { ...fakes.settings, launcherArgs: { 'claude-code': '--model big' } };
+    await mount();
+    expect((screen.getByTestId('launcher-args') as HTMLInputElement).value).toBe('--model big');
+    fireEvent.click(screen.getByTestId('launcher-start'));
+    await settle();
+    expect(JSON.parse(fakes.requests.find((r) => r.method === 'POST')!.body!)).toMatchObject({ launcherId: 'claude-code', args: '--model big' });
+  });
+});
 
 describe('notifications are the user\'s opt in (story 16.8)', () => {
   it('each pane has a Notify me switch, off by default, that asks the server and says what it shows', async () => {

@@ -111,6 +111,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 16.9 (proposed): `PaneLayout` hard codes the cap of panes per project though core's limit is a constant it could change, and two windows arranging at once are last writer wins. From 16.4 reviews. (log: "16.4 review: the layout schema holds the pane cap")
 - 16.11 (proposed): the fake program folder has no space in its path and no test hangs a probe for real; add both to the end to end suite. From 16.5 reviews. (log: "16.5 review: the fake program folder has no space")
 - 16.8b (proposed): send a pane's opted in needs attention and exit to epic 11's webhooks through `NotifierPort` (payload event, project and pane name only, never text) once 11.4's webhook store is on main; the status event already carries the opt in. From 16.8. (log: "16.8: the webhook send for panes waits for epic 11's webhook story")
+- 16.9b (proposed, needs the user): a button "open this chat's session here" that switches the chat to its terminal through epic 3's handoff and runs the CLI's resume in a pane would run one CLI session in two processes; decide how it should behave first (the conflict note is shipped). From 16.9. (log: "16.9: the open this chat's session here button is an intent question")
 - 16.7 (proposed): closing a pane stops its process group only, so an interactive shell's background jobs (`cmd &`, stopped jobs) survive Close, Restart, Developer mode off and the server stopping; walk descendants or HUP the shell first. From 16.2 security review. (log: "16.2 review: a pane's POSIX tree kill signals only the shell's own process group")
 - 16.9 (proposed): a pane's pty is never paused under a flood, the screen mirror's memory grows with the terminal width, and a pane route's 403 comes after a bad id or body is refused. From 16.2 reviews. (log: "16.2 review: low findings, no pty backpressure")
 - 16.2 (proposed): a server killed hard leaves a pane whose program ignores hangup running on macOS and Windows; record each pane's pid and start time and sweep only those on the next start. From spike 16.1. (log: "Spike 16.1: a server killed hard leaves a pane")
@@ -799,6 +800,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-tracer-bullet-one-plain-shell-pane-in-developer-mode-end-to-end-plan.md`
   summary: 16.2 review: a pane's POSIX tree kill signals only the shell's own process group, so background jobs of an interactive shell outlive Close and Restart.
   evidence: security review; `process-tree.ts` `killGroup`, `terminal-pty/index.ts` `killTerminalTree`; the fixture's grandchild stays in the shell's group so no test covers it.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-developer-mode-gating-terminals-settings-and-the-per-chat-toggle-relationship-plan.md`
+  summary: 16.9: the open this chat's session here button is an intent question (one CLI session in two processes); the conflict note is shipped.
+  evidence: epic entry 9 text; epic 3's handoff gives one driver per chat, not per CLI session.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-pane-notifications-through-the-existing-notifier-opt-in-plan.md`
   summary: 16.8: the webhook send for panes waits for epic 11's webhook story (11.4 is not on main); the browser opt in is built.
   evidence: `NotifierPort` exists on main but the webhook store and the strict `WebhookPayload` are 11.4's.

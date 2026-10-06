@@ -436,6 +436,7 @@ async function listenAndAnnounce({
     agentDefaults: { models: core.agentModels, isAgentRegistered: (agentId) => agents.get(agentId) !== undefined },
     appShortcut,
     panes,
+    terminalsSettings: core.terminalsSettings,
     tabs,
   });
 

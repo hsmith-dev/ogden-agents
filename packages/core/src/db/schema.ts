@@ -354,3 +354,9 @@ export const localEndpointSettings = sqliteTable('local_endpoint_settings', {
   id: integer('id').primaryKey(),
   defaultEndpointId: text('default_endpoint_id'),
 });
+
+/** The install's Terminals settings (epic 16, story 16.9): one row of JSON, written on first change. Never terminal output. */
+export const terminalsSettings = sqliteTable('terminals_settings', {
+  id: integer('id').primaryKey(),
+  settings: text('settings').notNull(),
+});

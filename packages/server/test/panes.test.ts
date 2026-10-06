@@ -17,6 +17,7 @@ import {
   PaneLaunchersResponse,
   PaneResponse,
   PanesResponse,
+  TerminalsSettingsResponse,
   WorkspaceResponse,
   type Pane,
 } from '@ogden-agents/shared';
@@ -659,4 +660,139 @@ describe('a pane\'s notifications over the API (story 16.8)', () => {
     setup.server.core.installSettings.setDeveloperMode(false);
     expect((await patch({ notify: true })).status).toBe(403);
   }, 45_000);
+});
+
+describe('Terminals settings and Developer mode off with running panes (story 16.9)', () => {
+  const settingsUrl = (setup: Setup) => `${setup.server.url}${API_ROUTES.terminalSettings}`;
+  const putSettings = (setup: Setup, body: unknown) => fetch(settingsUrl(setup), { method: 'PUT', headers: jsonHeaders(setup.tab), body: JSON.stringify(body) });
+  const developerModeUrl = (setup: Setup) => `${setup.server.url}${API_ROUTES.developerMode}`;
+  const putDeveloperMode = (setup: Setup, body: unknown) => fetch(developerModeUrl(setup), { method: 'PUT', headers: jsonHeaders(setup.tab), body: JSON.stringify(body) });
+  const pidAlive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  };
+
+  it('the settings are Developer mode only, start with everything off, change part by part, and refuse bad input', async () => {
+    const off = await startPaneServer({ developerMode: false });
+    expect((await fetch(settingsUrl(off), { headers: off.tab.headers })).status).toBe(403);
+    expect((await putSettings(off, { hidden: true })).status).toBe(403);
+
+    const setup = await startPaneServer();
+    const got = await (await fetch(settingsUrl(setup), { headers: setup.tab.headers })).json();
+    expect(TerminalsSettingsResponse.parse(got).settings).toEqual({ notifyNeedsAttention: false, notifyExited: false, notifyLaunchers: [], passProxies: false, passSshAgent: false, launcherArgs: {}, hidden: false });
+    const saved = TerminalsSettingsResponse.parse(await (await putSettings(setup, { notifyLaunchers: ['codex'], launcherArgs: { codex: '--model big' } })).json()).settings;
+    expect(saved).toMatchObject({ notifyLaunchers: ['codex'], launcherArgs: { codex: '--model big' }, hidden: false });
+    expect(TerminalsSettingsResponse.parse(await (await putSettings(setup, { hidden: true })).json()).settings).toMatchObject({ hidden: true, launcherArgs: { codex: '--model big' } });
+    for (const bad of [{}, { hidden: 'x' }, { launcherArgs: { codex: 'a\u0007b' } }]) expect((await putSettings(setup, bad)).status, JSON.stringify(bad)).toBe(400);
+    expect((await fetch(settingsUrl(setup), { method: 'PUT', headers: jsonHeaders(setup.tab), body: 'not json' })).status).toBe(400);
+    // The arguments are the user's own text: in no log line.
+    expect(setup.lines.join('\n')).not.toContain('--model big');
+  }, 45_000);
+
+  it('proxies and the SSH agent reach a pane only when the user opted in, read at each start', async () => {
+    const proxy = 'http://user:pw-sentinel@proxy.invalid:3128';
+    process.env.HTTPS_PROXY = proxy;
+    process.env.SSH_AUTH_SOCK = '/tmp/ogden-sentinel.sock';
+    try {
+      const setup = await startPaneServer();
+      await openPane(setup);
+      await waitFor(() => existsSync(setup.record), 'the shell to start', 20_000);
+      expect(recordOf(setup).envNames).not.toEqual(expect.arrayContaining(['HTTPS_PROXY']));
+      expect(recordOf(setup).envNames).not.toContain('SSH_AUTH_SOCK');
+      rmSync(setup.record);
+      expect((await putSettings(setup, { passProxies: true })).status).toBe(200);
+      await openPane(setup);
+      await waitFor(() => existsSync(setup.record), 'the second shell to start', 20_000);
+      const names = recordOf(setup).envNames.map((n) => n.toUpperCase());
+      expect(names).toContain('HTTPS_PROXY');
+      expect(names).not.toContain('SSH_AUTH_SOCK');
+    } finally {
+      delete process.env.HTTPS_PROXY;
+      delete process.env.SSH_AUTH_SOCK;
+    }
+  }, 60_000);
+
+  it('turning Developer mode off with panes running asks first (409 panes_running); stop ends them and keeps them as stopped', async () => {
+    const setup = await startPaneServer({ shellFlags: ['--grandchild'] });
+    const pane = await openPane(setup);
+    await waitFor(() => existsSync(setup.record), 'the shell to start', 20_000);
+    const { pid, grandchild } = recordOf(setup);
+    const asked = await putDeveloperMode(setup, { developerMode: false });
+    expect(asked.status).toBe(409);
+    expect(ApiErrorBody.parse(await asked.json()).error).toMatchObject({ code: 'panes_running', details: { running: 1 }, message: expect.stringContaining('Stop it, or keep it running') });
+    expect(setup.server.core.installSettings.developerMode()).toBe(true);
+    expect(pidAlive(pid)).toBe(true);
+    expect((await putDeveloperMode(setup, { developerMode: false, panes: 'stop' })).status).toBe(200);
+    await waitFor(() => !pidAlive(pid) && !pidAlive(grandchild!), 'the pane and its child to stop', 20_000);
+    expect((await putDeveloperMode(setup, { developerMode: true })).status).toBe(200);
+    const listed = PanesResponse.parse(await (await fetch(panesUrl(setup), { headers: setup.tab.headers })).json());
+    expect(listed.panes.map((p) => [p.id, p.state])).toEqual([[pane.id, 'stopped']]);
+  }, 60_000);
+
+  it('keep leaves the programs running in the background, unreachable, and they are there when Developer mode is turned on again; with none running it just turns off', async () => {
+    const setup = await startPaneServer();
+    const pane = await openPane(setup);
+    const viewer = viewPane(setup, pane.id);
+    await viewer.opened;
+    await waitFor(() => viewer.state.output.includes('fake-shell-ready'), 'the prompt', 15_000);
+    viewer.type('pid\r');
+    await waitFor(() => /pid=\d+/.test(viewer.state.output), 'its pid', 15_000);
+    const pid = Number(/pid=(\d+)/.exec(viewer.state.output)![1]);
+    expect((await putDeveloperMode(setup, { developerMode: false, panes: 'keep' })).status).toBe(200);
+    expect((await fetch(panesUrl(setup), { headers: setup.tab.headers })).status).toBe(403);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(pidAlive(pid)).toBe(true);
+    expect((await putDeveloperMode(setup, { developerMode: true })).status).toBe(200);
+    const back = viewPane(setup, pane.id);
+    await back.opened;
+    back.type('echo still-running\r');
+    await waitFor(() => back.state.output.includes('still-running'), 'the kept shell to answer', 15_000);
+    // Nothing running: turning it off needs no choice.
+    const idle = await startPaneServer();
+    expect((await putDeveloperMode(idle, { developerMode: false })).status).toBe(200);
+  }, 90_000);
+
+  it('a launcher the user opted in carries the opt in on its status events', async () => {
+    const folder = makeFakeCliFolder(['codex']);
+    dirs.push(folder);
+    process.env.OGDEN_AGENTS_TEST_PANE_PATH = folder;
+    let setup: Setup;
+    try {
+      setup = await startPaneServer();
+    } finally {
+      delete process.env.OGDEN_AGENTS_TEST_PANE_PATH;
+    }
+    await putSettings(setup, { notifyLaunchers: ['codex'] });
+    const opened = PaneResponse.parse(await (await fetch(panesUrl(setup), { method: 'POST', headers: jsonHeaders(setup.tab), body: JSON.stringify({ cols: 100, rows: 30, launcherId: 'codex' }) })).json()).pane;
+    const viewer = viewPane(setup, opened.id);
+    await viewer.opened;
+    await waitFor(() => viewer.state.output.includes('fake-shell-ready'), 'the CLI to start', 20_000);
+    viewer.type('perm\r');
+    await waitFor(() => setup.server.core.events.readAfter(0).some((e) => e.type === 'terminal.pane_status_changed' && e.payload.status === 'needs_attention'), 'the question to be noticed', 20_000);
+    const change = setup.server.core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_status_changed').find((e) => e.payload.status === 'needs_attention')!;
+    expect(change.payload).toMatchObject({ notify: true });
+  }, 60_000);
+});
+
+describe('node-pty that fails to load (AD-19, story 16.9)', () => {
+  it('says why in plain words on the list and refuses a new pane with 409 terminal_unavailable; everything else carries on', async () => {
+    const lines: string[] = [];
+    const server = await startTestServer({ lines, loadPty: async () => ({ ok: false, reason: 'no prebuilt terminal for this platform', detail: 'Error: injected' }), paneShell: { file: process.execPath, args: [FAKE_SHELL] } });
+    servers.push(server);
+    const tab = await signIn(server);
+    const repo = tempDir('ogden-agents-repo-');
+    const { workspace } = WorkspaceResponse.parse(await (await fetch(`${server.url}${API_ROUTES.workspaces}`, { method: 'POST', headers: { ...tab.headers, 'content-type': 'application/json' }, body: JSON.stringify({ path: repo }) })).json());
+    server.core.installSettings.setDeveloperMode(true);
+    const setup: Setup = { server, tab, repo, wsId: workspace.id, lines, record: '' };
+    const listed = PanesResponse.parse(await (await fetch(panesUrl(setup), { headers: tab.headers })).json());
+    expect(listed.terminal).toEqual({ available: false, code: 'pty_unavailable', reason: "The terminal couldn't start on this computer: no prebuilt terminal for this platform" });
+    const refused = await fetch(panesUrl(setup), { method: 'POST', headers: jsonHeaders(tab), body: JSON.stringify({ cols: 80, rows: 24 }) });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error).toMatchObject({ code: 'terminal_unavailable', details: { terminal: { available: false, code: 'pty_unavailable' } } });
+    expect(PanesResponse.parse(await (await fetch(panesUrl(setup), { headers: tab.headers })).json()).panes).toEqual([]);
+  }, 30_000);
 });

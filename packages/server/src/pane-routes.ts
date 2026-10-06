@@ -5,7 +5,7 @@
  * never behind a BMad piece's guard (E16-R3). They carry no terminal text:
  * only each pane's state (AD-6, AD-16).
  */
-import { CoreError, DeveloperModeRequiredError, LauncherUnavailableError, NotFoundError, PaneLimitError, TerminalUnavailableError, ValidationError, type Panes } from '@ogden-agents/core';
+import { CoreError, DeveloperModeRequiredError, LauncherUnavailableError, NotFoundError, PaneLimitError, TerminalUnavailableError, terminalUnavailableReason, ValidationError, type Panes } from '@ogden-agents/core';
 import {
   API_ROUTES,
   ArrangePanesRequest,
@@ -80,7 +80,7 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
     try {
       const list = panes.list(id);
       const pty = await panes.available();
-      const terminal: SessionTerminal = pty.ok ? { available: true } : { available: false, code: 'pty_unavailable', reason: pty.reason };
+      const terminal: SessionTerminal = pty.ok ? { available: true } : { available: false, code: 'pty_unavailable', reason: terminalUnavailableReason.ptyUnavailable(pty.reason) };
       return c.json(PanesResponse.parse({ panes: list, layout: panes.layout(id), terminal, limits: { perProject: MAX_PANES_PER_PROJECT, perInstall: MAX_PANES_PER_INSTALL } }));
     } catch (error) {
       return refuse(c, error);
@@ -125,7 +125,7 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
     try {
       panes.arrange(id, body.value.layout);
       const pty = await panes.available();
-      const terminal: SessionTerminal = pty.ok ? { available: true } : { available: false, code: 'pty_unavailable', reason: pty.reason };
+      const terminal: SessionTerminal = pty.ok ? { available: true } : { available: false, code: 'pty_unavailable', reason: terminalUnavailableReason.ptyUnavailable(pty.reason) };
       return c.json(PanesResponse.parse({ panes: panes.list(id), layout: panes.layout(id), terminal, limits: { perProject: MAX_PANES_PER_PROJECT, perInstall: MAX_PANES_PER_INSTALL } }));
     } catch (error) {
       return refuse(c, error);

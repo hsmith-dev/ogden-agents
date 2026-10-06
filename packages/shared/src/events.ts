@@ -9,6 +9,8 @@ import {
   SettingsWhileWorkingChangedEvent,
   SettingsUpdateNoticeChangedEvent,
   SettingsUpdateNoticeChangedInput,
+  SettingsTerminalsChangedEvent,
+  SettingsTerminalsChangedInput,
   AppUpdateAvailableEvent,
   AppUpdateAvailableInput,
   AppUpdateRequestedEvent,
@@ -16,6 +18,7 @@ import {
   SettingsWhileWorkingChangedInput,
 } from './events-settings.js';
 
+export { SettingsTerminalsChangedEvent } from './events-settings.js';
 export { AppUpdateAvailableEvent, AppUpdateRequestedEvent, SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsUpdateNoticeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
 // Terminal pane events (epic 16): state only.
 import * as panes from './events-panes.js';
@@ -376,6 +379,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   runs.SettingsNotificationsChangedEvent,
   SettingsLocalEndpointsChangedEvent,
   SettingsUpdateNoticeChangedEvent,
+  SettingsTerminalsChangedEvent,
   AppUpdateAvailableEvent,
   AppUpdateRequestedEvent,
   panes.TerminalPaneOpenedEvent, panes.TerminalPaneStatusChangedEvent, panes.TerminalPaneExitedEvent, panes.TerminalPaneClosedEvent, panes.TerminalPaneRenamedEvent, panes.TerminalLayoutChangedEvent,
@@ -438,6 +442,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   runs.SettingsNotificationsChangedInput,
   SettingsLocalEndpointsChangedInput,
   SettingsUpdateNoticeChangedInput,
+  SettingsTerminalsChangedInput,
   AppUpdateAvailableInput,
   AppUpdateRequestedInput,
   panes.TerminalPaneOpenedInput, panes.TerminalPaneStatusChangedInput, panes.TerminalPaneExitedInput, panes.TerminalPaneClosedInput, panes.TerminalPaneRenamedInput, panes.TerminalLayoutChangedInput,

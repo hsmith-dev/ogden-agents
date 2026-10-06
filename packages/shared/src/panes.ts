@@ -270,3 +270,22 @@ export const PANE_CLOSE = {
   /** The pane was closed (the page does not reconnect). */
   closed: 4001,
 } as const;
+
+/** `GET` or `PUT` the Terminals settings (story 16.9): the install's. */
+export const TerminalsSettingsResponse = z.object({ settings: TerminalsSettings });
+export type TerminalsSettingsResponse = z.infer<typeof TerminalsSettingsResponse>;
+
+/** `PUT`: the fields to change (each optional, at least one); the rest stay. */
+export const UpdateTerminalsSettingsRequest = z
+  .object({
+    notifyNeedsAttention: z.boolean(),
+    notifyExited: z.boolean(),
+    notifyLaunchers: z.array(PaneLauncherId).max(32),
+    passProxies: z.boolean(),
+    passSshAgent: z.boolean(),
+    launcherArgs: z.record(PaneLauncherId, PaneLauncherArgs),
+    hidden: z.boolean(),
+  })
+  .partial()
+  .refine((request) => Object.keys(request).length > 0, 'a setting to change');
+export type UpdateTerminalsSettingsRequest = z.infer<typeof UpdateTerminalsSettingsRequest>;

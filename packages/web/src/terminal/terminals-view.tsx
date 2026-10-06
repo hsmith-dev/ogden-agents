@@ -12,6 +12,7 @@ import { LauncherList } from './launcher-list';
 import { LayoutStage } from './layout-tree';
 import { PaneView } from './pane-view';
 import { panesQueryKey, useLaunchers, usePaneActions, usePanes } from './panes-api';
+import { useTerminalsSettings } from './terminals-settings';
 import { STATUS_WORDS, statusOfTab } from './pane-status-words';
 
 /** What the Terminals page says without Developer mode. */
@@ -36,6 +37,7 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
   const panes = usePanes(wsId, developerMode);
   const { open, close, rename, arrange, notify, error: mutationError } = usePaneActions(wsId);
   const launchers = useLaunchers(developerMode);
+  const settings = useTerminalsSettings(developerMode);
   // A pane's status and the layout change through the event log: every tab follows (AD-7).
   useEventInvalidation((event) => (event.type.startsWith('terminal.') && event.workspaceId === wsId ? [panesQueryKey(wsId)] : []));
   const [renamingTab, setRenamingTab] = useState<string | undefined>(undefined);
@@ -58,6 +60,14 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
     return (
       <PageBody data-testid="terminals-page">
         <Notice data-testid="terminals-developer-mode">{DEVELOPER_MODE_NEEDED}</Notice>
+      </PageBody>
+    );
+  }
+
+  if (settings.data?.hidden === true) {
+    return (
+      <PageBody data-testid="terminals-page">
+        <Notice data-testid="terminals-hidden-notice">Terminals are hidden. Turn them on again in Settings, then Terminals.</Notice>
       </PageBody>
     );
   }
@@ -149,9 +159,13 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
         onStart={startProgram}
         disabled={open.isPending || unavailable !== undefined || full}
         failed={launchers.list.isError || launchers.detect.isError}
+        defaults={settings.data?.launcherArgs}
       />
       <Text variant="caption" className="text-muted-foreground" data-testid="status-guess">
         Working, needs attention and idle are a guess from what a program prints. Ogden Agents cannot know what it is doing.
+      </Text>
+      <Text variant="caption" className="text-muted-foreground" data-testid="terminals-chat-note">
+        A chat's own Terminal switch is separate. Opening the same session here while Ogden Agents also drives it in the chat can make the two disagree.
       </Text>
       <Text variant="caption" className="text-muted-foreground">
         Each terminal runs your own shell in this project's folder. It stops when you close it or when Ogden Agents stops.

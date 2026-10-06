@@ -27,6 +27,7 @@ export function LauncherList({
   onStart,
   disabled,
   failed,
+  defaults = {},
 }: {
   statuses: readonly PaneLauncherStatus[];
   detecting: boolean;
@@ -34,6 +35,8 @@ export function LauncherList({
   onStart: (launcherId: string, args: string) => void;
   disabled: boolean;
   failed: boolean;
+  /** Each program's own arguments from Settings, Terminals: what its field starts with. */
+  defaults?: Readonly<Record<string, string>>;
 }) {
   const [args, setArgs] = useState<Record<string, string>>({});
   const programs = statuses.filter((status) => status.launcher.kind === 'cli');
@@ -67,11 +70,11 @@ export function LauncherList({
                     data-testid="launcher-args"
                     placeholder="Arguments (optional)"
                     maxLength={MAX_ARGS_LENGTH}
-                    value={args[launcher.id] ?? ''}
+                    value={args[launcher.id] ?? defaults[launcher.id] ?? ''}
                     onChange={(event) => setArgs((current) => ({ ...current, [launcher.id]: event.target.value }))}
                     className="h-(--control-height) min-w-40 flex-1 rounded-md border border-border bg-transparent px-2 text-label"
                   />
-                  <Button size="sm" aria-label={`Start ${launcher.label}`} disabled={disabled || detecting} onClick={() => onStart(launcher.id, args[launcher.id] ?? '')} data-testid="launcher-start">
+                  <Button size="sm" aria-label={`Start ${launcher.label}`} disabled={disabled || detecting} onClick={() => onStart(launcher.id, args[launcher.id] ?? defaults[launcher.id] ?? '')} data-testid="launcher-start">
                     Start
                   </Button>
                 </>

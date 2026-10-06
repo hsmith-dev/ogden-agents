@@ -23,6 +23,16 @@ export interface AgentWiring {
    * {@link agentHomeDir}: `start()` sets it only in chat processes.
    */
   setup?: AgentSetupPort | undefined;
+  /**
+   * For an agent whose process needs more than its own key and home from the
+   * server, decided per start (epic 14: the Local model's endpoint, its
+   * generated config and the endpoint's key): called before every start and
+   * reopen, resolves with the variables to add to that process's environment
+   * (they win over the ones core passes, and are never logged). Rejects with
+   * an `AgentError` in plain words when the chat can't start (the endpoint
+   * is not running). Absent: nothing is added.
+   */
+  prepareChat?: ((input: { env: Readonly<Record<string, string>> }) => Promise<Record<string, string>>) | undefined;
 }
 
 /**

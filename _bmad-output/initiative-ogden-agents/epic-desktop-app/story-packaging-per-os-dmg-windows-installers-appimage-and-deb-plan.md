@@ -3,13 +3,13 @@ title: 'Packaging per OS: dmg, Windows installers, AppImage and deb'
 type: 'feature'
 ticket: '8'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '2be227091fe4a1f16e7507751c2f19173d732b73'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-desktop-app/epic-desktop-app.md'
@@ -52,8 +52,8 @@ context:
 **Execution:**
 - [x] bundle config, icon, test key script, artifact check
 - [x] three-leg `app` job with dmg mount, silent install, Rosetta smoke
-- [ ] CI green on all three legs; artifacts downloadable from the run
-- [ ] review and triage
+- [x] CI green on all three legs (runs 37318872899 and the pull request's rerun); artifacts downloadable from the run
+- [x] review and triage
 
 **Acceptance Criteria:**
 - Given a pull request touching the desktop app, each leg uploads its installer and update artifacts, and the app installed from them starts and passes the smoke and lifecycle tests.
@@ -67,6 +67,14 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (security and correctness, self-review): medium 2, low 1.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | A stored updater key could end up in the repository or a build log | medium | patch | The test key is generated per run in the job's temp folder, never committed; the committed config builds no updater artifacts (tested). Masking was added in 13.10. |
+| 2 | An MSI next to the NSIS installer would remove it (spike 13.1) | medium | patch | NSIS only; the artifact check fails if an MSI is built. |
+| 3 | The macOS minimum was a placeholder (11.0) | low | patch | 13.5, the lowest macOS Node 24 runs on; tested in the config test. |
 
 ## Verification
 

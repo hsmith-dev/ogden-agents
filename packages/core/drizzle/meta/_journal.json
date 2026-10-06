@@ -152,8 +152,15 @@
     {
       "idx": 21,
       "version": "6",
-      "when": 1791236777277,
-      "tag": "0021_look_back_offers",
+      "when": 1791240725034,
+      "tag": "0021_local_endpoints",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1791245483489,
+      "tag": "0022_look_back_offers",
       "breakpoints": true
     }
   ]

@@ -296,6 +296,17 @@ function Board({
   const commitRef = buildFailure?.commitRef;
   // Story 5.8: a ticket whose build waits for a slot says Queued on its card.
   const runs = useWorkspaceRuns(wsId, builds !== undefined);
+  // The latest run of each ticket that failed its checks (runs come newest first): its failing check, in words (story 11.2).
+  const failures = useMemo(() => {
+    const seen = new Set<string>();
+    const found = new Map<string, string>();
+    for (const run of runs.data?.runs ?? []) {
+      if (seen.has(run.ticketRef)) continue;
+      seen.add(run.ticketRef);
+      if (run.outcome === 'failed' && run.decision === null && run.reason !== null) found.set(run.ticketRef, run.reason);
+    }
+    return found;
+  }, [runs.data]);
   const queued = useMemo(() => new Set((runs.data?.queue ?? []).map((entry) => entry.ticketRef)), [runs.data]);
   const epics = useMemo(() => groupBoard(data, showDropped), [data, showDropped]);
   // One status per card, recomputed only when the tickets change, so a highlight re-renders one card.
@@ -360,7 +371,7 @@ function Board({
         <ul aria-label={BOARD_EPICS_LABEL} className="m-0 flex list-none flex-col gap-8 p-0">
           {epics.map((epic) => (
             <li key={epic.slug} className="min-w-0">
-              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} lookBack={lookBackControls} />
+              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} failures={failures} lookBack={lookBackControls} />
             </li>
           ))}
         </ul>

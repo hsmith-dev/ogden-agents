@@ -28,7 +28,7 @@ export const API_ERROR_CODES = [
   'terminal_unavailable',
   /** A chat message was refused: the session's terminal drives it (409, story 3.2, AD-6). */
   'driver_is_terminal',
-  /** Skip all was asked for while Developer mode is off (403): nothing changed. */
+  /** Skip all, or a terminal pane (epic 16), was asked for while Developer mode is off (403): nothing changed. */
   'developer_mode_required',
   /** Skip all was asked for without the user's confirmation of its warning (400): nothing changed. */
   'confirmation_required',
@@ -57,6 +57,8 @@ export const API_ERROR_CODES = [
    * `details.action` is `trust_project`.
    */
   'project_not_trusted',
+  /** A terminal pane would pass the limit of panes in a project or in this install (409; epic 16). `details` says which limit and how many. */
+  'pane_limit_reached',
   /** uv's status or install could not be read or started (500). */
   'toolchain_unavailable',
   /** A route or socket request whose lane has not shipped yet (501; the story 2.3 stubs). */
@@ -176,6 +178,8 @@ export const API_ERROR_CODES = [
   'checkout_busy',
   /** Save the lessons: the project has no AGENTS.md that git tracks. */
   'agents_file_missing',
+  /** A Local model endpoint on a host that is not this computer was used before the user confirmed it, or its address changed since (409; epic 14 story 14.3). Nothing was called. */
+  'endpoint_confirmation_required',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

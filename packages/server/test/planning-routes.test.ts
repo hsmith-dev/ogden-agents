@@ -350,7 +350,7 @@ describe('Plan and Board routes (story 4.1)', () => {
     expect(catalogBody.entryAction).toBeNull();
     expect(catalogBody.modules).toEqual([]);
     // The fixture's config script defines `load_central_config` (entry 4.11), so it has the ticket tree.
-    expect(catalogBody.capabilities).toEqual({ plain_labels: true, ticket_tree: true });
+    expect(catalogBody.capabilities).toEqual({ plain_labels: true, ticket_tree: true, look_back: false });
 
     // Unknown and malformed skills create nothing.
     const unknown = await request(server, tab, 'POST', start, { skill: 'bmad-nothing' });

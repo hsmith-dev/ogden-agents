@@ -289,7 +289,7 @@ describe('the shipped files', () => {
     expect(SKILL_LABELS.entry === null || SKILL_NAME_PATTERN.test(SKILL_LABELS.entry)).toBe(true);
     for (const [name, labels] of Object.entries(SKILL_LABELS.skills)) {
       expect(name).toMatch(SKILL_NAME_PATTERN);
-      expect(Object.keys(labels).every((key) => ['label', 'description', 'group', 'next'].includes(key)), name).toBe(true);
+      expect(Object.keys(labels).every((key) => ['label', 'description', 'group', 'next', 'scope', 'nexts'].includes(key)), name).toBe(true);
       expect(typeof labels.label, name).toBe('string');
     }
   });

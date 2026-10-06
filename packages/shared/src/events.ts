@@ -17,6 +17,12 @@ import {
 } from './events-settings.js';
 
 export { AppUpdateAvailableEvent, AppUpdateRequestedEvent, SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsUpdateNoticeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
+// Terminal pane events (epic 16): state only.
+import * as panes from './events-panes.js';
+
+export {
+  TerminalLayoutChangedEvent, TerminalPaneClosedEvent, TerminalPaneExitedEvent, TerminalPaneOpenedEvent, TerminalPaneRenamedEvent, TerminalPaneStatusChangedEvent,
+} from './events-panes.js';
 // The Local model's endpoint events (epic 14 story 14.3).
 import { SettingsLocalEndpointsChangedEvent, SettingsLocalEndpointsChangedInput } from './events-local.js';
 
@@ -380,6 +386,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SettingsUpdateNoticeChangedEvent,
   AppUpdateAvailableEvent,
   AppUpdateRequestedEvent,
+  panes.TerminalPaneOpenedEvent, panes.TerminalPaneStatusChangedEvent, panes.TerminalPaneExitedEvent, panes.TerminalPaneClosedEvent, panes.TerminalPaneRenamedEvent, panes.TerminalLayoutChangedEvent,
 ]);
 export type CoreEvent = z.infer<typeof CoreEvent>;
 export type CoreEventType = CoreEvent['type'];
@@ -443,6 +450,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SettingsUpdateNoticeChangedInput,
   AppUpdateAvailableInput,
   AppUpdateRequestedInput,
+  panes.TerminalPaneOpenedInput, panes.TerminalPaneStatusChangedInput, panes.TerminalPaneExitedInput, panes.TerminalPaneClosedInput, panes.TerminalPaneRenamedInput, panes.TerminalLayoutChangedInput,
 ]);
 export type NewCoreEvent = z.infer<typeof NewCoreEvent>;
 

@@ -53,9 +53,12 @@ export interface MemoryBmadCatalog extends BmadCatalogPort {
 /** The version the memory catalog says Ogden Agents bundles. */
 export const MEMORY_BUNDLED_BMAD_VERSION = '7.0.0';
 
+/** A repo's catalog beyond its skills: capabilities left out are present (epic 7 added `look_back`). */
+export type MemoryCatalogRest = Partial<Omit<Catalog, 'skills' | 'capabilities'>> & { capabilities?: Partial<BmadCapabilities> };
+
 export interface MemoryBmadCatalogOptions {
   /** Each repo path's catalog beyond its skills (modules, agents, entry action, capabilities). */
-  catalogs?: Readonly<Record<string, Partial<Omit<Catalog, 'skills'>>>>;
+  catalogs?: Readonly<Record<string, MemoryCatalogRest>>;
   /** Each repo path's setup status before any `setup`; any other path is `not_set_up`. */
   setup?: Readonly<Record<string, BmadSetupStatus>>;
   /** `setup` rejects with this error (a setup that fails). */
@@ -115,11 +118,11 @@ export function createMemoryBmadCatalog(
     const named = missing.get(repoPath);
     if (named !== undefined) return named;
     const capabilities = catalogs.get(repoPath)?.capabilities;
-    return new Set(capabilities === undefined ? [] : BMAD_CAPABILITIES.filter((capability) => !capabilities[capability]));
+    return new Set(capabilities === undefined ? [] : BMAD_CAPABILITIES.filter((capability) => capabilities[capability] === false));
   };
   const capabilitiesOf = (repoPath: string): BmadCapabilities => {
     const lacks = missingOf(repoPath);
-    return { plain_labels: !lacks.has('plain_labels'), ticket_tree: !lacks.has('ticket_tree') };
+    return { plain_labels: !lacks.has('plain_labels'), ticket_tree: !lacks.has('ticket_tree'), look_back: !lacks.has('look_back') };
   };
   const statusOf = (repoPath: string) => structuredClone(setups.get(repoPath) ?? notSetUp());
   const scripts = new Map<string, string | undefined>(Object.entries(options.scripts ?? {}));

@@ -40,9 +40,9 @@ describe('catalog-memory: the catalog and setup (story 4.2)', () => {
     expect(answer.skills.map((skill) => skill.name)).toEqual(['bmad-spec', 'bmad-ticket']);
     expect(answer.skills[0]).toEqual({ name: 'bmad-spec', description: 'Spec.', label: null, group: null, module: null, installedAt: null, next: null, scope: null, nexts: [] });
     expect(answer.entryAction).toBe('bmad-spec');
-    expect(answer.capabilities).toEqual({ plain_labels: true, ticket_tree: true });
+    expect(answer.capabilities).toEqual({ plain_labels: true, ticket_tree: true, look_back: true });
     // Entry 4.11: a repo lacks no capability unless told (so every board and catalog works).
-    expect(await catalog.catalog('/other')).toEqual({ modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: true, ticket_tree: true } });
+    expect(await catalog.catalog('/other')).toEqual({ modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: true, ticket_tree: true, look_back: true } });
     expect(catalog.catalogCalls).toEqual(['/repo', '/other']);
   });
 
@@ -90,7 +90,7 @@ describe('catalog-memory: reduced mode and Upgrade (entry 4.11)', () => {
     expect(await catalog.missingCapabilities('/old', [])).toEqual([]);
     expect(await catalog.missingCapabilities('/labelless', ['plain_labels', 'ticket_tree'])).toEqual(['plain_labels']);
     expect(await catalog.missingCapabilities('/current', ['plain_labels', 'ticket_tree'])).toEqual([]);
-    expect((await catalog.catalog('/old')).capabilities).toEqual({ plain_labels: false, ticket_tree: false });
+    expect((await catalog.catalog('/old')).capabilities).toEqual({ plain_labels: false, ticket_tree: false, look_back: true });
     expect(catalog.capabilityCalls[0]).toEqual(['/old', ['ticket_tree', 'plain_labels']]);
   });
 
@@ -115,7 +115,7 @@ describe('catalog-memory: reduced mode and Upgrade (entry 4.11)', () => {
 describe('bmad-catalog without a repo or the script runner (story 4.2)', () => {
   it('the catalog of a missing repo is empty; setup without the script runner rejects (story 4.3)', async () => {
     const real = createBmadCatalog();
-    expect(await real.catalog('/no/such/repo')).toEqual({ modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false } });
+    expect(await real.catalog('/no/such/repo')).toEqual({ modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false, look_back: false } });
     await expect(real.setupStatus('/no/such/repo')).rejects.toThrow(/4\.3/);
     await expect(real.setup('/no/such/repo', () => {})).rejects.toThrow(/4\.3/);
   });

@@ -10,11 +10,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { ptyLoads, send, withTerminalChat } from './chat-server.js';
 
-/** The header's project tabs: exactly Chats, marked as the current page. */
+/** The header's project tabs: no BMad piece's tab, so Chats, marked as the current page, and (these tests run in Developer mode) Terminals (epic 16). */
 async function expectChatsTabOnly(page: Page) {
   const nav = page.getByRole('navigation', { name: 'Project sections' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('link')).toHaveCount(1);
+  await expect(nav.getByRole('link')).toHaveText(['Chats', 'Terminals']);
   const chats = nav.getByRole('link', { name: 'Chats' });
   await expect(chats).toHaveAttribute('aria-current', 'page');
 }

@@ -31,6 +31,12 @@ export const OPENCODE_CONFIG_ENV = 'OPENCODE_CONFIG';
  */
 export const ENDPOINT_KEY_ENV = 'OGDEN_ENDPOINT_KEY';
 
+/**
+ * Where the endpoint is, for Ogden's own watch over a running chat (story 14.6). Not a secret and ignored by the harness;
+ * the key for the same endpoint is `OGDEN_ENDPOINT_KEY`.
+ */
+export const ENDPOINT_URL_ENV = 'OGDEN_ENDPOINT_URL';
+
 /** What the config's `apiKey` says: the harness reads the variable itself. */
 export const ENDPOINT_KEY_REFERENCE = `{env:${ENDPOINT_KEY_ENV}}`;
 

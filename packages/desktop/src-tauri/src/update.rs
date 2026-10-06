@@ -31,6 +31,9 @@ static READY: Mutex<Option<(Update, Vec<u8>)>> = Mutex::new(None);
 pub enum Outcome {
     /// This build has no updater key (an unsigned release): nothing to check.
     Disabled,
+    /// A Linux install that is not an AppImage (the `.deb`): updated by downloading the newest version.
+    #[allow(dead_code)]
+    NotSelfUpdating,
     UpToDate(String),
     Ready(String),
     Failed(String),
@@ -87,6 +90,13 @@ fn percent_decode(s: &str) -> String {
 
 /// Checks the user's channel, and when there is a newer version, downloads and verifies it.
 pub async fn check(app: &AppHandle) -> Outcome {
+    // Linux: the updater replaces only an AppImage (the file `APPIMAGE` names). An install by the package
+    // manager (the .deb) is updated by downloading the newest version, so it does not check (story 13.15).
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("APPIMAGE").is_none() {
+        report("update_not_appimage", json!({}));
+        return Outcome::NotSelfUpdating;
+    }
     let config = plugin_config(app);
     if config["pubkey"].as_str().unwrap_or("").trim().is_empty() {
         report("update_disabled", json!({ "pluginConfig": config.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()) }));
@@ -208,6 +218,7 @@ pub async fn check_for_user(app: AppHandle) {
     let outcome = check(&app).await;
     let (text, kind) = match outcome {
         Outcome::Disabled => ("This build of Ogden Agents does not update itself. Download the newest version from the releases page.".to_string(), MessageDialogKind::Info),
+        Outcome::NotSelfUpdating => ("This install of Ogden Agents is updated through your package manager or by downloading the newest version from the releases page: github.com/hsmith-dev/ogden-agents/releases/latest".to_string(), MessageDialogKind::Info),
         Outcome::UpToDate(v) => (format!("Ogden Agents {v} is up to date."), MessageDialogKind::Info),
         Outcome::Ready(v) => (format!("Ogden Agents {v} is ready. Choose Restart to update in the app."), MessageDialogKind::Info),
         Outcome::Failed(why) => (format!("Ogden Agents could not check for updates. {why}"), MessageDialogKind::Warning),

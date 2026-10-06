@@ -92,6 +92,7 @@ vi.mock('@xterm/xterm', () => ({
     cols = 80;
     rows = 24;
     input: HTMLTextAreaElement | undefined;
+    unicode = { activeVersion: '6' };
     loadAddon() {}
     open(element: HTMLElement) {
       this.input = document.createElement('textarea');
@@ -113,6 +114,7 @@ vi.mock('@xterm/xterm', () => ({
   },
 }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
+vi.mock('@xterm/addon-unicode11', () => ({ Unicode11Addon: class {} }));
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
 vi.mock('../src/terminal/terminal-socket', () => ({
   connectTerminal: () => {

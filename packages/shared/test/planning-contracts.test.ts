@@ -93,7 +93,7 @@ describe('the catalog (story 4.2)', () => {
     expect(CatalogResponse.parse(catalog).skills[0]!.label).toBeNull();
     expect(CatalogResponse.safeParse({ ...catalog, capabilities: { plain_labels: true } }).success).toBe(false);
     expect(CatalogResponse.safeParse({ ...catalog, entryAction: 'Not A Skill' }).success).toBe(false);
-    expect(BMAD_CAPABILITIES).toEqual(['plain_labels', 'ticket_tree']);
+    expect(BMAD_CAPABILITIES).toEqual(['plain_labels', 'ticket_tree', 'look_back']);
     for (const capability of BMAD_CAPABILITIES) expect(BMAD_CAPABILITY_REDUCED_TEXT[capability]).toMatch(/^[A-Z].*\.$/);
   });
 
@@ -105,6 +105,13 @@ describe('the catalog (story 4.2)', () => {
     expect(catalogGroupRank(null)).toBe(6);
     expect(catalogGroupLabel('research')).toBe('Ideas and research');
     expect(catalogGroupLabel('mystery')).toBe('Other');
+  });
+
+  it('groupCatalogSkills leaves an epic-scoped skill out of Plan home (epic 7)', () => {
+    const look = CatalogSkill.parse({ name: 'bmad-retrospective', description: 'x', label: 'Look back on this epic', group: 'checking', scope: 'epic' });
+    const plain = CatalogSkill.parse({ name: 'bmad-code-review', description: 'y', group: 'checking' });
+    expect(groupCatalogSkills([look, plain]).map((group) => group.skills.map((skill) => skill.name))).toEqual([['bmad-code-review']]);
+    expect(groupCatalogSkills([look])).toEqual([]);
   });
 
   it('groupCatalogSkills groups in the UX order, keeps each group in catalog order, and puts unknown and missing last as Other (story 4.6)', () => {

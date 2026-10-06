@@ -41,7 +41,7 @@ describe('the Tauri config', () => {
     expect(JSON.stringify(config)).not.toContain('dangerousInsecureTransportProtocol');
     expect(config.plugins.updater.windows.installMode).toBe('passive');
     expect(config.bundle.externalBin).toEqual(['binaries/ogden-node']);
-    expect(config.bundle.linux.deb.depends).toContain('libwebkit2gtk-4.1-0');
+    expect(config.bundle.linux.deb.depends).toEqual(expect.arrayContaining(['libwebkit2gtk-4.1-0', 'libsecret-1-0']));
   });
 
   it('has no window of its own, no global Tauri object and no remote IPC access', () => {

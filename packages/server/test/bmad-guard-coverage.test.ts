@@ -54,6 +54,13 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
   // The script trust (story 4.2): asked before or right after a script-running piece is turned on, never revoked by turning one off.
   `PUT ${API_ROUTES.workspaceBmadScriptTrust}`,
+  // Terminal panes (epic 16): Developer mode, enforced by core on every call, serves no BMad piece (E16-R3).
+  `GET ${API_ROUTES.workspacePanes}`,
+  `POST ${API_ROUTES.workspacePanes}`,
+  `DELETE ${API_ROUTES.workspacePane}`,
+  `PUT ${API_ROUTES.workspacePaneLayout}`,
+  `PATCH ${API_ROUTES.workspacePane}`,
+  `POST ${API_ROUTES.workspacePaneRestart}`,
 ];
 
 /** The BMad-named routes that serve projects with BMad off (story 10.2) or the whole install (story 4.14): never guarded, by design. */

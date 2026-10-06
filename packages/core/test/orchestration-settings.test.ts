@@ -166,7 +166,7 @@ describe('the Orchestration piece', () => {
   });
 });
 
-describe('migration 0024', () => {
+describe('the orchestration contracts migration', () => {
   const drizzle = join(import.meta.dirname, '..', 'drizzle');
   const tables = (db: ReturnType<typeof openDatabase>) => db.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'orchestration_%' ORDER BY name").all();
 
@@ -190,8 +190,8 @@ describe('migration 0024', () => {
     const old = join(tempDir(), 'drizzle');
     mkdirSync(join(old, 'meta'), { recursive: true });
     const journal = JSON.parse(readFileSync(join(drizzle, 'meta', '_journal.json'), 'utf8')) as { entries: Array<{ idx: number; tag: string }> };
-    const last = journal.entries.at(-1)!;
-    expect(last.tag).toBe('0024_orchestration_contracts');
+    const last = journal.entries.find((entry) => entry.tag.endsWith('_orchestration_contracts'))!;
+    expect(last).toBeDefined();
     const earlier = { ...journal, entries: journal.entries.filter((entry) => entry.idx < last.idx) };
     for (const entry of earlier.entries) cpSync(join(drizzle, `${entry.tag}.sql`), join(old, `${entry.tag}.sql`));
     writeFileSync(join(old, 'meta', '_journal.json'), JSON.stringify(earlier));

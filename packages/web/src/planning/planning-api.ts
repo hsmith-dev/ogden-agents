@@ -6,7 +6,10 @@ import {
   BmadSourceResponse,
   CatalogResponse,
   DOCUMENT_LOAD_FAILED,
+  ADD_LESSONS_FAILED,
   LOOK_BACK_FAILED,
+  SAVE_LESSONS_FAILED,
+  SaveLessonsResponse,
   LookBackOffersResponse,
   DocumentResponse,
   MarkTicketResponse,
@@ -57,6 +60,22 @@ export async function startPlanningSession(wsId: string, skill: string, idea?: s
 export async function startLookBack(wsId: string, epic: string, auth: Auth = tabAuth): Promise<Session> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceEpicLookBack, { wsId, epic }), { method: 'POST' }, LOOK_BACK_FAILED);
   return SessionResponse.parse(json).session;
+}
+
+/**
+ * `POST /api/v1/workspaces/:wsId/epics/:epic/retrospective/sessions` (story
+ * 7.5): a planning session on one of the retrospective's next steps, with the
+ * epic's retrospective file as its argument.
+ */
+export async function startRetrospectiveStep(wsId: string, epic: string, skill: string, auth: Auth = tabAuth): Promise<Session> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceRetrospectiveSessions, { wsId, epic }), postJson({ skill }), ADD_LESSONS_FAILED);
+  return SessionResponse.parse(json).session;
+}
+
+/** `POST /api/v1/workspaces/:wsId/epics/:epic/retrospective/save` (story 7.5): Save the lessons for later builds, one local commit. */
+export async function saveLessons(wsId: string, epic: string, auth: Auth = tabAuth): Promise<SaveLessonsResponse> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceRetrospectiveSave, { wsId, epic }), { method: 'POST' }, SAVE_LESSONS_FAILED);
+  return SaveLessonsResponse.parse(json);
 }
 
 /** `GET /api/v1/workspaces/:wsId/look-back-offers`: the epics whose finished-epic offer was answered with Not now (story 7.4). */

@@ -113,13 +113,16 @@ export function registerPaneSocket(app: Hono, { panes, log, tabs, now = Date.now
         log.info('terminal pane viewer attached', { paneId, waited: size === undefined });
         if (size !== undefined) target.resize(size.cols, size.rows);
         else sendFrame(ws, { type: 'size', cols: target.size.cols, rows: target.size.rows });
-        sendFrame(ws, { type: 'state', state: target.pane.state });
+        sendFrame(ws, { type: 'state', state: target.pane.state, status: target.pane.status });
+        let lastState = target.pane.state;
         if (target.pane.state === 'exited') sendFrame(ws, { type: 'exit', exitCode: target.pane.exitCode });
         unsubscribes.push(
           target.onSize(({ cols, rows }) => sendFrame(ws, { type: 'size', cols, rows })),
           target.onState((pane) => {
-            sendFrame(ws, { type: 'state', state: pane.state });
-            if (pane.state === 'exited') sendFrame(ws, { type: 'exit', exitCode: pane.exitCode });
+            sendFrame(ws, { type: 'state', state: pane.state, status: pane.status });
+            // The exit once, when the state becomes exited: a later status change does not repeat it.
+            if (pane.state === 'exited' && lastState !== 'exited') sendFrame(ws, { type: 'exit', exitCode: pane.exitCode });
+            lastState = pane.state;
           }),
           target.onClose(() => close(ws, PANE_CLOSE.closed, 'closed')),
         );

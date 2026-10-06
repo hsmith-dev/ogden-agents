@@ -1,6 +1,7 @@
 import type { Pane, PaneId, PaneLayout, PanePlacement } from '@ogden-agents/shared';
 import { useEffect, useRef, useState } from 'react';
 import { isApiError } from '@/api/http';
+import { useEventInvalidation } from '@/events/use-event-invalidation';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { PageBody } from '@/ui/page';
@@ -10,7 +11,9 @@ import { MAX_NAME_LENGTH, neighbour, withActiveTab, withRatio, withTabRoot, with
 import { LauncherList } from './launcher-list';
 import { LayoutStage } from './layout-tree';
 import { PaneView } from './pane-view';
-import { useLaunchers, usePaneActions, usePanes } from './panes-api';
+import { panesQueryKey, useLaunchers, usePaneActions, usePanes } from './panes-api';
+import { useTerminalsSettings } from './terminals-settings';
+import { STATUS_WORDS, statusOfTab } from './pane-status-words';
 
 /** What the Terminals page says without Developer mode. */
 export const DEVELOPER_MODE_NEEDED = 'Terminals are for Developer mode. Turn it on in Settings, then Appearance.';
@@ -32,8 +35,11 @@ const FOCUS_KEYS: Readonly<Record<string, FocusDirection>> = { ArrowLeft: 'left'
  */
 export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId: string; developerMode: boolean; screenReaderMode: boolean }) {
   const panes = usePanes(wsId, developerMode);
-  const { open, close, rename, arrange, error: mutationError } = usePaneActions(wsId);
+  const { open, close, rename, arrange, notify, error: mutationError } = usePaneActions(wsId);
   const launchers = useLaunchers(developerMode);
+  const settings = useTerminalsSettings(developerMode);
+  // A pane's status and the layout change through the event log: every tab follows (AD-7).
+  useEventInvalidation((event) => (event.type.startsWith('terminal.') && event.workspaceId === wsId ? [panesQueryKey(wsId)] : []));
   const [renamingTab, setRenamingTab] = useState<string | undefined>(undefined);
   /** The pane that takes keyboard focus once it has loaded: only one the user just opened. */
   const [focusId, setFocusId] = useState<string | undefined>(undefined);
@@ -54,6 +60,14 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
     return (
       <PageBody data-testid="terminals-page">
         <Notice data-testid="terminals-developer-mode">{DEVELOPER_MODE_NEEDED}</Notice>
+      </PageBody>
+    );
+  }
+
+  if (settings.data?.hidden === true) {
+    return (
+      <PageBody data-testid="terminals-page">
+        <Notice data-testid="terminals-hidden-notice">Terminals are hidden. Turn them on again in Settings, then Terminals.</Notice>
       </PageBody>
     );
   }
@@ -125,6 +139,11 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
                 onDoubleClick={() => setRenamingTab(tab.id)}
               >
                 {tab.title}
+                {statusOfTab(tab.root, byId) === 'needs_attention' ? (
+                  <span data-testid="tab-attention" className="ml-2 text-foreground">
+                    {STATUS_WORDS.needs_attention}
+                  </span>
+                ) : null}
               </button>
             ),
           )}
@@ -140,7 +159,14 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
         onStart={startProgram}
         disabled={open.isPending || unavailable !== undefined || full}
         failed={launchers.list.isError || launchers.detect.isError}
+        defaults={settings.data?.launcherArgs}
       />
+      <Text variant="caption" className="text-muted-foreground" data-testid="status-guess">
+        Working, needs attention and idle are a guess from what a program prints. Ogden Agents cannot know what it is doing.
+      </Text>
+      <Text variant="caption" className="text-muted-foreground" data-testid="terminals-chat-note">
+        A chat's own Terminal switch is separate. Opening the same session here while Ogden Agents also drives it in the chat can make the two disagree.
+      </Text>
       <Text variant="caption" className="text-muted-foreground">
         Each terminal runs your own shell in this project's folder. It stops when you close it or when Ogden Agents stops.
       </Text>
@@ -179,7 +205,9 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
                   onClose={(id) => close.mutate(id)}
                   onSplit={(id, direction) => openPane({ kind: 'split', paneId: id as PaneId, direction })}
                   focusOnOpen={pane.id === focusId}
+                  resumeHint={launchers.list.data?.launchers.find((one) => one.launcher.id === pane.launcherId)?.launcher.resumeHint}
                   onRename={(id, title) => rename.mutate({ paneId: id, title })}
+                  onNotify={(id, on) => notify.mutate({ paneId: id, notify: on })}
                   splitDisabledReason={full ? PANE_LIMIT_REACHED(limit) : open.isPending ? 'Opening a terminal' : undefined}
                 />
               );

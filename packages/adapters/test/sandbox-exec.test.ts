@@ -65,6 +65,16 @@ describe('running a bounded command (story 5.8)', () => {
     expect(await runBounded('/definitely/not/a/program', [], request)).toMatchObject({ exitCode: null });
   });
 
+  it('an aborted signal stops the whole tree at once and is neither a pass nor a timeout', async () => {
+    const controller = new AbortController();
+    const running = runBounded(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { ...request, signal: controller.signal });
+    setTimeout(() => controller.abort(), 200);
+    expect(await running).toMatchObject({ exitCode: null, timedOut: false });
+    const already = new AbortController();
+    already.abort();
+    expect(await runBounded(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { ...request, signal: already.signal })).toMatchObject({ exitCode: null, timedOut: false });
+  });
+
   it('the fixed sandbox runs a command with no sandbox for its own kind (test) only; any other kind gets nothing', async () => {
     const fixed = createFixedSandbox({ available: true, kind: 'test' });
     const ran = await fixed.run({ sandbox: { ...sandbox, kind: 'test' }, cwd: tmpdir(), command: `"${process.execPath}" -e "console.log('hi')"`, env: request.env, timeoutMs: 20_000, maxOutputBytes: 1000 });

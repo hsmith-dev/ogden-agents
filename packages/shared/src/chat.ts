@@ -471,7 +471,15 @@ export const DeveloperModeResponse = z.object({ developerMode: z.boolean(), ever
 export type DeveloperModeResponse = z.infer<typeof DeveloperModeResponse>;
 
 /** `PUT /api/v1/settings/developer-mode`. */
-export const SetDeveloperModeRequest = z.object({ developerMode: z.boolean() });
+export const SetDeveloperModeRequest = z.object({
+  developerMode: z.boolean(),
+  /**
+   * What to do with terminal panes whose programs are running when Developer mode is turned off (epic 16, story
+   * 16.9): `stop` ends them, `keep` leaves them running in the background until the server stops (they come
+   * back when Developer mode is turned on again). Without it, turning it off with panes running is refused (409 `panes_running`).
+   */
+  panes: z.enum(['stop', 'keep']).optional(),
+});
 export type SetDeveloperModeRequest = z.infer<typeof SetDeveloperModeRequest>;
 
 // ---------------------------------------------------------------------------

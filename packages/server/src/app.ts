@@ -22,6 +22,7 @@ import {
   type InstallSettings,
   type NewProjectDefaultsStore,
   type Panes,
+  type TerminalsSettingsStore,
   type Onboarding,
   type Permissions,
   type PlanningUseCases,
@@ -59,6 +60,7 @@ import type { ShellMode } from './shell-mode.js';
 import { registerLauncherUpdateRoutes } from './update-notice/routes.js';
 import type { DesktopUpdate } from './update-notice/desktop-update.js';
 import { registerSettingsRoutes } from './settings-routes.js';
+import { registerTerminalsSettingsRoutes } from './terminals-settings-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
 import { registerTerminalSocket } from './terminal-socket.js';
@@ -170,6 +172,8 @@ export interface AppOptions {
   newProjectDefaults?: NewProjectDefaultsStore;
   /** Developer mode, kept and enforced by core (permission modes); without it its routes answer 501. */
   installSettings?: InstallSettings;
+  /** The install's Terminals settings (epic 16, story 16.9); without it their routes answer 501. */
+  terminalsSettings?: TerminalsSettingsStore;
   /** Terminal panes (epic 16): Developer mode only; without it their routes answer 501 and the socket is not registered. */
   panes?: Panes;
   /** The "newer version" notice (story 13.7); without it its routes answer 501. */
@@ -226,6 +230,7 @@ export function createApp({
   agentDefaults,
   appShortcut,
   panes,
+  terminalsSettings,
   tabs,
 }: AppOptions): Hono {
   const app = new Hono();
@@ -317,7 +322,7 @@ export function createApp({
     const addProject = createAddProject({ chat, defaults: newProjectDefaults, bmad });
     registerChatRoutes(app, chat, log, { terminalAvailability, addProject, agentDefaults });
   }
-  registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, log });
+  registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, builds, log });
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });
@@ -336,7 +341,8 @@ export function createApp({
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, buildSettings, log });
   // Terminal panes (epic 16): behind the gate, and Developer mode enforced by core on every call.
   registerPaneRoutes(app, { panes, log });
-  registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
+  registerSettingsRoutes(app, { installSettings, newProjectDefaults, panes, log });
+  registerTerminalsSettingsRoutes(app, { terminalsSettings, installSettings, log });
   // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
   registerRunSettingsRoutes(app, { buildSettings, builds, notifications, log });
   // The Local model's endpoints (epic 14 story 14.3): app-wide, behind the gate, never a piece's guard; a key never leaves.

@@ -14,7 +14,7 @@ import type { BuildCtx } from './build-context.js';
 export function createOutcome(ctx: BuildCtx) {
   const {
     trust, entities, events, tickets, vcs, sandbox, runner, chat, buildSessions, dataDir, settings, commandEnv, mask, report,
-    writeResult, generation, state, disarmDeadline, release, fn
+    writeResult, generation, state, disarmDeadline, release, rerunSignal, fn
   } = ctx;
 
   /**
@@ -41,6 +41,7 @@ export function createOutcome(ctx: BuildCtx) {
     const attended = run.sandbox === ATTENDED_SANDBOX;
     const setup = buildSessions.get(run.sessionId);
     const contained = setup === undefined || setup.attended === true ? undefined : setup;
+    const rerun = rerunSignal(run.id);
     const verification = await verifyRun(
       { sandbox, mask },
       {
@@ -53,8 +54,9 @@ export function createOutcome(ctx: BuildCtx) {
         cwd: run.worktreePath ?? repoPath,
         env: { ...commandEnv(), ...contained?.env },
         testCommand: detectTestCommand(repoPath, settings.workspaceSettings(run.workspaceId).testCommand) ?? undefined,
+        signal: rerun.signal,
       },
-    );
+    ).finally(() => rerun.done());
     // A run stopped or started again meanwhile has no verification to announce.
     if (!stillCurrent()) return { verification, checkedHead };
     try {

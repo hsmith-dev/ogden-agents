@@ -89,12 +89,12 @@
  * `OGDEN_AGENTS_TEST_*` name is declared here and read only beside a
  * {@link testHooksAllowed} call (`test/test-hooks-audit.test.ts`).
  */
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { appendFileSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, relative } from 'node:path';
 import type { AdapterPins, AntigravityPins } from '@ogden-agents/adapters';
-import { clampCheckInDelay, type ApiKeyVerification, type SandboxCheck } from '@ogden-agents/core';
-import { BmadLock, BmadPiece, type BmadPiece as BmadPieceName } from '@ogden-agents/shared';
+import { clampCheckInDelay, type ApiKeyVerification, type NotifierPort, type SandboxCheck } from '@ogden-agents/core';
+import { BmadLock, BmadPiece, webhookHttpMessage, type BmadPiece as BmadPieceName } from '@ogden-agents/shared';
 import type { StartOptions } from './start-types.js';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -172,6 +172,31 @@ export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
 export const MANAGER_ENV = 'OGDEN_AGENTS_TEST_MANAGER';
 /** `available` or `unavailable`: the sandbox check unattended builds get (tests only; story 5.2). */
 export const SANDBOX_ENV = 'OGDEN_AGENTS_TEST_SANDBOX';
+
+/**
+ * Absolute path to a file inside the temp folder (tests only; story 11.6): every
+ * webhook the server would send is appended there as one JSON line
+ * (`{"url": …, "payload": …}`) and answered with a 204. Nothing is sent over
+ * the network.
+ */
+export const NOTIFIER_ENV = 'OGDEN_AGENTS_TEST_NOTIFIER';
+
+/**
+ * The recording notifier from {@link NOTIFIER_ENV}, or `undefined` (the real
+ * `notify-webhook`): unset, hooks not allowed, the file not absolute or
+ * outside the temp folder.
+ */
+export function testNotifier(env: Env, dataDir: string, tmp: string = tmpdir()): NotifierPort | undefined {
+  const file = env[NOTIFIER_ENV];
+  if (file === undefined || file === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
+  if (!isAbsolute(file) || !insideTemp(dirname(file), tmp)) return undefined;
+  return {
+    async send(url, payload) {
+      appendFileSync(file, `${JSON.stringify({ url, payload })}\n`);
+      return { ok: true, status: 204, failure: null, message: webhookHttpMessage(204) };
+    },
+  };
+}
 
 /** The kind a run records under {@link SANDBOX_ENV} = `available`. */
 export const TEST_SANDBOX_KIND = 'test';
@@ -581,7 +606,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox' | 'manager'> & {
+export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox' | 'notifier' | 'manager'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -610,6 +635,7 @@ export interface TestHooks {
   secretStore: 'memory' | undefined;
   sandbox: SandboxCheck | undefined;
   manager: 'memory' | undefined;
+  notifier: NotifierPort | undefined;
 }
 
 /**
@@ -651,6 +677,8 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     sandbox: options.sandbox === undefined ? testSandbox(env, dataDir, tmp) : undefined,
     // A manager a test passes decides it: the hook is not read.
     manager: options.manager === undefined ? testManager(env, dataDir, tmp) : undefined,
+    // A notifier a test passes decides it: the hook is not read.
+    notifier: options.notifier === undefined ? testNotifier(env, dataDir, tmp) : undefined,
   };
 }
 
@@ -680,7 +708,8 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.bmadSource !== undefined ||
     hooks.checkInMs !== undefined ||
     hooks.manager !== undefined ||
-    hooks.sandbox !== undefined;
+    hooks.sandbox !== undefined ||
+    hooks.notifier !== undefined;
   if (!inUse) return undefined;
   return {
     claudeInstall: hooks.claudeInstall !== undefined,
@@ -702,6 +731,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     bmadSource: hooks.bmadSource !== undefined,
     manager: hooks.manager !== undefined,
     ...(hooks.sandbox === undefined ? {} : { sandbox: hooks.sandbox.available ? 'available' : 'unavailable' }),
+    ...(hooks.notifier === undefined ? {} : { notifier: true }),
     ...(hooks.checkInMs === undefined ? {} : { checkInMs: hooks.checkInMs }),
   };
 }

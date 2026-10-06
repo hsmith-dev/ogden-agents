@@ -1,6 +1,7 @@
 import type { BmadPiece, BmadPieceAvailability } from '@ogden-agents/shared';
 import { Link } from '@tanstack/react-router';
 import { useAppearance } from '@/appearance/appearance-provider';
+import { useTerminalsSettings } from '@/terminal/terminals-settings';
 import { Kbd } from '@/ui/kbd';
 import { TabNav, TabNavItem } from '@/ui/tab-nav';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
@@ -130,7 +131,9 @@ export function WorkspaceTabs({ wsId, active, slots = WORKSPACE_TAB_SLOTS }: { w
   const pieces = settings.isError ? undefined : settings.data?.bmadPieces;
   const availability = available.isError ? undefined : available.data;
   const { appearance } = useAppearance();
-  const tabs = visibleWorkspaceTabs(pieces, availability, slots, appearance.developerMode, !settings.isError && settings.data?.orchestrationEnabled === true);
+  // Developer mode's Terminals tab, unless the user hid the surface (Settings, Terminals).
+  const terminalsSettings = useTerminalsSettings(appearance.developerMode);
+  const tabs = visibleWorkspaceTabs(pieces, availability, slots, appearance.developerMode && !terminalsSettings.isPending && terminalsSettings.data?.hidden !== true, !settings.isError && settings.data?.orchestrationEnabled === true);
   useGoShortcuts(wsId, tabs);
   return <WorkspaceTabsView wsId={wsId} tabs={tabs} active={active} hints={appearance.developerMode} />;
 }

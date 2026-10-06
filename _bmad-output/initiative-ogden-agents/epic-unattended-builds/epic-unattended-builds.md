@@ -62,6 +62,8 @@ Claude Code builds, sandboxed natively on macOS and Linux, through Docker or att
 
 ## Notes
 
+- Note (epic 7, story 7.5, 2026-10-05): approve's clean-checkout check (E5-R9) also tolerates an uncommitted `AGENTS.md` at the repo root, like `_bmad-output/`, so lessons not yet saved never block an approve (AD-17 note).
+
 Status: approved by the user 2026-10-01 and split in two; build driver settled 2026-10-02 (ACP fallback, no bmad-loop): this epic (5a, entries 5.1 to 5.11) and epic 11 (5b, `epic-build-runs-and-notifications`, entries 11.1 to 11.6). The approved spec and architecture deltas are applied (below). Drafted by autonomous inception.
 
 - Open question (2026-10-04, raised by 5.6, with the user): how a build runs inside Docker when it is the only sandbox. Which image carries Claude Code, and how the agent reaches its model while its commands have no network (an allowlist or proxy), are undecided. Until answered, 5.6 detects and shows Docker but never builds in it; Landlock is the same.

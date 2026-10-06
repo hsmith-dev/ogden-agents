@@ -1,7 +1,7 @@
 import { API_ROUTES, DeveloperModeResponse, type CoreEvent, type DeveloperModeResponse as DeveloperModeState } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { call, type Auth } from '@/api/http';
+import { call, isApiError, type Auth } from '@/api/http';
 import { keepSaved } from '@/api/keep-saved';
 import { tabAuth } from '@/auth/tab-token';
 import { useEventInvalidation } from '@/events/use-event-invalidation';
@@ -30,8 +30,8 @@ export async function fetchDeveloperMode(auth: Auth = tabAuth): Promise<Develope
 }
 
 /** `PUT /api/v1/settings/developer-mode`: turning it off drops every Skip-all chat to Ask. */
-export async function saveDeveloperMode(developerMode: boolean, auth: Auth = tabAuth): Promise<boolean> {
-  const json = await call(auth, API_ROUTES.developerMode, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ developerMode }) }, SAVE_FAILED);
+export async function saveDeveloperMode(developerMode: boolean, auth: Auth = tabAuth, panes?: 'stop' | 'keep'): Promise<boolean> {
+  const json = await call(auth, API_ROUTES.developerMode, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ developerMode, ...(panes === undefined ? {} : { panes }) }) }, SAVE_FAILED);
   return DeveloperModeResponse.parse(json).developerMode;
 }
 
@@ -44,11 +44,14 @@ export function useDeveloperModeSave(auth: Auth = tabAuth) {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  const save = (on: boolean) => {
+  /** Terminals are still running: how many, and the question to ask before turning Developer mode off (story 16.9). */
+  const [question, setQuestion] = useState<string | undefined>(undefined);
+  const save = (on: boolean, panes?: 'stop' | 'keep') => {
     if (saving) return;
     setSaving(true);
     setError(undefined);
-    saveDeveloperMode(on, auth).then(
+    setQuestion(undefined);
+    saveDeveloperMode(on, auth, panes).then(
       async (saved) => {
         await keepSaved(queryClient, DEVELOPER_MODE_QUERY_KEY, savedState(saved));
         update({ developerMode: saved });
@@ -56,11 +59,16 @@ export function useDeveloperModeSave(auth: Auth = tabAuth) {
       },
       (failure: unknown) => {
         setSaving(false);
+        // Terminals are running: ask what to do with them, then save again with the answer.
+        if (isApiError(failure, 'panes_running')) {
+          setQuestion(failure.message);
+          return;
+        }
         setError(failure instanceof Error ? failure.message : "Ogden Agents couldn't save Developer mode. Try again.");
       },
     );
   };
-  return { saving, error, save };
+  return { saving, error, save, terminalsQuestion: question, cancelQuestion: () => setQuestion(undefined) };
 }
 
 /**

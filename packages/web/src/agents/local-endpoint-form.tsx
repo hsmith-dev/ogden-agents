@@ -146,7 +146,7 @@ export function AddEndpoint({ onAdded }: { onAdded: () => void }) {
           )}
           <Label htmlFor="endpoint-key">Key (only if the server needs one)</Label>
           <Text variant="caption" id="endpoint-key-description">
-            Kept in this computer's keychain. A server on this computer usually needs none.
+            Kept in this computer's keychain. A server on this computer usually needs none. The model's process holds the key while a chat runs, so a command you approve in that chat could print it: approve commands with care.
           </Text>
           <Input
             id="endpoint-key"

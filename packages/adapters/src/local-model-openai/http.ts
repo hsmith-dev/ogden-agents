@@ -8,6 +8,8 @@
  * body is ever logged: a failure carries a kind and a status code.
  */
 
+import { errorCode } from '../error-code.js';
+
 /** How long a call may take before it counts as failed. */
 export const DEFAULT_TIMEOUT_MS = 5_000;
 /** The most of an answer that is read (a model list is small; a chat completion is capped by the caller). */
@@ -56,11 +58,7 @@ export function endpointUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
 }
 
-const codeOf = (error: unknown): string => {
-  const cause = (error as { cause?: unknown } | undefined)?.cause ?? error;
-  const code = (cause as { code?: unknown } | undefined)?.code;
-  return typeof code === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(code) ? code : 'unknown';
-};
+const codeOf = (error: unknown): string => errorCode((error as { cause?: unknown } | undefined)?.cause ?? error, 'unknown');
 
 /**
  * One call to `path` on the endpoint; resolves with the parsed JSON answer.

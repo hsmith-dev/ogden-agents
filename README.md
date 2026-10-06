@@ -89,6 +89,10 @@ Each chat uses one coding agent: Claude Code, Google's Antigravity, OpenAI's Cod
 
 Skip all is behind Developer mode.
 
+### Terminals (Developer mode)
+
+With Developer mode on, each project has a **Terminals** tab: a workspace of real terminals, in tabs and splits, for people who already use the agents' own command line programs. It is off for everyone else and never needed (the chat does the same work with cards). Open a plain shell, or start Claude Code, Codex, Grok, Antigravity or Copilot (Gemini only if you already have it). Ogden Agents only looks for these programs, with their `--version`, when you open the page or press **Detect**; it never installs one, and you sign in inside each program yourself: Ogden Agents never sees or keeps that sign in. A terminal gets a small, secret free environment (your proxy settings and SSH keys only if you turn them on in Settings > Terminals), and a project can have 8 terminals open at once, Ogden Agents 16. Each terminal shows a guess of what it is doing (working, idle, may need you, ended), a guess from what it prints, never a promise. Turn on **Notify me** for a terminal, or for a whole program in Settings > Terminals, to get the same sound or notice as chats when it may need you; it shows the project and the terminal's name, never what it printed. Your layout, names and opt ins are kept across a restart (what a terminal printed never is); after a restart each terminal shows as stopped with **Start**, and the programs end when Ogden Agents stops. Copilot is offered for your own interactive use only. Turning Developer mode off with terminals running asks whether to stop them or keep them running until Ogden Agents stops.
+
 ## Run
 
 ```sh

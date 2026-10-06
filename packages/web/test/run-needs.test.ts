@@ -96,3 +96,15 @@ describe('a build need in the notifier (story 11.4)', () => {
     expect(shown).toEqual([entry.id, entry.id]);
   });
 });
+
+describe('the refetch trigger of a run query (story 11.5)', () => {
+  it('follows the newest event, so a trimmed old event cannot hide a new one', async () => {
+    const { latestSeq } = await import('../src/planning/builds-api');
+    const event = (seq: number, type: string) => ({ seq, type, workspaceId: WS }) as never;
+    const matches = (e: { type: string }) => e.type.startsWith('run.');
+    // The count is 1 before and after: run.created was trimmed as run.outcome_changed arrived.
+    expect(latestSeq([event(6, 'run.created')], matches)).toBe(6);
+    expect(latestSeq([event(18, 'run.outcome_changed')], matches)).toBe(18);
+    expect(latestSeq([event(7, 'session.state_changed')], matches)).toBe(0);
+  });
+});

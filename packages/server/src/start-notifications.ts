@@ -7,6 +7,7 @@ import { createWebhookNotifier } from '@ogden-agents/adapters';
 import { CoreError, workspaceRepoPath, type Core, type Notifications, type SecretStorePort, type TicketStorePort } from '@ogden-agents/core';
 import type { Logger } from './log.js';
 import type { StartOptions } from './start-types.js';
+import type { TestHooks } from './test-hooks.js';
 
 export function createNotificationsWiring({
   options,
@@ -14,16 +15,18 @@ export function createNotificationsWiring({
   log,
   secrets,
   ticketStore,
+  hooks,
 }: {
   options: StartOptions;
   core: Core;
   log: Logger;
   secrets: SecretStorePort;
   ticketStore: TicketStorePort;
+  hooks: Pick<TestHooks, 'notifier'>;
 }): Notifications {
   return core.createNotifications({
     secrets,
-    notifier: options.notifier ?? createWebhookNotifier(),
+    notifier: options.notifier ?? hooks.notifier ?? createWebhookNotifier(),
     // The ticket's title for a payload, from the project's own files; any failure sends none.
     titleOf: async (workspaceId, ref) => {
       const scripts = await core.bmadScriptTrust.requireScriptsUnchanged(workspaceId);

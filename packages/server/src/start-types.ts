@@ -7,7 +7,7 @@ import type { AgentWiring } from './agent-wiring.js';
 import type { AntigravityPorts } from './antigravity-wiring.js';
 import type { CodexPorts } from './codex-wiring.js';
 import type { GrokPorts } from './grok-wiring.js';
-import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, NotifierPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
+import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, NotifierPort, PaneLaunchers, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -118,6 +118,8 @@ export interface StartOptions {
    * in a test run, `$OGDEN_AGENTS_TEST_PANE_SHELL`.
    */
   paneShell?: { file: string; args: readonly string[] };
+  /** The launchers terminal panes offer and their detection (tests: fake programs, so none looks at the real computer). Default: the real list over this computer's PATH. */
+  paneLaunchers?: PaneLaunchers;
   /** Loads `node-pty` for the hidden sign-in terminal (tests: one that fails, AD-19). Default: `terminal-pty`'s lazy loader. */
   loadPty?: PtyLoader;
   /**

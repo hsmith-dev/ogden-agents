@@ -122,8 +122,36 @@ export const PaneLauncher = z.object({
   resumeHint: z.string().max(200).optional(),
   /** `interactive_only`: never fed, scheduled or driven by Ogden, and left out of any automation (E16-R9). */
   termsNote: z.enum(['interactive_only']).optional(),
+  /** `false`: the launcher is offered only when its program is found (a CLI Ogden does not lead with). Default `true`: a missing program shows its install link. */
+  showWhenMissing: z.boolean().default(true),
 });
 export type PaneLauncher = z.infer<typeof PaneLauncher>;
+
+/**
+ * What detection found for one launcher (story 16.5; E16-R5). Found by looking
+ * on the user's PATH and well known folders and asking the program for its
+ * version, with nothing installed and nothing else run. `failed`: it is there
+ * but did not answer. `reason` is plain words.
+ */
+export const PaneDetection = z.object({
+  launcherId: PaneLauncherId,
+  state: z.enum(['found', 'not_found', 'failed']),
+  /** The program's own one line answer to its version request, shortened. */
+  version: z.string().max(80).optional(),
+  reason: z.string().max(200).optional(),
+});
+export type PaneDetection = z.infer<typeof PaneDetection>;
+
+/** One launcher as the page shows it: its data and what detection found. A launcher not found and not to be shown is left out. */
+export const PaneLauncherStatus = z.object({ launcher: PaneLauncher, detection: PaneDetection });
+export type PaneLauncherStatus = z.infer<typeof PaneLauncherStatus>;
+
+/** `GET` or `POST` the launchers (story 16.5): the list with detection; `POST` (the Detect button) looks again. */
+export const PaneLaunchersResponse = z.object({ launchers: z.array(PaneLauncherStatus) });
+export type PaneLaunchersResponse = z.infer<typeof PaneLaunchersResponse>;
+
+/** The text a user types in a launcher's visible argument field: plain, up to 500 characters, no control characters. */
+export const PaneLauncherArgs = z.string().max(500).regex(/^[^\p{Cc}]*$/u, 'no control characters');
 
 /** A tab's split tree (E16-R4): a pane, or two children side by side (`row`) or stacked (`column`) at `ratio` for the first. */
 export type PaneLayoutNode = { type: 'pane'; paneId: PaneId } | { type: 'split'; direction: 'row' | 'column'; ratio: number; first: PaneLayoutNode; second: PaneLayoutNode };
@@ -166,7 +194,7 @@ export const TerminalsSettings = z.object({
   passProxies: z.boolean().default(false),
   passSshAgent: z.boolean().default(false),
   /** What the user types after a launcher's own arguments, by launcher id. */
-  launcherArgs: z.record(PaneLauncherId, z.string().max(500).regex(/^[^\p{Cc}]*$/u, 'no control characters')).default({}),
+  launcherArgs: z.record(PaneLauncherId, PaneLauncherArgs).default({}),
   hidden: z.boolean().default(false),
 });
 export type TerminalsSettings = z.infer<typeof TerminalsSettings>;
@@ -184,7 +212,7 @@ export const PanePlacement = z.discriminatedUnion('kind', [
 export type PanePlacement = z.infer<typeof PanePlacement>;
 
 /** `POST` panes: the size the viewer's terminal has now, so the program starts at it, and where the pane goes. */
-export const OpenPaneRequest = z.object({ ...size, placement: PanePlacement.optional() });
+export const OpenPaneRequest = z.object({ ...size, placement: PanePlacement.optional(), launcherId: PaneLauncherId.optional(), args: PaneLauncherArgs.optional() });
 export type OpenPaneRequest = z.infer<typeof OpenPaneRequest>;
 
 /** `POST` pane restart: the size to start at. */

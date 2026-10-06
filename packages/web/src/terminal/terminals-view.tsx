@@ -7,9 +7,10 @@ import { PageBody } from '@/ui/page';
 import { Text } from '@/ui/typography';
 import { cn } from '@/ui/utils';
 import { MAX_NAME_LENGTH, neighbour, withActiveTab, withRatio, withTabRoot, withTabTitle, type FocusDirection, type PaneBox } from './layout-edit';
+import { LauncherList } from './launcher-list';
 import { LayoutStage } from './layout-tree';
 import { PaneView } from './pane-view';
-import { usePaneActions, usePanes } from './panes-api';
+import { useLaunchers, usePaneActions, usePanes } from './panes-api';
 
 /** What the Terminals page says without Developer mode. */
 export const DEVELOPER_MODE_NEEDED = 'Terminals are for Developer mode. Turn it on in Settings, then Appearance.';
@@ -32,6 +33,7 @@ const FOCUS_KEYS: Readonly<Record<string, FocusDirection>> = { ArrowLeft: 'left'
 export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId: string; developerMode: boolean; screenReaderMode: boolean }) {
   const panes = usePanes(wsId, developerMode);
   const { open, close, rename, arrange, error: mutationError } = usePaneActions(wsId);
+  const launchers = useLaunchers(developerMode);
   const [renamingTab, setRenamingTab] = useState<string | undefined>(undefined);
   /** The pane that takes keyboard focus once it has loaded: only one the user just opened. */
   const [focusId, setFocusId] = useState<string | undefined>(undefined);
@@ -63,6 +65,7 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
   const limit = panes.data?.limits.perProject ?? 8;
   const full = (panes.data?.panes.length ?? 0) >= limit;
   const openPane = (placement?: PanePlacement) => open.mutate({ size: placement === undefined ? { cols: 100, rows: 30 } : { cols: 80, rows: 24 }, ...(placement === undefined ? {} : { placement }) }, { onSuccess: (pane) => setFocusId(pane.id) });
+  const startProgram = (launcherId: string, typed: string) => open.mutate({ size: { cols: 100, rows: 30 }, launch: { launcherId, args: typed } }, { onSuccess: (pane) => setFocusId(pane.id) });
 
   const moveFocus = (event: React.KeyboardEvent) => {
     const direction = FOCUS_KEYS[event.key];
@@ -130,6 +133,14 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
           New terminal
         </Button>
       </div>
+      <LauncherList
+        statuses={launchers.list.data?.launchers ?? []}
+        detecting={launchers.detect.isPending}
+        onDetect={() => launchers.detect.mutate()}
+        onStart={startProgram}
+        disabled={open.isPending || unavailable !== undefined || full}
+        failed={launchers.list.isError || launchers.detect.isError}
+      />
       <Text variant="caption" className="text-muted-foreground">
         Each terminal runs your own shell in this project's folder. It stops when you close it or when Ogden Agents stops.
       </Text>

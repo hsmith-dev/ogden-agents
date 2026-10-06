@@ -15,13 +15,14 @@
  * - What a pane prints and what is typed into it is never logged, evented or
  *   stored here (AD-6, AD-16); only a pane's state changes and why.
  */
-import type { NewCoreEvent, Pane, PaneId, PaneLayout, PanePlacement, PaneState, TerminalUnavailableCode, WorkspaceId } from '@ogden-agents/shared';
+import type { NewCoreEvent, Pane, PaneLauncherStatus, PaneId, PaneLayout, PanePlacement, PaneState, TerminalUnavailableCode, WorkspaceId } from '@ogden-agents/shared';
 import { PaneTitle } from '@ogden-agents/shared';
+import { splitLauncherArgs, type PaneLaunchers } from './pane-launchers.js';
 import { addTab, EMPTY_LAYOUT, layoutPaneIds, rearrangement, removePane, splitPane } from './pane-layout.js';
 import { MAX_PANES_PER_INSTALL, MAX_PANES_PER_PROJECT, MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS } from '@ogden-agents/shared';
 import type { TerminalSize } from './chat/types.js';
 import type { Entities } from './entities.js';
-import { DeveloperModeRequiredError, NotFoundError, ValidationError, PANES_NEED_DEVELOPER_MODE, PaneLimitError, TerminalUnavailableError } from './errors.js';
+import { DeveloperModeRequiredError, LauncherUnavailableError, NotFoundError, ValidationError, PANES_NEED_DEVELOPER_MODE, PaneLimitError, TerminalUnavailableError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import { newId } from './ids.js';
 import type { InstallSettings } from './install-settings.js';
@@ -58,6 +59,12 @@ export interface PaneViewer {
   detach(): void;
 }
 
+/** What a new pane runs (story 16.5): a launcher (default the user's shell) and what the user typed in its argument field. */
+export interface PaneLaunch {
+  launcherId?: string | undefined;
+  args?: string | undefined;
+}
+
 export interface Panes {
   /** Whether a pane can open on this computer, or the plain reason it can't (AD-19). */
   available(): Promise<TerminalAvailability>;
@@ -69,7 +76,9 @@ export interface Panes {
    * `NotFoundError` (no such project), `PaneLimitError`, `TerminalUnavailableError`
    * when `node-pty` can't load or the program can't start (nothing is left open then).
    */
-  open(workspaceId: WorkspaceId, size: TerminalSize, placement?: PanePlacement): Promise<Pane>;
+  open(workspaceId: WorkspaceId, size: TerminalSize, placement?: PanePlacement, launch?: PaneLaunch): Promise<Pane>;
+  /** What a pane can run besides the shell, with what detection found (story 16.5); `refresh` looks again (Detect). Developer mode only. */
+  launchers(refresh?: boolean): Promise<PaneLauncherStatus[]>;
   /** The project's layout: tabs of split trees of its panes (story 16.4). Never refused for a project with no panes: it is empty then. */
   layout(workspaceId: WorkspaceId): PaneLayout;
   /**
@@ -100,6 +109,8 @@ export interface PanesOptions {
   events?: Pick<EventLog, 'subscribe' | 'lastSeq' | 'append'> | undefined;
   /** Without a terminal port (or one without `openPane`) no pane can open. */
   terminal: TerminalPort | undefined;
+  /** The launchers (story 16.5). Without it only the plain shell opens. */
+  launchers?: PaneLaunchers | undefined;
   /** The program a plain shell pane runs: the user's own shell, by absolute path. */
   shell: () => TerminalCommand;
   /** The pane program's whole environment (AD-16: the server builds it from the allowlist; never a secret). */
@@ -123,6 +134,8 @@ interface ViewerEntry {
 interface Entry {
   pane: Pane;
   cwd: string;
+  /** What a launcher found, run again by Restart pane (the detected absolute path); the shell is looked up each time. */
+  command: TerminalCommand | undefined;
   process: PaneProcess | undefined;
   size: TerminalSize;
   viewers: Set<ViewerEntry>;
@@ -208,7 +221,7 @@ export function createPanes(options: PanesOptions): Panes {
     if (terminal?.openPane === undefined) throw new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.noTerminalPort());
     let process: PaneProcess;
     try {
-      const command = options.shell();
+      const command = entry.command ?? options.shell();
       process = await terminal.openPane({ file: command.file, args: command.args, cwd: entry.cwd, env: options.env(), cols: size.cols, rows: size.rows, scrollback });
     } catch (error) {
       // Plain words only: a spawn error can name a path.
@@ -291,9 +304,9 @@ export function createPanes(options: PanesOptions): Panes {
     });
   }
 
-  const titleFor = (workspaceId: WorkspaceId): string => {
+  const titleFor = (workspaceId: WorkspaceId, label = 'Terminal'): string => {
     const taken = new Set([...entries.values()].filter((e) => e.pane.workspaceId === workspaceId).map((e) => e.pane.title));
-    for (let n = 1; ; n += 1) if (!taken.has(`Terminal ${n}`)) return `Terminal ${n}`;
+    for (let n = 1; ; n += 1) if (!taken.has(`${label} ${n}`)) return `${label} ${n}`;
   };
 
   return {
@@ -304,11 +317,25 @@ export function createPanes(options: PanesOptions): Panes {
       return [...entries.values()].filter((e) => e.pane.workspaceId === workspaceId).map((e) => e.pane);
     },
 
-    async open(workspaceId, size, placement) {
+    async open(workspaceId, size, placement, launch) {
       requireDeveloperMode();
       if (disposed) throw new DeveloperModeRequiredError(PANES_NEED_DEVELOPER_MODE);
       const workspace = entities.getWorkspace(workspaceId);
       if (workspace === undefined) throw new NotFoundError('project', workspaceId);
+      // What to run, looked up before a slot is taken: a launcher that is not there opens nothing.
+      let command: TerminalCommand | undefined;
+      let label: string | undefined;
+      const launcherId = launch?.launcherId ?? 'shell';
+      if (launcherId !== 'shell') {
+        const launcher = options.launchers?.get(launcherId);
+        const typed = launch?.args === undefined ? [] : splitLauncherArgs(launch.args);
+        if (launcher === undefined || launcher.kind === 'shell') throw new LauncherUnavailableError('unknown_launcher', 'That program is not one Ogden Agents can start.');
+        if (typed === undefined) throw new ValidationError('The arguments are not closed quotes or are too many.', [{ path: ['args'], message: 'unreadable arguments' }]);
+        const found = await options.launchers!.command(launcherId, typed);
+        if (!found.ok) throw new LauncherUnavailableError(found.code, found.reason);
+        command = { file: found.file, args: found.args };
+        label = launcher.label;
+      }
       const pty = await available();
       if (!pty.ok) throw new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.ptyUnavailable(pty.reason));
       // Checked and taken in one tick (below), so a burst of opens can't pass the limits.
@@ -316,8 +343,9 @@ export function createPanes(options: PanesOptions): Panes {
       if (entries.size >= perInstall) throw new PaneLimitError('install', perInstall);
       if ([...entries.values()].filter((e) => e.pane.workspaceId === workspaceId).length >= perProject) throw new PaneLimitError('project', perProject);
       const entry: Entry = {
-        pane: { id: newId('pan'), workspaceId, launcherId: 'shell', title: titleFor(workspaceId), state: 'starting', exitCode: null },
+        pane: { id: newId('pan'), workspaceId, launcherId, title: titleFor(workspaceId, label), state: 'starting', exitCode: null },
         cwd: workspace.realPath ?? workspace.path,
+        command,
         process: undefined,
         size: { cols: clamp(size.cols, MAX_TERMINAL_COLS), rows: clamp(size.rows, MAX_TERMINAL_ROWS) },
         viewers: new Set(),
@@ -341,6 +369,12 @@ export function createPanes(options: PanesOptions): Panes {
       emit({ type: 'terminal.pane_opened', workspaceId, streamId: workspaceId, payload: { paneId: entry.pane.id, launcherId: entry.pane.launcherId, title: entry.pane.title } });
       setLayout(workspaceId, split ?? addTab(current, `t${newId('pan').slice(-8).toLowerCase()}`, entry.pane.title, entry.pane.id));
       return entry.pane;
+    },
+
+    async launchers(refresh = false) {
+      requireDeveloperMode();
+      if (options.launchers === undefined) return [];
+      return refresh ? options.launchers.detect() : options.launchers.list();
     },
 
     layout(workspaceId) {

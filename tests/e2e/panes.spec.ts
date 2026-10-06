@@ -12,9 +12,17 @@ import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { API_ROUTES, ROOT } from '../support.js';
 import { APPEARANCE_KEY, ptyLoads, setDeveloperMode, withChatServer } from './chat-server.js';
+import { addFakeCli, makeFakeCliFolder } from '../fixtures/fake-cli-folder.js';
 import { storedToken } from './tab.js';
 
 const FAKE_SHELL = join(ROOT, 'tests', 'fixtures', 'fake-pane-shell.mjs');
+/** Programs detection finds: none. A test that is not about detection never looks at the real computer, so it never runs a real CLI. */
+const NO_PROGRAMS = {
+  list: async () => [],
+  detect: async () => [],
+  get: () => undefined,
+  command: async () => ({ ok: false as const, code: 'unknown_launcher' as const, reason: 'No programs in this test.' }),
+};
 /** What zod's check for `eval` (made on every page, and caught) reports under `script-src 'self'`. */
 const ZOD_EVAL_PROBE = 'script-src eval';
 
@@ -95,7 +103,7 @@ test('Terminals is a Developer mode surface: hidden without it, and a pane opens
 
       expect((await violations()).filter((v) => !v.startsWith(ZOD_EVAL_PROBE))).toEqual([]);
     },
-    { extra: { paneShell: { file: process.execPath, args: [FAKE_SHELL] } } },
+    { extra: { paneShell: { file: process.execPath, args: [FAKE_SHELL] }, paneLaunchers: NO_PROGRAMS } },
   );
 });
 
@@ -119,7 +127,7 @@ test('a program that ends shows it, and Restart starts it again in the same pane
       await expect(terminal.locator('.xterm-rows')).toContainText('fake-shell-ready');
       await expect(page.getByTestId('pane-title')).toHaveText('Terminal 1');
     },
-    { extra: { paneShell: { file: process.execPath, args: [FAKE_SHELL] } } },
+    { extra: { paneShell: { file: process.execPath, args: [FAKE_SHELL] }, paneLaunchers: NO_PROGRAMS } },
   );
 });
 
@@ -196,6 +204,56 @@ test('a project gets tabs and splits: split a terminal, move the divider and foc
       await expect(page.getByTestId('pane')).toHaveCount(1);
       await expect(page.getByTestId('layout-divider')).toHaveCount(0);
     },
-    { extra: { paneShell: { file: process.execPath, args: [FAKE_SHELL] } } },
+    { extra: { paneShell: { file: process.execPath, args: [FAKE_SHELL] }, paneLaunchers: NO_PROGRAMS } },
   );
+});
+
+test('programs: detection shows found and not found with the install page, Detect looks again, and a found program starts in a pane with its typed arguments', async ({ page }) => {
+  test.skip(!process.env.CI && !(await ptyLoads()), 'node-pty cannot load on this computer');
+  // Detection sees only a folder of fake programs (a test hook that needs a test run and a temp data folder).
+  const folder = makeFakeCliFolder(['claude', 'copilot']);
+  const before = { path: process.env.OGDEN_AGENTS_TEST_PANE_PATH, env: process.env.NODE_ENV };
+  process.env.OGDEN_AGENTS_TEST_PANE_PATH = folder;
+  process.env.NODE_ENV = 'test';
+  try {
+    await withChatServer(
+      page,
+      async ({ repo }) => {
+        const wsId = await openProject(page, repo);
+        await setBrowserDeveloperMode(page, true);
+        await setDeveloperMode(page, true);
+        await page.goto(at(page, `/w/${wsId}/terminals`));
+        await page.getByTestId('launchers').locator('summary').click();
+        const row = (id: string) => page.locator(`[data-testid="launcher"][data-launcher="${id}"]`);
+        await expect(row('claude-code')).toHaveAttribute('data-state', 'found');
+        await expect(row('copilot')).toContainText('own interactive use only');
+        await expect(row('codex')).toHaveAttribute('data-state', 'not_found');
+        await expect(row('codex')).toContainText('Install it yourself, then press Detect.');
+        await expect(row('codex').getByTestId('launcher-install-link')).toHaveAttribute('href', 'https://github.com/openai/codex');
+        // Gemini is offered only when installed.
+        await expect(row('gemini')).toHaveCount(0);
+
+        // The user installs it themselves; Detect finds it.
+        addFakeCli(folder, 'codex');
+        await expect(row('codex')).toHaveAttribute('data-state', 'not_found');
+        await page.getByTestId('launchers-detect').click();
+        await expect(row('codex')).toHaveAttribute('data-state', 'found');
+
+        // Start it with the arguments typed in its own field.
+        await row('codex').getByTestId('launcher-args').fill('--model big');
+        await row('codex').getByTestId('launcher-start').click();
+        await expect(page.getByTestId('pane-title')).toHaveText('Codex 1');
+        const terminal = page.getByTestId('pane-terminal');
+        await expect(terminal.locator('.xterm-rows')).toContainText('fake-shell-ready');
+        await page.keyboard.type('args');
+        await page.keyboard.press('Enter');
+        await expect(terminal.locator('.xterm-rows')).toContainText('args=["--model","big"]');
+      },
+    );
+  } finally {
+    if (before.path === undefined) delete process.env.OGDEN_AGENTS_TEST_PANE_PATH;
+    else process.env.OGDEN_AGENTS_TEST_PANE_PATH = before.path;
+    if (before.env === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = before.env;
+  }
 });

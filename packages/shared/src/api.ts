@@ -436,6 +436,14 @@ export const API_ROUTES = {
    * guarded by a piece (E16-R3).
    */
   workspacePanes: `${API_BASE}/workspaces/:wsId/panes`,
+  /**
+   * `GET` → `PaneLaunchersResponse` (epic 16, story 16.5): what a pane can run
+   * and what detection found on this computer (looked up once, then kept);
+   * `POST` (no body) → the same, looking again (the Detect button). Detection
+   * only looks and asks for `--version`: nothing is installed. Developer mode
+   * only (403); install wide, not a project's.
+   */
+  terminalLaunchers: `${API_BASE}/terminals/launchers`,
   /** `PUT ArrangePanesRequest` → `PanesResponse` (epic 16, story 16.4): the project's layout arrangement. 400 unless it is the same panes, each once. Developer mode only. */
   workspacePaneLayout: `${API_BASE}/workspaces/:wsId/pane-layout`,
   /** `PATCH RenamePaneRequest` → `PaneResponse` (story 16.4): rename a pane. `DELETE` → 204 (epic 16): closes the pane and stops its process tree. Developer mode only. 404 for another workspace's pane. */

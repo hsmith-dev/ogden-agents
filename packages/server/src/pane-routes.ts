@@ -5,13 +5,14 @@
  * never behind a BMad piece's guard (E16-R3). They carry no terminal text:
  * only each pane's state (AD-6, AD-16).
  */
-import { CoreError, DeveloperModeRequiredError, NotFoundError, PaneLimitError, TerminalUnavailableError, ValidationError, type Panes } from '@ogden-agents/core';
+import { CoreError, DeveloperModeRequiredError, LauncherUnavailableError, NotFoundError, PaneLimitError, TerminalUnavailableError, ValidationError, type Panes } from '@ogden-agents/core';
 import {
   API_ROUTES,
   ArrangePanesRequest,
   RenamePaneRequest,
   OpenPaneRequest,
   PaneId,
+  PaneLaunchersResponse,
   PaneResponse,
   PanesResponse,
   RestartPaneRequest,
@@ -43,6 +44,8 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
     app.delete(API_ROUTES.workspacePane, notImplemented);
     app.patch(API_ROUTES.workspacePane, notImplemented);
     app.put(API_ROUTES.workspacePaneLayout, notImplemented);
+    app.get(API_ROUTES.terminalLaunchers, notImplemented);
+    app.post(API_ROUTES.terminalLaunchers, notImplemented);
     app.post(API_ROUTES.workspacePaneRestart, notImplemented);
     return;
   }
@@ -52,6 +55,7 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
     if (error instanceof DeveloperModeRequiredError) return apiError(c, 403, 'developer_mode_required', error.message);
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', 'There is no such terminal.');
+    if (error instanceof LauncherUnavailableError) return apiError(c, 409, 'launcher_unavailable', error.message, { launcher: error.launcherCode });
     if (error instanceof PaneLimitError) return apiError(c, 409, 'pane_limit_reached', error.message, { scope: error.scope, limit: error.limit });
     if (error instanceof TerminalUnavailableError) return apiError(c, 409, 'terminal_unavailable', error.message, { terminal: error.terminal });
     log.error('a terminal pane request failed', { code: error instanceof CoreError ? error.code : 'unexpected' });
@@ -88,13 +92,29 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
     const body = await readBody(c, OpenPaneRequest);
     if (!body.ok) return body.response;
     try {
-      const pane = await panes.open(id, { cols: body.value.cols, rows: body.value.rows }, body.value.placement);
-      log.info('terminal pane opened', { paneId: pane.id, workspaceId: id });
+      const pane = await panes.open(id, { cols: body.value.cols, rows: body.value.rows }, body.value.placement, { launcherId: body.value.launcherId, args: body.value.args });
+      log.info('terminal pane opened', { paneId: pane.id, workspaceId: id, launcherId: pane.launcherId });
       return c.json(PaneResponse.parse({ pane }), 201);
     } catch (error) {
       return refuse(c, error);
     }
   });
+
+  // What a pane can run and what detection found (story 16.5). Install wide; Developer mode only. Never the paths.
+  const live = panes;
+  for (const refresh of [false, true]) {
+    const handler = async (c: Context) => {
+      try {
+        const launchers = await live.launchers(refresh);
+        if (refresh) log.info('terminal launchers detected again', { found: launchers.filter((one) => one.detection.state === 'found').length });
+        return c.json(PaneLaunchersResponse.parse({ launchers }));
+      } catch (error) {
+        return refuse(c, error);
+      }
+    };
+    if (refresh) app.post(API_ROUTES.terminalLaunchers, handler);
+    else app.get(API_ROUTES.terminalLaunchers, handler);
+  }
 
   app.put(API_ROUTES.workspacePaneLayout, bodyLimit({ maxSize: MAX_LAYOUT_BODY_BYTES, onError: tooLarge }), async (c) => {
     const id = workspaceId(c);

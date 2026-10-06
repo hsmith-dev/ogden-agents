@@ -371,6 +371,17 @@ export class DeveloperModeRequiredError extends CoreError {
 /** The message refusing a terminal pane without Developer mode (epic 16, E16-R3): the same 403 `developer_mode_required` as Skip all. */
 export const PANES_NEED_DEVELOPER_MODE = 'Terminals are only offered in Developer mode. Turn it on in Settings → Appearance first.';
 
+/** A launcher can't start a pane (epic 16, story 16.5): unknown, its program not found on this computer, or found but it did not answer. `reason` is plain words; nothing was started. */
+export class LauncherUnavailableError extends CoreError {
+  override readonly name = 'LauncherUnavailableError';
+  constructor(
+    readonly launcherCode: 'unknown_launcher' | 'not_found' | 'failed',
+    message: string,
+  ) {
+    super('launcher_unavailable', message);
+  }
+}
+
 /** A pane would pass the limit of panes in its project or in this install (epic 16): nothing opened. */
 export class PaneLimitError extends CoreError {
   override readonly name = 'PaneLimitError';

@@ -1,4 +1,4 @@
-import { API_ROUTES, apiPath, PaneResponse, PanesResponse, type Pane, type PaneLayout, type PanePlacement } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, PaneLaunchersResponse, PaneResponse, PanesResponse, type Pane, type PaneLayout, type PanePlacement } from '@ogden-agents/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { call, callNoContent, postJson, type Auth } from '@/api/http';
@@ -18,8 +18,8 @@ export async function fetchPanes(wsId: string, auth: Auth = tabAuth): Promise<Pa
 }
 
 /** `POST /api/v1/workspaces/:wsId/panes`: a new pane running the user's shell, started at `size`. */
-export async function openPane(wsId: string, size: { cols: number; rows: number }, placement?: PanePlacement, auth: Auth = tabAuth): Promise<Pane> {
-  const body = placement === undefined ? size : { ...size, placement };
+export async function openPane(wsId: string, size: { cols: number; rows: number }, placement?: PanePlacement, launch?: { launcherId: string; args: string }, auth: Auth = tabAuth): Promise<Pane> {
+  const body = { ...size, ...(placement === undefined ? {} : { placement }), ...(launch === undefined ? {} : { launcherId: launch.launcherId, ...(launch.args.trim() === '' ? {} : { args: launch.args }) }) };
   return PaneResponse.parse(await call(auth, apiPath(API_ROUTES.workspacePanes, { wsId }), postJson(body), "Ogden Agents couldn't open a terminal")).pane;
 }
 
@@ -43,6 +43,26 @@ export async function restartPane(wsId: string, paneId: string, size: { cols: nu
   return PaneResponse.parse(await call(auth, apiPath(API_ROUTES.workspacePaneRestart, { wsId, paneId }), postJson(size), "Ogden Agents couldn't restart that terminal")).pane;
 }
 
+export const launchersQueryKey = ['terminal-launchers'] as const;
+
+/** `GET /api/v1/terminals/launchers`: what a pane can run and what detection found. */
+export async function fetchLaunchers(auth: Auth = tabAuth): Promise<PaneLaunchersResponse> {
+  return PaneLaunchersResponse.parse(await call(auth, API_ROUTES.terminalLaunchers, {}, "Ogden Agents couldn't look for programs"));
+}
+
+/** `POST /api/v1/terminals/launchers`: the Detect button; looks again. */
+export async function detectLaunchers(auth: Auth = tabAuth): Promise<PaneLaunchersResponse> {
+  return PaneLaunchersResponse.parse(await call(auth, API_ROUTES.terminalLaunchers, { method: 'POST' }, "Ogden Agents couldn't look for programs"));
+}
+
+/** The launchers, and Detect. Off while Developer mode is. */
+export function useLaunchers(enabled: boolean, auth: Auth = tabAuth) {
+  const queryClient = useQueryClient();
+  const list = useQuery({ queryKey: launchersQueryKey, queryFn: () => fetchLaunchers(auth), enabled, retry: false });
+  const detect = useMutation({ mutationFn: () => detectLaunchers(auth), onSuccess: (response) => queryClient.setQueryData(launchersQueryKey, response) });
+  return { list, detect };
+}
+
 /** The project's panes. Off while Developer mode is (the server would refuse). */
 export function usePanes(wsId: string, enabled: boolean, auth: Auth = tabAuth) {
   return useQuery({ queryKey: panesQueryKey(wsId), queryFn: () => fetchPanes(wsId, auth), enabled, retry: false });
@@ -54,7 +74,7 @@ export function usePaneActions(wsId: string, auth: Auth = tabAuth) {
   const refresh = () => queryClient.invalidateQueries({ queryKey: panesQueryKey(wsId) });
   const [error, setError] = useState<string | undefined>(undefined);
   const failed = (failure: unknown) => setError(failure instanceof Error ? failure.message : undefined);
-  const open = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (input: { size: { cols: number; rows: number }; placement?: PanePlacement }) => openPane(wsId, input.size, input.placement, auth), onSettled: refresh });
+  const open = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (input: { size: { cols: number; rows: number }; placement?: PanePlacement; launch?: { launcherId: string; args: string } }) => openPane(wsId, input.size, input.placement, input.launch, auth), onSettled: refresh });
   const close = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (paneId: string) => closePane(wsId, paneId, auth), onSettled: refresh });
   const rename = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (input: { paneId: string; title: string }) => renamePane(wsId, input.paneId, input.title, auth), onSettled: refresh });
   const arrangeKey = ['pane-arrange', wsId] as const;

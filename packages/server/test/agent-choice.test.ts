@@ -146,7 +146,7 @@ describe('the Local model slot (epic 14 story 14.2)', () => {
     expect(await listed(withLocal, tab)).toEqual(['claude-code', 'grok', 'local']);
     const local = ChatAgentsResponse.parse(await (await request(withLocal, tab, 'GET', API_ROUTES.chatAgents)).json()).agents.find((agent) => agent.agentId === 'local');
     // Ask only, no sign in, no project trust, no terminal.
-    expect(local).toMatchObject({ displayName: 'Local model', signInMethods: [], permissionModes: ['ask'], needsProjectTrust: false, terminalResume: false });
+    expect(local).toMatchObject({ displayName: 'Local model', signInMethods: [], noAccount: true, permissionModes: ['ask'], needsProjectTrust: false, terminalResume: false });
   });
 });
 

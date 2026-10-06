@@ -129,7 +129,7 @@ export function findImportViolations(files: readonly SourceFile[]): string[] {
  * and the tests' second agent. AD-1 (epic 6 note): `packages/core` and
  * `packages/shared` name none of them outside tests; server wiring does.
  */
-export const AGENT_IDS = ['claude-code', 'antigravity', 'codex', 'grok', 'local', 'gemini', 'gemini-cli', 'copilot', 'fake-agent'] as const;
+export const AGENT_IDS = ['claude-code', 'antigravity', 'codex', 'grok', 'gemini', 'gemini-cli', 'copilot', 'fake-agent'] as const;
 
 /**
  * The environment variables one agent reads (its API key, its home folder),
@@ -178,6 +178,12 @@ export function findAgentIdViolations(files: readonly SourceFile[], ids: readonl
 }
 
 describe('AD-1: core and shared name no agent (epic 6)', () => {
+  it("core, shared and the web never use the string 'local' as an agent id (epic 14; a longer name such as local_endpoints is not one)", () => {
+    const violations = loadWorkspaceSources().filter((file) => (AGENT_NEUTRAL.has(file.pkg) || WEB_SOURCE.test(file.path)) && /(['"`])local\1/.test(withoutComments(file.source))).map((file) => file.path);
+    expect(violations).toEqual([]);
+  });
+
+
   it('no core or shared source names an agent id outside tests', () => {
     const files = loadWorkspaceSources();
     expect(files.some((file) => file.pkg === '@ogden-agents/core')).toBe(true);

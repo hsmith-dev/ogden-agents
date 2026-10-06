@@ -28,7 +28,7 @@ async function withServer(page: Page, body: (server: RunningServer, home: string
   try {
     process.env.HOME = home;
     process.env.USERPROFILE = home;
-    server = await startServer(dataDir, 0, { availableBmadPieces: AVAILABLE });
+    server = await startServer(dataDir, 0, { shippedBmadPieces: ['planning', 'board', 'builds'], availableBmadPieces: AVAILABLE });
     await page.setViewportSize({ width: 1440, height: 900 });
     await openConnected(page, '/', server.launchUrl);
     await body(server, home, dataDir);

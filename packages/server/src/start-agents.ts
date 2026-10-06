@@ -20,11 +20,13 @@ import {
   createClaudeCodeAgent,
   createClaudeCodeSetup,
   createKeyringSecretStore,
+  createOpenAiLocalModel,
+  DETECT_PROBE_TIMEOUT_MS,
   createMemorySecretStore,
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
 } from '@ogden-agents/adapters';
-import { agentEnvKeys, AgentSetupError, CoreError, createAgentSetup, type AgentPort, type AgentTerminalResume, type Core } from '@ogden-agents/core';
+import { agentEnvKeys, AgentSetupError, CoreError, createAgentSetup, createLocalModels, type AgentPort, type AgentTerminalResume, type Core, type LocalEndpoints } from '@ogden-agents/core';
 import type { AgentId } from '@ogden-agents/shared';
 import { agentHomeDir, checkAgentWiring, describedLike, type AgentWiring } from './agent-wiring.js';
 import { antigravityWiring, type AntigravityPorts } from './antigravity-wiring.js';
@@ -95,11 +97,14 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
                 : { pins: hooks.grokInstall.pins, tokenProbe: async () => true, ...(hooks.grokInstall.npmCli === undefined ? {} : { npmCli: hooks.grokInstall.npmCli }), ...(hooks.grokInstall.binarySha256 === undefined ? {} : { binarySha256: hooks.grokInstall.binarySha256 }) },
             onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of grok) checkAgentWiring(wiring);
+  // The Local model's endpoints (epic 14 story 14.3), over the keychain below; a chat asks for its target at each start.
+  let endpointStore: LocalEndpoints | undefined;
+  const localEndpoints = (): LocalEndpoints => (endpointStore ??= core.localEndpoints(secrets));
   // The Local model (epic 14 story 14.2): the same, in its own folder's switch.
   const local =
     options.local === false || (options.local === undefined && !LOCAL_SHIPPED && hooks.localServer === undefined && hooks.localEndpoint === undefined)
       ? []
-      : [localWiring({ dataDir, given: options.local, serverScript: hooks.localServer, target: hooks.localEndpoint, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+      : [localWiring({ dataDir, given: options.local, serverScript: hooks.localServer, target: hooks.localEndpoint ?? (async () => localEndpoints().target()), onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of local) checkAgentWiring(wiring);
   const extraAgents = [...antigravity, ...codex, ...grok, ...local, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
   // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.
@@ -216,7 +221,9 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   });
   /** Claude Code as a chat runs it: the default agent, and the one Plan and the document cards fall back to (stories 4.1, 4.7). */
   const chatAgent = forChat(CLAUDE_CODE_AGENT_ID, agent);
-  return { claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
+  const localModelPort = options.localModelPort ?? createOpenAiLocalModel();
+  const localModels = createLocalModels({ endpoints: localEndpoints(), port: localModelPort, detectPort: options.localModelPort ?? createOpenAiLocalModel({ timeoutMs: DETECT_PROBE_TIMEOUT_MS }) });
+  return { localModels, localEndpoints: localEndpoints(), claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
 }
 
 /**

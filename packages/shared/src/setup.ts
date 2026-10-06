@@ -72,6 +72,8 @@ export const AgentSetupStatus = z.object({
    * offers no Sign in, asks for the key, and its notices say why.
    */
   apiKeyOnly: z.boolean().optional(),
+  /** `true` for an agent that needs no account and no key (epic 14: the Local model): no Sign in and no key box; its card shows its endpoint's state. */
+  noAccount: z.boolean().optional(),
   /** What the agent calls its key in the card's words, when it is not "API key" (Grok: "xAI API access token"). */
   apiKeyName: z.string().min(1).max(60).optional(),
   /** `true` when the agent is signed in with the user's account through Ogden Agents and can be signed out here (epic 6 entry 7). */

@@ -181,6 +181,47 @@ export const API_ROUTES = {
    * 404 `agent_unknown` for an agent this install doesn't have.
    */
   chatAgentDefaultModel: `${API_BASE}/chat-agents/:agentId/default-model`,
+  /**
+   * `GET` → `LocalEndpointsResponse` (epic 14 story 14.3): the OpenAI-compatible
+   * endpoints the Local model talks to. `POST AddLocalEndpointRequest` → 201
+   * `LocalEndpointResponse`; 400 `invalid_request` for an address that can't be
+   * used, 503 `secrets_unavailable` when a key is given and the keychain can't hold it,
+   * 409 `endpoint_confirmation_required` when the host is not this computer and
+   * `confirmHost` does not match it. Never carries a key (AD-16).
+   */
+  localEndpoints: `${API_BASE}/local-endpoints`,
+  /**
+   * `PATCH UpdateLocalEndpointRequest` → `LocalEndpointResponse`; `DELETE` → 204
+   * (also removes its key). A changed host drops its confirmation (epic 14
+   * story 14.3). 404 `not_found`.
+   */
+  localEndpoint: `${API_BASE}/local-endpoints/:endpointId`,
+  /**
+   * `PUT SetEndpointKeyRequest` → `LocalEndpointResponse`; `DELETE` →
+   * `LocalEndpointResponse`: saves or removes the endpoint's key in the keychain
+   * (`agent-endpoint-key/<id>`). Sent `no-store`; the key is never answered,
+   * logged or evented (AD-16). 503 `secrets_unavailable` with plain words.
+   */
+  localEndpointKey: `${API_BASE}/local-endpoints/:endpointId/key`,
+  /**
+   * `POST ConfirmRemoteRequest` → `LocalEndpointResponse`: the user confirmed that
+   * prompts and project text go to `host`, which must be the endpoint's current host.
+   */
+  localEndpointConfirm: `${API_BASE}/local-endpoints/:endpointId/confirm`,
+  /** `PUT SetDefaultEndpointRequest` → `LocalEndpointsResponse`: the endpoint new chats use. */
+  localEndpointDefault: `${API_BASE}/local-endpoints-default`,
+  /** `GET` → `LocalEndpointPresetsResponse` (epic 14 story 14.4): the one-click presets (label, address, where to get the server). */
+  localEndpointPresets: `${API_BASE}/local-endpoint-presets`,
+  /**
+   * `POST` → `LocalEndpointTestResponse` (story 14.4): Test connection. The server calls the endpoint
+   * (never the page); 409 `endpoint_confirmation_required` for an unconfirmed host, in which case nothing is called.
+   */
+  localEndpointTest: `${API_BASE}/local-endpoints/:endpointId/test`,
+  /**
+   * `POST` → `LocalEndpointDetectResponse` (story 14.4): Detect. Probes only 127.0.0.1 and localhost on the
+   * presets' ports, once, when the user presses it. Reads no body.
+   */
+  localEndpointDetect: `${API_BASE}/local-endpoints-detect`,
   /** `GET` → `AgentsResponse` (9.1): every supported agent's install and sign-in state. */
   agents: `${API_BASE}/agents`,
   /**
@@ -384,6 +425,16 @@ export const API_ROUTES = {
    * `vcs_unavailable` without a branch or a usable git.
    */
   workspaceBuildCommitPlan: `${API_BASE}/workspaces/:wsId/builds/:ref/commit-plan`,
+  /**
+   * `POST` (no body) → 201 `SessionResponse` (story 7.1's tracer): looks back
+   * on the epic whose folder name is `:epic` (an epic of the board's initiative):
+   * a session of kind `planning` whose first message invokes the project's
+   * retrospective skill on the epic's folder. Serves the `retrospectives`
+   * piece and needs the project's script trust (it reads the board). 400 for
+   * a malformed `:epic`, 404 for an epic not on the board or a project whose
+   * BMad Method has no such skill.
+   */
+  workspaceEpicLookBack: `${API_BASE}/workspaces/:wsId/epics/:epic/look-back`,
   /** `GET` → `SessionRunResponse` (story 5.2): the run of a `build` session; 404 for one without a run. */
   sessionRun: `${API_BASE}/workspaces/:wsId/sessions/:sesId/run`,
   // Pre-registered by story 5.3 for epics 5 and 11: each serves `builds`

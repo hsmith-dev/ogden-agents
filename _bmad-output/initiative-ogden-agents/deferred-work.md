@@ -6,6 +6,7 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 
 Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim from its Log entry's summary (story 10.8). Log entries are append-only, so the phrase never goes stale; `node scripts/check-provenance.mjs` (CI job Provenance) fails on a line whose phrase is missing or matches no summary, on a line whose phrase a `Resolved:` summary contains (the entry is closed, so the line is stale), and (entry 4.12) on a Log entry added since the base branch that isn't `Resolved:`, contains no index line's phrase, and isn't quoted (`"<part of its summary>"`) by a `Resolved:` summary. A partial close starts `Resolved (…):` and leaves its index line in place.
 
+- Epic 7 (retrospectives, from 7.1 review): a look-back's epic folder can name a folder that does not exist when the active initiative is nested or the central config overrides the output folder; check it exists before starting. (log: "A look-back's epic folder is derived from tickets.py's folder name and the setup status's output folder")
 - Remove-project story (not yet ticketed): delete a project's always-allow rules before its workspace row (`permission_rules.workspace_id` has no `ON DELETE`). From 2.6 F9. (log: "Removing a project must delete its always-allow rules first")
 - Epic 5 (unattended builds): the inside-the-project check for file-kind rules is check-then-use, so a symlink swapped in before the write could redirect it. From 2.6. (log: "The inside-the-project check for file-kind rules runs before the agent acts (check-then-use)")
 - Unowned (copy change): say in the caution-level copy (EXPERIENCE.md, settings page) that `think` auto-allows helper-agent launches and TodoWrite. From 2.8 F3. (log: "the `think` kind is auto-allowed")
@@ -119,6 +120,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 14.10 (proposed): An approved env or printenv card puts an endpoint's key into the harness's tool output and so into opencode.db. From 14.2 review. (log: "An approved env or printenv card puts an endpoint's key into the harness's tool output and so into opencode.db")
 - 14.10 (proposed): test-hooks.ts is over 600 lines after the Local model hooks. From 14.2 review. (log: "test-hooks.ts is over 600 lines after the Local model hooks")
 - 14.10 (proposed): CI never unpacks the real OpenCode archives with the app's extractors. From 14.2 review. (log: "CI never unpacks the real OpenCode archives with the app's extractors")
+- 14.10 (proposed): The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one. From 14.3 review. (log: "The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one")
+- 14.10 (proposed): Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry). From 14.3 review. (log: "Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry)")
+- 14.10 (proposed): shared/src/events.ts is over 600 lines and shared compiles with DOM types. From 14.3 review. (log: "shared/src/events.ts is over 600 lines and shared compiles with DOM types")
 
 ## Log
 
@@ -810,6 +814,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-review-approve-and-merge-reject-and-retry-plan.md`
   summary: Update and retry takes no run limit slot and arms no deadline
   evidence: 5.9 correctness review: `rebaseLocked` sets the run running without `hasCapacity` or `armDeadline`; `review()` calls `tickets.find` on each read.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-retrospectives/story-tracer-bullet-look-back-on-one-finished-epic-from-the-board-plan.md`
+  summary: A look-back's epic folder is derived from tickets.py's folder name and the setup status's output folder (`folder.name` for a nested active initiative, `_bmad/config.toml` only for the output folder), so a nested initiative or an overridden central output folder starts a session naming a missing folder instead of answering 404.
+  evidence: correctness review of 7.1 read tickets.py `cmd_status` (`folder.name`) and `tickets_root` (merged config); fix by checking the derived folder exists through the catalog port before starting.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-live-run-view-and-the-runs-tab-plan.md`
   summary: Apply the saved fix after a late failure: the patch stays applied while the run is still blocked when the plan mark or the prompt fails; the patch is read by git three times and is not previewed.
   evidence: 11.1 correctness and security reviews; Retry still works, and the agent is released while the run is blocked.
@@ -828,3 +835,12 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-tracer-bullet-one-local-model-chat-against-a-fake-server-end-to-end-plan.md`
   summary: CI never unpacks the real OpenCode archives with the app's extractors: `agent-pins --check --agent local` hashes the archive only; the per-file pins were checked by hand on this Mac and the Linux x64 tar header was read, but a pin bump should unpack with extractPinned and extractPinnedTarGz on each OS.
   evidence: 14.2 correctness review.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-epic-contracts-and-stubs-endpoint-localmodelport-no-account-descriptor-and-the-fake-server-plan.md`
+  summary: The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one: Ogden's probe refuses redirects but OpenCode's own fetch makes the chat requests; whether it follows a 307 with the request body is a live check and the harness's fetch settings should be read on each pin bump.
+  evidence: 14.3 security review; unverified against OpenCode 1.18.34.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-epic-contracts-and-stubs-endpoint-localmodelport-no-account-descriptor-and-the-fake-server-plan.md`
+  summary: Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry): a crash or a concurrent remove can leave an orphan agent-endpoint-key entry that nothing reads; a startup sweep of unknown agent-endpoint-key names would need the keychain to be listable.
+  evidence: 14.3 reviews; the key never reaches the database or events either way.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-epic-contracts-and-stubs-endpoint-localmodelport-no-account-descriptor-and-the-fake-server-plan.md`
+  summary: shared/src/events.ts is over 600 lines and shared compiles with DOM types: events.ts grew from 615 to 621 lines with the endpoint event and shared's tsconfig gained the DOM lib only for URL; a narrower URL declaration and a split of events.ts are the sweep's.
+  evidence: 14.3 correctness review.

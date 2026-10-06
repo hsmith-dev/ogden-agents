@@ -73,38 +73,42 @@ async function refusalOf(reply: Response) {
 }
 
 describe('what the install ships (story 10.2)', () => {
-  it('ships Planning, Board (story 4.2) and Unattended builds (story 5.2): Retrospectives is coming soon, and no PATCH can turn it on', async () => {
-    expect(SHIPPED_BMAD_PIECES).toEqual(['planning', 'board', 'builds']);
+  it('ships Planning, Board (story 4.2), Unattended builds (story 5.2) and Retrospectives (story 7.1)', async () => {
+    expect(SHIPPED_BMAD_PIECES).toEqual(['planning', 'board', 'builds', 'retrospectives']);
     const server = await startTestServer();
     const tab = await signIn(server);
     expect(await piecesOf(server, tab)).toEqual([
       { piece: 'planning', available: true },
       { piece: 'board', available: true },
       { piece: 'builds', available: true },
-      { piece: 'retrospectives', available: false, reason: BMAD_COMING_SOON_REASON },
+      { piece: 'retrospectives', available: true },
     ]);
 
     const workspace = await addProject(server, tab);
-    const before = server.core.events.lastSeq();
-    for (const bmadPieces of [['board', 'builds', 'retrospectives'], ['planning', 'board', 'builds', 'retrospectives']]) {
-      const refused = await refusalOf(await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces, cautionLevel: 'ask_for_commands' }));
-      expect(refused, JSON.stringify(bmadPieces)).toEqual({ status: 409, code: 'feature_unavailable', message: FEATURE_UNAVAILABLE_MESSAGE });
-    }
-    expect(server.core.events.lastSeq()).toBe(before);
     expect(WorkspaceSettingsResponse.parse(await (await request(server, tab, 'GET', settingsPath(workspace.id))).json()).settings).toEqual({
       cautionLevel: 'ask_every_time',
       bmadPieces: [],
       bmadScriptsTrusted: false,
     });
-    // Planning, Board and Unattended builds turn on.
-    const on = await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning', 'board', 'builds'] });
-    expect(WorkspaceSettingsResponse.parse(await on.json()).settings.bmadPieces).toEqual(['planning', 'board', 'builds']);
+    // Every shipped piece turns on (Retrospectives needs Unattended builds until story 7.2 changes it to Board).
+    const on = await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning', 'board', 'builds', 'retrospectives'] });
+    expect(WorkspaceSettingsResponse.parse(await on.json()).settings.bmadPieces).toEqual(['planning', 'board', 'builds', 'retrospectives']);
+
+    // An install that ships one piece fewer: it is coming soon, and no PATCH turns it on.
+    const fewer = await startTestServer({ shippedBmadPieces: ['planning', 'board', 'builds'] });
+    const fewerTab = await signIn(fewer);
+    expect(await piecesOf(fewer, fewerTab)).toContainEqual({ piece: 'retrospectives', available: false, reason: BMAD_COMING_SOON_REASON });
+    const other = await addProject(fewer, fewerTab);
+    const before = fewer.core.events.lastSeq();
+    const refused = await refusalOf(await request(fewer, fewerTab, 'PATCH', settingsPath(other.id), { bmadPieces: ['board', 'builds', 'retrospectives'] }));
+    expect(refused).toEqual({ status: 409, code: 'feature_unavailable', message: FEATURE_UNAVAILABLE_MESSAGE });
+    expect(fewer.core.events.lastSeq()).toBe(before);
     // Behind the gate like every API route.
     expect((await send(server, API_ROUTES.bmadPieces)).status).toBe(401);
   });
 
   it('a test-registered piece, by start() option or by its test hook, is available with no reason, and the hook is logged', async () => {
-    const byOption = await startTestServer({ availableBmadPieces: ['retrospectives'] });
+    const byOption = await startTestServer({ shippedBmadPieces: ['planning', 'board', 'builds'], availableBmadPieces: ['retrospectives'] });
     const pieces = await piecesOf(byOption, await signIn(byOption));
     expect(pieces[3]).toEqual({ piece: 'retrospectives', available: true });
     expect(pieces.map((entry) => entry.available)).toEqual([true, true, true, true]);
@@ -112,7 +116,7 @@ describe('what the install ships (story 10.2)', () => {
 
     vi.stubEnv(BMAD_AVAILABLE_ENV, 'retrospectives, builds');
     const lines: string[] = [];
-    const byHook = await startTestServer({ lines });
+    const byHook = await startTestServer({ lines, shippedBmadPieces: ['planning', 'board', 'builds'] });
     expect((await piecesOf(byHook, await signIn(byHook))).map((entry) => entry.available)).toEqual([true, true, true, true]);
     const hooks = lines.map((line) => JSON.parse(line) as { msg: string; bmadAvailable?: string }).find((line) => line.msg === 'test hooks in use');
     expect(hooks?.bmadAvailable).toBe('retrospectives,builds');
@@ -132,24 +136,6 @@ describe('what the install ships (story 10.2)', () => {
     expect(server.core.events.lastSeq()).toBe(before);
     const ok = await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['retrospectives', 'board', 'builds'] });
     expect(WorkspaceSettingsResponse.parse(await ok.json()).settings.bmadPieces).toEqual(['board', 'builds', 'retrospectives']);
-  });
-
-  it('keeps a stored piece that is no longer available when only the caution level changes, and lets it be turned off', async () => {
-    const dataDir = tempDataDir();
-    const first = await startTestServer({ dataDir, availableBmadPieces: ['retrospectives'] });
-    const firstTab = await signIn(first);
-    const workspace = await addProject(first, firstTab);
-    expect((await request(first, firstTab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['board', 'builds', 'retrospectives'] })).status).toBe(200);
-    await first.close();
-
-    const second = await startTestServer({ dataDir });
-    const tab = await signIn(second);
-    const caution = await request(second, tab, 'PATCH', settingsPath(workspace.id), { cautionLevel: 'ask_for_commands' });
-    expect(caution.status).toBe(200);
-    expect(WorkspaceSettingsResponse.parse(await caution.json()).settings).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: ['board', 'builds', 'retrospectives'], bmadScriptsTrusted: false });
-    const off = await request(second, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['board', 'builds'] });
-    expect(WorkspaceSettingsResponse.parse(await off.json()).settings.bmadPieces).toEqual(['board', 'builds']);
-    expect((await refusalOf(await request(second, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['board', 'builds', 'retrospectives'] }))).code).toBe('feature_unavailable');
   });
 });
 

@@ -30,6 +30,7 @@ import { Text } from '@/ui/typography';
 import { ScriptTrustPrompt } from '@/workspaces/script-trust-prompt';
 import { BmadDownloadPrompt } from './bmad-download-prompt';
 import { BoardEpic } from './board-epic';
+import { useBoardLookBack, type BoardLookBack } from './board-look-back';
 import { BuildDialog } from './build-dialog';
 import { commitPlanFiles, startBuild, useWorkspaceRuns } from './builds-api';
 import { cardStatusLine, groupBoard, indexTickets, unmetPrerequisites, type CardStatus } from './board-model';
@@ -60,11 +61,14 @@ export function BoardTickets({
   wsId,
   sheet,
   builds,
+  lookBack,
 }: {
   wsId: string;
   /** The ticket sheet's outlet: shown only over a loaded board, never over a prompt or an error. */ sheet?: ReactNode;
   /** Build on Ready cards (story 5.2): only with Unattended builds on. */
   builds?: BoardBuilds | undefined;
+  /** Look back on an epic (story 7.1): only with Retrospectives on. */
+  lookBack?: BoardLookBack | undefined;
 }) {
   const tickets = useTickets(wsId);
   const reduced = tickets.data === undefined && isApiError(tickets.error, 'reduced_mode');
@@ -75,12 +79,12 @@ export function BoardTickets({
   return (
     <>
       {shownReduced.current ? <ReducedModeNotice wsId={wsId} texts={reduced ? [BMAD_CAPABILITY_REDUCED_TEXT.ticket_tree] : []} className="mb-4 flex max-w-(--space-chat-column) flex-col gap-3" /> : null}
-      {reduced ? null : <BoardTicketsBody wsId={wsId} sheet={sheet} tickets={tickets} builds={builds} />}
+      {reduced ? null : <BoardTicketsBody wsId={wsId} sheet={sheet} tickets={tickets} builds={builds} lookBack={lookBack} />}
     </>
   );
 }
 
-function BoardTicketsBody({ wsId, sheet, tickets, builds }: { wsId: string; sheet?: ReactNode; tickets: ReturnType<typeof useTickets>; builds?: BoardBuilds | undefined }) {
+function BoardTicketsBody({ wsId, sheet, tickets, builds, lookBack }: { wsId: string; sheet?: ReactNode; tickets: ReturnType<typeof useTickets>; builds?: BoardBuilds | undefined; lookBack?: BoardLookBack | undefined }) {
   const highlighted = useBoardEvents(wsId);
   if (isApiError(tickets.error, 'scripts_not_trusted')) return <ScriptTrustPrompt wsId={wsId} onTrusted={() => void tickets.refetch()} />;
   // Story 4.13: the scripts changed since the user allowed them; Allow allows them as they are now.
@@ -112,7 +116,7 @@ function BoardTicketsBody({ wsId, sheet, tickets, builds }: { wsId: string; shee
           {tickets.error.message}
         </Notice>
       )}
-      <Board wsId={wsId} data={tickets.data} updatedAt={tickets.dataUpdatedAt} highlighted={highlighted} builds={builds} />
+      <Board wsId={wsId} data={tickets.data} updatedAt={tickets.dataUpdatedAt} highlighted={highlighted} builds={builds} lookBack={lookBack} />
       {sheet}
     </>
   );
@@ -275,17 +279,20 @@ function Board({
   updatedAt,
   highlighted,
   builds,
+  lookBack,
 }: {
   wsId: string;
   data: TicketsResponse;
   /** When `data` was fetched. */ updatedAt: number;
   highlighted: ReadonlySet<string>;
   builds?: BoardBuilds | undefined;
+  lookBack?: BoardLookBack | undefined;
 }) {
   const [showDropped, setShowDropped] = useState(false);
   const droppedId = useId();
   const { onChoose, saving, announcement, failure } = useBoardMarks(wsId, updatedAt, showDropped, droppedId);
   const { onBuild, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted } = useBoardBuild(wsId, builds);
+  const { onLookBack, lookingBack, lookBackFailure } = useBoardLookBack(wsId, lookBack);
   const commitRef = buildFailure?.commitRef;
   // Story 5.8: a ticket whose build waits for a slot says Queued on its card.
   const runs = useWorkspaceRuns(wsId, builds !== undefined);
@@ -324,6 +331,11 @@ function Board({
           {buildFailure.message}
         </Notice>
       )}
+      {lookBackFailure === undefined ? null : (
+        <Notice variant="blocked" role="alert" data-testid="board-look-back-error">
+          {lookBackFailure}
+        </Notice>
+      )}
       {dialogRef === undefined ? null : <BuildDialog wsId={wsId} ticketRef={dialogRef} onClose={closeDialog} onStarted={onAttendedStarted} />}
       {committed === undefined ? null : (
         <Notice role="status" data-testid="board-plan-committed" data-committed={committed}>
@@ -347,7 +359,7 @@ function Board({
         <ul aria-label={BOARD_EPICS_LABEL} className="m-0 flex list-none flex-col gap-8 p-0">
           {epics.map((epic) => (
             <li key={epic.slug} className="min-w-0">
-              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} />
+              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} onLookBack={onLookBack} lookingBack={lookingBack} />
             </li>
           ))}
         </ul>

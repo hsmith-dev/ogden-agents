@@ -52,7 +52,7 @@ export function createBuildSettings({ db, events, entities }: { db: Database; ev
   };
   const readWorkspace = (workspaceId: WorkspaceId): WorkspaceBuildSettings => {
     const row = orm.select().from(workspaceBuildSettings).where(eq(workspaceBuildSettings.workspaceId, workspaceId)).get();
-    const parsed = WorkspaceBuildSettings.safeParse({ maxConcurrentRuns: row?.maxConcurrentRuns ?? undefined, testCommand: row?.testCommand ?? null });
+    const parsed = WorkspaceBuildSettings.safeParse({ maxConcurrentRuns: row?.maxConcurrentRuns ?? undefined, testCommand: row?.testCommand ?? null, defaultBuildAgentId: row?.defaultBuildAgentId ?? null });
     return parsed.success ? parsed.data : WorkspaceBuildSettings.parse({});
   };
   const refuse = (error: { issues: Array<{ path: PropertyKey[]; message: string }> }, fallback: string): never => {
@@ -92,11 +92,11 @@ export function createBuildSettings({ db, events, entities }: { db: Database; ev
       return events.transaction(() => {
         const previous = readWorkspace(workspaceId);
         const settings = WorkspaceBuildSettings.parse({ ...previous, ...parsed.data });
-        if (settings.maxConcurrentRuns === previous.maxConcurrentRuns && settings.testCommand === previous.testCommand) return settings;
+        if (settings.maxConcurrentRuns === previous.maxConcurrentRuns && settings.testCommand === previous.testCommand && settings.defaultBuildAgentId === previous.defaultBuildAgentId) return settings;
         orm
           .insert(workspaceBuildSettings)
-          .values({ workspaceId, maxConcurrentRuns: settings.maxConcurrentRuns, testCommand: settings.testCommand })
-          .onConflictDoUpdate({ target: workspaceBuildSettings.workspaceId, set: { maxConcurrentRuns: settings.maxConcurrentRuns, testCommand: settings.testCommand } })
+          .values({ workspaceId, maxConcurrentRuns: settings.maxConcurrentRuns, testCommand: settings.testCommand, defaultBuildAgentId: settings.defaultBuildAgentId })
+          .onConflictDoUpdate({ target: workspaceBuildSettings.workspaceId, set: { maxConcurrentRuns: settings.maxConcurrentRuns, testCommand: settings.testCommand, defaultBuildAgentId: settings.defaultBuildAgentId } })
           .run();
         events.append({ type: 'workspace.build_settings_changed', workspaceId, streamId: workspaceId, payload: { settings, previous } });
         return settings;

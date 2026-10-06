@@ -1,4 +1,4 @@
-import { MAX_TEST_COMMAND_LENGTH, RUN_LIMIT_BOUNDS, RUN_LIMITS_LABEL, RUN_TIME_LIMIT_LABEL, TEST_COMMAND_HINT, TEST_COMMAND_LABEL } from '@ogden-agents/shared';
+import { BUILD_WAY_LABELS, DEFAULT_BUILD_AGENT_AUTOMATIC, DEFAULT_BUILD_AGENT_HINT, DEFAULT_BUILD_AGENT_LABEL, DEFAULT_BUILD_AGENT_SAVED, MAX_TEST_COMMAND_LENGTH, RUN_LIMIT_BOUNDS, RUN_LIMITS_LABEL, RUN_TIME_LIMIT_LABEL, TEST_COMMAND_HINT, TEST_COMMAND_LABEL } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Button } from '@/ui/button';
@@ -6,7 +6,8 @@ import { Field } from '@/ui/field';
 import { Input } from '@/ui/input';
 import { Notice } from '@/ui/notice';
 import { PageSection } from '@/ui/page';
-import { fetchBuildSettings, fetchRunLimits, saveBuildSettings, saveRunLimits } from './builds-api';
+import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
+import { fetchBuildAgents, fetchBuildSettings, fetchRunLimits, saveBuildSettings, saveRunLimits } from './builds-api';
 
 /** One whole-number setting: its field, a Save button that waits for a changed valid value, and what happened. */
 function NumberSetting({
@@ -145,6 +146,56 @@ function TestCommandSetting({ wsId, value, onSaved }: { wsId: string; value: str
   );
 }
 
+/**
+ * Workspace settings, Builds (epic 17): the agent a Build uses when the person picks none. Automatic follows the project's default
+ * chat agent when it can build, else Claude Code. Each agent says how it would build here; one that is not ready cannot be chosen.
+ */
+function DefaultBuildAgentSetting({ wsId, value, onSaved }: { wsId: string; value: string | null; onSaved: (saved: Awaited<ReturnType<typeof saveBuildSettings>>) => void }) {
+  const agents = useQuery({ queryKey: ['build-agents', wsId], queryFn: () => fetchBuildAgents(wsId), retry: false });
+  const [state, setState] = useState<'idle' | 'saved' | { error: string }>('idle');
+  // Nothing to choose between with one agent (or when the list can't be read).
+  if (agents.data === undefined || agents.data.agents.length < 2) return null;
+  const AUTOMATIC = 'automatic';
+  const choose = (next: string) => {
+    setState('idle');
+    saveBuildSettings(wsId, { defaultBuildAgentId: next === AUTOMATIC ? null : next }).then(
+      (saved) => {
+        onSaved(saved);
+        setState('saved');
+      },
+      (error: unknown) => setState({ error: error instanceof Error ? error.message : String(error) }),
+    );
+  };
+  return (
+    <Field id="default-build-agent" label={DEFAULT_BUILD_AGENT_LABEL} description={DEFAULT_BUILD_AGENT_HINT}>
+      <RadioGroup value={value ?? AUTOMATIC} onValueChange={choose} aria-labelledby="default-build-agent-label" data-testid="default-build-agent">
+        <RadioGroupOption id="default-build-agent-automatic" value={AUTOMATIC} label={DEFAULT_BUILD_AGENT_AUTOMATIC} data-testid="default-build-agent-automatic" />
+        {agents.data.agents.map((agent) => (
+          <RadioGroupOption
+            key={agent.agentId}
+            id={`default-build-agent-${agent.agentId}`}
+            value={agent.agentId}
+            disabled={agent.way === 'unavailable'}
+            label={agent.displayName}
+            description={`${BUILD_WAY_LABELS[agent.way]}${agent.reason === null ? '' : `. ${agent.reason}`}`}
+            data-testid={`default-build-agent-${agent.agentId}`}
+          />
+        ))}
+      </RadioGroup>
+      {state === 'saved' ? (
+        <span role="status" className="text-caption text-muted-foreground" data-testid="default-build-agent-saved">
+          {DEFAULT_BUILD_AGENT_SAVED}
+        </span>
+      ) : null}
+      {typeof state === 'object' ? (
+        <Notice variant="blocked" role="alert" data-testid="default-build-agent-error">
+          {state.error}
+        </Notice>
+      ) : null}
+    </Field>
+  );
+}
+
 /** Settings, Builds (story 5.8): how many builds run at once in the whole install, and how long one may take. */
 export function InstallBuildLimits() {
   const queryClient = useQueryClient();
@@ -203,6 +254,7 @@ export function ProjectBuildLimit({ wsId }: { wsId: string }) {
         bounds={RUN_LIMIT_BOUNDS.maxConcurrentRunsPerWorkspace}
         save={async (value) => queryClient.setQueryData(['build-settings', wsId], await saveBuildSettings(wsId, { maxConcurrentRuns: value }))}
       />
+      <DefaultBuildAgentSetting wsId={wsId} value={settings.data.defaultBuildAgentId} onSaved={(saved) => queryClient.setQueryData(['build-settings', wsId], saved)} />
       <TestCommandSetting wsId={wsId} value={settings.data.testCommand} onSaved={(saved) => queryClient.setQueryData(['build-settings', wsId], saved)} />
     </PageSection>
   );

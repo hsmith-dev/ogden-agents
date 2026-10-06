@@ -322,6 +322,8 @@ export const workspaceBuildSettings = sqliteTable('workspace_build_settings', {
     .references(() => workspaces.id),
   maxConcurrentRuns: integer('max_concurrent_runs'),
   testCommand: text('test_command'),
+  /** The agent a Build with no choice uses in this project (epic 17); `NULL` falls back to the project's default chat agent when it can build, else Claude Code. */
+  defaultBuildAgentId: text('default_build_agent_id'),
 });
 
 /**

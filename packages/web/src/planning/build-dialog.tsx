@@ -1,5 +1,12 @@
 import {
   ATTENDED_EXPLAINED_TEXT,
+  attendedExplainedTextFor,
+  BUILD_PICKER_LABEL,
+  BUILD_WAY_LABELS,
+  buildDialogTitleFor,
+  buildPickerTitle,
+  OTHER_AGENT_PICK_TEXT,
+  type BuildAgentChoice,
   BUILD_DIALOG_CONFIRM_BUTTON,
   BUILD_DIALOG_CONFIRM_TEXT,
   BUILD_DIALOG_LOAD_FAILED,
@@ -17,13 +24,15 @@ import {
   type SandboxStatus,
 } from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import { Button } from '@/ui/button';
 import { Dialog, DialogContent } from '@/ui/dialog';
 import { Notice } from '@/ui/notice';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
-import { fetchBuildSandbox, startBuild } from './builds-api';
+import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
+import { fetchBuildAgents, fetchBuildSandbox, startBuild } from './builds-api';
 
 /**
  * The Build dialog (story 5.6; EXPERIENCE.md Build actions, Sandbox
@@ -50,6 +59,11 @@ export interface BuildDialogProps {
   onStarted: (sessionId: string, runId: string) => void;
   /** Opened for a build the manager proposed (15.11): the person confirms it here, whether or not a sandbox is ready. */
   confirm?: boolean;
+  /**
+   * Opened by Build itself because more than one agent can build here (epic 17): the person picks the agent for this run,
+   * and with a sandbox ready the dialog offers **Build** for the one picked. Nothing starts until a button here is pressed.
+   */
+  picker?: boolean;
 }
 
 /** What each probe found, one plain line (a usable sandbox needs no line: the dialog would not be open). */
@@ -67,21 +81,68 @@ function ProbeList({ probes }: { probes: readonly SandboxProbe[] }) {
   );
 }
 
-export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = false }: BuildDialogProps) {
-  const sandbox = useQuery({ queryKey: ['build-sandbox', wsId], queryFn: () => fetchBuildSandbox(wsId), retry: false, staleTime: 0, gcTime: 0 });
+/** The agent picker (epic 17): every agent that can build, each with how it would build here and why in plain words; one not ready cannot be chosen. */
+function AgentPicker({ agents, selected, onSelect, groupRef }: { agents: readonly BuildAgentChoice[]; selected: string; onSelect: (agentId: string) => void; groupRef: RefObject<HTMLDivElement | null> }) {
+  return (
+    <div className="flex flex-col gap-1" data-testid="build-picker">
+      <Text variant="label" id="build-picker-label">
+        {BUILD_PICKER_LABEL}
+      </Text>
+      <div ref={groupRef}>
+        <RadioGroup value={selected} onValueChange={onSelect} aria-labelledby="build-picker-label">
+          {agents.map((agent) => (
+            <RadioGroupOption
+              key={agent.agentId}
+              id={`build-agent-${agent.agentId}`}
+              value={agent.agentId}
+              disabled={agent.way === 'unavailable'}
+              label={agent.displayName}
+              description={
+                <span data-testid="build-agent-way" data-way={agent.way}>
+                  {BUILD_WAY_LABELS[agent.way]}
+                  {agent.reason === null ? '' : `. ${agent.reason}`}
+                </span>
+              }
+              data-testid={`build-agent-${agent.agentId}`}
+            />
+          ))}
+        </RadioGroup>
+      </div>
+    </div>
+  );
+}
+
+export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = false, picker = false }: BuildDialogProps) {
+  // Which agents can build here and how (epic 17). A failed read shows no picker: the dialog is as it was, for the default agent.
+  const agentsQuery = useQuery({ queryKey: ['build-agents', wsId], queryFn: () => fetchBuildAgents(wsId), retry: false, staleTime: 0, gcTime: 0 });
+  const agents = agentsQuery.data?.agents ?? [];
+  const [chosen, setChosen] = useState<string | undefined>();
+  const usable = agents.filter((agent) => agent.way !== 'unavailable');
+  const agentId: string | undefined =
+    agents.length < 2 ? undefined : chosen !== undefined && usable.some((agent) => agent.agentId === chosen) ? chosen : (usable.find((agent) => agent.agentId === agentsQuery.data?.defaultAgentId) ?? usable[0])?.agentId;
+  const agentName = agents.find((agent) => agent.agentId === agentId)?.displayName;
+  const groupRef = useRef<HTMLDivElement | null>(null);
+  const sandbox = useQuery({
+    queryKey: ['build-sandbox', wsId, agentId ?? 'default'],
+    queryFn: () => fetchBuildSandbox(wsId, undefined, agentId),
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    enabled: !agentsQuery.isPending,
+  });
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<string | undefined>();
   const status: SandboxStatus | undefined = sandbox.data;
   // Until the server answers (or when it cannot), the entry's own order; a failed read never blocks building with you watching.
   const ready = status?.available === true;
-  const choices: readonly SandboxChoice[] = ready ? (confirm ? ['attended'] : []) : status === undefined || status.choices.length === 0 ? SANDBOX_CHOICES : status.choices;
+  const choices: readonly SandboxChoice[] = ready ? (confirm || picker ? ['attended'] : []) : status === undefined || status.choices.length === 0 ? SANDBOX_CHOICES : status.choices;
   const dockerReady = status?.probes.some((probe) => probe.kind === 'docker' && probe.state === 'detected') === true;
 
   const begin = (mode: 'attended' | 'unattended') => {
     if (starting) return;
     setStarting(true);
     setFailure(undefined);
-    startBuild(wsId, ticketRef, mode).then(
+    startBuild(wsId, ticketRef, mode, undefined, agentId).then(
       ({ session, run }) => {
         setStarting(false);
         onStarted(session.id, run.id);
@@ -93,17 +154,27 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = fal
       },
     );
   };
+  const startable = ready && (confirm || picker);
   const buildAttended = () => begin('attended');
 
   const choice = (id: SandboxChoice) => {
     const label = SANDBOX_CHOICE_LABELS[id];
     if (id === 'other_agent') {
+      // Enabled when another agent can build here: it moves you to the picker (epic 17).
+      const others = usable.filter((agent) => agent.agentId !== agentId);
+      const canSwitch = agents.length >= 2 && others.length > 0;
       return (
         <li key={id} className="flex flex-col gap-1" data-testid="build-dialog-choice" data-choice={id}>
-          <Button type="button" variant="outline" disabled data-testid="build-dialog-other-agent">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!canSwitch}
+            onClick={() => groupRef.current?.querySelector<HTMLElement>('[role="radio"]:not([disabled])')?.focus()}
+            data-testid="build-dialog-other-agent"
+          >
             {label}
           </Button>
-          <Text variant="caption">{OTHER_AGENT_DISABLED_TEXT}</Text>
+          <Text variant="caption">{canSwitch ? OTHER_AGENT_PICK_TEXT : OTHER_AGENT_DISABLED_TEXT}</Text>
         </li>
       );
     }
@@ -135,20 +206,21 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = fal
         <Button type="button" variant="primary" aria-disabled={starting || undefined} onClick={buildAttended} data-testid="build-dialog-attended">
           {label}
         </Button>
-        <Text variant="caption">{ATTENDED_EXPLAINED_TEXT}</Text>
+        <Text variant="caption">{agentName === undefined ? ATTENDED_EXPLAINED_TEXT : attendedExplainedTextFor(agentName)}</Text>
       </li>
     );
   };
 
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <DialogContent title={confirm && ready ? buildDialogConfirmTitle(ticketRef) : BUILD_DIALOG_TITLE} description={`Building ${ticketRef}.`} data-testid="build-dialog" data-confirm={confirm ? 'true' : undefined}>
+      <DialogContent title={picker && ready ? buildPickerTitle(ticketRef) : confirm && ready ? buildDialogConfirmTitle(ticketRef) : agentName === undefined ? BUILD_DIALOG_TITLE : buildDialogTitleFor(agentName)} description={`Building ${ticketRef}.`} data-testid="build-dialog" data-confirm={confirm ? 'true' : undefined}>
         {confirm ? (
           <Text variant="body" data-testid="build-dialog-confirm-text">
             {BUILD_DIALOG_CONFIRM_TEXT}
           </Text>
         ) : null}
-        {sandbox.isPending ? (
+        {agents.length >= 2 && agentId !== undefined ? <AgentPicker agents={agents} selected={agentId} onSelect={setChosen} groupRef={groupRef} /> : null}
+        {sandbox.isPending || agentsQuery.isPending ? (
           <Skeleton className="h-10 w-full" />
         ) : status === undefined ? (
           <Notice variant="blocked" role="alert" data-testid="build-dialog-load-error">
@@ -172,8 +244,8 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = fal
             {failure}
           </Notice>
         )}
-        {ready && !confirm ? <Text variant="body" data-testid="build-dialog-ready">{BUILD_DIALOG_READY_TEXT}</Text> : null}
-        {ready && confirm ? (
+        {ready && !confirm && !picker ? <Text variant="body" data-testid="build-dialog-ready">{BUILD_DIALOG_READY_TEXT}</Text> : null}
+        {startable ? (
           <Button type="button" variant="primary" aria-disabled={starting || undefined} onClick={() => begin('unattended')} data-testid="build-dialog-start">
             {BUILD_DIALOG_CONFIRM_BUTTON}
           </Button>

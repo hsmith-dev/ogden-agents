@@ -112,6 +112,8 @@ export function createBuildsWiring({
   };
   return createBuilds({
     skillReach,
+    // The project's default chat agent, for the default build agent's fallback (epic 17).
+    projectDefaultAgent: (workspaceId) => core.permissions.getSettings(workspaceId).defaultAgentId,
     settings: core.buildSettings,
     // The re-run of a project's tests gets the agents' allowlist and never an API key (AD-16).
     commandEnv: () => withoutAgentKeys(agentEnvironment()),

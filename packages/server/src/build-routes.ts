@@ -53,7 +53,7 @@ import {
   type BuildSettings,
   type BuildsUseCases,
 } from '@ogden-agents/core';
-import { AllReadyBuildsResponse, API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildAgentsResponse, BuildResponse, WorkspaceBuildSettingsResponse, CommitPlanFilesResponse, ReviewResponse, RunResponse, RunsResponse, SandboxStatusResponse, SessionId, SessionRunResponse } from '@ogden-agents/shared';
+import { AllReadyBuildsResponse, API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildAgent, BuildAgentsResponse, BuildResponse, WorkspaceBuildSettingsResponse, CommitPlanFilesResponse, ReviewResponse, RunResponse, RunsResponse, SandboxStatusResponse, SessionId, SessionRunResponse, UNKNOWN_BUILD_AGENT_MESSAGE } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { bmadPieceRoutes } from './bmad-pieces.js';
@@ -194,7 +194,11 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, buil
   routes.get('builds', API_ROUTES.workspaceBuildSandbox, async (c, { workspaceId }) => {
     if (builds === undefined) return notImplemented(c);
     try {
-      return c.json(SandboxStatusResponse.parse({ status: await builds.sandboxStatus(workspaceId) }));
+      // The agent the picker asks about (`?agent=`), else the project's default build agent.
+      const asked = c.req.query('agent');
+      const parsedAgent = asked === undefined ? undefined : BuildAgent.safeParse(asked);
+      if (parsedAgent !== undefined && !parsedAgent.success) return apiError(c, 400, 'invalid_request', UNKNOWN_BUILD_AGENT_MESSAGE);
+      return c.json(SandboxStatusResponse.parse({ status: await builds.sandboxStatus(workspaceId, parsedAgent?.data) }));
     } catch (error) {
       return refused(c, workspaceId, error);
     }

@@ -81,6 +81,11 @@ export interface AgentDescriptor {
    */
   permissionModes: Readonly<{ ask: string } & Partial<Record<Exclude<PermissionMode, 'ask'>, string>>>;
   /**
+   * One plain sentence appended to "<agent> doesn't offer <mode>." when a mode it doesn't declare is asked for
+   * (epic 14: why a small local model is Ask only), so the picker says why, not only that.
+   */
+  modesNote?: string | undefined;
+  /**
    * The agent runs the project's own agent settings or hooks, so a chat with
    * it starts only in a project the user trusted.
    */
@@ -243,6 +248,7 @@ export function agentDescriptorProblems(descriptor: AgentDescriptor): string[] {
     at(`the handoff budget ${String(budget)} is not a whole number from 1000 to ${MAX_HANDOFF_BRIEF_CHARS}`);
   }
   if (descriptor.sendNow !== undefined && !(SEND_NOW_STYLES as readonly string[]).includes(descriptor.sendNow)) at(`${String(descriptor.sendNow)} is not a send now style`);
+  if (descriptor.modesNote !== undefined && (descriptor.modesNote.trim() === '' || /[\u2013\u2014]/.test(descriptor.modesNote))) at('the modes note is empty or has a dash');
   if (!isRelativeFolder(descriptor.skillsFolder)) at(`the skills folder ${JSON.stringify(descriptor.skillsFolder)} is not a plain repo-relative path`);
   return problems;
 }

@@ -15,9 +15,9 @@ import { spawn, spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { appExecutable, IS_WIN, killApps, killSidecars, launchApp, listApps, listSidecars, newWorkspace, readReport, sleep, waitFor, writeQuit } from './app-harness.mjs';
+import { agentWrapper, appExecutable, IS_WIN, killApps, killSidecars, launchApp, listApps, listSidecars, newWorkspace, readReport, sleep, tabOf, waitFor, writeQuit } from './app-harness.mjs';
 
 const { values } = parseArgs({ options: { app: { type: 'string' }, bundle: { type: 'string' }, 'version-next': { type: 'string' }, target: { type: 'string' } }, strict: true });
 for (const k of ['app', 'bundle', 'version-next', 'target']) {
@@ -28,7 +28,6 @@ for (const k of ['app', 'bundle', 'version-next', 'target']) {
 }
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..', '..', '..');
-const FAKE_AGENT = join(repo, 'tests', 'fixtures', 'fake-acp-agent-installed.mjs');
 const SERVER = join(repo, 'tests', 'fixtures', 'fake-release-server', 'serve.mjs');
 const exe = appExecutable(values.app);
 const nextVersion = values['version-next'];
@@ -67,12 +66,6 @@ function fakeServer(tamper) {
   });
 }
 
-function agentWrapper(dir) {
-  const file = join(dir, 'agent.mjs');
-  writeFileSync(file, `await import(${JSON.stringify(pathToFileURL(FAKE_AGENT).href)});\n`);
-  return file;
-}
-
 /** A copy of the installed app for one scenario, so a replaced app never carries into the next. */
 async function startApp(name, { channel, base }) {
   const ws = newWorkspace(`ogden-update-${name}-`);
@@ -83,18 +76,6 @@ async function startApp(name, { channel, base }) {
   await waitFor(`${name}: the page`, () => events(ws, 'page_finished').length > 0 || events(ws, 'server_error').length > 0, 120_000);
   current = ws;
   return { ws, child, port: events(ws, 'server_ready')[0].data.port };
-}
-
-async function tabOf(ws, port) {
-  const url = `http://127.0.0.1:${port}`;
-  const token = readFileSync(join(ws.data, 'launcher.token'), 'utf8').trim();
-  const hello = await (await fetch(`${url}/launcher/hello?launch=1`, { headers: { 'x-ogden-launcher-token': token } })).json();
-  const res = await fetch(`${url}/api/v1/tab/exchange`, { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ code: new URL(hello.launchUrl).hash.replace(/^#c=/, '') }) });
-  const headers = { authorization: `Bearer ${(await res.json()).token}`, origin: url, 'content-type': 'application/json' };
-  return {
-    get: async (path) => (await fetch(`${url}${path}`, { headers })).json(),
-    post: (path, body) => fetch(`${url}${path}`, { method: 'POST', headers, body: JSON.stringify(body) }),
-  };
 }
 
 async function scenario(name, fn) {

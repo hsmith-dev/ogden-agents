@@ -73,9 +73,11 @@ describe('the catalog (story 4.2)', () => {
       module: null,
       installedAt: null,
       next: null,
+      scope: null,
+      nexts: [],
     });
     const full = { name: 'bmad-spec', description: 'Spec.', label: 'Write a spec', group: 'planning', module: 'bmm', installedAt: at, next: { skill: 'bmad-ticket', label: 'Turn this spec into tickets' } };
-    expect(CatalogSkill.parse(full)).toEqual(full);
+    expect(CatalogSkill.parse(full)).toEqual({ ...full, scope: null, nexts: [] });
     expect(CatalogSkill.safeParse({ ...full, next: { skill: '../x', label: 'x' } }).success).toBe(false);
     expect(CatalogSkill.safeParse({ ...full, installedAt: 'yesterday' }).success).toBe(false);
   });
@@ -144,7 +146,7 @@ describe('the board (story 4.2)', () => {
   it('TicketsResponse adds the folder and epics, defaulted for a 4.1 answer', () => {
     expect(TicketsResponse.parse({ tickets: [row], problems: [] })).toMatchObject({ folder: null, epics: [] });
     const epics = [{ slug: 'epic-a', id: 1, status: 'in-progress', after: [], blocks: ['epic-b'] }];
-    expect(TicketsResponse.parse({ tickets: [], problems: [], folder: 'initiative-demo', epics }).epics).toEqual(epics);
+    expect(TicketsResponse.parse({ tickets: [], problems: [], folder: 'initiative-demo', epics }).epics).toEqual(epics.map((epic) => ({ ...epic, retrospective: null })));
     expect(TicketsResponse.safeParse({ tickets: [], problems: [], epics: [{ slug: '' }] }).success).toBe(false);
   });
 

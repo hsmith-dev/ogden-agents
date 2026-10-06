@@ -229,7 +229,7 @@ const stepOf = (row: StepRow): OrchestrationStep =>
   });
 
 /** Whether `content` is the instruction a step sent: the text itself, or for a review step the message core built from its question. */
-const sentAs = (content: string, instruction: string, reviewed: boolean): boolean => content === instruction || (reviewed && isReviewMessageFor(content, instruction));
+const sentAs = (content: string, instruction: string, reviewed: boolean): boolean => content === instruction || (reviewed && isReviewMessageFor(content, instruction.slice(0, REVIEW_LIMITS.maxQuestionChars)));
 
 export function createOrchestration({ db, events, feature, chat, manager: fixedManager, managers, team, limits: runLimits, clock }: OrchestrationOptions): Orchestration {
   const { orm } = db;
@@ -584,15 +584,13 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     if (team === undefined || reviewer?.agentId !== row.worker) return refuse();
     const reviewed = stepsOf(run.id).find((other) => other.stepId === row.reviewOf);
     if (reviewed === undefined || reviewed.state !== 'done' || reviewed.sessionId === null) throw new StepNotApprovedError();
+    // The plan check's rules again, so a row written another way is never built into a message.
+    if (row.chat !== 'new' || reviewed.reviewOf !== null || !stepOf(row).dependsOn.includes(reviewed.stepId)) return refuse();
     if (reviewed.worker === row.worker && (await team.workers(workspaceId)).some((worker) => worker.ready && worker.agentId !== row.worker)) return refuse();
     const names = await labels(workspaceId);
-    const result = makeStatusReport({
-      stepId: reviewed.stepId,
-      worker: reviewed.worker,
-      state: 'done',
-      text: lastReply(workspaceId, reviewed.sessionId as SessionId, reviewed.instruction, reviewed.chat !== 'new', reviewed.reviewOf !== null),
-    });
-    return buildReviewMessage({ question: row.instruction, reviewedStep: reviewed.stepId, reviewedBy: names.get(reviewed.worker) ?? reviewed.worker, resultText: cleanForManager(result.summary) });
+    // The reviewed step's own words, not yet cut: code and diffs are left out first, so they cannot fill the room the prose needs.
+    const text = lastReply(workspaceId, reviewed.sessionId as SessionId, reviewed.instruction, reviewed.chat !== 'new', reviewed.reviewOf !== null);
+    return buildReviewMessage({ question: row.instruction, reviewedStep: reviewed.stepId, reviewedBy: cleanForManager(names.get(reviewed.worker) ?? reviewed.worker).slice(0, 60), resultText: cleanForManager(text) });
   };
 
   /** Whether the chat a step names can take an instruction now (read as it is, no await): the worker's own, a plain chat, idle, not in the terminal. */

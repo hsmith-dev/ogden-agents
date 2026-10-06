@@ -202,3 +202,32 @@ describe('the step and its review link', () => {
     expect(view.review).toEqual({ kind: 'build_review', ticketRef: '5.2' });
   });
 });
+
+describe('fences and headerless patches (review findings)', () => {
+  it('keeps a longer fence open across an inner fence, and a tilde fence open across backticks', () => {
+    const text = ['intro', '````md', '```js', 'const hidden1 = 1;', '```', 'const hidden2 = 2;', '````', 'middle', '~~~', '```', 'const hidden3 = 3;', '~~~', 'end'].join('\n');
+    const out = omitCodeAndDiffs(text);
+    for (const never of ['hidden1', 'hidden2', 'hidden3']) expect(out).not.toContain(never);
+    expect(out).toContain('intro');
+    expect(out).toContain('middle');
+    expect(out).toContain('end');
+  });
+
+  it('drops a run of patch lines that has no header', () => {
+    const out = omitCodeAndDiffs('Changed it:\n-const a = 1;\n+const a = 2;\n+const b = 3;\nDone.');
+    expect(out).not.toContain('const a');
+    expect(out).toContain('[changes left out]');
+    expect(out).toContain('Done.');
+  });
+});
+
+describe('a real patch with blank context lines and a long agent name', () => {
+  it('leaves out every hunk, including lines after a blank context line, and keeps the cap with a long name', () => {
+    const patch = ['Result:', 'diff --git a/a.ts b/a.ts', '--- a/a.ts', '+++ b/a.ts', '@@ -1,4 +1,4 @@', ' line one', ' ', '-old secretA', '+new secretA', '', '@@ -10,2 +10,2 @@', '-old secretB', '+new secretB', 'Back to prose.'].join('\n');
+    const out = omitCodeAndDiffs(patch);
+    for (const never of ['secretA', 'secretB', 'line one']) expect(out).not.toContain(never);
+    expect(out).toContain('Back to prose.');
+    const message = buildReviewMessage({ question: 'q'.repeat(REVIEW_LIMITS.maxQuestionChars), reviewedStep: 's1', reviewedBy: 'N'.repeat(5000), resultText: 'r'.repeat(9000) });
+    expect(message.length).toBeLessThanOrEqual(REVIEW_LIMITS.maxMessageChars);
+  });
+});

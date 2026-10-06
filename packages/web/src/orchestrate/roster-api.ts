@@ -47,10 +47,10 @@ const changesRoster = (wsId: string | undefined) => (event: { type: string; work
 
 export function useProjectRoster(wsId: string) {
   useEventInvalidation((event) => (changesRoster(wsId)(event) ? [['team-roster', wsId]] : []));
-  return useQuery({ queryKey: ['team-roster', wsId], queryFn: () => fetchProjectRoster(wsId), retry: false });
+  return useQuery({ queryKey: ['team-roster', wsId], queryFn: () => fetchProjectRoster(wsId), retry: false, refetchOnMount: 'always' as const });
 }
 
 export function useDefaultRoster() {
   useEventInvalidation((event) => (changesRoster(undefined)(event) ? [['team-roster-default']] : []));
-  return useQuery({ queryKey: ['team-roster-default'], queryFn: () => fetchDefaultRoster(), retry: false });
+  return useQuery({ queryKey: ['team-roster-default'], queryFn: () => fetchDefaultRoster(), retry: false, refetchOnMount: 'always' as const });
 }

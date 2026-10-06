@@ -134,7 +134,11 @@ function RoleCard({ view, props }: { view: RosterRoleView; props: RosterEditorVi
           {view.note}
         </Text>
       )}
-      <RadioGroup value={value} aria-label={`Who is the ${name.toLowerCase()}`} data-testid={`roster-group-${role}`} onValueChange={(next) => (next === DEFAULT_VALUE ? props.onSet(role, null) : props.onSet(role, view.options.find((option) => assigneeKey(option.assignee) === next)?.assignee ?? null))}>
+      <RadioGroup value={value} aria-label={`Who is the ${name.toLowerCase()}`} data-testid={`roster-group-${role}`} onValueChange={(next) => {
+          if (next === DEFAULT_VALUE) return props.onSet(role, null);
+          const found = view.options.find((option) => assigneeKey(option.assignee) === next);
+          if (found !== undefined) props.onSet(role, found.assignee);
+        }}>
         <RadioGroupOption
           id={`roster-${props.scope}-${role}-default`}
           value={DEFAULT_VALUE}

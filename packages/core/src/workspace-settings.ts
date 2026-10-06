@@ -385,7 +385,10 @@ export function createWorkspaceSettings({
         if (!parsed.success) throw new ValidationError('Choose who takes each role: an agent, or a model.', [{ path: ['orchestrationRoster'], message: 'not a roster' }]);
         for (const assignee of Object.values(parsed.data)) if (assignee?.kind === 'agent' && !isAgentRegistered(assignee.agentId)) throw new UnknownAgentError(ROSTER_UNKNOWN_AGENT);
         // The manager is a model and a worker is an agent, whatever is ready (E15: the manager is a tool-free call, a worker runs commands).
+        const before = readOrchestrationRoster(orm, workspaceId);
         for (const role of TEAM_ROLES) {
+          // Only a role that is being changed: a roster stored before the rule never blocks a change to another role.
+          if (JSON.stringify(parsed.data[role]) === JSON.stringify(before?.[role] ?? null)) continue;
           const problem = rosterKindProblem(role, parsed.data[role]);
           if (problem !== undefined) throw new ValidationError(problem, [{ path: ['orchestrationRoster', role], message: role === 'manager' ? 'not a model' : 'not an agent' }]);
         }

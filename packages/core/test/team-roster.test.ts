@@ -146,6 +146,13 @@ describe('the defaults for a role nobody was chosen for', () => {
     expect(defaultModel(context())).toBeNull();
   });
 
+  it('a default nobody chose never points at another computer, and the newest pass wins', () => {
+    const remote = server(EP2, { loopback: false, model: 'far' });
+    expect(defaultModel(context({ endpoints: [remote] }))).toBeNull();
+    expect(defaultModel(context({ endpoints: [remote], tests: [test(EP2, 'far', true)] }))).toEqual({ kind: 'model', endpointId: EP2, model: 'far' });
+    expect(defaultModel(context({ endpoints: [server(EP1)], tests: [test(EP1, 'old', true), test(EP1, 'new', true)] }))).toEqual({ kind: 'model', endpointId: EP1, model: 'new' });
+  });
+
   it('the worker is the project\'s default agent when it is ready, else the first agent that is', () => {
     expect(effectiveRoster(none, context({ projectDefaultAgent: 'beta' })).roster.worker).toEqual({ kind: 'agent', agentId: 'beta' });
     const notReady = agent('beta', 'Beta', { unavailable: { code: 'agent_signed_out', reason: 'Signed out.', action: 'sign_in' } });

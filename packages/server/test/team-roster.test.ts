@@ -182,10 +182,26 @@ describe('every assignment is checked by the server', () => {
     expect(refused.status).toBe(400);
     expect(ApiErrorBody.parse(await refused.json()).error.message).toContain('it only takes instructions you approve one by one');
     expect((await stored())?.reviewer ?? null).toBeNull();
+    // With the worker cleared, the project may dispatch automatically, and then the agent cannot come back as a worker.
+    expect((await save({ worker: null })).status).toBe(200);
     expect((await call(server, tab, 'PATCH', settingsPath, { orchestrationMode: 'automatic', confirm: true })).status).toBe(200);
-    const stillRefused = await save({ planner: null, reviewer: { kind: 'agent', agentId: 'claude-code' } });
+    const stillRefused = await save({ reviewer: { kind: 'agent', agentId: 'claude-code' } });
     expect(stillRefused.status).toBe(400);
     expect(ApiErrorBody.parse(await stillRefused.json()).error.message).toContain('This project dispatches automatically.');
+  });
+
+  it('refuses a switch to automatic on its own while a subscription agent is the worker, chosen, and writes nothing', async () => {
+    const { save, settingsPath, server, tab, stored } = await setUp([]);
+    // By default no worker is picked in automatic mode, so a switch with nothing chosen is fine.
+    expect((await call(server, tab, 'PATCH', settingsPath, { orchestrationMode: 'automatic', confirm: true })).status).toBe(200);
+    expect((await call(server, tab, 'PATCH', settingsPath, { orchestrationMode: 'approve_each' })).status).toBe(200);
+    expect((await save({ worker: { kind: 'agent', agentId: 'claude-code' } })).status).toBe(200);
+    const refused = await call(server, tab, 'PATCH', settingsPath, { orchestrationMode: 'automatic', confirm: true });
+    expect(refused.status).toBe(400);
+    expect(ApiErrorBody.parse(await refused.json()).error.message).toContain('This project dispatches automatically.');
+    // The same roster sent again with the mode is refused too.
+    expect((await save({ worker: { kind: 'agent', agentId: 'claude-code' } }, { orchestrationMode: 'automatic', confirm: true })).status).toBe(400);
+    expect(await stored()).toMatchObject({ worker: { agentId: 'claude-code' } });
   });
 
   it('leaves a role as it was unchecked: a holder that is no longer ready never blocks another change', async () => {

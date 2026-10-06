@@ -139,7 +139,7 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
       if (!body.ok) return body.response;
       try {
         // A roster that breaks a rule of what is ready now (an agent not ready, a model that failed its test) is refused here, before anything is written.
-        if (team !== undefined && body.value.orchestrationRoster !== undefined) await team.check(scope.workspaceId, body.value.orchestrationRoster, body.value.orchestrationMode);
+        if (team !== undefined && (body.value.orchestrationRoster !== undefined || body.value.orchestrationMode !== undefined)) await team.check(scope.workspaceId, body.value.orchestrationRoster, body.value.orchestrationMode);
         const settings = permissions.updateSettings(scope.workspaceId, body.value);
         log.info('workspace settings saved', {
           workspaceId: scope.workspaceId,

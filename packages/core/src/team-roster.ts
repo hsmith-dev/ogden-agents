@@ -86,8 +86,13 @@ const automaticWords = 'This project dispatches automatically. Switch it to Appr
 
 const isSubscription = (agent: ChatAgent): boolean => agent.signInMethods.some((method) => method.kind === 'subscription');
 
-/** Whether `assignee` can take `role` now. Never throws; a reason is always plain words. */
+/** Whether `assignee` can take `role` now. Never throws; a reason is always plain words, cut to what the view allows. */
 export function assess(role: TeamRole, assignee: TeamAssignee, ctx: RosterContext): Assessment {
+  const found = assessUncut(role, assignee, ctx);
+  return { ...found, label: found.label.slice(0, 400), ...(found.reason === undefined ? {} : { reason: found.reason.slice(0, 600) }), ...(found.note === undefined ? {} : { note: found.note.slice(0, 600) }) };
+}
+
+function assessUncut(role: TeamRole, assignee: TeamAssignee, ctx: RosterContext): Assessment {
   if (assignee.kind === 'agent') {
     const agent = ctx.agents.find((candidate) => candidate.agentId === assignee.agentId);
     const label = agent?.displayName ?? assignee.agentId;
@@ -133,10 +138,12 @@ function endpointsInOrder(ctx: RosterContext): LocalEndpointView[] {
 export function defaultModel(ctx: RosterContext): TeamAssignee | null {
   const usable = endpointsInOrder(ctx).filter((endpoint) => !endpoint.needsConfirmation);
   for (const endpoint of usable) {
-    const passed = ctx.tests.all().find((test) => test.endpointId === endpoint.id && test.pass);
+    // The newest pass: an older one may be a model the server no longer loads.
+    const passed = [...ctx.tests.all()].reverse().find((test) => test.endpointId === endpoint.id && test.pass);
     if (passed !== undefined) return { kind: 'model', endpointId: endpoint.id, model: passed.model };
   }
-  for (const endpoint of usable) {
+  // Nobody chose this: a goal is never sent to another computer on the strength of a default, so only this computer's servers count.
+  for (const endpoint of usable.filter((candidate) => candidate.loopback)) {
     if (endpoint.model !== null && ctx.tests.result(endpoint.id, endpoint.model)?.pass !== false) return { kind: 'model', endpointId: endpoint.id, model: endpoint.model };
   }
   return null;
@@ -191,14 +198,15 @@ function optionsFor(role: TeamRole, stored: TeamRoster, ctx: RosterContext): Ros
       ...(found.approveEachOnly === true ? { approveEachOnly: true } : {}),
     });
   };
+  // The holder first, so a long list never cuts it off, and an agent the install lost still shows with its reason.
+  const held = stored[role];
+  if (held !== null) add(held);
   for (const agent of ctx.agents) add(agentOf(agent.agentId));
   if (role !== 'worker') {
-    const held = stored[role];
     for (const endpoint of endpointsInOrder(ctx)) {
       if (endpoint.model !== null) add({ kind: 'model', endpointId: endpoint.id, model: endpoint.model });
       for (const test of ctx.tests.all()) if (test.endpointId === endpoint.id) add({ kind: 'model', endpointId: endpoint.id, model: test.model });
     }
-    if (held?.kind === 'model') add(held);
   }
   return options.slice(0, 200);
 }
@@ -260,7 +268,7 @@ export interface Team {
   /** The agents the project's manager may address now. */
   workers(workspaceId: WorkspaceId): Promise<RosterWorker[]>;
   /** Refuses a roster (and mode) the project cannot take, before it is saved. {@link ValidationError}. */
-  check(workspaceId: WorkspaceId, roster: TeamRoster, mode?: OrchestrationMode): Promise<void>;
+  check(workspaceId: WorkspaceId, roster: TeamRoster | undefined, mode?: OrchestrationMode): Promise<void>;
   /**
    * Keeps the roster new projects start with: checked like a project's, saved in the install's preferences, and
    * `settings.team_roster_default_changed` appended when it changed. {@link ValidationError} for a roster that breaks a rule.
@@ -293,22 +301,35 @@ export function createTeam({ db, events, chat, endpoints, tests, defaults }: Tea
       mode: modeOverride ?? (workspaceId === undefined ? DEFAULT_ORCHESTRATION_MODE : (readOrchestrationMode(orm, workspaceId) ?? DEFAULT_ORCHESTRATION_MODE)),
     };
   };
+  const defaultView = async () => {
+    const stored = defaults.get().orchestrationRoster ?? TeamRosterSchema.parse({});
+    return { roster: describeRoster(stored, await context(undefined)), stored };
+  };
   const storedOf = (workspaceId: WorkspaceId): TeamRoster => readOrchestrationRoster(orm, workspaceId) ?? TeamRosterSchema.parse({});
   return {
     async view(workspaceId) {
       const stored = storedOf(workspaceId);
       return { roster: describeRoster(stored, await context(workspaceId)), stored };
     },
-    async defaultView() {
-      const stored = defaults.get().orchestrationRoster ?? TeamRosterSchema.parse({});
-      return { roster: describeRoster(stored, await context(undefined)), stored };
-    },
+    defaultView,
     async workers(workspaceId) {
       const ctx = await context(workspaceId);
       return workersOf(effectiveRoster(storedOf(workspaceId), ctx).roster, ctx);
     },
     async check(workspaceId, roster, mode) {
-      checkRoster(storedOf(workspaceId), roster, await context(workspaceId, mode));
+      const current = storedOf(workspaceId);
+      const ctx = await context(workspaceId, mode);
+      const next = roster ?? current;
+      checkRoster(current, next, ctx);
+      // The mode rule holds for every holder the project keeps, changed or not: a switch to automatic with a subscription agent as worker or reviewer is refused.
+      if (ctx.mode === 'automatic') {
+        for (const role of ['worker', 'reviewer'] as const) {
+          const holder = next[role];
+          if (holder === null) continue;
+          const found = assess(role, holder, ctx);
+          if (found.approveEachOnly === true && !found.available) throw new ValidationError(found.reason ?? 'This agent only takes instructions you approve one by one.', [{ path: ['orchestrationMode'], message: 'mode' }]);
+        }
+      }
     },
     async setDefault(input) {
       const parsed = TeamRosterSchema.safeParse(input);
@@ -319,12 +340,16 @@ export function createTeam({ db, events, chat, endpoints, tests, defaults }: Tea
       for (const assignee of Object.values(parsed.data)) {
         if (assignee?.kind === 'agent' && !ctx.agents.some((agent) => agent.agentId === assignee.agentId)) throw new ValidationError('Choose agents this install has for each role.', [{ path: ['roster'], message: 'unknown agent' }]);
       }
+      for (const role of TEAM_ROLES) {
+        const problem = rosterKindProblem(role, parsed.data[role]);
+        if (problem !== undefined) throw new ValidationError(problem, [{ path: ['roster', role], message: 'wrong kind' }]);
+      }
       checkRoster(previous, parsed.data, ctx);
       const next = defaults.setRoster(parsed.data);
       if (!sameRoster(previous, next)) {
         events.append({ type: 'settings.team_roster_default_changed', workspaceId: null, streamId: SETTINGS_STREAM, payload: { orchestrationRoster: next, previousOrchestrationRoster: previous } });
       }
-      return this.defaultView();
+      return defaultView();
     },
   };
 }

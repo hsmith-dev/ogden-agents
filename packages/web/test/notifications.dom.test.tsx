@@ -18,8 +18,10 @@ const state = vi.hoisted(() => ({
   navigate: [] as unknown[],
 }));
 
-vi.mock('@/shell/sidebar-data', () => ({ useSidebarData: () => ({ model: { groups: [{ wsId: 'ws_a', rows: [{ sesId: 'ses_a' }], earlier: [] }], needsYou: state.needs } }) }));
+vi.mock('@/shell/sidebar-data', () => ({ useSidebarData: () => ({ runsSettled: true, model: { groups: [{ wsId: 'ws_a', rows: [{ sesId: 'ses_a' }], earlier: [] }], needsYou: state.needs } }) }));
 vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ caughtUp: state.caughtUp }) }));
+// The webhooks have their own tests (webhook-settings.dom.test.tsx).
+vi.mock('@/notifications/webhook-settings', () => ({ WebhookSettings: () => null }));
 vi.mock('@/shell/workspace-header', () => ({ WorkspaceHeader: ({ title }: { title: string }) => <h1>{title}</h1> }));
 vi.mock('@tanstack/react-router', async (importOriginal) => {
   const router = { navigate: async (to: unknown) => void state.navigate.push(to) };

@@ -1,0 +1,166 @@
+# Epic 15 breakdown (v2, LLM orchestration: a manager model tells other agents what to do). Table order is the build order; ids never change once written.
+# Incepted autonomously 2026-10-05 on the user's approval of epic 15 and every recommended default (see the epic's Notes, Decisions). Open questions are in the epic's Notes.
+# References to other epics use "<epic id>.<entry id>".
+# Real models, real agents, the real keychain and the real network are impossible in CI: every test uses a fake manager (the memory `LocalModelPort` or the fake OpenAI-compatible server on loopback), fake workers (fake agents), and the existing test hooks (testHooksAllowed). The reliability of small local models as managers, and live runs with real workers, are the user's live checks (checklist in RELEASING.md), never CI.
+# The user's rules (binding): the manager is any configured OpenAI-compatible endpoint (local-first recommended, not forced); it is a tool-free, schema-validated JSON call with no shell, files or credentials; never Skill-all or Skip all; never starts a build without the Build dialog; per-project roster of roles (manager, planner, worker, reviewer) with defaults; per-team mode "Approve each instruction" (default) or "Dispatch automatically", server-enforced; limits per run 20 instructions, depth 3, 30 minutes; a visible Stop and an activity log; Copilot CLI is never an autonomous worker; subscription agents are approve-each only until their terms are re-checked; cost and budget stay out.
+# Lanes: 1 and 2 first (the fake manager and the contracts every later entry shares); 3 proves the whole path thin; 4 (adapter) and 5 (roster) can run in parallel after 3; 6 to 9 are one chain through the run entity and dispatch; 10, 11 and 12 can run in parallel after 9; 13 sweeps; 14 releases.
+# Order follows the user's list: reliability harness, contracts, tracer, manager adapter, roster UI, plan review UI, dispatch and read-back, mode setting with Stop and limits, loop with pause, reviewer, builds through the Build dialog, routing profiles, sweep.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Manager reliability harness: a fake manager that returns good, malformed and adversarial JSON"
+description = "Adds the fixtures every later entry tests against: a scripted fake manager (a `LocalModelPort` stub plus a mode of the fake OpenAI-compatible server) that returns, on cue, a conforming plan, a conforming decision, JSON in prose or a code fence, truncated JSON, a wrong version, an oversize reply, extra and unknown fields, an off-roster agent id, a mode above Ask, a `skip_all` or credential-shaped field, a build or shell request, an instruction that tries to override Ogden's rules, a duplicate or cyclic step list, and a slow or hanging reply; plus a table of expected outcomes (accepted, repaired once, refused with a plain reason) as data, and a small CLI-free report function that tallies a model's valid-JSON rate over those cases and over three sample goals. The real-model measurement is not run in CI: the report function and a checklist for the user's live check (Mac and Windows, several model sizes, valid-JSON rate, plan quality, latency, the floor and go or no-go) go into RELEASING.md."
+verify = "Unit tests show the fake manager yields each case on cue and the table lists the expected outcome of each; the report function over the fake returns the expected tally; RELEASING.md holds the live-check checklist; no test calls a real model or a real network."
+covers = []
+after = ["14.8"]
+hitl = false
+risk = "medium"
+unknown = "Which quality floor (model size, context) makes a dependable manager; only the user's live run on real models answers it, so the epic builds against the protocol and leaves the floor as a setting and a recorded Decision."
+
+[[entry]]
+id = 2
+type = "story"
+title = "Contracts and stubs: manager protocol schemas, ManagerPort, orchestration run entity, events and the mode setting"
+description = "Adds the shared contracts with no behaviour: `ogden.manager.plan.v1` (goal, steps of id, worker, chat reference or new, instruction up to a size cap, requested mode never above Ask, depends_on), `ogden.manager.decision.v1` (dispatch, ask_user, done, stop, each with a reason) and a status report (the worker's normalized state plus a capped, masked summary), each as zod with a JSON schema export for `structuredComplete`; the `OrchestrationMode` (`approve_each` default, `automatic`), the run limits (20 instructions, depth 3, 30 minutes) and the run and step entities with states; `orchestration.*` events (run started, plan proposed, step proposed, approved, edited, skipped, dispatched, result read, paused, stopped, finished, mode changed) as an AD-8 amendment proposed through a bmad-spec memlog, never hand-edited; the `ManagerPort` in core (propose a plan, decide the next step) with a fake; a drizzle migration (renumbered after what is on main) for the run, step and per-project orchestration columns; the `workspace.settings_changed` keys for the roster, mode and the Orchestration piece (default off); and an architecture test that core and shared name no model product and that nothing under orchestration imports a shell, file, or credential port."
+verify = "Unit and architecture tests: every schema accepts its conforming sample and refuses each adversarial case from entry 1 with a plain reason; a mode above Ask, `skip_all` and unknown fields are refused by the schema; the migration applies on a fresh database and on one with every earlier migration; the stub manager satisfies the port's contract tests; with the Orchestration piece off the new routes are absent."
+covers = []
+after = [1, "14.3"]
+hitl = false
+risk = "medium"
+references = ["architecture-ogden-agents/architecture-ogden-agents.md#ad-8"]
+
+[[entry]]
+id = 3
+type = "story"
+title = "Tracer bullet: a goal reaches a stubbed manager, a plan shows, one approved instruction reaches one worker chat, the status reads back"
+description = "Adds the thinnest end-to-end path with the stubbed manager and a fake worker: a bare Orchestrate page behind the Orchestration piece (off by default, so Simple projects never see it), a goal box, the plan listed, one Approve on the first step that sends the instruction through the existing chat `sendMessage` into a worker chat (creating it with the worker's own default mode), and the worker's normalized state and a capped, masked result read back and shown; the roster, mode, limits and loop are fixed in code and replaced by entries 5 to 9. Dispatch is refused in code unless the step was approved."
+verify = "A test with the fake manager and a fake agent turns a goal into a plan, a direct API call to dispatch an unapproved step is refused, approving the first step creates a worker chat whose transcript shows the instruction as sent by the manager at the user's approval, and the result reads back masked and capped; with the piece off the page and routes do not exist."
+covers = []
+after = [2, "6.6"]
+hitl = false
+risk = "high"
+unknown = "How much of the dispatch path can reuse `sendMessage` and the handoff preview token as they are; the entry is rewritten if the chat layer needs a small seam for an instruction that is not typed by the user."
+
+[[entry]]
+id = 4
+type = "story"
+title = "The manager adapter: build the input from core's data, call structuredComplete, validate, repair once, honour the roster"
+description = "Adds the real `ManagerPort` on `LocalModelPort.structuredComplete`: the input built by core each turn, capped to a budget set from the endpoint's reported context and never more than half of it (the goal, a short project summary, the roster of ready workers with their normalized states, and the capped, masked report of the last step, as a delimited data field; never file contents, secrets or diffs), the plan and decision schemas, validation of the answer, one repair retry that names only the schema error, a roster check that refuses an off-roster or not-ready worker, the plain-words failure kinds (malformed, off roster, too large, too slow, context too small, remote host not confirmed), and an event-log record of the masked output. A remote manager uses epic 14's per-endpoint confirmation and its key never enters the prompt or the logs. Worker text is untrusted data in a delimited field and never instructions."
+verify = "Against the fake server and the entry 1 cases: good JSON is accepted, malformed JSON is repaired once or refused with its reason, every adversarial case dispatches nothing, a worker's output saying to ignore the rules changes no step, the input never contains a key, a file body or a path outside the project, an oversize input is cut to the cap, and a non-loopback endpoint with no confirmation is refused; core and shared still name no vendor."
+covers = []
+after = [3]
+hitl = false
+risk = "high"
+unknown = "What each server honours for structured output (json_schema, json_object, prompt only); the adapter records the mode that worked and always validates after the fact."
+
+[[entry]]
+id = 5
+type = "story"
+title = "Team roster and roles in Settings: assign agents and models to manager, planner, worker, reviewer per project"
+description = "Adds the roster UI and server routes on the `TeamRole` and `TeamRoster` types: per project, the user assigns each agent or model (the Local model on a configured endpoint, Claude Code, Antigravity, Codex, Grok) to manager, planner, worker or reviewer, one holder may have several roles, with an app-wide default for new projects and defaults when nothing is chosen (manager and planner the first ready model, workers the project's default agent, reviewer a different ready agent from the worker); an agent that cannot take a role shows why in plain words (not ready, no manager test passed, vendor terms, mode); the server checks every assignment, emits `workspace.settings_changed`, and the manager's roster in entry 4 is read from it."
+verify = "Tests assign and clear each role, the defaults resolve for a fresh project and for one with the app-wide default changed, an agent not ready or a model that failed the manager test is refused for the manager role with its reason, Copilot CLI is refused as a worker, a direct API call that breaks a rule is refused, and the manager adapter addresses only rostered workers."
+covers = []
+after = [3]
+hitl = false
+risk = "medium"
+references = ["ux-ogden-agents"]
+
+[[entry]]
+id = 6
+type = "story"
+title = "Plan review UI: see every step, edit, approve, skip, reorder within prerequisites, stop"
+description = "Replaces the tracer's fixed approval with the plan review: every step shown with its worker, chat, instruction, mode and prerequisites and where the manager runs (this computer or a named host); edit an instruction, approve, skip, reorder within the prerequisites, and a visible Stop; approvals are server-enforced per step in the default mode, an edit makes the step need approval again, and the manager can never approve for the user, change a worker's mode or use Skip all; plain states while the manager is thinking that never block the workers' chats."
+verify = "A browser test with the fake manager reviews a three-step plan: editing a step requires a fresh approval, a skipped step never dispatches and its dependents wait, a reorder that breaks a prerequisite is refused, Stop halts the run, and a direct call that approves for the user without a user action is refused."
+covers = []
+after = [4, 5]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 7
+type = "story"
+title = "Dispatch and read-back across workers: handoff and send-message dispatch, masked status, refusal paths"
+description = "Completes dispatch to every worker: an approved instruction becomes a send-message in the worker's chat, or a new chat, through the existing chat use-cases and, where a chat changes agent, the handoff brief with its single-use preview token (masked and capped); a worker's vendor terms are applied in code (Copilot CLI is never dispatched, subscription agents are approve-each only until their terms are re-checked, Codex and Grok are API-key workers); the read-back gives the manager the worker's normalized state and a capped, secret-masked summary of its last output and tool calls; refusals (worker not ready, chat busy, driver is the terminal, trust) are reported to the manager as plain results and dispatch nothing."
+verify = "With fake Claude Code, Antigravity, Codex and Grok agents a test dispatches an approved instruction to each, the transcript shows who sent it, a secret in a worker's output is masked in the read-back, an over-long output is capped, and each refusal path leaves every chat unchanged and tells the manager why."
+covers = []
+after = [6, "12.11"]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Orchestration mode, Stop and per-run limits: Approve each instruction or Dispatch automatically, plainly labelled, server-enforced"
+description = "Adds the mode toggle per project with an app-wide default, plainly labelled, changeable any time in Settings; switching to automatic is confirmed once per project and recorded in the event log like AD-15's Skip all confirmation; in the default mode a dispatch without approval is refused in code, in automatic mode the run dispatches within its limits (20 instructions, depth 3, 30 minutes, adjustable) and stops at the first refusal, error or limit; subscription agents stay approve-each only in automatic mode, with the reason shown; a visible Stop halts the run and cancels the worker's current turn; an activity log lists every dispatched instruction (who, to which worker and chat, when, result)."
+verify = "Tests with the fake manager and fake workers: a default-mode dispatch with no approval is refused through the API, automatic mode needs its one confirmation, the run stops at 20 instructions, at depth 3 and at 30 minutes (a fake clock), Stop cancels the worker's turn and ends the run, the activity log matches the dispatched instructions, and flipping the mode back mid-run returns the next step to needing approval."
+covers = []
+after = [7]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 9
+type = "story"
+title = "The loop: next-step decisions, stop on error, Deny or limit, pause on a worker's unanswered card, resume after a restart"
+description = "Closes the loop: after each result core asks the manager for the next decision (dispatch, ask the user, done, stop), a refusal, an error, a Deny of a worker's permission card or a limit ends the run and tells the manager when it matters; an unanswered permission card in a worker chat pauses that step and the run waits for the user, who answers on the worker's own card (the manager can never answer one); the events are the log, so a run resumes after a restart in the state it was in and never re-dispatches an instruction already sent."
+verify = "Fake manager and fake workers: a requested shell command waits on its card and the run pauses, Deny ends the step and the manager is told it was denied, a restart mid-run resumes at the same step without a second dispatch, the manager's `ask_user` waits for the user, `done` finishes the run, and nothing in the loop ever changes a worker's mode."
+covers = []
+after = [8]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 10
+type = "story"
+title = "Reviewer role: a bounded question to the reviewer about a worker's result, linked to the review page"
+description = "Adds the reviewer role in use: the manager may ask the roster's reviewer a bounded question about a worker's result (a different agent from the worker where one is ready), the answer comes back as a capped, masked read-back, and the step links to epic 5's review page where the human still approves and merges; the reviewer is a worker chat with its own cards and modes, and the manager only chooses who reviews and what to ask."
+verify = "A test with fake workers has one produce a result and the roster's reviewer be asked a bounded question, the answer reaches the manager masked and capped, the review link opens epic 5's page, and no ticket reaches done without the person's approval."
+covers = []
+after = [9, "5.9"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 11
+type = "story"
+title = "Builds proposed by the manager: Build ticket N through the Build dialog and nowhere else"
+description = "Lets the manager propose a step 'Build ticket N' for a ticket on the board; it appears in the plan as a proposal only, and the user confirms it in epic 5's Build dialog (with its sandbox chain and limits) before anything starts, in both modes; the run's Runs tab entry and notifications come from epic 11; builds stay Claude Code only until epic 8 widens them; the manager has no route that starts a build."
+verify = "With the fake manager a proposed build starts nothing until the Build dialog is confirmed by a user action, a direct API call to start a build from a run is refused in both modes, the confirmed build appears in the Runs tab, and the manager's schema refuses any field that names a build driver or mode."
+covers = []
+after = [9, "5.6", "5.8", "11.1"]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 12
+type = "story"
+title = "Routing profiles: the user's rules in plain words, applied as suggestions"
+description = "Adds per-project routing profiles: the user writes rules in plain words (for example, tests go to Claude Code, reviews to a different agent), stored with the project, passed to the manager as a capped data field and shown beside each proposed step as a suggestion the user and manager both see; manual and explicit first, no learned routing, and a rule can never widen what the roster or the vendor terms allow."
+verify = "A test saves a rule, the manager's input carries it capped and masked, the plan shows which rule a step followed, a rule naming a worker the roster refuses changes nothing, and deleting the rule removes it from the next input."
+covers = []
+after = [9]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 13
+type = "story"
+title = "Refactor sweep"
+description = "Reviews the whole epic's diff for duplication, dead code and boundary leaks, extracts what the manager adapter, dispatch and the build proposals now share, checks the architecture tests (no shell, file or credential port reachable from orchestration), and fixes small findings."
+verify = "The full unit, architecture and integration suites pass and each finding is fixed or recorded."
+covers = []
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 14
+type = "story"
+title = "End-to-end suite and v2 release; live checks with real models and at least two real workers"
+description = "Adds the epic's end-to-end suite against the fake manager endpoint and fake workers (goal, plan, edit, approve, dispatch, a worker's card pauses the run, Deny, automatic mode within limits and Stop, a malformed manager reply dispatching nothing, orchestration off showing no Orchestrate surface and a Simple project unchanged), updates the README and Settings help, and releases v2; the hitl step is the user's live checks on a Mac and on Windows with real Ollama or LM Studio and at least two real workers, and the recorded floor and go or no-go from entry 1's checklist."
+verify = "The suite passes on all three OSes in CI with no real model and no real network, the release workflow publishes the release, and the user records each live check as a dated Decision in the epic's Notes."
+covers = []
+after = [13]
+hitl = true
+risk = "medium"

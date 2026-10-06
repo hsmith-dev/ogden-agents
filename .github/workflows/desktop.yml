@@ -4,7 +4,7 @@ name: Desktop
 # macOS and Windows apps from the packed server and smoke-tests each one headlessly: it starts,
 # the window loads the server's page, the tab exchange happens, and quitting leaves no `ogden-node`
 # process. Test builds are workflow artifacts only: no secrets, no releases.
-# Linux is out of scope for now (the code stays portable; no Linux job runs).
+# Linux (story 13.15) builds an AppImage and a .deb on Ubuntu 22.04 (x64 and arm64) and runs the same tests under Xvfb.
 #
 # Lanes (story 13.3): the pinned Node check runs in ci.yml (job `Desktop Node pins`). The `app`
 # job below is the shell and runtime lane (stage, build, smoke). The upgrade lane (13.6) and the
@@ -51,6 +51,8 @@ jobs:
           - { leg: macos-universal, os: macos-latest, target: universal-apple-darwin }
           - { leg: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc }
           - { leg: windows-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc }
+          - { leg: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { leg: linux-arm64, os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
     defaults:
       run:
         shell: bash
@@ -75,6 +77,11 @@ jobs:
 
       - name: Run the staged server with only the staged Node on PATH
         run: node packages/desktop/scripts/verify-stage.mjs --target ${{ matrix.target }}
+
+      # Linux (story 13.15, AD-16): the keychain module with a session bus and no Secret Service.
+      - name: Keychain without a Secret Service (Linux)
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- node packages/desktop/scripts/keychain-linux.mjs --target ${{ matrix.target }}
 
       - name: Upload the staging report
         if: always()
@@ -101,6 +108,8 @@ jobs:
           - { leg: macos-universal, os: macos-latest, target: universal-apple-darwin, rust: 'aarch64-apple-darwin,x86_64-apple-darwin', bundles: 'app,dmg' }
           - { leg: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, rust: x86_64-pc-windows-msvc, bundles: nsis }
           - { leg: windows-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc, rust: aarch64-pc-windows-msvc, bundles: nsis }
+          - { leg: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, rust: x86_64-unknown-linux-gnu, bundles: 'appimage,deb' }
+          - { leg: linux-arm64, os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, rust: aarch64-unknown-linux-gnu, bundles: 'appimage,deb' }
     defaults:
       run:
         shell: bash
@@ -131,8 +140,28 @@ jobs:
           exe="$(node packages/desktop/scripts/install-nsis.mjs "$(cygpath -w "$installer")" "$RUNNER_TEMP\\ogden-installed" | tail -1)"
           echo "APP_PATH=$exe" >> "$GITHUB_ENV"
 
+      # Linux (story 13.15): the AppImage, run as a user would, under a virtual display and a session D-Bus
+      # (the single-instance plugin and GTK want one). Extract-and-run means no FUSE is needed and the
+      # shell is one process the tests can kill. $WRAP is empty on the other systems.
+      - name: Linux test environment
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y xvfb dbus
+          Xvfb :99 -screen 0 1280x1024x24 >/dev/null 2>&1 &
+          appimage="$(ls packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage | head -1)"
+          mkdir -p "$RUNNER_TEMP/appimage"
+          cp "$appimage" "$RUNNER_TEMP/appimage/Ogden-Agents.AppImage"
+          chmod +x "$RUNNER_TEMP/appimage/Ogden-Agents.AppImage"
+          {
+            echo "DISPLAY=:99"
+            echo "NO_AT_BRIDGE=1"
+            echo "APPIMAGE_EXTRACT_AND_RUN=1"
+            echo "WRAP=dbus-run-session --"
+            echo "APP_PATH=$RUNNER_TEMP/appimage/Ogden-Agents.AppImage"
+          } >> "$GITHUB_ENV"
+
       - name: Smoke test
-        run: node packages/desktop/scripts/smoke.mjs --app "$APP_PATH"
+        run: $WRAP node packages/desktop/scripts/smoke.mjs --app "$APP_PATH"
 
       # The other half of a universal app: the Intel slice under Rosetta.
       - name: Smoke test, Intel slice (macOS)
@@ -143,7 +172,7 @@ jobs:
 
       # A second launch, quit, an attached npm server, a busy quit, a killed shell (story 13.5).
       - name: Lifecycle test
-        run: node packages/desktop/scripts/lifecycle.mjs --target ${{ matrix.target }} --app "$APP_PATH"
+        run: $WRAP node packages/desktop/scripts/lifecycle.mjs --target ${{ matrix.target }} --app "$APP_PATH"
 
       # The update test (story 13.10): the installed app N reads a local fake release that serves N+1,
       # built here with the same throwaway key. Run last: it replaces the installed app.
@@ -156,6 +185,10 @@ jobs:
 
       - name: Use the installed app for the update test (Windows)
         if: runner.os == 'Windows'
+        run: echo "UPDATE_APP=$APP_PATH" >> "$GITHUB_ENV"
+
+      - name: Use the AppImage for the update test (Linux)
+        if: runner.os == 'Linux'
         run: echo "UPDATE_APP=$APP_PATH" >> "$GITHUB_ENV"
 
       - name: Unmount the .dmg (macOS)
@@ -175,6 +208,9 @@ jobs:
             packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
             packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe.sig
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.sig
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
 
       - name: Build version N+1
         working-directory: packages/desktop
@@ -184,8 +220,8 @@ jobs:
           node -e 'const fs=require("fs"); const c=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/build-config.json","utf8")); c.version=process.argv[1]; fs.writeFileSync(process.env.RUNNER_TEMP+"/build-config-next.json", JSON.stringify(c))' "$next"
           # The bundler keeps earlier outputs; N's files must not be picked as N+1.
           rm -rf "src-tauri/target/${{ matrix.target }}/release/bundle"
-          bundles=nsis; if [ "$RUNNER_OS" = "macOS" ]; then bundles=app; fi
+          bundles=nsis; if [ "$RUNNER_OS" = "macOS" ]; then bundles=app; fi; if [ "$RUNNER_OS" = "Linux" ]; then bundles=appimage; fi
           npx --yes @tauri-apps/cli@2.12.1 build --target ${{ matrix.target }} --bundles "$bundles" --config "$RUNNER_TEMP/build-config-next.json"
 
       - name: Update test
-        run: node packages/desktop/scripts/update-e2e.mjs --app "$UPDATE_APP" --bundle "packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle" --version-next "$NEXT_VERSION" --target ${{ matrix.target }}
+        run: $WRAP node packages/desktop/scripts/update-e2e.mjs --app "$UPDATE_APP" --bundle "packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle" --version-next "$NEXT_VERSION" --target ${{ matrix.target }}

@@ -228,7 +228,10 @@ describe('Approve and Reject (story 5.2)', () => {
     const dirty = (await refusal(h.builds.approve(h.wsId, '1.1', { revision: 'b'.repeat(40) }))) as BuildRefusedError;
     expect([dirty.code, dirty.message]).toEqual(['checkout_dirty', CHECKOUT_DIRTY_MESSAGE]);
     expect(h.git.calls).toEqual([]);
-    h.git.state.status = ['_bmad-output/notes.md'];
+    // The root AGENTS.md (lessons not saved yet, epic 7) is tolerated as the output folder is; another AGENTS.md is not.
+    h.git.state.status = ['docs/AGENTS.md'];
+    expect(((await refusal(h.builds.approve(h.wsId, '1.1', { revision: 'b'.repeat(40) }))) as BuildRefusedError).code).toBe('checkout_dirty');
+    h.git.state.status = ['_bmad-output/notes.md', 'AGENTS.md'];
     const review = await h.builds.approve(h.wsId, '1.1', { revision: 'b'.repeat(40) });
     // The merged branch goes with the worktree, merged only (story 5.5).
     expect(h.git.calls).toEqual(['merge bbbb', `add ${PLAN}`, 'commit', `worktree remove and merged ${h.run.branch}`]);
@@ -291,7 +294,7 @@ describe('review loop 1 hardening (story 5.2)', () => {
     h.sandbox.available = false;
     expect(((await refusal(h.builds.start(h.wsId, { ref: '1.1' }))) as Error).message).toMatch(/none$/);
     const { prerequisitesMet } = await import('../src/builds.js');
-    const epics = [{ slug: 'epic-zero', id: 0, status: 'done', after: [], blocks: [] }];
+    const epics = [{ slug: 'epic-zero', id: 0, status: 'done', after: [], blocks: [], retrospective: null }];
     expect(prerequisitesMet({ ref: '1.1', after: ['epic-zero'] }, { tickets: [], epics })).toBe(true);
     expect(prerequisitesMet({ ref: '1.1', after: ['epic-zero'] }, { tickets: [], epics: [{ ...epics[0]!, status: 'in-progress' }] })).toBe(false);
   });

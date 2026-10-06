@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { Button } from '@/ui/button';
 import { Text } from '@/ui/typography';
 import { DocumentSheet } from './document-sheet';
+import { RetrospectiveActions, retrospectiveEpicOf } from './retrospective-actions';
 import { startPlanningSession } from './planning-api';
 
 export interface DocumentCardProps {
@@ -29,6 +30,7 @@ export function DocumentCard({ wsId, path, next, onStarted }: DocumentCardProps)
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const openButton = useRef<HTMLButtonElement>(null);
+  const retrospectiveEpic = retrospectiveEpicOf(path);
 
   const startNext = () => {
     if (next === null || starting) return;
@@ -75,6 +77,7 @@ export function DocumentCard({ wsId, path, next, onStarted }: DocumentCardProps)
           {DOCUMENT_OPEN_LABEL}
         </Button>
       </div>
+      {retrospectiveEpic === undefined ? null : <RetrospectiveActions wsId={wsId} epic={retrospectiveEpic} onStarted={onStarted} />}
       {error === undefined ? null : (
         <Text variant="caption" role="alert" data-testid="document-card-error">
           {error}

@@ -3,7 +3,7 @@ title: 'Refactor sweep (epic 16)'
 type: 'refactor'
 ticket: '10'
 created: '2026-10-06'
-status: 'in-review'
+status: 'built'
 baseline_revision: 'aa2c14fb0992b5470c940e8e23c842092c54e813'
 route: 'full'
 route_source: 'auto'
@@ -70,3 +70,5 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security review and correctness review, both read only: no findings. Checked and found equal: the gate and Developer mode checks, every limit and close code, the viewer count and its decrement, no logged terminal text, restore of a stored layout that no longer parses (it falls back to one tab per pane), no builder in core that makes a layout the new checks refuse, and nothing in CI or release that used the spike. Two low notes, accepted: the two un-exported constants leave core's public list (no user), and the memory stub pane now reads through to its terminal (test only, covered by a new test).

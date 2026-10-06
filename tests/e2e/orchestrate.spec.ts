@@ -15,7 +15,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { startFakeServer } from '../fixtures/fake-openai-server.mjs';
-import { API_ROUTES, serverModule } from '../support.js';
+import { API_ROUTES, fakeSecondAgent, serverModule } from '../support.js';
 import { withChatServer } from './chat-server.js';
 import { storedToken } from './tab.js';
 
@@ -317,5 +317,186 @@ test('the user reviews a three step plan: an edit needs a fresh approval, a skip
       expect(await chats()).toBe(1);
     },
     { extra: { manager: createMemoryManager({ plans: [plan] }) } },
+  );
+});
+
+/** The fake agent as a worker that signs in with an API key (like Codex and Grok), for the automatic mode; a subscription agent never is. */
+async function apiKeyWorker(agentId: string, displayName: string) {
+  const worker = await fakeSecondAgent({ agentId, displayName });
+  return {
+    ...worker,
+    descriptor: { ...worker.descriptor, signInMethods: [{ id: 'fake-key', kind: 'api_key' as const, label: 'Use an API key', apiKey: { envNames: ['FAKE_AGENT_KEY'] as [string, ...string[]], format: 'Starts with fake-' } }] },
+  };
+}
+
+const rosterOf = (worker: string, reviewer: string) => ({ worker: { kind: 'agent', agentId: worker }, reviewer: { kind: 'agent', agentId: reviewer } });
+
+test('the user switches a project to Dispatch automatically with one confirmation, an automatic run goes within its limits, and the activity log lists what was sent', async ({ page }) => {
+  const { createMemoryManager } = await serverModule();
+  const plan = {
+    version: 'ogden.manager.plan.v1',
+    goal: 'Add a contact form',
+    steps: [
+      { id: 's1', worker: 'fake-codex', chat: 'new', instruction: 'Write the failing test first.', mode: 'ask', depends_on: [] },
+      { id: 's2', worker: 'fake-grok', chat: 'new', instruction: 'Add the form fields.', mode: 'ask', depends_on: ['s1'] },
+      { id: 's3', worker: 'fake-codex', chat: 'new', instruction: 'Wire the form to the page.', mode: 'ask', depends_on: ['s2'] },
+    ],
+  };
+  await withChatServer(
+    page,
+    async ({ server, repo, tempFolder }) => {
+      const wsId = await addProject(page, repo);
+      const origin = server.url;
+      const headers = { authorization: `Bearer ${(await storedToken(page))!}`, origin, 'content-type': 'application/json' };
+      const settingsUrl = `${origin}${apiPath(API_ROUTES.workspaceSettings, { wsId })}`;
+      const settings = async () => ((await (await fetch(settingsUrl, { headers })).json()) as { settings: { orchestrationMode?: string; orchestrationAutomaticConfirmed?: boolean } }).settings;
+      expect((await fetch(settingsUrl, { method: 'PATCH', headers, body: JSON.stringify({ orchestrationEnabled: true, orchestrationRoster: rosterOf('fake-codex', 'fake-grok') }) })).status).toBe(200);
+
+      // The mode, plainly labelled, with Approve each instruction in force.
+      await page.goto(`${origin}/w/${wsId}/settings`);
+      const approveEach = page.getByTestId('orchestration-mode-approve_each');
+      const automatic = page.getByTestId('orchestration-mode-automatic');
+      await expect(approveEach).toHaveAttribute('data-state', 'checked');
+      await expect(page.getByTestId('orchestration-mode-section')).toContainText('Dispatch automatically');
+      await expect(page.getByTestId('orchestration-mode-section')).toContainText('You see every instruction and approve, edit or skip it before an agent gets it.');
+
+      // Dispatch automatically asks once: Cancel changes nothing, the answer switches it, and it is on the record.
+      await automatic.click();
+      await expect(page.getByTestId('orchestration-mode-confirm')).toContainText('Your agents still ask you before they run a command or change a file.');
+      await page.getByTestId('orchestration-mode-confirm-cancel').click();
+      await expect(approveEach).toHaveAttribute('data-state', 'checked');
+      expect((await settings()).orchestrationMode).toBeUndefined();
+      await automatic.click();
+      await page.getByTestId('orchestration-mode-confirm-button').click();
+      await expect(automatic).toHaveAttribute('data-state', 'checked');
+      expect(await settings()).toMatchObject({ orchestrationMode: 'automatic', orchestrationAutomaticConfirmed: true });
+      // Back at any time, and on again without a second question.
+      await approveEach.click();
+      await expect(approveEach).toHaveAttribute('data-state', 'checked');
+      await automatic.click();
+      await expect(page.getByTestId('orchestration-mode-confirm')).toHaveCount(0);
+      await expect(automatic).toHaveAttribute('data-state', 'checked');
+      // The server is the gate: another project asks for itself, and a direct call without the answer is refused.
+      const other = await addProject(page, tempFolder('ogden-agents-e2e-other-'));
+      const direct = await fetch(`${origin}${apiPath(API_ROUTES.workspaceSettings, { wsId: other })}`, { method: 'PATCH', headers, body: JSON.stringify({ orchestrationMode: 'automatic' }) });
+      expect(direct.status).toBe(400);
+      expect(((await direct.json()) as { error: { code: string } }).error.code).toBe('confirmation_required');
+
+      // The limits are set in Settings for new projects: two instructions.
+      await page.goto(`${origin}/settings/new-projects`);
+      await page.getByTestId('orchestration-limit-maxInstructions').fill('2');
+      await page.getByTestId('orchestration-limits-save').click();
+      await expect(page.getByTestId('orchestration-defaults-status')).toHaveText('Saved.');
+
+      // An automatic run: the manager's plan is sent step by step with nobody pressing anything, and stops at its limit.
+      await page.goto(`${origin}/w/${wsId}/orchestrate`);
+      await expect(page.getByTestId('orchestrate-mode')).toContainText('Dispatch automatically');
+      await page.getByTestId('orchestrate-goal').fill('Add a contact form');
+      await page.getByTestId('orchestrate-plan').click();
+      await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'stopped', { timeout: 20_000 });
+      await expect(page.getByTestId('orchestrate-stop-reason')).toHaveText('The run stopped because it sent 2 instructions, the limit. Nothing more was sent.');
+      await expect(page.getByTestId('orchestrate-run-counter')).toHaveText('2 of 2 instructions sent. Dispatching automatically.');
+      const row = (id: string) => page.locator(`[data-testid="orchestrate-step"][data-step-id="${id}"]`);
+      await expect(row('s1').getByTestId('orchestrate-step-state')).toHaveText('Finished');
+      await expect(row('s2').getByTestId('orchestrate-step-state')).toHaveText('Finished');
+      await expect(row('s1').getByTestId('orchestrate-step-approver')).toHaveText('Sent automatically');
+      await expect(row('s3').getByTestId('orchestrate-step-state')).toHaveText('Not sent. The run was stopped.');
+      await expect(page.getByTestId('orchestrate-stop')).toHaveCount(0);
+
+      // The activity log lists each instruction that was sent: worker, who approved it, chat and result, newest first.
+      const entries = page.getByTestId('orchestrate-activity-entry');
+      await expect(entries).toHaveCount(2);
+      await expect(entries.nth(0).getByTestId('orchestrate-activity-worker')).toHaveText('Fake Grok');
+      await expect(entries.nth(1).getByTestId('orchestrate-activity-worker')).toHaveText('Fake Codex');
+      await expect(entries.nth(0).getByTestId('orchestrate-activity-who')).toHaveText('Approved by the mode, automatically, sent to a new chat');
+      await expect(entries.nth(0).getByTestId('orchestrate-activity-result')).toHaveText('Finished');
+      await expect(entries.nth(1).getByTestId('orchestrate-activity-instruction')).toHaveText('Write the failing test first.');
+
+      // The worker's transcript says the manager sent it automatically.
+      await entries.nth(1).getByTestId('orchestrate-activity-chat').click();
+      await expect(page.getByTestId('message-origin')).toHaveText('Sent by the manager automatically');
+      await expect(page.getByTestId('message-user').first()).toHaveText('Write the failing test first.');
+    },
+    { extra: { manager: createMemoryManager({ plans: [plan] }), extraAgents: [await apiKeyWorker('fake-codex', 'Fake Codex'), await apiKeyWorker('fake-grok', 'Fake Grok')] } },
+  );
+});
+
+test('Stop halts an automatic run, cancels the worker\'s turn and sends nothing more, and still works with the piece switched off', async ({ page }) => {
+  const { createMemoryManager } = await serverModule();
+  const plan = {
+    version: 'ogden.manager.plan.v1',
+    goal: 'Add a contact form',
+    steps: [
+      { id: 's1', worker: 'fake-codex', chat: 'new', instruction: 'hold', mode: 'ask', depends_on: [] },
+      { id: 's2', worker: 'fake-grok', chat: 'new', instruction: 'Add the form fields.', mode: 'ask', depends_on: ['s1'] },
+    ],
+  };
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const wsId = await addProject(page, repo);
+      const origin = server.url;
+      const headers = { authorization: `Bearer ${(await storedToken(page))!}`, origin, 'content-type': 'application/json' };
+      const call = (method: string, path: string, body?: unknown) => fetch(`${origin}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      const sessions = async () => ((await (await call('GET', apiPath(API_ROUTES.workspaceSessions, { wsId }))).json()) as { sessions: Array<{ id: string; state: string; agentId: string }> }).sessions;
+      expect((await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { orchestrationEnabled: true, orchestrationRoster: rosterOf('fake-codex', 'fake-grok'), orchestrationMode: 'automatic', confirm: true })).status).toBe(200);
+
+      await page.goto(`${origin}/w/${wsId}/orchestrate`);
+      await page.getByTestId('orchestrate-goal').fill('Add a contact form');
+      await page.getByTestId('orchestrate-plan').click();
+      const first = page.locator('[data-testid="orchestrate-step"][data-step-id="s1"]');
+      // The first instruction went by itself and the worker is holding on it.
+      await expect(first.getByTestId('orchestrate-step-state')).toHaveText('Sent, the worker is on it');
+      await expect(first.getByTestId('orchestrate-step-session-state')).toHaveAttribute('data-session-state', 'working');
+      expect((await sessions()).filter((session) => session.state === 'working')).toHaveLength(1);
+
+      // Stop: the run ends, the worker's turn is cancelled, and the next step is never sent.
+      await page.getByTestId('orchestrate-stop').click();
+      await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'stopped');
+      await expect(page.getByTestId('orchestrate-stopped-note')).toContainText('You stopped this run.');
+      await expect.poll(async () => (await sessions()).map((session) => session.state)).toEqual(['idle']);
+      await expect(page.locator('[data-testid="orchestrate-step"][data-step-id="s2"]').getByTestId('orchestrate-step-state')).toHaveText('Not sent. The run was stopped.');
+      await expect(page.getByTestId('orchestrate-stop')).toHaveCount(0);
+      expect(await sessions()).toHaveLength(1);
+      // The instruction it sent is in the activity log, and nothing says money.
+      await expect(page.getByTestId('orchestrate-activity-entry')).toHaveCount(1);
+      await expect(page.getByTestId('orchestrate')).not.toContainText(/\$|cost|budget/i);
+    },
+    { extra: { manager: createMemoryManager({ plans: [plan] }), extraAgents: [await apiKeyWorker('fake-codex', 'Fake Codex'), await apiKeyWorker('fake-grok', 'Fake Grok')] } },
+  );
+});
+
+test('a Stop cannot be blocked: with the piece switched off the run still stops, and in the default mode a direct send of an unapproved step is refused', async ({ page }) => {
+  const { createMemoryManager } = await serverModule();
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const wsId = await addProject(page, repo);
+      const origin = server.url;
+      const headers = { authorization: `Bearer ${(await storedToken(page))!}`, origin, 'content-type': 'application/json' };
+      const call = (method: string, path: string, body?: unknown) => fetch(`${origin}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { orchestrationEnabled: true });
+      await page.goto(`${origin}/w/${wsId}/orchestrate`);
+      await page.getByTestId('orchestrate-goal').fill('Add a contact form');
+      await page.getByTestId('orchestrate-plan').click();
+      await expect(page.getByTestId('orchestrate-step')).toHaveCount(1);
+      const runId = ((await (await call('GET', apiPath(API_ROUTES.workspaceOrchestrationRuns, { wsId }))).json()) as { runs: Array<{ run: { id: string } }> }).runs[0]!.run.id;
+      // In the default mode a send nobody approved is refused in code.
+      const unapproved = await call('POST', apiPath(API_ROUTES.workspaceOrchestrationStepDispatch, { wsId, runId, stepId: 's1' }));
+      expect(unapproved.status).toBe(409);
+      expect(((await unapproved.json()) as { error: { code: string } }).error.code).toBe('step_not_approved');
+
+      // The piece is switched off: the page is gone and every call is refused as off, but Stop still ends the run.
+      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { orchestrationEnabled: false });
+      expect((await call('GET', apiPath(API_ROUTES.workspaceOrchestrationRuns, { wsId }))).status).toBe(409);
+      const stopped = await call('POST', apiPath(API_ROUTES.workspaceOrchestrationStop, { wsId, runId }));
+      expect(stopped.status).toBe(200);
+      expect(((await stopped.json()) as { run: { run: { state: string; stopReason: string } } }).run.run).toMatchObject({ state: 'stopped', stopReason: 'user' });
+      // Turned on again, the run reads as stopped.
+      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { orchestrationEnabled: true });
+      await page.goto(`${origin}/w/${wsId}/orchestrate`);
+      await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'stopped');
+    },
+    { extra: { manager: createMemoryManager() } },
   );
 });

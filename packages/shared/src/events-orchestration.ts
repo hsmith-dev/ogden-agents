@@ -16,6 +16,7 @@ import { assigned, onWorkspaceStream } from './events-envelope.js';
 import { SessionId, OrchestrationRunId } from './ids.js';
 import {
   Approver,
+  DispatchRefusalReason,
   ManagerDecision,
   ManagerFailureKind,
   ManagerGoal,
@@ -107,6 +108,15 @@ export const OrchestrationStepDispatchedInput = z.object({
 export const OrchestrationStepDispatchedEvent = OrchestrationStepDispatchedInput.extend(assigned);
 export type OrchestrationStepDispatchedEvent = z.infer<typeof OrchestrationStepDispatchedEvent>;
 
+export const OrchestrationDispatchRefusedInput = z.object({
+  type: z.literal('orchestration.dispatch_refused'),
+  ...onWorkspaceStream,
+  payload: z.object({ ...step, worker: AgentId, reason: DispatchRefusalReason, message: z.string().min(1).max(400) }),
+});
+/** An instruction was not sent: the worker or its chat could not take it (15.8). Nothing was created or sent. The plain words are core's. */
+export const OrchestrationDispatchRefusedEvent = OrchestrationDispatchRefusedInput.extend(assigned);
+export type OrchestrationDispatchRefusedEvent = z.infer<typeof OrchestrationDispatchRefusedEvent>;
+
 export const OrchestrationResultReadInput = z.object({
   type: z.literal('orchestration.result_read'),
   ...onWorkspaceStream,
@@ -184,6 +194,7 @@ export const ORCHESTRATION_INPUTS = [
   OrchestrationStepSkippedInput,
   OrchestrationStepsReorderedInput,
   OrchestrationStepDispatchedInput,
+  OrchestrationDispatchRefusedInput,
   OrchestrationResultReadInput,
   OrchestrationRunPausedInput,
   OrchestrationRunStoppedInput,

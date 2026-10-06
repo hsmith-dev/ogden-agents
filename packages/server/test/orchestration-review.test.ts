@@ -177,7 +177,8 @@ describe('the plan review over REST', () => {
     expect(await refusalOf(await post(server, tab, route('workspaceOrchestrationStepEdit', id, 's1'), { instruction: 'x' }))).toEqual(off);
     expect(await refusalOf(await post(server, tab, route('workspaceOrchestrationStepSkip', id, 's1')))).toEqual(off);
     expect(await refusalOf(await post(server, tab, runRoute('workspaceOrchestrationReorder', id), { order: ['s1'] }))).toEqual(off);
-    expect(await refusalOf(await post(server, tab, runRoute('workspaceOrchestrationStop', id)))).toEqual(off);
+    // Stop is never blockable (15.8): with the piece off it is not refused as off, only as a run that is not there.
+    expect(await refusalOf(await post(server, tab, runRoute('workspaceOrchestrationStop', id)))).toMatchObject({ status: 404, code: 'not_found' });
   });
 });
 

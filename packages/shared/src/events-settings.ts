@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { AgentId, SETTINGS_STREAM, WhileWorking } from './events-common.js';
 import { ModelId } from './entities.js';
 import { assigned } from './events-envelope.js';
+import { OrchestrationMode, RunLimits } from './orchestration.js';
 import { TeamRoster } from './team.js';
 
 const onSettingsStream = { workspaceId: z.null(), streamId: z.literal(SETTINGS_STREAM) };
@@ -58,6 +59,25 @@ export const SettingsTeamRosterDefaultChangedInput = z.object({
  */
 export const SettingsTeamRosterDefaultChangedEvent = SettingsTeamRosterDefaultChangedInput.extend(assigned);
 export type SettingsTeamRosterDefaultChangedEvent = z.infer<typeof SettingsTeamRosterDefaultChangedEvent>;
+
+export const SettingsOrchestrationDefaultsChangedInput = z.object({
+  type: z.literal('settings.orchestration_defaults_changed'),
+  ...onSettingsStream,
+  payload: z.object({
+    mode: OrchestrationMode,
+    previousMode: OrchestrationMode,
+    limits: RunLimits,
+    previousLimits: RunLimits,
+    /** Present when the user confirmed Dispatch automatically as the default in this change. */
+    automaticConfirmed: z.literal(true).optional(),
+  }),
+});
+/**
+ * The mode new projects are offered and the limits of every run (epic 15, 15.8; install-level, kept beside the default for new
+ * projects) changed. A project's own mode is never changed by it, and a project still confirms automatic for itself.
+ */
+export const SettingsOrchestrationDefaultsChangedEvent = SettingsOrchestrationDefaultsChangedInput.extend(assigned);
+export type SettingsOrchestrationDefaultsChangedEvent = z.infer<typeof SettingsOrchestrationDefaultsChangedEvent>;
 
 export const SettingsUpdateNoticeChangedInput = z.object({
   type: z.literal('settings.update_notice_changed'),

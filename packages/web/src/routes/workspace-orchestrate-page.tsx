@@ -13,6 +13,7 @@ import {
   useOrchestrationRuns,
   useOrchestrationSettings,
 } from '@/orchestrate/orchestrate-api';
+import { useOrchestrationActivity } from '@/orchestrate/mode-api';
 import { OrchestrateView } from '@/orchestrate/orchestrate-view';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
@@ -83,6 +84,7 @@ function OrchestrateGate({ wsId }: { wsId: string }) {
 function OrchestrateOn({ wsId }: { wsId: string }) {
   const settings = useOrchestrationSettings(wsId);
   const runs = useOrchestrationRuns(wsId);
+  const activity = useOrchestrationActivity(wsId);
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -148,6 +150,9 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
       busy={busy}
       error={error ?? (runs.error instanceof Error ? runs.error.message : undefined)}
       stopping={stopping}
+      mode={settings.data.mode}
+      activity={activity.data}
+      activityError={activity.error instanceof Error ? activity.error.message : undefined}
       onStart={(goal) => void act(() => startOrchestrationRun(wsId, goal))}
       onStop={() => (run === undefined ? undefined : stop(run.run.id))}
       onEdit={(stepId, instruction) => (run === undefined ? Promise.resolve(false) : act(() => editOrchestrationStep(wsId, run.run.id, stepId, instruction)))}

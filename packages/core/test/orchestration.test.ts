@@ -430,7 +430,8 @@ describe('plan review (15.6): edit', () => {
     await expect(orchestration.editStep(workspace.id, 'orc_x', 's1', { instruction: 'x' })).rejects.toBeInstanceOf(OrchestrationOffError);
     await expect(orchestration.skipStep(workspace.id, 'orc_x', 's1')).rejects.toBeInstanceOf(OrchestrationOffError);
     await expect(orchestration.reorderSteps(workspace.id, 'orc_x', { order: ['s1'] })).rejects.toBeInstanceOf(OrchestrationOffError);
-    await expect(orchestration.stopRun(workspace.id, 'orc_x')).rejects.toBeInstanceOf(OrchestrationOffError);
+    // Stop is never blockable (15.8): it is not behind the guard, so an unknown run is not found rather than refused as off.
+    await expect(orchestration.stopRun(workspace.id, 'orc_x')).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -773,7 +774,8 @@ describe('dispatch into a chat the step names (15.7)', () => {
       expect(created, name).toEqual([]);
       expect(sent, name).toEqual([]);
       expect(chatsOf(core, workspace.id), name).toBe(before.chats);
-      expect(core.events.lastSeq(), name).toBe(before.seq);
+      // The refusal is the only event (15.8): it is recorded, nothing else changed.
+      expect(core.events.readAfter(before.seq).map((event) => event.type), name).toEqual(['orchestration.dispatch_refused']);
       // The step is still approved: the user can send it when the chat is free.
       expect(stepOf(await orchestration.getRun(workspace.id, run.id), 's1').state, name).toBe('approved');
       void tamper;
@@ -918,17 +920,17 @@ describe('the worker is checked again at dispatch, and the vendor terms are appl
       expect(kit.created).toEqual([]);
       expect(kit.sent).toEqual([]);
       expect(chatsOf(kit.core, kit.workspace.id)).toBe(before.chats);
-      expect(kit.core.events.lastSeq()).toBe(before.seq);
+      expect(kit.core.events.readAfter(before.seq).map((event) => event.type)).toEqual(['orchestration.dispatch_refused']);
     });
   }
 
-  it('applies the subscription rule at dispatch: Claude Code and Antigravity take only the user\'s own approval, in a run that dispatches automatically they are refused, and the API key workers go on', async () => {
+  it('applies the subscription rule at dispatch: Claude Code and Antigravity take only the user\'s own approval one by one, whatever the mode, and the API key workers go on', async () => {
     const kit = setUp(stubManager(planOf(['claude-code'], ['antigravity'], ['codex'], ['grok'])), { agents: WORKERS });
+    // The project dispatches automatically (confirmed), and its mode approved each step itself: set directly, as a bug or a damaged row would.
+    kit.core.permissions.updateSettings(kit.workspace.id, { orchestrationMode: 'automatic', confirm: true });
     const { run } = await kit.orchestration.startRun(kit.workspace.id, { goal: 'Do the work' });
-    for (const id of ['s1', 's2', 's3', 's4']) await kit.orchestration.approveStep(kit.workspace.id, run.id, id);
-    // The run is under the automatic mode, which approved each step itself (set directly: the mode story 15.8 does it through its own routes).
-    kit.tamper("UPDATE orchestration_runs SET mode = 'automatic' WHERE id = ?", run.id);
-    kit.tamper("UPDATE orchestration_steps SET approved_by = 'mode' WHERE run_id = ?", run.id);
+    await kit.orchestration.whenIdle();
+    kit.tamper("UPDATE orchestration_steps SET state = 'approved', approved_by = 'mode' WHERE run_id = ?", run.id);
     const before = chatsOf(kit.core, kit.workspace.id);
     for (const id of ['s1', 's2']) {
       const error = await kit.orchestration.dispatchStep(kit.workspace.id, run.id, id).catch((failure: unknown) => failure);
@@ -937,8 +939,11 @@ describe('the worker is checked again at dispatch, and the vendor terms are appl
     }
     expect(kit.created).toEqual([]);
     expect(chatsOf(kit.core, kit.workspace.id)).toBe(before);
+    // The user's own approval of that instruction is what the vendor's terms allow, in an automatic run too.
+    kit.tamper("UPDATE orchestration_steps SET approved_by = 'user' WHERE run_id = ? AND step_id = 's1'", run.id);
+    expect((await kit.orchestration.dispatchStep(kit.workspace.id, run.id, 's1')).steps.find((step) => step.stepId === 's1')!.state).toBe('dispatched');
     for (const id of ['s3', 's4']) expect((await kit.orchestration.dispatchStep(kit.workspace.id, run.id, id)).steps.find((step) => step.stepId === id)!.state).toBe('dispatched');
-    expect(kit.created.map((entry) => entry.agentId)).toEqual(['codex', 'grok']);
+    expect(kit.created.map((entry) => entry.agentId)).toEqual(['claude-code', 'codex', 'grok']);
   });
 
   it('never moves a worker\'s mode: the dispatch code names no way to set a mode, hand off or switch a driver', () => {

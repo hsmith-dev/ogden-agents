@@ -197,9 +197,10 @@ export const SessionMessageCompletedInput = z.object({
      * review F4), or one typed in the agent's own terminal and imported after
      * switching back (`terminal`, story 3.2; shown "from terminal"), or an
      * instruction the orchestration manager wrote and the user approved
-     * (`manager`, epic 15, 15.3; shown "Sent by the manager, approved by you").
+     * (`manager`, epic 15, 15.3; shown "Sent by the manager, approved by you"), or one the
+     * manager sent on its own under Dispatch automatically (`manager_auto`, 15.8).
      */
-    origin: z.enum(['deny_reason', 'terminal', 'manager']).optional(),
+    origin: z.enum(['deny_reason', 'terminal', 'manager', 'manager_auto']).optional(),
     /**
      * Set on a user message sent right away that the agent took into its
      * running turn (`injected`; send now or wait): the turn went on with it.

@@ -8,6 +8,8 @@ import {
   SettingsDeveloperModeChangedInput,
   SettingsWhileWorkingChangedEvent,
   SettingsTeamRosterDefaultChangedEvent,
+  SettingsOrchestrationDefaultsChangedEvent,
+  SettingsOrchestrationDefaultsChangedInput,
   SettingsUpdateNoticeChangedEvent,
   SettingsUpdateNoticeChangedInput,
   SettingsTerminalsChangedEvent,
@@ -21,7 +23,7 @@ import {
 } from './events-settings.js';
 
 export { SettingsTerminalsChangedEvent } from './events-settings.js';
-export { AppUpdateAvailableEvent, AppUpdateRequestedEvent, SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsUpdateNoticeChangedEvent, SettingsWhileWorkingChangedEvent, SettingsTeamRosterDefaultChangedEvent } from './events-settings.js';
+export { AppUpdateAvailableEvent, AppUpdateRequestedEvent, SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsUpdateNoticeChangedEvent, SettingsWhileWorkingChangedEvent, SettingsTeamRosterDefaultChangedEvent, SettingsOrchestrationDefaultsChangedEvent } from './events-settings.js';
 // Terminal pane events (epic 16): state only.
 import * as panes from './events-panes.js';
 
@@ -37,7 +39,7 @@ import * as orch from './events-orchestration.js';
 
 export {
   OrchestrationManagerRepliedEvent, OrchestrationModeChangedEvent, OrchestrationPlanProposedEvent, OrchestrationResultReadEvent, OrchestrationRunFinishedEvent, OrchestrationRunPausedEvent, OrchestrationRunStartedEvent,
-  OrchestrationRunStoppedEvent, OrchestrationStepApprovedEvent, OrchestrationStepDispatchedEvent, OrchestrationStepEditedEvent, OrchestrationStepProposedEvent, OrchestrationStepSkippedEvent, OrchestrationStepsReorderedEvent,
+  OrchestrationRunStoppedEvent, OrchestrationStepApprovedEvent, OrchestrationStepDispatchedEvent, OrchestrationStepEditedEvent, OrchestrationStepProposedEvent, OrchestrationStepSkippedEvent, OrchestrationStepsReorderedEvent, OrchestrationDispatchRefusedEvent,
 } from './events-orchestration.js';
 // Build run events and the builds and notification settings events (stories 5.2, 5.3).
 import * as runs from './events-runs.js';
@@ -408,11 +410,12 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SettingsAgentDefaultModelChangedEvent,
   SettingsWhileWorkingChangedEvent,
   SettingsTeamRosterDefaultChangedEvent,
+  SettingsOrchestrationDefaultsChangedEvent,
   runs.SettingsRunLimitsChangedEvent,
   runs.SettingsNotificationsChangedEvent,
   SettingsLocalEndpointsChangedEvent,
   orch.OrchestrationRunStartedEvent, orch.OrchestrationPlanProposedEvent, orch.OrchestrationStepProposedEvent, orch.OrchestrationStepApprovedEvent, orch.OrchestrationStepEditedEvent, orch.OrchestrationStepSkippedEvent, orch.OrchestrationStepsReorderedEvent,
-  orch.OrchestrationStepDispatchedEvent, orch.OrchestrationResultReadEvent, orch.OrchestrationRunPausedEvent, orch.OrchestrationRunStoppedEvent, orch.OrchestrationRunFinishedEvent, orch.OrchestrationModeChangedEvent, orch.OrchestrationManagerRepliedEvent,
+  orch.OrchestrationStepDispatchedEvent, orch.OrchestrationDispatchRefusedEvent, orch.OrchestrationResultReadEvent, orch.OrchestrationRunPausedEvent, orch.OrchestrationRunStoppedEvent, orch.OrchestrationRunFinishedEvent, orch.OrchestrationModeChangedEvent, orch.OrchestrationManagerRepliedEvent,
   SettingsUpdateNoticeChangedEvent,
   SettingsTerminalsChangedEvent,
   AppUpdateAvailableEvent,
@@ -476,6 +479,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SettingsAgentDefaultModelChangedInput,
   SettingsWhileWorkingChangedInput,
   SettingsTeamRosterDefaultChangedInput,
+  SettingsOrchestrationDefaultsChangedInput,
   runs.SettingsRunLimitsChangedInput,
   runs.SettingsNotificationsChangedInput,
   SettingsLocalEndpointsChangedInput,

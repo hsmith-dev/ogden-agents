@@ -434,6 +434,54 @@ export const RunLimits = z.strictObject({
 });
 export type RunLimits = z.infer<typeof RunLimits>;
 
+/**
+ * The bounds the user may set a run limit within (15.8): sane, not unlimited. Instructions cannot pass the most steps a plan may
+ * have; a depth of five is already a long chain for a small manager; two hours is the longest a run may go without the user looking.
+ */
+export const ORCHESTRATION_LIMIT_BOUNDS = {
+  maxInstructions: { min: 1, max: MANAGER_LIMITS.maxSteps },
+  maxDepth: { min: 1, max: 5 },
+  maxMinutes: { min: 1, max: 120 },
+} as const;
+const boundedLimit = (bounds: { min: number; max: number }, what: string) =>
+  z
+    .number()
+    .int(`Use a whole number for ${what}.`)
+    .min(bounds.min, `${what} must be at least ${bounds.min}.`)
+    .max(bounds.max, `${what} can be at most ${bounds.max}.`);
+/** The limits as the user may save them: each within its bounds. */
+export const BoundedRunLimits = z.strictObject({
+  maxInstructions: boundedLimit(ORCHESTRATION_LIMIT_BOUNDS.maxInstructions, 'The number of instructions'),
+  maxDepth: boundedLimit(ORCHESTRATION_LIMIT_BOUNDS.maxDepth, 'The depth'),
+  maxMinutes: boundedLimit(ORCHESTRATION_LIMIT_BOUNDS.maxMinutes, 'The time limit'),
+});
+
+/**
+ * How deep a step is (15.8): a step that needs nothing is at depth 1, and any other is one deeper than the deepest step it needs, so a
+ * run's depth is its longest chain of `depends_on`. (The manager's own decisions nest no deeper than that until the loop, entry 9,
+ * which counts a decision that follows a result as one more level.) A step that needs one not in the list is counted as if it did not.
+ */
+export function stepDepths(steps: ReadonlyArray<{ stepId: string; dependsOn: readonly string[] }>): Map<string, number> {
+  const needs = new Map(steps.map((step) => [step.stepId, step.dependsOn]));
+  const depths = new Map<string, number>();
+  const visiting = new Set<string>();
+  const depthOf = (id: string): number => {
+    const known = depths.get(id);
+    if (known !== undefined) return known;
+    // A step that (wrongly) needs itself through a loop is as deep as any limit: the plan check forbids it, this only keeps the count finite.
+    if (visiting.has(id)) return Number.MAX_SAFE_INTEGER;
+    visiting.add(id);
+    let deepest = 0;
+    for (const need of needs.get(id) ?? []) if (needs.has(need)) deepest = Math.max(deepest, depthOf(need));
+    visiting.delete(id);
+    const depth = deepest === Number.MAX_SAFE_INTEGER ? deepest : deepest + 1;
+    depths.set(id, depth);
+    return depth;
+  };
+  for (const step of steps) depthOf(step.stepId);
+  return depths;
+}
+
 /** A run's state. `stopped` and `finished` and `failed` are final. */
 export const ORCHESTRATION_RUN_STATES = ['planning', 'awaiting_user', 'running', 'paused', 'stopped', 'finished', 'failed'] as const;
 export const OrchestrationRunState = z.enum(ORCHESTRATION_RUN_STATES);
@@ -477,7 +525,7 @@ export const Approver = z.enum(APPROVERS);
 export type Approver = z.infer<typeof Approver>;
 
 /** Why a run stopped. */
-export const ORCHESTRATION_STOP_REASONS = ['user', 'instruction_limit', 'depth_limit', 'time_limit', 'manager_refused', 'worker_error', 'permission_denied'] as const;
+export const ORCHESTRATION_STOP_REASONS = ['user', 'instruction_limit', 'depth_limit', 'time_limit', 'manager_refused', 'worker_error', 'permission_denied', 'dispatch_refused'] as const;
 export const OrchestrationStopReason = z.enum(ORCHESTRATION_STOP_REASONS);
 export type OrchestrationStopReason = z.infer<typeof OrchestrationStopReason>;
 
@@ -672,3 +720,92 @@ export const dispatchRefusalWords = (reason: DispatchRefusalReason, worker: stri
       return 'The terminal is driving the chat this step names, so nothing was sent. Switch the chat back to the chat view first.';
   }
 };
+
+// ---- the mode, the confirmation, the limits and the activity log (15.8) ----
+
+/** What the user is asked, once for a project, before it may dispatch automatically. Plain words, no dashes. */
+export const ORCHESTRATION_AUTOMATIC_CONFIRM_TITLE = 'Dispatch automatically in this project?';
+export const ORCHESTRATION_AUTOMATIC_CONFIRM_WORDS =
+  'The manager will send each instruction to your agents on its own, without asking you each time. It stops at the first problem, when it reaches the limits below, or when you press Stop. Your agents still ask you before they run a command or change a file. An agent that signs in with your account, or a chat that runs without asking you first, still waits for you to approve each instruction. You will not be asked again in this project.';
+export const ORCHESTRATION_AUTOMATIC_CONFIRM_BUTTON = 'Dispatch automatically';
+
+/** A new project starts on Approve each instruction whatever the install default says, until the user confirms automatic for that project. */
+export const ORCHESTRATION_DEFAULT_AUTOMATIC_NOTE =
+  'New projects are set to dispatch automatically by default, but each project starts on Approve each instruction until you confirm Dispatch automatically for it here.';
+
+/** The install's default for new projects' mode, and the limits of every run (15.8). Install-level, kept beside the defaults for new projects. */
+export const OrchestrationDefaults = z.object({ mode: OrchestrationMode, limits: RunLimits });
+export type OrchestrationDefaults = z.infer<typeof OrchestrationDefaults>;
+export const OrchestrationDefaultsResponse = z.object({ defaults: OrchestrationDefaults });
+export type OrchestrationDefaultsResponse = z.infer<typeof OrchestrationDefaultsResponse>;
+
+/**
+ * `PUT /api/v1/settings/orchestration`: the default mode and/or the limits. Making Dispatch automatically the default needs
+ * `confirm: true` (`confirmation_required`) every time it is set, and a limit outside its bounds is refused (400). What is left out is kept.
+ */
+export const UpdateOrchestrationDefaultsRequest = z
+  .strictObject({
+    mode: OrchestrationMode.optional(),
+    limits: BoundedRunLimits.partial().optional(),
+    confirm: z.boolean().optional(),
+  })
+  .refine((request) => request.mode !== undefined || (request.limits !== undefined && Object.keys(request.limits).length > 0), 'Choose a setting to change.');
+export type UpdateOrchestrationDefaultsRequest = z.infer<typeof UpdateOrchestrationDefaultsRequest>;
+
+/** The plain sentence for a stop reason (what the page says when a run has ended without finishing). No dashes. */
+export function orchestrationStopWords(reason: OrchestrationStopReason, limits: RunLimits): string {
+  switch (reason) {
+    case 'user':
+      return 'You stopped this run. Nothing more will be approved or sent. A worker that was in the middle of a turn was asked to stop; its chat is still there.';
+    case 'instruction_limit':
+      return `The run stopped because it sent ${limits.maxInstructions} instructions, the limit. Nothing more was sent.`;
+    case 'depth_limit':
+      return `The run stopped before a step that is more than ${limits.maxDepth} steps deep, the limit. Nothing more was sent.`;
+    case 'time_limit':
+      return `The run stopped because it ran for ${limits.maxMinutes} minutes, the limit. Nothing more was sent, and a worker still going was asked to stop.`;
+    case 'manager_refused':
+      return 'The manager did not give a usable plan, so the run stopped.';
+    case 'worker_error':
+      return 'A worker hit an error, so the run stopped.';
+    case 'permission_denied':
+      return 'A permission was denied, so the run stopped.';
+    case 'dispatch_refused':
+      return 'The run stopped because an instruction could not be sent. The activity log says why.';
+  }
+}
+
+/** What a step that waits for the user in a run that dispatches automatically says: its agent signs in with the user's account, or its chat runs without asking. */
+export const ORCHESTRATION_NEEDS_YOUR_APPROVAL = 'This step needs your approval before it is sent: its agent signs in with your account, or its chat runs without asking you first. The run waits for you.';
+
+/** What the transcript says under an instruction the mode sent on its own (the user did not approve that one). */
+export const ORCHESTRATION_MANAGER_AUTO_MARK = 'Sent by the manager automatically';
+
+/** One line of the activity log (15.8), read from the events: an instruction that was sent, or one that was refused. */
+export const OrchestrationActivityEntry = z.object({
+  at: IsoUtcTimestamp,
+  runId: OrchestrationRunId,
+  stepId: ManagerStepId,
+  kind: z.enum(['sent', 'refused']),
+  worker: AgentId,
+  workerLabel: z.string().min(1).max(120),
+  /** The chat it was sent to; null for a refused one. */
+  sessionId: SessionId.nullable(),
+  /** Whether it went to a chat made for it, or to one the plan named. */
+  chat: z.enum(['new', 'existing']),
+  /** Who approved it: the user, or the mode. Null for a refused one. */
+  approvedBy: Approver.nullable(),
+  /** The start of the instruction, masked. */
+  instruction: z.string().max(200),
+  /** Where it stands: sent and the worker is on it, finished, failed, refused or stopped. */
+  result: z.enum(['working', 'finished', 'failed', 'refused', 'stopped']),
+  /** Plain words: why it was refused, or the start of the worker's reply (masked). Empty when there is nothing to say. */
+  note: z.string().max(300),
+});
+export type OrchestrationActivityEntry = z.infer<typeof OrchestrationActivityEntry>;
+
+/** `GET /api/v1/workspaces/:wsId/orchestration/activity`: the newest entries first, with the run's instruction counter (no money anywhere). */
+export const OrchestrationActivityResponse = z.object({
+  entries: z.array(OrchestrationActivityEntry),
+});
+export type OrchestrationActivityResponse = z.infer<typeof OrchestrationActivityResponse>;
+export const ORCHESTRATION_ACTIVITY_PAGE = 100;

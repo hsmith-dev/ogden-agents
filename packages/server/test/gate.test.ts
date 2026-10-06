@@ -722,6 +722,9 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.workspaceOrchestrationStepSkip}`,
   `POST ${API_ROUTES.workspaceOrchestrationReorder}`,
   `POST ${API_ROUTES.workspaceOrchestrationStop}`,
+  `GET ${API_ROUTES.workspaceOrchestrationActivity}`,
+  `GET ${API_ROUTES.orchestrationDefaults}`,
+  `PUT ${API_ROUTES.orchestrationDefaults}`,
 ] as const;
 
 describe('gate placement', () => {

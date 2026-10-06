@@ -32,13 +32,13 @@ import {
   type WhileWorking,
   WhileWorking as WhileWorkingSchema,
 } from '@ogden-agents/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { readBmadPieces } from './bmad-pieces.js';
 import { readOrchestrationEnabled } from './orchestration-feature.js';
 import { readScriptsTrusted } from './bmad-script-trust.js';
 import type { Database, Orm } from './db/database.js';
-import { localEndpoints, workspaces } from './db/schema.js';
+import { events, localEndpoints, workspaces } from './db/schema.js';
 import { ConfirmationRequiredError, DeveloperModeRequiredError, FeatureUnavailableError, NotFoundError, OrchestrationUnavailableError, UnknownAgentError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 
@@ -237,14 +237,31 @@ export function readOrchestrationRoster(orm: Orm, workspaceId: string): TeamRost
   return parsed.success ? parsed.data : TeamRosterSchema.parse({});
 }
 
+/**
+ * Whether the user confirmed Dispatch automatically for this project (15.8): the record is the `orchestrationAutomaticConfirmed`
+ * mark on a `workspace.settings_changed` event of the project's own stream (read through the stream index, so the project's chats
+ * are not scanned). Asked once per project: a project that has the mark is not asked again, and one that never had it is.
+ * Deleting the project's history takes the record with it, so the user is asked again, never the other way.
+ */
+export function readAutomaticConfirmed(orm: Orm, workspaceId: string): boolean {
+  const row = orm
+    .select({ seq: events.seq })
+    .from(events)
+    .where(and(eq(events.streamId, workspaceId), eq(events.type, 'workspace.settings_changed'), sql`json_extract(${events.payload}, '$.orchestrationAutomaticConfirmed') = 1`))
+    .limit(1)
+    .get();
+  return row !== undefined;
+}
+
 const sameRoster = (a: TeamRoster, b: TeamRoster): boolean => JSON.stringify(canonicalRoster(a)) === JSON.stringify(canonicalRoster(b));
 /** The roster with its roles in a fixed order, so equal rosters compare equal. */
 const canonicalRoster = (roster: TeamRoster) => ({ manager: roster.manager, planner: roster.planner, worker: roster.worker, reviewer: roster.reviewer });
 
 /** The settings' orchestration fields, present only when they differ from the defaults. */
-const orchestrationFields = (enabled: boolean, mode: OrchestrationMode, roster: TeamRoster) => ({
+const orchestrationFields = (enabled: boolean, mode: OrchestrationMode, roster: TeamRoster, confirmed: boolean) => ({
   ...(enabled ? { orchestrationEnabled: true } : {}),
   ...(mode === DEFAULT_ORCHESTRATION_MODE ? {} : { orchestrationMode: mode }),
+  ...(confirmed ? { orchestrationAutomaticConfirmed: true as const } : {}),
   ...(sameRoster(roster, TeamRosterSchema.parse({})) ? {} : { orchestrationRoster: roster }),
 });
 
@@ -313,7 +330,7 @@ export function createWorkspaceSettings({
         ...modeFields(mode),
         ...modelsField(defaultModels),
         ...(whileWorking === undefined ? {} : { whileWorking }),
-        ...orchestrationFields(orchestrationEnabled, orchestrationMode, orchestrationRoster),
+        ...orchestrationFields(orchestrationEnabled, orchestrationMode, orchestrationRoster, readAutomaticConfirmed(orm, workspaceId)),
       };
     },
 
@@ -422,8 +439,10 @@ export function createWorkspaceSettings({
           if (!developerMode()) throw new DeveloperModeRequiredError(SKIP_ALL_DEFAULT_NEEDS_DEVELOPER_MODE);
           if (input.confirm !== true) throw new ConfirmationRequiredError(SKIP_ALL_DEFAULT_NEEDS_CONFIRMATION);
         }
-        // The server is the gate here too (E15-R3): the manager dispatching on its own needs the user's confirmation.
-        if (orchestrationMode === 'automatic' && input.confirm !== true) throw new ConfirmationRequiredError(AUTOMATIC_NEEDS_CONFIRMATION);
+        // The server is the gate here too (E15-R3): the manager dispatching on its own needs the user's confirmation, asked once per project:
+        // a project whose event log already holds the confirmation is not asked again (15.8).
+        const confirmedBefore = readAutomaticConfirmed(orm, workspaceId);
+        if (orchestrationMode === 'automatic' && !confirmedBefore && input.confirm !== true) throw new ConfirmationRequiredError(AUTOMATIC_NEEDS_CONFIRMATION);
         const previous = readCautionLevel(orm, workspaceId);
         const previousBmadPieces = readBmadPieces(orm, workspaceId);
         const previousAgent = readDefaultAgent(orm, workspaceId, isAgentRegistered);
@@ -478,6 +497,8 @@ export function createWorkspaceSettings({
         const orchestrationModeChanged = modeNow !== previousOrchestrationMode;
         const rosterNow = orchestrationRoster ?? previousOrchestrationRoster;
         const orchestrationRosterChanged = !sameRoster(rosterNow, previousOrchestrationRoster);
+        // The user's confirmation, given now for the first time in this project (it is recorded even if the mode itself did not change).
+        const confirmsNow = orchestrationMode === 'automatic' && !confirmedBefore;
         const settings = {
           cautionLevel: level,
           bmadPieces: pieces,
@@ -486,9 +507,9 @@ export function createWorkspaceSettings({
           ...modeFields(mode),
           ...modelsField(defaultModels),
           ...(projectWhileWorking === undefined ? {} : { whileWorking: projectWhileWorking }),
-          ...orchestrationFields(enabledNow, modeNow, rosterNow),
+          ...orchestrationFields(enabledNow, modeNow, rosterNow, confirmedBefore || confirmsNow),
         };
-        if (level === previous && !piecesChanged && !agentChanged && !modeChanged && !modelsChanged && !whileWorkingChanged && !orchestrationEnabledChanged && !orchestrationModeChanged && !orchestrationRosterChanged) return settings;
+        if (level === previous && !piecesChanged && !agentChanged && !modeChanged && !modelsChanged && !whileWorkingChanged && !orchestrationEnabledChanged && !orchestrationModeChanged && !confirmsNow && !orchestrationRosterChanged) return settings;
         orm
           .update(workspaces)
           .set({
@@ -525,12 +546,12 @@ export function createWorkspaceSettings({
             ...(modelsChanged ? { defaultModels, previousDefaultModels: previousModels } : {}),
             ...(whileWorkingChanged ? { whileWorking: whileWorking ?? null, previousWhileWorking: previousWhileWorking ?? null } : {}),
             ...(orchestrationEnabledChanged ? { orchestrationEnabled: enabledNow, previousOrchestrationEnabled } : {}),
-            ...(orchestrationModeChanged
+            ...(orchestrationModeChanged || confirmsNow
               ? {
                   orchestrationMode: modeNow,
                   previousOrchestrationMode,
                   // The user's confirmation of the switch to automatic dispatch for this project, on the record (E15-R3).
-                  ...(modeNow === 'automatic' ? { orchestrationAutomaticConfirmed: true as const } : {}),
+                  ...(confirmsNow ? { orchestrationAutomaticConfirmed: true as const } : {}),
                 }
               : {}),
             ...(orchestrationRosterChanged ? { orchestrationRoster: rosterNow, previousOrchestrationRoster } : {}),

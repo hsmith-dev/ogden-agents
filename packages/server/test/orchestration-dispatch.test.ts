@@ -160,7 +160,8 @@ describe('the refusals leave every chat as it was and say why', () => {
     expect(refused).toMatchObject({ status: 409, code: 'dispatch_refused', details: { reason: 'worker_not_on_team' } });
     expect(refused.message).toBe("Codex is not on this project's team any more, so the instruction was not sent. Choose a worker in the project settings under Orchestration.");
     expect(await sessions()).toEqual([]);
-    expect(server.core.events.lastSeq()).toBe(before);
+    // The refusal is the only thing that changed (15.8): it is an event now.
+    expect(server.core.events.readAfter(before).map((event) => event.type)).toEqual(['orchestration.dispatch_refused']);
     expect((await get(view.run.id)).steps[0]!.state).toBe('approved');
   });
 

@@ -364,6 +364,8 @@ export const WorkspaceSettings = z.object({
   orchestrationEnabled: z.boolean().optional(),
   /** The project's orchestration mode (epic 15). Absent: Approve each instruction (and from older servers). */
   orchestrationMode: OrchestrationMode.optional(),
+  /** Present once the user confirmed Dispatch automatically for this project (15.8): it is asked once, and the record is in the event log. */
+  orchestrationAutomaticConfirmed: z.literal(true).optional(),
   /** The project's team roster (epic 15). Absent: nobody assigned yet. */
   orchestrationRoster: TeamRoster.optional(),
 });

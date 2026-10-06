@@ -26,6 +26,7 @@ import {
   StepNotProposedError,
   ValidationError,
   type Orchestration,
+  type OrchestrationDefaultsUseCase,
   type OrchestrationFeature,
   type Permissions,
 } from '@ogden-agents/core';
@@ -36,6 +37,7 @@ import {
   DEFAULT_ORCHESTRATION_MODE,
   ORCHESTRATION_NO_MANAGER_MESSAGE,
   ORCHESTRATION_OFF_MESSAGE,
+  OrchestrationActivityResponse,
   OrchestrationRunResponse,
   OrchestrationRunsResponse,
   OrchestrationSettingsResponse,
@@ -58,6 +60,15 @@ const MAX_GOAL_BODY_BYTES = 8 * 1024;
 /** An edited instruction (up to 4000 characters) or a new order of at most twenty step ids, with room for JSON escaping. */
 const MAX_REVIEW_BODY_BYTES = 32 * 1024;
 
+/** What a route registered through {@link orchestrationRoutes} may ask of the guard. */
+export interface OrchestrationRouteOptions {
+  /**
+   * `false` leaves the Orchestration piece's guard out (15.8): for Stop only, which must never be blockable, so it works with the piece
+   * switched off. The project must still exist and the run must be its own.
+   */
+  guarded?: boolean;
+}
+
 export type OrchestrationHandler = (c: Context, scope: { workspaceId: WorkspaceId }) => Response | Promise<Response>;
 
 /** Every route registered through {@link orchestrationRoutes} on an app, as `METHOD path`. */
@@ -72,13 +83,13 @@ const WORKSPACE_SCOPE = `${API_BASE}/workspaces/:wsId/`;
 export function orchestrationRoutes(app: Hono, { orchestration, log }: { orchestration: OrchestrationFeature; log: Logger }) {
   const keys = registered.get(app) ?? new Set<string>();
   registered.set(app, keys);
-  const register = (method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE') => (path: string, handler: OrchestrationHandler) => {
+  const register = (method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE') => (path: string, handler: OrchestrationHandler, { guarded = true }: OrchestrationRouteOptions = {}) => {
     if (!path.startsWith(WORKSPACE_SCOPE)) throw new Error(`an orchestration route must be inside a workspace (${WORKSPACE_SCOPE}…): ${method} ${path}`);
     app.on(method, path, async (c) => {
       const scope = ids(c);
       if (scope === undefined) return apiError(c, 404, 'not_found', BMAD_PROJECT_NOT_FOUND_MESSAGE);
       try {
-        orchestration.requireOrchestration(scope.workspaceId);
+        if (guarded) orchestration.requireOrchestration(scope.workspaceId);
       } catch (error) {
         if (error instanceof OrchestrationOffError) {
           log.info('Orchestration is off; route refused', { workspaceId: scope.workspaceId });
@@ -110,10 +121,12 @@ export interface OrchestrationRoutesOptions {
   permissions?: Pick<Permissions, 'getSettings'> | undefined;
   /** The runs use-case (15.3); without it the run routes answer 501 once the guard passes. */
   runs?: Orchestration | undefined;
+  /** The install's mode default and limits (15.8); the settings read shows its limits. Without it the built in limits. */
+  defaults?: Pick<OrchestrationDefaultsUseCase, 'get'> | undefined;
   log: Logger;
 }
 
-export function registerOrchestrationRoutes(app: Hono, { orchestration, permissions, runs, log }: OrchestrationRoutesOptions): void {
+export function registerOrchestrationRoutes(app: Hono, { orchestration, permissions, runs, defaults, log }: OrchestrationRoutesOptions): void {
   const routes = orchestrationRoutes(app, { orchestration, log });
   const limit = bodyLimit({ maxSize: MAX_GOAL_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That goal is too long.') });
   const reviewLimit = bodyLimit({ maxSize: MAX_REVIEW_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That is too long.') });
@@ -154,7 +167,7 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
       OrchestrationSettingsResponse.parse({
         settings: {
           mode: settings.orchestrationMode ?? DEFAULT_ORCHESTRATION_MODE,
-          limits: RUN_LIMITS,
+          limits: defaults?.get().limits ?? RUN_LIMITS,
           roster: settings.orchestrationRoster ?? TeamRoster.parse({}),
           managerReady: manager.state === 'ready',
           manager,
@@ -238,11 +251,18 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
     return tooLong ?? answer!;
   });
 
-  routes.post(API_ROUTES.workspaceOrchestrationStop, (c, { workspaceId }) =>
-    run(c, async (use) => {
-      const view = await use.stopRun(workspaceId, c.req.param('runId') ?? '');
-      log.info('orchestration run stopped by the user', { workspaceId, runId: c.req.param('runId') });
-      return c.json(OrchestrationRunResponse.parse({ run: view }));
-    }),
+  // Stop is never blockable (15.8): its route leaves the piece's guard out, so a run can be stopped with the piece switched off.
+  routes.post(
+    API_ROUTES.workspaceOrchestrationStop,
+    (c, { workspaceId }) =>
+      run(c, async (use) => {
+        const view = await use.stopRun(workspaceId, c.req.param('runId') ?? '');
+        log.info('orchestration run stopped by the user', { workspaceId, runId: c.req.param('runId') });
+        return c.json(OrchestrationRunResponse.parse({ run: view }));
+      }),
+    { guarded: false },
   );
+
+  // The activity log (15.8): every instruction sent or refused, read from the events.
+  routes.get(API_ROUTES.workspaceOrchestrationActivity, (c, { workspaceId }) => run(c, async (use) => c.json(OrchestrationActivityResponse.parse({ entries: await use.activity(workspaceId) }))));
 }

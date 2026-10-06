@@ -603,6 +603,8 @@ const GUARDED_SLICES: ReadonlyArray<readonly [name: string, from: string, to: st
   ['startRun', 'async startRun(', 'async listRuns('],
   ['dispatchStep', 'async dispatchStep(', undefined],
   ['readBack', 'const readBack =', 'const NO_MANAGER'],
+  // Story 15.8: the automatic engine sends steps for the mode, never by calling the user's own actions.
+  ['advance', 'const chains = new Map', 'const api: Orchestration = {'],
 ];
 /** Where the user's actions are called from outside core: the server's orchestration routes, and the web client that sends them. */
 const USER_ACTION_CALLERS = /(^|[\\/])packages[\\/]server[\\/]src[\\/]orchestration-routes\.ts$/;
@@ -650,7 +652,7 @@ describe('E15: approval comes only from a user action (story 15.6)', () => {
       {
         pkg: '@ogden-agents/core',
         path: 'packages/core/src/orchestration.ts',
-        source: "async startRun() { await this.approveStep(); }\nasync listRuns() {}\nconst readBack = () => { stopRun(); };\nconst NO_MANAGER = 1;\nasync approveStep() {}\nasync dispatchStep() { editStep(); }",
+        source: "const chains = new Map();\nconst api: Orchestration = {};\nasync startRun() { await this.approveStep(); }\nasync listRuns() {}\nconst readBack = () => { stopRun(); };\nconst NO_MANAGER = 1;\nasync approveStep() {}\nasync dispatchStep() { editStep(); }",
       },
       { pkg: '@ogden-agents/server', path: 'packages/server/src/chat-routes.ts', source: 'runs.reorderSteps(a, b);' },
       { pkg: '@ogden-agents/server', path: 'packages/server/src/orchestration-routes.ts', source: 'use.approveStep(a, b, c);' },
@@ -697,6 +699,51 @@ describe("E15: a worker keeps its own mode (story 15.7)", () => {
     expect(findModeChanges(files)).toEqual([
       "packages/core/src/orchestration.ts: names setPermissionMode (E15: the manager never changes a worker's mode, model, driver or agent)",
       "packages/core/src/model-manager.ts: names handOff (E15: the manager never changes a worker's mode, model, driver or agent)",
+    ]);
+  });
+});
+
+/**
+ * E15 (story 15.8): the manager can never change the mode or the confirmation. The manager's own code (the port, its input, the
+ * real and the fake managers, the source) and the orchestration use-case (start, read-back, dispatch, the automatic engine, Stop)
+ * only read the project's mode; none of them names a settings mutator, the user's confirmation, the install's defaults or the
+ * roster's setters. Changing the mode is the workspace settings route and the defaults route, which the user calls.
+ */
+const SETTINGS_MUTATORS = /\b(updateSettings|setOrchestration|setRoster|setDefault|setDefaults|orchestrationAutomaticConfirmed|automaticConfirmed|createOrchestrationDefaults|OrchestrationDefaultsUseCase|UpdateOrchestrationDefaultsRequest)\b/;
+export function findSettingsMutatorReaches(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    if (!ORCHESTRATION_USE_CASE.test(path) && !MANAGER_CODE.test(path)) continue;
+    for (const match of withoutComments(source).matchAll(new RegExp(SETTINGS_MUTATORS.source, 'g'))) violations.push(`${path}: names ${match[1]} (E15: the manager never changes the mode or the confirmation)`);
+  }
+  return violations;
+}
+
+describe('E15: the manager never changes the mode or the confirmation (story 15.8)', () => {
+  it('the manager code and the orchestration use-case name no settings mutator', () => {
+    const files = loadWorkspaceSources();
+    expect(files.some((file) => ORCHESTRATION_USE_CASE.test(file.path))).toBe(true);
+    expect(files.filter((file) => MANAGER_CODE.test(file.path)).length).toBeGreaterThan(3);
+    expect(findSettingsMutatorReaches(files)).toEqual([]);
+  });
+
+  it('the automatic engine is one of the guarded slices of the use-case', () => {
+    const source = loadWorkspaceSources().find((file) => ORCHESTRATION_USE_CASE.test(file.path))!.source;
+    expect(source).toContain('const chains = new Map');
+    expect(source.indexOf('const chains = new Map')).toBeLessThan(source.indexOf('const api: Orchestration = {'));
+  });
+
+  it('flags a planted mutator in the use-case or the manager code', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration.ts', source: "// updateSettings is only a word here\npermissions.updateSettings(ws, { orchestrationMode: 'automatic', confirm: true });" },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/model-manager.ts', source: 'defaults.setOrchestration(next);' },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/manager-memory/index.ts', source: "const mark = { orchestrationAutomaticConfirmed: true };" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/workspace-routes.ts', source: 'permissions.updateSettings(a, b);' },
+    ];
+    expect(findSettingsMutatorReaches(files)).toEqual([
+      'packages/core/src/orchestration.ts: names updateSettings (E15: the manager never changes the mode or the confirmation)',
+      'packages/core/src/model-manager.ts: names setOrchestration (E15: the manager never changes the mode or the confirmation)',
+      'packages/adapters/src/manager-memory/index.ts: names orchestrationAutomaticConfirmed (E15: the manager never changes the mode or the confirmation)',
     ]);
   });
 });

@@ -27,6 +27,8 @@ import {
   ManagerPlan,
   ManagerRefusalCode,
   ManagerStatusReport,
+  ROUTING_LIMITS,
+  RoutingRuleId,
   ManagerStepId,
   MANAGER_LIMITS,
   OrchestrationMode,
@@ -237,6 +239,18 @@ export const OrchestrationBuildLinkedInput = z.object({
 export const OrchestrationBuildLinkedEvent = OrchestrationBuildLinkedInput.extend(assigned);
 export type OrchestrationBuildLinkedEvent = z.infer<typeof OrchestrationBuildLinkedEvent>;
 
+export const OrchestrationRoutingChangedInput = z.object({
+  type: z.literal('orchestration.routing_changed'),
+  ...onWorkspaceStream,
+  payload: z.object({ ruleIds: z.array(RoutingRuleId).max(ROUTING_LIMITS.maxRules), previousRuleIds: z.array(RoutingRuleId).max(ROUTING_LIMITS.maxRules) }),
+});
+/**
+ * The person changed the project's routing rules (15.12). Only the rules' ids are kept: the sentences are the person's own words, kept with
+ * the project, and a deleted rule leaves nothing behind in the log.
+ */
+export const OrchestrationRoutingChangedEvent = OrchestrationRoutingChangedInput.extend(assigned);
+export type OrchestrationRoutingChangedEvent = z.infer<typeof OrchestrationRoutingChangedEvent>;
+
 /** Every orchestration event's input, for `NewCoreEvent`. */
 export const ORCHESTRATION_INPUTS = [
   OrchestrationRunStartedInput,
@@ -258,4 +272,5 @@ export const ORCHESTRATION_INPUTS = [
   OrchestrationQuestionAnsweredInput,
   OrchestrationRunResumedInput,
   OrchestrationBuildLinkedInput,
+  OrchestrationRoutingChangedInput,
 ] as const;

@@ -78,6 +78,7 @@ import {
   ORCHESTRATION_BUILD_NOT_THIS_TICKET_MESSAGE,
   type OrchestrationBuildRunView,
   type ManagerAnyStep,
+  type RoutingRule,
   type OrchestrationReviewTarget,
   type ManagerStatusView,
   type ManagerDecision,
@@ -98,6 +99,7 @@ import { AgentNotReadyError, BadOrderError, DispatchRefusedError, DriverIsTermin
 import type { EventLog } from './event-log.js';
 import type { OrchestrationFeature } from './orchestration-feature.js';
 import { cleanForManager } from './manager-input.js';
+import { checkRoutingRequest, readRoutingRules, sameRules, writeRoutingRules } from './orchestration-routing.js';
 import { dispatchableSteps, MANAGER_FAILURE_WORDS, type ManagerContext, type ManagerDecisionContext, type ManagerPort, type ManagerRecord } from './manager-port.js';
 import { RESTARTED_REASON } from './chat/constants.js';
 import type { ManagerSource } from './manager-source.js';
@@ -161,6 +163,18 @@ export interface Orchestration {
    * ({@link RunNotOpenError}). From then on the step follows the build run.
    */
   linkBuild(workspaceId: WorkspaceId, runId: string, stepId: string, request: unknown): Promise<OrchestrationRunView>;
+  /**
+   * The project's routing rules (15.12): the person's plain sentences about which kind of work goes to which worker, in their order, each
+   * with the id a plan names when a step followed it.
+   */
+  getRouting(workspaceId: WorkspaceId): RoutingRule[];
+  /**
+   * The person saves the whole list of rules (15.12). At most 10, each one clean line of at most
+   * 300 characters holding no secret ({@link ValidationError} in plain words otherwise, nothing stored).
+   * Items that name an existing rule's id keep it; the rest are new rules. A change appends `orchestration.routing_changed` (ids only).
+   * Deleting a rule takes it out of the next manager input. Returns the rules as stored.
+   */
+  setRouting(workspaceId: WorkspaceId, request: unknown): RoutingRule[];
   /**
    * The user answers the manager's question (15.9). The answer is masked, kept as `orchestration.question_answered` and goes to the manager
    * as data with the next decision. {@link NoQuestionPendingError} when the run is not waiting for an answer, {@link RunNotOpenError} for an
@@ -248,6 +262,7 @@ const stepOf = (row: StepRow): OrchestrationStep =>
     sessionId: row.sessionId,
     reviewOf: row.reviewOf,
     build: row.buildRef === null ? null : { ticketRef: row.buildRef, runId: row.buildRunId },
+    rule: row.ruleId === null || row.ruleText === null ? null : { id: row.ruleId, text: row.ruleText },
   });
 
 /** Whether `content` is the instruction a step sent: the text itself, or for a review step the message core built from its question. */
@@ -984,8 +999,11 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     const reviewerId = reviewer?.ready === true && addressable.some((agent) => agent.agentId === reviewer.agentId) ? reviewer.agentId : undefined;
     // 15.11: the tickets a build may be proposed for, asked only when a plan is being made (a decision cannot add steps).
     const tickets = withBuildable && buildable !== undefined ? await buildable(workspaceId) : [];
+    // 15.12: the person's routing rules, read now, only when a plan is being made. A rule deleted a moment ago is not here.
+    const rules = withBuildable ? (readRoutingRules(orm, workspaceId) ?? []) : [];
     return {
       goal,
+      ...(rules.length === 0 ? {} : { rules }),
       ...(reviewerId === undefined ? {} : { reviewer: reviewerId }),
       ...(tickets.length === 0 ? {} : { buildable: tickets.map((ticket) => ({ ref: ticket.ref, title: ticket.title })) }),
       ...(builder === undefined ? {} : { builder }),
@@ -1350,6 +1368,11 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         throw new ManagerFailedError(redactSecrets(result.reason).slice(0, 300));
       }
       const plan = masked(result.value);
+      // The rule a step followed, as it was when the plan was asked for (the rules the manager was given), kept with the step.
+      const ruleOf = (id: string | undefined): { ruleId: string; ruleText: string } | { ruleId: null; ruleText: null } => {
+        const found = id === undefined ? undefined : context.rules?.find((rule) => rule.id === id);
+        return found === undefined ? { ruleId: null, ruleText: null } : { ruleId: found.id, ruleText: found.text };
+      };
       events.transaction(() => {
         noteReply(workspaceId, runId, result.record);
         plan.steps.forEach((step, position) => {
@@ -1359,7 +1382,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
             : { worker: step.worker, chat: step.chat, instruction: step.instruction, reviewOf: step.review_of ?? null, buildRef: null };
           orm
             .insert(orchestrationSteps)
-            .values({ runId, stepId: step.id, position, ...values, dependsOn: JSON.stringify(step.depends_on), state: 'proposed', approvedBy: null, sessionId: null, buildRunId: null })
+            .values({ runId, stepId: step.id, position, ...values, ...ruleOf(step.rule), dependsOn: JSON.stringify(step.depends_on), state: 'proposed', approvedBy: null, sessionId: null, buildRunId: null })
             .run();
         });
         moveRun(runId, 'awaiting_user');
@@ -1369,6 +1392,24 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       // Under Dispatch automatically the run begins at once: core sends the first step itself, within the run's limits.
       if (syncMode(workspaceId, requireRun(workspaceId, runId)).mode === 'automatic') await advanceNow(workspaceId, runId);
       return readBack(workspaceId, requireRun(workspaceId, runId));
+    },
+
+    getRouting(workspaceId) {
+      feature.requireOrchestration(workspaceId);
+      return readRoutingRules(orm, workspaceId) ?? [];
+    },
+
+    setRouting(workspaceId, request) {
+      feature.requireOrchestration(workspaceId);
+      return events.transaction(() => {
+        const current = readRoutingRules(orm, workspaceId) ?? [];
+        const next = checkRoutingRequest(request, current);
+        if (!sameRules(current, next)) {
+          writeRoutingRules(orm, workspaceId, next);
+          events.append({ type: 'orchestration.routing_changed', workspaceId, streamId: workspaceId, payload: { ruleIds: next.map((rule) => rule.id), previousRuleIds: current.map((rule) => rule.id) } });
+        }
+        return next;
+      });
     },
 
     async listRuns(workspaceId) {

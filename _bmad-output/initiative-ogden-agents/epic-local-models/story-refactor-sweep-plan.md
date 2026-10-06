@@ -64,3 +64,9 @@ Dispositions of the epic's open items (all recorded in deferred-work.md, owner 1
 ## Verification
 
 **Commands:** `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm run pack && pnpm smoke`, `PROVENANCE_BASE=origin/main pnpm provenance`.
+
+## Review triage log (whole epic sweep)
+
+Fixed: B1 (a key must be 4 characters or more, so masking always hides it), A8 (vendor wording), A9 (orphaned comment), A10 (pointless wrapper).
+Deferred to the next refactor pass, no behaviour risk, recorded as one item in deferred-work.md: A1 (move harness preparation from server local-wiring into acp-opencode), A2 (LocalModels closures, repeated unreachable throws), A3 (shared route helpers), A4 and A5 (install support shared with Antigravity, one pin type), A6 (listIds via probeEndpoint, one StructuredMode), A7 (one failure words table), A11 (one JSON init in web api), A12 (unused exports), A13 (move archive tests), A14 (shared test helpers), A15 (fake-opencode as a personality or recorded divergence).
+Clean: archive move is byte identical in every check; no other secret leak found; no new file over 600 lines.

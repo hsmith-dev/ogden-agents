@@ -8,9 +8,9 @@
  * body is ever logged: a failure carries a kind and a status code.
  */
 
-/** How long a call may take before it counts as failed. */
 import { errorCode } from '../error-code.js';
 
+/** How long a call may take before it counts as failed. */
 export const DEFAULT_TIMEOUT_MS = 5_000;
 /** The most of an answer that is read (a model list is small; a chat completion is capped by the caller). */
 export const DEFAULT_MAX_BYTES = 1024 * 1024;

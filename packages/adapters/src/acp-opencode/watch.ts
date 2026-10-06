@@ -101,7 +101,6 @@ function watched(session: AgentSession, env: Readonly<Record<string, string>>, o
 
 /** `agent` with the watch over each session it starts or reopens. */
 export function withEndpointWatch(agent: AgentPort, options: EndpointWatchOptions = {}): AgentPort {
-  const forInput = <T extends StartAgentSession>(input: T) => input.env;
   return {
     get displayName() {
       return agent.displayName;
@@ -111,11 +110,11 @@ export function withEndpointWatch(agent: AgentPort, options: EndpointWatchOption
     },
     ...(agent.modeFixedAtStart === true ? { modeFixedAtStart: true } : {}),
     async startSession(input) {
-      return watched(await agent.startSession(input), forInput(input), options);
+      return watched(await agent.startSession(input), input.env, options);
     },
     async reopenSession(input) {
       const reopened = await agent.reopenSession(input);
-      return { ...reopened, session: watched(reopened.session, forInput(input), options) };
+      return { ...reopened, session: watched(reopened.session, input.env, options) };
     },
     listAuthMethods: (input) => agent.listAuthMethods(input),
     skillInvocation: (skill, idea) => agent.skillInvocation(skill, idea),

@@ -218,6 +218,19 @@ export const API_ROUTES = {
    */
   localEndpointTest: `${API_BASE}/local-endpoints/:endpointId/test`,
   /**
+   * `GET` → `LocalEndpointModelsResponse` (story 14.5): the models the endpoint serves with the size,
+   * context length and tool support it reports, cautions in plain words, and the chosen model if
+   * the server no longer has it. The server (never the page) asks the endpoint; 409
+   * `endpoint_confirmation_required` for an unconfirmed host, in which case nothing is called.
+   */
+  localEndpointModels: `${API_BASE}/local-endpoints/:endpointId/models`,
+  /**
+   * `POST ManagerTestRequest` → `ManagerTestResponse` (story 14.8): Test as a manager. Sends one fixed small
+   * plan shaped request to the model (no tools, no files) and says in plain words whether it answered in the
+   * shape asked for. 409 `endpoint_confirmation_required` for an unconfirmed host, in which case nothing is called.
+   */
+  localEndpointManagerTest: `${API_BASE}/local-endpoints/:endpointId/manager-test`,
+  /**
    * `POST` → `LocalEndpointDetectResponse` (story 14.4): Detect. Probes only 127.0.0.1 and localhost on the
    * presets' ports, once, when the user presses it. Reads no body.
    */
@@ -435,6 +448,32 @@ export const API_ROUTES = {
    * BMad Method has no such skill.
    */
   workspaceEpicLookBack: `${API_BASE}/workspaces/:wsId/epics/:epic/look-back`,
+  /**
+   * `GET` → `LookBackOffersResponse` (story 7.2): the epics whose finished-epic
+   * offer the user answered with Not now. Serves `retrospectives`, with the trust.
+   */
+  workspaceLookBackOffers: `${API_BASE}/workspaces/:wsId/look-back-offers`,
+  /**
+   * `DELETE` → 204 (story 7.2): Not now on epic `:epic`'s offer, kept per
+   * project and epic; the first one appends `workspace.look_back_offer_dismissed`,
+   * a repeat changes nothing. 400 for a malformed `:epic`. Serves
+   * `retrospectives`, with the trust.
+   */
+  workspaceEpicLookBackOffer: `${API_BASE}/workspaces/:wsId/epics/:epic/look-back-offer`,
+  /**
+   * `POST StartRetrospectiveStepRequest` → 201 `SessionResponse` (frozen by
+   * 7.2, served by 7.5): a planning session on one of the retrospective's
+   * next steps with the epic's retrospective file. 501 `not_implemented` until 7.5.
+   * Serves `retrospectives`, with the trust.
+   */
+  workspaceRetrospectiveSessions: `${API_BASE}/workspaces/:wsId/epics/:epic/retrospective/sessions`,
+  /**
+   * `POST` (no body) → `SaveLessonsResponse` (frozen by 7.2, served by 7.5):
+   * Save the lessons for later builds. 409 `nothing_to_save`,
+   * `checkout_busy` or `agents_file_missing` with nothing committed; 501
+   * `not_implemented` until 7.5. Serves `retrospectives`, with the trust.
+   */
+  workspaceRetrospectiveSave: `${API_BASE}/workspaces/:wsId/epics/:epic/retrospective/save`,
   /** `GET` → `SessionRunResponse` (story 5.2): the run of a `build` session; 404 for one without a run. */
   sessionRun: `${API_BASE}/workspaces/:wsId/sessions/:sesId/run`,
   // Pre-registered by story 5.3 for epics 5 and 11: each serves `builds`

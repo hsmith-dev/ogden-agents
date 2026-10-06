@@ -100,6 +100,29 @@ function listAllSidecars() {
     .map((l) => ({ pid: Number(l.trim().split(/\s+/)[0]), command: l.trim().slice(0, 200) }));
 }
 
+/** The sidecars as `pid ppid state command` lines (not on Windows), to say what was left when a check fails. */
+export function describeSidecars(ignore = new Set()) {
+  if (IS_WIN) return listSidecars(ignore).map((p) => String(p.pid));
+  const out = execFileSync('ps', ['-axo', 'pid=,ppid=,stat=,command='], { encoding: 'utf8' });
+  return out
+    .split('\n')
+    .filter((l) => /ogden-node/.test(l) && !ignore.has(Number(l.trim().split(/\s+/)[0])))
+    .map((l) => l.trim().slice(0, 220));
+}
+
+/**
+ * Stops what a scenario left behind in an order that cannot start more: the app first (a server that
+ * loses its launcher, or an agent killed under a live server, could otherwise be restarted), then the
+ * sidecars until a pass finds none (a process started during a pass is caught by the next).
+ */
+export function sweepScenario(appsIgnore, sidecarsIgnore) {
+  killApps(appsIgnore);
+  for (let pass = 0; pass < 5; pass++) {
+    if (listSidecars(sidecarsIgnore).length === 0) return;
+    killSidecars(sidecarsIgnore);
+  }
+}
+
 /** Kills the sidecars left behind that were not running before `ignore` was taken (cleanup after a failed check only). */
 export function killSidecars(ignore = new Set()) {
   for (const { pid } of listSidecars(ignore)) {
@@ -135,7 +158,7 @@ export function listApps(ignore = new Set()) {
   const out = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
   return out
     .split('\n')
-    .filter((l) => /\/ogden-agents(\s|$)/.test(l) || l.includes('Contents/MacOS/ogden-agents'))
+    .filter((l) => /(^|\s|\/)ogden-agents(\s|$)/.test(l.trim().replace(/^\d+\s+/, '')) || l.includes('Contents/MacOS/ogden-agents'))
     .map((l) => ({ pid: Number(l.trim().split(/\s+/)[0]) }))
     .filter((p) => !ignore.has(p.pid));
 }

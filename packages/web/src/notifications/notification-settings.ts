@@ -20,13 +20,13 @@ export interface NotificationSettings {
 
 export const NOTIFICATION_SETTINGS_KEY = 'ogden-agents.notifications';
 
-export const NEED_KINDS: readonly NeedKind[] = ['permission', 'waiting', 'check_in', 'sign_in'];
+export const NEED_KINDS: readonly NeedKind[] = ['permission', 'waiting', 'check_in', 'sign_in', 'run_blocked', 'run_review'];
 
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   desktop: false,
   sound: true,
   volume: 0.6,
-  kinds: { permission: true, waiting: true, check_in: true, sign_in: true },
+  kinds: { permission: true, waiting: true, check_in: true, sign_in: true, run_blocked: true, run_review: true },
   onlyWhenAway: true,
 };
 

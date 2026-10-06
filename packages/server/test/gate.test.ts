@@ -654,6 +654,10 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspaceTickets}`,
   // Looking back on an epic (story 7.1), guarded with the trust.
   `POST ${API_ROUTES.workspaceEpicLookBack}`,
+  `GET ${API_ROUTES.workspaceLookBackOffers}`,
+  `DELETE ${API_ROUTES.workspaceEpicLookBackOffer}`,
+  `POST ${API_ROUTES.workspaceRetrospectiveSessions}`,
+  `POST ${API_ROUTES.workspaceRetrospectiveSave}`,
   // Story 4.2's pre-registered routes (guarded; one ticket filled by 4.8, setup by 4.3, the status write 501 until 4.10) and the script trust (unguarded).
   `GET ${API_ROUTES.workspaceTicket}`,
   `PUT ${API_ROUTES.workspaceTicketStatus}`,
@@ -700,6 +704,8 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.localEndpointPresets}`,
   `POST ${API_ROUTES.localEndpointTest}`,
   `POST ${API_ROUTES.localEndpointDetect}`,
+  `GET ${API_ROUTES.localEndpointModels}`,
+  `POST ${API_ROUTES.localEndpointManagerTest}`,
 ] as const;
 
 describe('gate placement', () => {
@@ -751,6 +757,10 @@ describe('gate placement', () => {
         `POST ${API_ROUTES.workspacePlanningSessions}`,
         `GET ${API_ROUTES.workspaceTickets}`,
         `POST ${API_ROUTES.workspaceEpicLookBack}`,
+        `GET ${API_ROUTES.workspaceLookBackOffers}`,
+        `DELETE ${API_ROUTES.workspaceEpicLookBackOffer}`,
+        `POST ${API_ROUTES.workspaceRetrospectiveSessions}`,
+        `POST ${API_ROUTES.workspaceRetrospectiveSave}`,
         `GET ${API_ROUTES.workspaceTicket}`,
         `PUT ${API_ROUTES.workspaceTicketStatus}`,
         `GET ${API_ROUTES.workspaceBmadSetup}`,

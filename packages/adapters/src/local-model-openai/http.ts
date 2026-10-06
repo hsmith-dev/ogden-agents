@@ -33,7 +33,7 @@ export class EndpointError extends Error {
   override readonly name = 'EndpointError';
   constructor(
     readonly kind: EndpointFailureKind,
-    readonly details: { status?: number; code?: string } = {},
+    readonly details: { status?: number; code?: string; apiCode?: string } = {},
   ) {
     super(`endpoint ${kind}`);
   }
@@ -68,6 +68,7 @@ const codeOf = (error: unknown): string => {
  */
 export async function callEndpoint(call: EndpointCall, path: string, init: { method?: 'GET' | 'POST'; body?: unknown } = {}): Promise<unknown> {
   const fetchImpl = call.fetch ?? globalThis.fetch;
+  if (call.signal?.aborted) throw new EndpointError('unreachable', { code: 'aborted' });
   const controller = new AbortController();
   const onAbort = () => controller.abort();
   call.signal?.addEventListener('abort', onAbort);
@@ -104,8 +105,10 @@ export async function callEndpoint(call: EndpointCall, path: string, init: { met
       throw new EndpointError('key_refused', { status: response.status });
     }
     if (!response.ok) {
-      void response.body?.cancel().catch(() => {});
-      throw new EndpointError('http', { status: response.status });
+      // The server's own error code (a short token such as `model_not_found`), read to tell a missing model or a full context
+      // from other errors. Its message is never kept or shown.
+      const apiCode = await errorCodeOf(response);
+      throw new EndpointError('http', { status: response.status, ...(apiCode === undefined ? {} : { apiCode }) });
     }
     const text = await readLimited(response, call.maxBytes ?? DEFAULT_MAX_BYTES);
     try {
@@ -120,6 +123,30 @@ export async function callEndpoint(call: EndpointCall, path: string, init: { met
   } finally {
     clearTimeout(timer);
     call.signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+/** Whether a server's error text or type says the request was longer than the model's context. */
+const CONTEXT_ERROR = /context[ _-]?(?:length|window|size)|maximum context|too many tokens|exceed[_ ]context|input is too long|prompt is too long/i;
+
+/**
+ * The server's own error code (a short token such as `model_not_found`), read to tell a missing model or a full context
+ * from other errors; the answer is read to at most 8 KB. A context error is recognised by its code, type or words
+ * (servers differ: a code, a type, a plain string). Its message is never kept or shown.
+ */
+async function errorCodeOf(response: Response): Promise<string | undefined> {
+  try {
+    const text = await readLimited(response, 8 * 1024);
+    const body = JSON.parse(text) as { error?: unknown };
+    const error = body.error;
+    const message = typeof error === 'string' ? error : typeof (error as { message?: unknown } | null)?.message === 'string' ? (error as { message: string }).message : '';
+    const type = typeof (error as { type?: unknown } | null)?.type === 'string' ? (error as { type: string }).type : '';
+    const code = typeof (error as { code?: unknown } | null)?.code === 'string' ? (error as { code: string }).code : '';
+    if (CONTEXT_ERROR.test(code) || CONTEXT_ERROR.test(type) || CONTEXT_ERROR.test(message)) return 'context_length_exceeded';
+    const token = code !== '' ? code : type;
+    return /^[A-Za-z0-9_.-]{1,60}$/.test(token) ? token : /model[^\n]{0,60}not found/i.test(message) ? 'model_not_found' : undefined;
+  } catch {
+    return undefined;
   }
 }
 

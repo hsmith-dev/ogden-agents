@@ -20,14 +20,17 @@ import {
   createClaudeCodeAgent,
   createClaudeCodeSetup,
   createKeyringSecretStore,
+  SAFE_MODEL_ID,
+  localModelId,
+  LOCAL_AGENT_ID,
   createOpenAiLocalModel,
   DETECT_PROBE_TIMEOUT_MS,
   createMemorySecretStore,
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
 } from '@ogden-agents/adapters';
-import { agentEnvKeys, AgentSetupError, CoreError, createAgentSetup, createLocalModels, type AgentPort, type AgentTerminalResume, type Core, type LocalEndpoints } from '@ogden-agents/core';
-import type { AgentId } from '@ogden-agents/shared';
+import { agentEnvKeys, AgentSetupError, CoreError, createAgentSetup, createLocalModels, type AgentPort, type AgentTerminalResume, type Core, type LocalEndpoints, type LocalModelInfo } from '@ogden-agents/core';
+import { modelDescription, type AgentId } from '@ogden-agents/shared';
 import { agentHomeDir, checkAgentWiring, describedLike, type AgentWiring } from './agent-wiring.js';
 import { antigravityWiring, type AntigravityPorts } from './antigravity-wiring.js';
 import { codexWiring } from './codex-wiring.js';
@@ -104,7 +107,11 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   const local =
     options.local === false || (options.local === undefined && !LOCAL_SHIPPED && hooks.localServer === undefined && hooks.localEndpoint === undefined)
       ? []
-      : [localWiring({ dataDir, given: options.local, serverScript: hooks.localServer, target: hooks.localEndpoint ?? (async () => localEndpoints().target()), onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+      : [localWiring({ dataDir, given: options.local, serverScript: hooks.localServer, target: hooks.localEndpoint ?? (async () => {
+          const target = await localEndpoints().target();
+          const known = target === undefined ? undefined : lastModelInfo.get(target.endpointId);
+          return target === undefined ? undefined : { ...target, ...(known === undefined ? {} : { models: known.map((model) => ({ id: model.id, contextTokens: model.contextTokens, toolCall: model.toolCall })) }) };
+        }), onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of local) checkAgentWiring(wiring);
   const extraAgents = [...antigravity, ...codex, ...grok, ...local, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
   // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.
@@ -222,7 +229,21 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   /** Claude Code as a chat runs it: the default agent, and the one Plan and the document cards fall back to (stories 4.1, 4.7). */
   const chatAgent = forChat(CLAUDE_CODE_AGENT_ID, agent);
   const localModelPort = options.localModelPort ?? createOpenAiLocalModel();
-  const localModels = createLocalModels({ endpoints: localEndpoints(), port: localModelPort, detectPort: options.localModelPort ?? createOpenAiLocalModel({ timeoutMs: DETECT_PROBE_TIMEOUT_MS }) });
+  // The chat's model picker offers the default endpoint's models, under the ids the harness lists them by (epic 14 story 14.5),
+  // and the harness is told what each server reported of them (context length, tool support) at the next chat start.
+  const lastModelInfo = new Map<string, readonly LocalModelInfo[]>();
+  const rememberLocalModels = (endpointId: string, models: readonly LocalModelInfo[]) => {
+    lastModelInfo.set(endpointId, models);
+    const target = localEndpoints().defaultEndpointId() ?? localEndpoints().list()[0]?.id;
+    if (target !== endpointId) return;
+    // Only ids the harness will list (the same rule as its config) and the picker accepts.
+    const usable = models.filter((model) => SAFE_MODEL_ID.test(model.id));
+    core.agentModels.rememberModels(
+      LOCAL_AGENT_ID,
+      usable.map((model) => ({ id: localModelId(model.id), name: model.id, ...(modelDescription(model) === undefined ? {} : { description: modelDescription(model)! }) })),
+    );
+  };
+  const localModels = createLocalModels({ onModels: rememberLocalModels, endpoints: localEndpoints(), port: localModelPort, detectPort: options.localModelPort ?? createOpenAiLocalModel({ timeoutMs: DETECT_PROBE_TIMEOUT_MS }) });
   return { localModels, localEndpoints: localEndpoints(), claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
 }
 

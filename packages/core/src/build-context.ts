@@ -16,7 +16,7 @@ import { workspaceRepoPath } from './planning.js';
 import { serializedByRepo } from './repo-serialization.js';
 import type { AgentSandbox } from './sandbox-port.js';
 import type { TicketRunGuard } from './ticket-store-port.js';
-import { BMAD_OUTPUT_PREFIX, CREDENTIAL_FOLDERS, isBuildBranch, intentGapPatchOf, RESULT_STATUSES, MAX_RESULT_TEXT } from './build-names.js';
+import { AGENTS_FILE, BMAD_OUTPUT_PREFIX, CREDENTIAL_FOLDERS, isBuildBranch, intentGapPatchOf, RESULT_STATUSES, MAX_RESULT_TEXT } from './build-names.js';
 import type { BuildsDeps } from './builds-types.js';
 
 export interface BuildFns {
@@ -226,12 +226,12 @@ export function createBuildContext(deps: BuildsDeps) {
     await removeRunWorktree(cleanupDeps, repoPath, run).catch((error: unknown) => report(run.id, 'cleanup', error));
   };
 
-  /** Approve's checkout checks: nothing staged, the plan untouched, no operation in progress, nothing changed outside `_bmad-output/`. */
+  /** Approve's checkout checks: nothing staged, the plan untouched, no operation in progress, nothing changed outside `_bmad-output/` (and the root `AGENTS.md`, whose lessons Save the lessons commits later: epic 7, E7-R5). */
   const requireCleanCheckout = async (repoPath: string, plan: string | null): Promise<void> => {
     if ((await vcs.operationInProgress(repoPath)) || (await vcs.staged(repoPath)).length > 0) throw new BuildRefusedError('checkout_dirty', CHECKOUT_BUSY_MESSAGE);
     const changed = await vcs.status(repoPath);
     if (plan !== null && changed.includes(plan)) throw new BuildRefusedError('checkout_dirty', CHECKOUT_BUSY_MESSAGE);
-    if (changed.some((path) => !path.startsWith(BMAD_OUTPUT_PREFIX))) throw new BuildRefusedError('checkout_dirty', CHECKOUT_DIRTY_MESSAGE);
+    if (changed.some((path) => !path.startsWith(BMAD_OUTPUT_PREFIX) && path !== AGENTS_FILE)) throw new BuildRefusedError('checkout_dirty', CHECKOUT_DIRTY_MESSAGE);
   };
 
   /** Cross-module calls bound late: dispatch fills them in. */

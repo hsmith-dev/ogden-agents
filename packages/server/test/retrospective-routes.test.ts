@@ -14,7 +14,8 @@
  * - a look-back's document opens through the document route with Planning
  *   off (the retrospective card, story 7.1).
  */
-import { realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { createMemoryBmadCatalog, createMemoryTicketStore } from '@ogden-agents/adapters';
 import {
   API_ROUTES,
@@ -23,19 +24,23 @@ import {
   DocumentResponse,
   FEATURE_OFF_MESSAGE,
   LOOK_BACK_EPIC_NOT_FOUND_MESSAGE,
-  LOOK_BACK_UNAVAILABLE_MESSAGE,
+  REDUCED_MODE_MESSAGE,
+  LookBackOffersResponse,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
   SessionResponse,
+  TicketsResponse,
   WorkspaceResponse,
   type BmadPiece,
   type SessionId,
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createFakeBmadRepo } from '../../../tests/fixtures/fake-bmad-repo.js';
+import { createRetrospectiveRepo, RETRO_EPIC, RETRO_EPIC_FOLDER, RETRO_FILE, RETRO_PITFALL } from '../../../tests/fixtures/retrospective-repo.js';
 import { removeAfterTest, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const SKILL_FILE = '---\nname: bmad-retrospective\ndescription: Look back.\n---\n\n# bmad-retrospective\n';
 const EPIC = { slug: 'epic-one', id: 1, status: 'active', after: [], blocks: [] };
+const RETRO_TEXT = '---\nverdict: accepted\ndate: 2026-10-05\n---\n\n# Retrospective\n';
 const RETRO_PIECES: BmadPiece[] = ['board', 'builds', 'retrospectives'];
 
 function request(server: TestServer, tab: SignedIn, method: string, path: string, body?: unknown) {
@@ -54,10 +59,10 @@ async function setup({ pieces = RETRO_PIECES, trust = true, skills = ['bmad-retr
   const ticketStore = createMemoryTicketStore({ repos: { [real]: { tickets: [], folder: 'initiative-demo', epics: [EPIC] } } });
   const bmadCatalog = createMemoryBmadCatalog(
     { [real]: { hasBmad: true, hasOutput: true } },
-    { [real]: skills.map((name) => ({ name, description: SKILL_FILE })) },
+    { [real]: skills.map((name) => ({ name, description: SKILL_FILE, ...(name === 'bmad-retrospective' ? { scope: 'epic' as const } : {}) })) },
     {
       setup: { [real]: { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] } },
-      documents: { [real]: { '_bmad-output/initiative-demo/epic-one/epic-epic-one-retrospective.md': '# Retrospective\n' } },
+      documents: { [real]: { '_bmad-output/initiative-demo/epic-one/epic-epic-one-retrospective.md': RETRO_TEXT } },
     },
   );
   const server = await startTestServer({ ticketStore, bmadCatalog });
@@ -119,7 +124,7 @@ describe('look back on an epic over REST (story 7.1)', () => {
     expect(server.core.entities.listSessions(workspace.id)).toHaveLength(1);
   });
 
-  it('a malformed epic is 400, an epic the board lacks 404, and a project without the skill 404; each creates nothing', async () => {
+  it('a malformed epic is 400, an epic the board lacks 404, and a project without the look-back step 409 reduced_mode; each creates nothing', async () => {
     const { server, tab, workspace, lookBack } = await setup();
     const bad = await request(server, tab, 'POST', lookBack('-x'));
     expect(bad.status).toBe(400);
@@ -131,8 +136,9 @@ describe('look back on an epic over REST (story 7.1)', () => {
 
     const bare = await setup({ skills: ['bmad-spec'] });
     const noSkill = await request(bare.server, bare.tab, 'POST', bare.lookBack('epic-one'));
-    expect(noSkill.status).toBe(404);
-    expect(await errorOf(noSkill)).toEqual({ code: 'not_found', message: LOOK_BACK_UNAVAILABLE_MESSAGE });
+    // No epic-scoped action in the catalog: reduced mode, not a 404.
+    expect(noSkill.status).toBe(409);
+    expect(await errorOf(noSkill)).toEqual({ code: 'reduced_mode', message: REDUCED_MODE_MESSAGE });
     expect(bare.server.core.entities.listSessions(bare.workspace.id)).toEqual([]);
   });
 
@@ -142,8 +148,140 @@ describe('look back on an epic over REST (story 7.1)', () => {
     const url = `${apiPath(API_ROUTES.workspaceDocument, { wsId: workspace.id })}?${new URLSearchParams({ path })}`;
     const opened = await request(server, tab, 'GET', url);
     expect(opened.status).toBe(200);
-    expect(DocumentResponse.parse(await opened.json()).document.content).toBe('# Retrospective\n');
+    expect(DocumentResponse.parse(await opened.json()).document.content).toBe(RETRO_TEXT);
     expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId: workspace.id }), { bmadPieces: [] })).status).toBe(200);
     expect((await request(server, tab, 'GET', url)).status).toBe(409);
+  });
+});
+
+describe('the board\'s epics with their retrospectives (story 7.4)', () => {
+  it('carry the verdict and date read from the file with Retrospectives on, and nothing with it off', async () => {
+    const on = await setup();
+    const reply = await request(on.server, on.tab, 'GET', apiPath(API_ROUTES.workspaceTickets, { wsId: on.workspace.id }));
+    expect(reply.status).toBe(200);
+    const { epics } = TicketsResponse.parse(await reply.json());
+    expect(epics[0]!.retrospective).toEqual({ path: '_bmad-output/initiative-demo/epic-one/epic-epic-one-retrospective.md', verdict: 'accepted', date: '2026-10-05', problem: null });
+    expect(on.bmadCatalog.retrospectiveCalls).toHaveLength(1);
+
+    const off = await setup({ pieces: ['board'] });
+    const none = TicketsResponse.parse(await (await request(off.server, off.tab, 'GET', apiPath(API_ROUTES.workspaceTickets, { wsId: off.workspace.id }))).json());
+    expect(none.epics[0]!.retrospective).toBeNull();
+    expect(off.bmadCatalog.retrospectiveCalls).toEqual([]);
+  });
+});
+
+describe('the catalog for Retrospectives alone (story 7.3)', () => {
+  it('answers the epic-scoped action to a project with only Retrospectives on, with no trust; Plan stays off', async () => {
+    const { server, tab, workspace } = await setup({ trust: false });
+    const catalogPath = apiPath(API_ROUTES.workspaceCatalog, { wsId: workspace.id });
+    const reply = await request(server, tab, 'GET', catalogPath);
+    expect(reply.status).toBe(200);
+    const body = (await reply.json()) as { skills: Array<{ name: string; scope: string | null }>; entryAction: string | null };
+    expect(body.skills.map((skill) => [skill.name, skill.scope])).toEqual([['bmad-retrospective', 'epic']]);
+    expect(body.entryAction).toBeNull();
+    const start = await request(server, tab, 'POST', apiPath(API_ROUTES.workspacePlanningSessions, { wsId: workspace.id }), { skill: 'bmad-retrospective' });
+    expect(start.status).toBe(409);
+    expect((await errorOf(start)).code).toBe('feature_off');
+    const off = await setup({ pieces: [] });
+    expect((await request(off.server, off.tab, 'GET', apiPath(API_ROUTES.workspaceCatalog, { wsId: off.workspace.id }))).status).toBe(409);
+  });
+});
+
+describe('the rest of epic 7\'s routes (story 7.2)', () => {
+  const routes = (wsId: string) => ({
+    offers: apiPath(API_ROUTES.workspaceLookBackOffers, { wsId }),
+    dismiss: (epic: string) => apiPath(API_ROUTES.workspaceEpicLookBackOffer, { wsId, epic }),
+    step: (epic: string) => apiPath(API_ROUTES.workspaceRetrospectiveSessions, { wsId, epic }),
+    save: (epic: string) => apiPath(API_ROUTES.workspaceRetrospectiveSave, { wsId, epic }),
+  });
+
+  it('with Retrospectives off, every one answers feature_off before the body is read, and with it on but untrusted, scripts_not_trusted', async () => {
+    const off = await setup({ pieces: ['planning', 'board'] });
+    const o = routes(off.workspace.id);
+    for (const [method, path, body] of [
+      ['GET', o.offers, undefined],
+      ['DELETE', o.dismiss('epic-one'), undefined],
+      ['POST', o.step('epic-one'), { skill: 'bmad-project-context' }],
+      ['POST', o.step('epic-one'), '{not json'],
+      ['POST', o.save('epic-one'), undefined],
+    ] as const) {
+      const reply = await request(off.server, off.tab, method, path, body);
+      expect(reply.status, `${method} ${path}`).toBe(409);
+      expect(await errorOf(reply)).toEqual({ code: 'feature_off', message: FEATURE_OFF_MESSAGE });
+    }
+    expect(readsOf(off.ticketStore)).toEqual([]);
+
+    const untrusted = await setup({ trust: false });
+    const u = routes(untrusted.workspace.id);
+    for (const [method, path] of [
+      ['GET', u.offers],
+      ['DELETE', u.dismiss('epic-one')],
+      ['POST', u.step('epic-one')],
+      ['POST', u.save('epic-one')],
+    ] as const) {
+      const reply = await request(untrusted.server, untrusted.tab, method, path);
+      expect(reply.status, `${method} ${path}`).toBe(409);
+      expect((await errorOf(reply)).code).toBe('scripts_not_trusted');
+    }
+    expect(untrusted.server.core.entities.listSessions(untrusted.workspace.id)).toEqual([]);
+  });
+
+  it('Not now is kept per epic, appends one event, and survives a read; a malformed epic is 400', async () => {
+    const { server, tab, workspace } = await setup();
+    const r = routes(workspace.id);
+    expect(LookBackOffersResponse.parse(await (await request(server, tab, 'GET', r.offers)).json())).toEqual({ dismissed: [] });
+    const before = server.core.events.lastSeq();
+    expect((await request(server, tab, 'DELETE', r.dismiss('epic-one'))).status).toBe(204);
+    expect((await request(server, tab, 'DELETE', r.dismiss('epic-one'))).status).toBe(204);
+    expect((await request(server, tab, 'DELETE', r.dismiss('epic-two'))).status).toBe(204);
+    const appended = server.core.events.readAfter(before).filter((event) => event.type === 'workspace.look_back_offer_dismissed');
+    expect(appended.map((event) => event.payload)).toEqual([{ epic: 'epic-one' }, { epic: 'epic-two' }]);
+    expect(LookBackOffersResponse.parse(await (await request(server, tab, 'GET', r.offers)).json())).toEqual({ dismissed: ['epic-one', 'epic-two'] });
+    expect((await request(server, tab, 'DELETE', r.dismiss('-x'))).status).toBe(400);
+  });
+
+  it('the retrospective step and Save the lessons refuse a malformed epic or body with 400 before anything else', async () => {
+    const { server, tab, workspace } = await setup();
+    const r = routes(workspace.id);
+    expect((await request(server, tab, 'POST', r.step('epic-one'), { skill: '../x' })).status).toBe(400);
+    expect((await request(server, tab, 'POST', r.step('-x'), { skill: 'bmad-project-context' })).status).toBe(400);
+    expect((await request(server, tab, 'POST', r.save('-x'))).status).toBe(400);
+    expect(server.core.entities.listSessions(workspace.id)).toEqual([]);
+  });
+
+  it('on the fixture repo the fake agent writes the retrospective (a card) and the lessons into AGENTS.md, leaving exactly those two paths changed', async () => {
+    const repo = createRetrospectiveRepo();
+    removeAfterTest(repo.path);
+    const real = realpathSync.native(repo.path);
+    const ticketStore = createMemoryTicketStore({ repos: { [real]: { tickets: [], folder: 'initiative-demo', epics: [{ slug: RETRO_EPIC, id: 1, status: 'done', after: [], blocks: [] }] } } });
+    const bmadCatalog = createMemoryBmadCatalog(
+      { [real]: { hasBmad: true, hasOutput: true } },
+      { [real]: [{ name: 'bmad-retrospective', description: 'Look back.', scope: 'epic' as const }, { name: 'bmad-project-context', description: 'Keep AGENTS.md current.' }] },
+      { setup: { [real]: { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] } } },
+    );
+    const server = await startTestServer({ ticketStore, bmadCatalog });
+    const tab = await signIn(server);
+    const { workspace } = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo.path })).json());
+    expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId: workspace.id }), { bmadPieces: ['board', 'retrospectives'] })).status).toBe(200);
+    expect((await request(server, tab, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId: workspace.id }))).status).toBe(200);
+    expect(repo.git('status', '--porcelain')).toBe('');
+
+    const reply = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceEpicLookBack, { wsId: workspace.id, epic: RETRO_EPIC }));
+    expect(reply.status).toBe(201);
+    const { session } = SessionResponse.parse(await reply.json());
+    expect(userMessagesOf(server, session.id)).toEqual([`/bmad-retrospective ${RETRO_EPIC_FOLDER}`]);
+    await waitFor(() => existsSync(join(repo.path, RETRO_FILE)), 'the fake agent writes the retrospective');
+    expect(readFileSync(join(repo.path, RETRO_FILE), 'utf8')).toContain('verdict: accepted-with-open-items');
+    // The card (Planning is off: Retrospectives alone gets it).
+    await waitFor(() => server.core.events.readAfter(0).some((event) => event.streamId === session.id && event.type === 'session.document_written'), 'the document card');
+    const card = server.core.events.readAfter(0).find((event) => event.streamId === session.id && event.type === 'session.document_written');
+    expect(card?.payload).toMatchObject({ path: RETRO_FILE });
+
+    // The lessons: the agent edits AGENTS.md (sent as the next message, as story 7.5's step will start it).
+    const sent = await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId: workspace.id, sesId: session.id }), { text: `/bmad-project-context ${RETRO_FILE}` });
+    expect(sent.status).toBe(202);
+    await waitFor(() => readFileSync(join(repo.path, 'AGENTS.md'), 'utf8').includes(RETRO_PITFALL), 'the pitfall in AGENTS.md');
+    // Nothing committed, nothing else touched: exactly the two paths the lessons commit later.
+    expect(repo.git('status', '--porcelain').split('\n').filter(Boolean).map((line) => line.slice(3)).sort()).toEqual(['AGENTS.md', RETRO_FILE].sort());
   });
 });

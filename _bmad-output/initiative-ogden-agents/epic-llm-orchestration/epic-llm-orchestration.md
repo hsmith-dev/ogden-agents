@@ -12,7 +12,7 @@ risk: high
 
 ## Description
 
-Envelope only (drafted autonomously 2026-10-05; not incepted). The user's long-term goal is "some LLM orchestration" and, added the same day: "being able to have the local model do the manager roles and then the other ones be told what to do." Ogden is open source and free, an "advanced herdr setup": simple users see chats, and the herdr-style advanced functionality can be turned off. Orchestration is an advanced, opt-in layer.
+Incepted 2026-10-05 (breakdown in tickets.toml, 14 entries). The user's long-term goal is "some LLM orchestration" and, added the same day: "being able to have the local model do the manager roles and then the other ones be told what to do." Ogden is open source and free, an "advanced herdr setup": simple users see chats, and the herdr-style advanced functionality can be turned off. Orchestration is an advanced, opt-in layer.
 
 The vision: a manager model, local-first (recommended, not forced) and any OpenAI-compatible endpoint the user configured in epic 14 (Ollama, LM Studio, or a remote one such as vLLM, a company gateway or OpenRouter after its per-endpoint confirmation), reads the user's goal and the state of the project, proposes a plan, and writes one structured instruction at a time for a worker. The workers are the agents Ogden already runs in chats: Claude Code and Antigravity (subscription sign-in), Codex (OpenAI API key) and Grok (xAI token), and later others. Ogden, not the model, dispatches each instruction into a worker's chat through the existing chat and handoff machinery and, for builds, through epic 5's Build dialog and review page. The user sees every instruction. By default the user approves, edits, skips or stops each one; a per-team orchestration mode lets the user switch the team to dispatch automatically (user, 2026-10-05). Workers keep their own permission cards and modes. The manager reads each worker's status and result back and proposes the next step.
 
@@ -68,7 +68,11 @@ Orchestration of chats and builds Ogden already runs, driven by a model-written 
 
 ## Notes
 
-- Status: APPROVED by the user 2026-10-05 (envelope and every recommended default). Still an envelope: it is cut into stories at its inception, after epic 14.
+- Status: APPROVED by the user 2026-10-05 (envelope and every recommended default). INCEPTED 2026-10-05: cut into 14 entries in `tickets.toml`, built in the user's order.
+- Decision (2026-10-05, inception): the reliability spike is split. Entry 1 builds what CI can test (a fake manager returning good, malformed and adversarial JSON, the expected-outcome table and a valid-JSON report function); the measurement on real models is the user's live check, listed in RELEASING.md, with the quality floor recorded afterwards as a dated Decision.
+- Decision (2026-10-05, inception): order is the user's: harness, contracts, tracer, manager adapter, roster UI, plan review UI, dispatch and read-back, mode setting with Stop and limits, the loop, reviewer, builds through the Build dialog, routing profiles, sweep, then the release (hitl).
+- Decision (2026-10-05, inception): `covers` stays empty on every entry until CAP-22 is applied to the spec through a `bmad-spec` memlog (proposed in entry 2); the AD-8 `orchestration.*` event amendment is proposed the same way, never hand-edited.
+- Decision (2026-10-05, inception): the stories use the existing `sendMessage` and handoff preview token for dispatch, and the Build dialog for builds; the manager has no route to either that skips a user action in the default mode, and none to a build in any mode.
 
 ### A minimal manager protocol (proposal)
 

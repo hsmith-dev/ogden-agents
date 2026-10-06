@@ -18,6 +18,8 @@
 export interface LocalModelTarget {
   baseUrl: string;
   key?: string | undefined;
+  /** The preset the endpoint was made from, when it was: an adapter may read more of that kind of server (sizes, context length) than the OpenAI-compatible list gives. */
+  preset?: string | undefined;
 }
 
 /** Why a call to an endpoint failed. */
@@ -52,8 +54,10 @@ export interface LocalFailure {
   kind: LocalFailureKind;
   /** The HTTP status, for `http`. */
   status?: number | undefined;
-  /** Plain words for the user. Never the address, a key or an answer's text. */
+  /** Plain words for the user. Never a key or an answer's text (the address's host and port only). */
   reason: string;
+  /** For `bad_answer`: why, as a short token (`not_json`, `off_shape`, `no_way_to_ask`, `bad_schema`). */
+  detail?: string | undefined;
 }
 
 /** One model an endpoint serves, with what the server reports of it (nothing is guessed). */
@@ -61,6 +65,8 @@ export interface LocalModelInfo {
   id: string;
   /** Parameters or size on disk in bytes, where the server reports it. */
   sizeBytes?: number | undefined;
+  /** Parameters as the server writes them (`7B`), where it reports them. */
+  parameterSize?: string | undefined;
   /** The context window in tokens, where the server reports it. */
   contextTokens?: number | undefined;
   /** Whether the server says it can call tools; `undefined` when it doesn't say. */

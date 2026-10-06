@@ -31,6 +31,10 @@ export interface SkillLabels {
   /** The UI group as written (an unknown one shows as Other). */
   readonly group: string | null;
   readonly next: CatalogNext | null;
+  /** `epic` for a skill that takes an epic's folder (epic 7), else `null`. */
+  readonly scope: 'epic' | null;
+  /** Further next steps beside {@link next}, each once (epic 7). */
+  readonly nexts: readonly CatalogNext[];
 }
 
 /** The label mapping, read. */
@@ -58,7 +62,9 @@ function text(value: unknown): string | undefined {
 
 const FILE_KEYS = new Set(['entry', 'skills', 'modules']);
 const MODULE_KEYS = new Set(['label']);
-const SKILL_KEYS = new Set(['label', 'description', 'group', 'next']);
+const SKILL_KEYS = new Set(['label', 'description', 'group', 'next', 'scope', 'nexts']);
+/** The most further next steps a skill may name. */
+const MAX_NEXTS = 8;
 const NEXT_KEYS = new Set(['skill', 'label']);
 
 /**
@@ -112,7 +118,28 @@ export function readModuleLabels(raw: unknown): { labels: LabelMap; problems: st
       if (isTable(value.next) && isSkillName(value.next.skill) && nextLabel !== undefined) next = { skill: value.next.skill, label: nextLabel };
       else problems.push(`skills.${name}.next needs a skill name and a label`);
     }
-    skills.set(name, { label, description, group, next });
+    let scope: 'epic' | null = null;
+    if (value.scope !== undefined) {
+      if (value.scope === 'epic') scope = 'epic';
+      else problems.push(`skills.${name}.scope is not 'epic'`);
+    }
+    const nexts: CatalogNext[] = [];
+    if (value.nexts !== undefined) {
+      if (!Array.isArray(value.nexts)) problems.push(`skills.${name}.nexts is not a list`);
+      else {
+        for (const [index, each] of value.nexts.slice(0, MAX_NEXTS).entries()) {
+          if (isTable(each)) unknownKeys(each, NEXT_KEYS, `skills.${name}.nexts[${index}]`);
+          const nextLabel = isTable(each) ? text(each.label) : undefined;
+          if (isTable(each) && isSkillName(each.skill) && nextLabel !== undefined) {
+            // Each step once, and never the skill itself.
+            if (each.skill !== name && !nexts.some((have) => have.skill === each.skill)) nexts.push({ skill: each.skill, label: nextLabel });
+          }
+          else problems.push(`skills.${name}.nexts[${index}] needs a skill name and a label`);
+        }
+        if (value.nexts.length > MAX_NEXTS) problems.push(`skills.${name}.nexts has more than ${MAX_NEXTS} steps`);
+      }
+    }
+    skills.set(name, { label, description, group, next, scope, nexts });
   }
 
   if (raw.modules !== undefined && !isTable(raw.modules)) problems.push("'modules' is not an object");
@@ -160,6 +187,8 @@ export function applyLabels(
       label: found.label,
       group: found.group,
       next: found.next !== null && installed.has(found.next.skill) ? found.next : null,
+      scope: found.scope,
+      nexts: found.nexts.filter((step) => installed.has(step.skill)),
     });
   });
   const entryAction = labels.entry !== null && installed.has(labels.entry) ? labels.entry : null;

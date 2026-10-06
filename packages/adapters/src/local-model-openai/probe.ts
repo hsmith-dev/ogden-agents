@@ -14,7 +14,8 @@ export function modelIdsOf(answer: unknown): string[] | undefined {
   if (!Array.isArray(data)) return undefined;
   const ids = data.flatMap((entry) => {
     const id = (entry as { id?: unknown } | null)?.id;
-    return typeof id === 'string' && id !== '' && id.length <= 300 ? [id] : [];
+    // No spaces, control characters or direction marks: an id is shown to the user and never let spoof the page.
+    return typeof id === 'string' && id !== '' && id.length <= 300 && !/[\s\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/.test(id) ? [id] : [];
   });
   return [...new Set(ids)];
 }

@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import {
   ENDPOINT_KEY_ENV,
   ENDPOINT_KEY_REFERENCE,
+  ENDPOINT_URL_ENV,
   LOCAL_AGENT_ID,
   OPENCODE_CONFIG_ENV,
   OPENCODE_PROVIDER_ID,
@@ -68,7 +69,7 @@ const ASKED = ['bash', 'edit', 'webfetch', 'websearch', 'codesearch', 'task', 'e
  * send it back in every request: such an id is never written. Real ids (`qwen2.5-coder:7b`,
  * `org/model-name`, `hf.co/x/y:Q4_K_M`) fit.
  */
-export const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,299}$/;
+export const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,189}$/;
 
 /** Whether `baseUrl` may be written to the config: http(s), no user or password, no query or fragment, no brace. */
 function safeBaseUrl(baseUrl: string): boolean {
@@ -188,7 +189,7 @@ export function writeOpenCodeConfig(dataDir: string, config: Record<string, unkn
  * its own launch switches: its config, its folders and, for an endpoint with
  * a key, the key. They win over core's own `HOME` and `USERPROFILE`.
  */
-export function opencodeChatEnv(input: { dataDir: string; configFile: string; key?: string | undefined; platform?: NodeJS.Platform }): Record<string, string> {
+export function opencodeChatEnv(input: { dataDir: string; configFile: string; key?: string | undefined; baseUrl?: string | undefined; platform?: NodeJS.Platform }): Record<string, string> {
   const home = localHome(input.dataDir);
   const platform = input.platform ?? process.platform;
   return {
@@ -201,6 +202,7 @@ export function opencodeChatEnv(input: { dataDir: string; configFile: string; ke
     XDG_STATE_HOME: home.xdg.state,
     ...(platform === 'win32' ? { APPDATA: join(home.home, 'AppData', 'Roaming'), LOCALAPPDATA: join(home.home, 'AppData', 'Local') } : {}),
     ...(input.key === undefined || input.key === '' ? {} : { [ENDPOINT_KEY_ENV]: input.key }),
+    ...(input.baseUrl === undefined ? {} : { [ENDPOINT_URL_ENV]: input.baseUrl }),
   };
 }
 

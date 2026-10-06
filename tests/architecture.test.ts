@@ -629,6 +629,12 @@ export function findUserActionReaches(files: readonly SourceFile[]): string[] {
     if (ORCHESTRATION_USE_CASE.test(path) && !USER_ACTION_MODULES.test(path)) {
       for (const match of code.matchAll(new RegExp(USER_ACTIONS.source, 'g'))) violations.push(`${path}: names ${match[1]} (E15: only the user's routes may call it)`);
     }
+    // The assembly lists the user's actions in its interface but only spreads them in `createOrchestration`: nothing there names one.
+    if (/(^|[\\/])packages[\\/]core[\\/]src[\\/]orchestration\.ts$/.test(path)) {
+      const at = code.indexOf('export function createOrchestration');
+      if (at < 0) violations.push(`${path}: cannot find createOrchestration (E15 guard needs it)`);
+      else for (const match of code.slice(at).matchAll(new RegExp(USER_ACTIONS.source, 'g'))) violations.push(`${path}: createOrchestration names ${match[1]} (E15: only the user's routes may call it)`);
+    }
     // Outside core and its tests, only the server's orchestration routes call the use-cases.
     if (/(^|[\\/])packages[\\/]server[\\/]src[\\/]/.test(path) && !USER_ACTION_CALLERS.test(path)) {
       for (const match of code.matchAll(/\.(approveStep|editStep|skipStep|reorderSteps|stopRun|answerQuestion)\(/g)) violations.push(`${path}: calls ${match[1]} (E15: only orchestration-routes.ts, a user's route, may)`);
@@ -657,7 +663,8 @@ describe('E15: approval comes only from a user action (story 15.6)', () => {
       { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration-engine.ts', source: 'const advancePass = () => { answerQuestion(); reorderSteps(); };' },
       // The user's actions and the assembly that lists them are the places that name them.
       { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration-actions.ts', source: 'const approveStep = () => {}; const stopRun = () => {};' },
-      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration.ts', source: 'approveStep(workspaceId: string): void;' },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration.ts', source: 'approveStep(workspaceId: string): void;\nexport function createOrchestration() { return { ...actions }; }' },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration.ts', source: 'export function createOrchestration() { engine.stopRun(a, b); }' },
       { pkg: '@ogden-agents/server', path: 'packages/server/src/chat-routes.ts', source: 'runs.reorderSteps(a, b);' },
       { pkg: '@ogden-agents/server', path: 'packages/server/src/orchestration-routes.ts', source: 'use.approveStep(a, b, c);' },
     ];
@@ -669,6 +676,7 @@ describe('E15: approval comes only from a user action (story 15.6)', () => {
       "packages/core/src/orchestration-readback.ts: names stopRun (E15: only the user's routes may call it)",
       "packages/core/src/orchestration-engine.ts: names answerQuestion (E15: only the user's routes may call it)",
       "packages/core/src/orchestration-engine.ts: names reorderSteps (E15: only the user's routes may call it)",
+      "packages/core/src/orchestration.ts: createOrchestration names stopRun (E15: only the user's routes may call it)",
       "packages/server/src/chat-routes.ts: calls reorderSteps (E15: only orchestration-routes.ts, a user's route, may)",
     ]);
   });

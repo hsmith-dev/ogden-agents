@@ -523,8 +523,14 @@ describe('a pane\'s status over the API (story 16.6)', () => {
     viewer.type('perm\r');
     await waitFor(() => viewer.state.output.includes('(y/n)'), 'the question', 15_000);
     await poll(setup, pane.id, 'idle', 'idle (the shell has no patterns)');
+    // The end is in the log too, with the pane's name.
+    // The question is answered first, then the shell ends.
+    viewer.type('y\r');
+    await waitFor(() => viewer.state.output.includes('answered:y'), 'the answer', 15_000);
+    viewer.type('exit 0\r');
+    await poll(setup, pane.id, 'exited', 'the end');
     const changes = setup.server.core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_status_changed');
-    expect(changes.length).toBeGreaterThan(0);
+    expect(changes.map((e) => e.payload.status)).toEqual(['exited']);
     for (const event of changes) expect(event.payload).toMatchObject({ paneId: pane.id, title: 'Terminal 1' });
     expect(changes.some((e) => e.payload.status === 'needs_attention')).toBe(false);
     expect(JSON.stringify(changes)).not.toContain('proceed');

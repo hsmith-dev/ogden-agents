@@ -6,7 +6,7 @@
  */
 import type { PanePromptPattern, PaneStatus } from '@ogden-agents/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compilePatterns, createStatusTracker, IDLE_MS, matchesPrompt, QUIET_MS } from '../src/index.js';
+import { compilePatterns, createStatusTracker, IDLE_MS, isAutomaticReply, matchesPrompt, QUIET_MS } from '../src/index.js';
 
 const PATTERNS: PanePromptPattern[] = [
   { name: 'yes-no', pattern: '\\((y/n|Y/n|y/N)\\)', depth: 1 },
@@ -127,9 +127,32 @@ describe('the status guess', () => {
     expect(stopped.changes).toEqual([]);
   });
 
-  it('cuts a very long line before matching it', () => {
+  it('cuts a very long line to its END before matching it, where a prompt sits', () => {
     const compiled = compilePatterns([{ name: 'q', pattern: 'needle', depth: 1 }]);
-    expect(matchesPrompt(compiled, [`${'x'.repeat(400)}needle`])).toBe(false);
-    expect(matchesPrompt(compiled, ['needle'])).toBe(true);
+    expect(matchesPrompt(compiled, [`needle${'x'.repeat(400)}`])).toBe(false);
+    expect(matchesPrompt(compiled, [`${'x'.repeat(400)}needle`])).toBe(true);
+  });
+
+  it('a program that never prints reads idle once quiet', async () => {
+    const { tracker } = tracked();
+    await settle(IDLE_MS + 100);
+    expect(tracker.status).toBe('idle');
+  });
+
+  it('the page\'s own replies (focus reports, cursor position and device answers) are not typing; arrow keys and letters are', async () => {
+    const { tracker, screen } = tracked();
+    screen.lines = ['Proceed? (y/n)'];
+    tracker.output();
+    await settle(QUIET_MS + 10);
+    expect(tracker.status).toBe('needs_attention');
+    for (const automatic of ['\x1b[I', '\x1b[O', '\x1b[12;40R', '\x1b[?1;2c']) {
+      expect(isAutomaticReply(automatic), automatic).toBe(true);
+      tracker.input(automatic);
+      expect(tracker.status).toBe('needs_attention');
+    }
+    expect(isAutomaticReply('\x1b[A')).toBe(false);
+    expect(isAutomaticReply('y')).toBe(false);
+    tracker.input('\x1b[B');
+    expect(tracker.status).toBe('working');
   });
 });

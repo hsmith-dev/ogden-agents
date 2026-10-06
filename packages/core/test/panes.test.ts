@@ -442,6 +442,40 @@ describe('a pane\'s status (story 16.6)', () => {
     }
   });
 
+  it('a Restart pane that could not start leaves the pane exited in status too', async () => {
+    let failing = false;
+    const core = openTestCore();
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    core.installSettings.setDeveloperMode(true);
+    const panes = createPanes({
+      entities: core.entities,
+      installSettings: core.installSettings,
+      events: core.events,
+      terminal: fakeTerminal({ opening: async () => void (failing && (() => { throw new Error('x'); })()) }).port,
+      shell: () => ({ file: '/x', args: [] }),
+      env: () => ({}),
+    });
+    stops.push(() => panes.dispose());
+    const pane = await panes.open(workspace.id, SIZE);
+    failing = true;
+    await panes.restart(workspace.id, pane.id, SIZE).catch(() => undefined);
+    expect(panes.list(workspace.id)[0]).toMatchObject({ state: 'exited', status: 'exited' });
+  });
+
+  it('working and idle stay out of the event log (every command would add two rows): only into or out of needs attention, and the end', async () => {
+    vi.useFakeTimers();
+    try {
+      const { core, workspace, fake, panes } = withLauncher();
+      await panes.open(workspace.id, SIZE, undefined, { launcherId: 'example' });
+      fake.processes[0]!.print('output');
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(panes.list(workspace.id)[0]!.status).toBe('idle');
+      expect(core.events.readAfter(0).filter((e) => e.type === 'terminal.pane_status_changed')).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('the plain shell has no prompt patterns, so it is only ever working or idle; Restart pane starts the guess over', async () => {
     vi.useFakeTimers();
     try {

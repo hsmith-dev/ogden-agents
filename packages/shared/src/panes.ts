@@ -80,8 +80,8 @@ export const PanePromptPattern = z.object({
         return false;
       }
     }, 'not a valid pattern')
-    // Nested quantifiers are the usual way to a runaway match: a pattern is data, so it is refused here.
-    .refine((source) => !/\([^)]*[+*][^)]*\)[+*{]/.test(source), 'a pattern may not repeat a repeated group'),
+    // A repeated group is the usual way to a runaway match, so none is allowed (a heuristic: the launcher list is the adapters' own data, and a pattern is also cut to short lines when matched).
+    .refine((source) => !/(?<!\\)\)[+*{]/.test(source), 'a pattern may not repeat a group'),
   depth: z.number().int().min(1).max(20),
 });
 export type PanePromptPattern = z.infer<typeof PanePromptPattern>;
@@ -244,7 +244,7 @@ export const RenamePaneRequest = z.object({ title: PaneTitle });
 export type RenamePaneRequest = z.infer<typeof RenamePaneRequest>;
 
 /** Server → client on the pane socket: the pane's state now (sent on attach and on every change). */
-export const PaneStateFrame = z.object({ type: z.literal('state'), state: PaneState });
+export const PaneStateFrame = z.object({ type: z.literal('state'), state: PaneState, /** The pane's status guess (story 16.6), sent with every change so its chip needs no refetch. */ status: PaneStatus.optional() });
 /**
  * Server → client: what follows is the pane's screen as it is now, not more
  * output: the viewer resets its terminal, then writes the next binary frame

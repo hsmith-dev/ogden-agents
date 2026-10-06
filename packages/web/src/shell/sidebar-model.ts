@@ -182,7 +182,9 @@ function pendingRequests(folded: FoldedStream | undefined, session: Session): { 
  * `needs_attention` until its next status, its exit or its close.
  */
 export function paneNeeds(store: EventStoreState, wsId: string, workspaceName: string): NeedsYouEntry[] {
-  const events = streamEvents(store, wsId, wsId);
+  // Panes live in memory: what an earlier run of the server left in the log is gone with it.
+  const startedSeq = store.install.events.findLast((event) => event.type === 'server.started')?.seq ?? 0;
+  const events = streamEvents(store, wsId, wsId).filter((event) => event.seq > startedSeq);
   const panes = new Map<string, { title: string; waiting: { seq: number; at: string } | undefined }>();
   for (const event of events) {
     switch (event.type) {

@@ -3,13 +3,13 @@ title: 'Status per pane: working, needs attention, idle, exited'
 type: 'feature'
 ticket: '6'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '5c2cd9acdfc5fb702232d7f489e3d4ccc9221d85'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/epic-native-cli-terminal.md'
@@ -22,7 +22,7 @@ context:
 
 **Problem:** With several panes open the user cannot tell, from another tab, which one is waiting for them. Spike 16.1 measured that output recency alone cannot say it, and that the screen's last lines plus a launcher's prompt patterns can, with known limits.
 
-**Approach:** In memory only, core guesses each pane's status from output recency and the launcher's prompt patterns read from the adapter's screen mirror: working while it prints, needs attention when it has been quiet 400 ms and the last lines match a pattern, idle after 1.2 s, exited from the exit. State changes become `terminal.pane_status_changed` events (the pane's name and the states, never text); the page shows a status chip per pane, a mark on a tab, a Needs you row and the tab title count, and says plainly that it is a guess. Defaults are conservative: silence alone never says needs attention, and a pane with no patterns (the shell) is only working or idle.
+**Approach:** In memory only, core guesses each pane's status from output recency and the launcher's prompt patterns read from the adapter's screen mirror: working while it prints, needs attention when it has been quiet 400 ms and the last lines match a pattern, idle after 1.2 s, exited from the exit. Changes into or out of needs attention, and the end, become `terminal.pane_status_changed` events (the pane's name and the states, never text); working and idle go to each pane's page over its own socket, since every typed command would otherwise add two log rows; the page shows a status chip per pane, a mark on a tab, a Needs you row and the tab title count, and says plainly that it is a guess. Defaults are conservative: silence alone never says needs attention, and a pane with no patterns (the shell) is only working or idle.
 
 ## Boundaries & Constraints
 
@@ -70,3 +70,18 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Two reviews ran (one security, one correctness).
+
+| Finding | Verdict | Route |
+|---|---|---|
+| A failed Restart left status working on an exited pane (C) | medium, real | patch: exited in status and state |
+| A pane that never prints stayed working forever (C) | medium, real | patch: the quiet timer starts with the tracker |
+| The page's own replies (focus reports, cursor position, device answers) counted as typing and flipped a waiting pane (C) | medium, real | patch: `isAutomaticReply` |
+| Every working and idle flip was a persisted event; the 2000 event window was crowded (C) | medium, real | patch: events only into or out of needs attention and for the end; working and idle ride the pane's socket; the list is read every 3 seconds for tab marks |
+| Trimmed or deleted pane events lost a waiting row; stale rows after a crash (C) | medium, real | patch: the newest pane events of a live pane are held when trimming; pane events from before the last server start are ignored |
+| Exited status event came before the exit event, and the socket sent the exit twice (C) | low | patch |
+| Repeated groups in a pattern could run away; the heuristic comment overstated (S) | low, latent (the list is the adapters' own) | patch: any repeated group refused; comment says it is a heuristic |
+| Long line cut kept the start, not the end where a prompt sits (C) | low | patch |
+| Date.now steps; `menu-yes` could match a quoted list in output; live announcer says nothing for panes (C) | low | by design for now: the tab title and the row carry it |
+| Tests used their own patterns, not the defaults; the sidebar build path is not run whole (C) | low | partly patched; the live checks supply real wording |

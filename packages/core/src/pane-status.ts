@@ -22,7 +22,7 @@ import type { PanePromptPattern, PaneStatus } from '@ogden-agents/shared';
 export const QUIET_MS = 400;
 /** How long a pane must be quiet before it reads idle. */
 export const IDLE_MS = 1_200;
-/** The longest screen line matched (a longer one is cut: a pattern is never run on a flood). */
+/** The longest screen line matched: the END of a longer one, where a prompt sits (a pattern is never run on a flood). */
 const MAX_LINE_CHARS = 300;
 
 export interface StatusTrackerOptions {
@@ -39,8 +39,8 @@ export interface StatusTracker {
   readonly status: PaneStatus;
   /** The program printed something. */
   output(): void;
-  /** The user typed or pasted. */
-  input(): void;
+  /** The user typed or pasted `data` (the page's own automatic replies, focus reports and cursor position answers, are not typing). */
+  input(data?: string): void;
   /** The program ended. */
   exited(): void;
   /** Stops the timers (the pane closed or restarted). */
@@ -66,7 +66,12 @@ export function compilePatterns(patterns: readonly PanePromptPattern[]): Compile
 
 /** Whether any pattern matches within its own depth of the last lines. `lines` is oldest first. */
 export function matchesPrompt(compiled: readonly Compiled[], lines: readonly string[]): boolean {
-  return compiled.some(({ re, depth }) => lines.slice(-depth).some((line) => re.test(line.slice(0, MAX_LINE_CHARS))));
+  return compiled.some(({ re, depth }) => lines.slice(-depth).some((line) => re.test(line.slice(-MAX_LINE_CHARS))));
+}
+
+/** What the page's terminal sends by itself, not the user: a focus report, a device attributes or cursor position answer. */
+export function isAutomaticReply(data: string): boolean {
+  return /^\x1b\[(?:[IO]|\??[\d;]*c|\d+;\d+R)$/.test(data);
 }
 
 export function createStatusTracker({ patterns, screenLines, onChange, quietMs = QUIET_MS, idleMs = IDLE_MS }: StatusTrackerOptions): StatusTracker {
@@ -122,6 +127,9 @@ export function createStatusTracker({ patterns, screenLines, onChange, quietMs =
     schedule(quietMs, evaluate);
   };
 
+  // A program that never prints reads idle too, once it has been quiet.
+  schedule(quietMs, evaluate);
+
   return {
     get status() {
       return status;
@@ -131,8 +139,8 @@ export function createStatusTracker({ patterns, screenLines, onChange, quietMs =
       set('working');
       active();
     },
-    input() {
-      if (ended) return;
+    input(data) {
+      if (ended || (data !== undefined && isAutomaticReply(data))) return;
       // Whatever it waited for may be answered: working until it prints (or is quiet again).
       if (status === 'needs_attention') set('working');
       active();

@@ -48,6 +48,16 @@ describe('Needs you from pane events', () => {
     expect(paneNeeds(store, WS, 'P')[0]!.id).not.toBe(first.find((n) => n.paneId === PANE)!.id);
   });
 
+  it('ignores what an earlier run of the server left in the log: panes live in memory', () => {
+    const before = [
+      event('terminal.pane_opened', { paneId: PANE, launcherId: 'a', title: 'One' }),
+      event('terminal.pane_status_changed', { paneId: PANE, status: 'needs_attention', previous: 'working' }),
+    ];
+    const started = { id: 'evt_01J9Z3K4M5N6P7Q8R9S0T1V2W9', seq: ++seq, at: '2026-10-05T12:30:00.000Z', type: 'server.started', workspaceId: null, streamId: 'server', payload: { version: '1' } } as unknown as CoreEvent;
+    expect(paneNeeds(applyEvents(emptyStore(), [...before, started]), WS, 'P')).toEqual([]);
+    expect(paneNeeds(applyEvents(emptyStore(), before), WS, 'P')).toHaveLength(1);
+  });
+
   it('carries no terminal text: only the pane\'s name and ids', () => {
     const needs = paneNeeds(storeOf(event('terminal.pane_opened', { paneId: PANE, launcherId: 'a', title: 'One' }), event('terminal.pane_status_changed', { paneId: PANE, status: 'needs_attention', previous: 'idle' })), WS, 'P');
     expect(Object.values(needs[0]!).filter((v) => typeof v === 'string').join(' ')).not.toMatch(/y\/n|proceed/i);

@@ -207,7 +207,8 @@ export function createPanes(options: PanesOptions): Panes {
     if (entry.pane.status === status) return;
     entry.pane = { ...entry.pane, status };
     for (const viewer of [...entry.viewers]) for (const listener of [...viewer.states]) safely(() => listener(entry.pane));
-    if (entry.announced) emit({ type: 'terminal.pane_status_changed', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, status, previous, title: entry.pane.title } });
+    // Working and idle come and go with every command: they reach the page over the pane's own socket. The log keeps the changes someone elsewhere acts on: into or out of needs attention, and the end.
+    if (entry.announced && (status === 'needs_attention' || previous === 'needs_attention' || status === 'exited')) emit({ type: 'terminal.pane_status_changed', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, status, previous, title: entry.pane.title } });
   };
   const setState = (entry: Entry, state: PaneState, exitCode: number | null = null) => {
     if (entry.pane.state === state && entry.pane.exitCode === exitCode) return;
@@ -272,8 +273,9 @@ export function createPanes(options: PanesOptions): Panes {
     process.onExit(({ exitCode }) => {
       // A program replaced by Restart pane (or closed) reports its end too: only the current one counts.
       if (entry.process === process && !entry.closed) {
-        setState(entry, 'exited', exitCode);
+        // Status first (exited), then the state and its event.
         tracker.exited();
+        setState(entry, 'exited', exitCode);
         emit({ type: 'terminal.pane_exited', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, exitCode } });
       }
     });
@@ -470,6 +472,7 @@ export function createPanes(options: PanesOptions): Panes {
       } catch (error) {
         // It could not start again: the pane stays, stopped, so Restart can be tried once more.
         if (!entry.closed) {
+          setStatus(entry, 'exited');
           setState(entry, 'exited');
           emit({ type: 'terminal.pane_exited', workspaceId, streamId: workspaceId, payload: { paneId, exitCode: null } });
         }
@@ -517,7 +520,7 @@ export function createPanes(options: PanesOptions): Panes {
         write(data) {
           if (!developerModeOn(entry)) return;
           if (viewer.size !== undefined) applySize(viewer.size);
-          entry.tracker?.input();
+          entry.tracker?.input(data);
           entry.process?.write(data);
         },
         resize(cols, rows) {

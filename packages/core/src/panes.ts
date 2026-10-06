@@ -17,6 +17,7 @@
  */
 import type { NewCoreEvent, Pane, PaneLauncherStatus, PaneStatus, PaneId, PaneLayout, PanePlacement, PaneState, TerminalUnavailableCode, WorkspaceId } from '@ogden-agents/shared';
 import { PaneTitle } from '@ogden-agents/shared';
+import type { PaneStore } from './pane-store.js';
 import { createStatusTracker, type StatusTracker } from './pane-status.js';
 import { splitLauncherArgs, type PaneLaunchers } from './pane-launchers.js';
 import { addTab, EMPTY_LAYOUT, layoutPaneIds, rearrangement, removePane, splitPane } from './pane-layout.js';
@@ -92,12 +93,12 @@ export interface Panes {
   /** Stops the pane's program and everything it started, and forgets the pane. `NotFoundError` for an unknown or another project's pane. */
   close(workspaceId: WorkspaceId, paneId: PaneId): void;
   /** Restart pane: stops what is left of the pane's program and starts it again in the same pane (same id, same project folder). */
-  restart(workspaceId: WorkspaceId, paneId: PaneId, size: TerminalSize): Promise<Pane>;
+  restart(workspaceId: WorkspaceId, paneId: PaneId, size: TerminalSize, args?: string): Promise<Pane>;
   /** A hold on a pane, or `undefined` for an unknown one. `DeveloperModeRequiredError` without Developer mode. */
   attach(paneId: PaneId): PaneViewer | undefined;
   /** How many panes are open now (every project). */
   count(): number;
-  /** Stops every pane and its program (the server stopping, Developer mode turned off). */
+  /** Stops every pane's program and what it started (the server stopping, Developer mode turned off); the panes stay, `stopped`. */
   closeAll(cause?: 'user' | 'developer_mode_off' | 'server_stopped'): void;
   /** {@link closeAll}, and stops following Developer mode. */
   dispose(): void;
@@ -110,6 +111,10 @@ export interface PanesOptions {
   events?: Pick<EventLog, 'subscribe' | 'lastSeq' | 'append'> | undefined;
   /** Without a terminal port (or one without `openPane`) no pane can open. */
   terminal: TerminalPort | undefined;
+  /** Where panes and layouts are kept between runs (story 16.7). Without it they live only while the server runs. */
+  store?: PaneStore | undefined;
+  /** Records each program's pid (and forgets it when it ends), for the sweep after a hard stop (story 16.7). */
+  pids?: { add(pid: number): void; remove(pid: number): void } | undefined;
   /** The launchers (story 16.5). Without it only the plain shell opens. */
   launchers?: PaneLaunchers | undefined;
   /** The program a plain shell pane runs: the user's own shell, by absolute path. */
@@ -137,7 +142,7 @@ interface Entry {
   cwd: string;
   /** What the launcher resolved at open. Restart pane resolves it again (the program may have moved); the shell is looked up each time. */
   command: TerminalCommand | undefined;
-  /** The arguments the user typed, read (kept for Restart pane). */
+  /** The arguments the user typed, read (kept in memory for Restart pane; never stored). */
   typed: readonly string[];
   process: PaneProcess | undefined;
   /** Its status guess (story 16.6), over the current program. */
@@ -200,6 +205,8 @@ export function createPanes(options: PanesOptions): Panes {
   const setLayout = (workspaceId: WorkspaceId, layout: PaneLayout) => {
     if (layout.tabs.length === 0) layouts.delete(workspaceId);
     else layouts.set(workspaceId, layout);
+    // The shape is kept (never a pane's output): it comes back after a restart.
+    safely(() => (layout.tabs.length === 0 ? options.store?.deleteLayout(workspaceId) : options.store?.saveLayout(workspaceId, layout)));
     emit({ type: 'terminal.layout_changed', workspaceId, streamId: workspaceId, payload: { tabCount: layout.tabs.length, paneCount: layoutPaneIds(layout).length } });
   };
   /** A status change: the pane, its viewers and an event (state only, with the pane's name). */
@@ -248,6 +255,12 @@ export function createPanes(options: PanesOptions): Panes {
     // A second Restart that started meanwhile: only one program per pane, the other stops.
     entry.process?.kill();
     entry.process = process;
+    // The pid is recorded so a hard stop of the server can be cleaned up at the next start; forgotten when the program ends.
+    const pid = process.pid;
+    if (pid !== undefined) {
+      safely(() => options.pids?.add(pid));
+      process.onExit(() => safely(() => options.pids?.remove(pid)));
+    }
     entry.tracker?.dispose();
     entry.tracker = createStatusTracker({
       // The launcher's own words for waiting on the user; the shell and an unknown program have none, so they are only working or idle.
@@ -292,6 +305,7 @@ export function createPanes(options: PanesOptions): Panes {
     if (entry.closed) return;
     entry.closed = true;
     entries.delete(entry.pane.id);
+    if (entry.announced) safely(() => options.store?.deletePane(entry.pane.id));
     if (entry.announced) setLayout(entry.pane.workspaceId, removePane(layoutOf(entry.pane.workspaceId), entry.pane.id));
     if (entry.announced) emit({ type: 'terminal.pane_closed', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, cause } });
     const process = entry.process;
@@ -306,9 +320,65 @@ export function createPanes(options: PanesOptions): Panes {
     }
   };
 
-  const closeAll = (cause: PaneClosedCause = 'server_stopped') => {
-    for (const entry of [...entries.values()]) forget(entry, cause);
+  /**
+   * Stops every program and what it started, and keeps each pane as a shape (story 16.7): `stopped`, so it
+   * comes back with a Start button, after Developer mode is turned on again or the server starts again.
+   */
+  const stopAll = (cause: PaneClosedCause = 'server_stopped') => {
+    for (const entry of [...entries.values()]) {
+      const process = entry.process;
+      entry.process = undefined;
+      entry.tracker?.dispose();
+      entry.tracker = undefined;
+      process?.kill();
+      for (const viewer of entry.viewers) {
+        viewer.unbind?.();
+        viewer.unbind = undefined;
+      }
+      if (entry.pane.state === 'stopped') continue;
+      const wasRunning = entry.pane.state !== 'exited';
+      entry.pane = { ...entry.pane, state: 'stopped', status: 'idle', exitCode: null };
+      for (const viewer of [...entry.viewers]) for (const listener of [...viewer.states]) safely(() => listener(entry.pane));
+      if (entry.announced && wasRunning && cause === 'developer_mode_off') emit({ type: 'terminal.pane_exited', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, exitCode: null } });
+    }
   };
+  const closeAll = stopAll;
+
+  // After a restart: every stored pane comes back stopped, in the layout it had (story 16.7).
+  if (options.store !== undefined) {
+    try {
+      const stored = options.store.load();
+      const byWorkspace = new Map<WorkspaceId, PaneId[]>();
+      for (const saved of stored.panes) {
+        const workspace = entities.getWorkspace(saved.workspaceId);
+        if (workspace === undefined) continue;
+        entries.set(saved.id, {
+          pane: { id: saved.id, workspaceId: saved.workspaceId, launcherId: saved.launcherId, title: saved.title, state: 'stopped', status: 'idle', exitCode: null },
+          cwd: workspace.realPath ?? workspace.path,
+          command: undefined,
+          typed: [],
+          process: undefined,
+          tracker: undefined,
+          size: { cols: 100, rows: 30 },
+          viewers: new Set(),
+          closed: false,
+          announced: true,
+        });
+        byWorkspace.set(saved.workspaceId, [...(byWorkspace.get(saved.workspaceId) ?? []), saved.id]);
+      }
+      for (const [workspaceId, ids] of byWorkspace) {
+        // The stored layout, kept only if it is exactly these panes; else one tab each, in the order they were made.
+        let layout: PaneLayout = EMPTY_LAYOUT;
+        const kept = stored.layouts.get(workspaceId);
+        const rebuilt = kept === undefined ? undefined : rearrangement({ tabs: ids.map((id, i) => ({ id: `t${i}`, title: '', root: { type: 'pane', paneId: id } })), activeTabId: null }, { ...kept });
+        if (rebuilt !== undefined) layout = rebuilt;
+        else for (const id of ids) layout = addTab(layout, `t${newId('pan').slice(-8).toLowerCase()}`, entries.get(id)!.pane.title, id);
+        layouts.set(workspaceId, layout);
+      }
+    } catch (error) {
+      options.onError?.(error);
+    }
+  }
 
   let unfollow: (() => void) | undefined;
   if (events !== undefined) {
@@ -400,6 +470,7 @@ export function createPanes(options: PanesOptions): Panes {
       // Closed while it started (closed by the user, Developer mode turned off, the server stopping): nothing is left running, and nothing was announced.
       if (entry.closed || disposed) throw new NotFoundError('pane', entry.pane.id);
       entry.announced = true;
+      safely(() => options.store?.savePane({ id: entry.pane.id, workspaceId, launcherId: entry.pane.launcherId, title: entry.pane.title, createdAt: Date.now() }));
       const current = layoutOf(workspaceId);
       const split = placement?.kind === 'split' ? splitPane(current, placement.paneId, entry.pane.id, placement.direction) : undefined;
       emit({ type: 'terminal.pane_opened', workspaceId, streamId: workspaceId, payload: { paneId: entry.pane.id, launcherId: entry.pane.launcherId, title: entry.pane.title } });
@@ -436,6 +507,7 @@ export function createPanes(options: PanesOptions): Panes {
       if (!parsed.success) throw new ValidationError('A terminal needs a name without control characters, up to 80 characters.', [{ path: ['title'], message: 'invalid name' }]);
       if (parsed.data !== entry.pane.title) {
         entry.pane = { ...entry.pane, title: parsed.data };
+        safely(() => options.store?.renamePane(paneId, parsed.data));
         emit({ type: 'terminal.pane_renamed', workspaceId, streamId: workspaceId, payload: { paneId, title: parsed.data } });
       }
       return entry.pane;
@@ -446,12 +518,16 @@ export function createPanes(options: PanesOptions): Panes {
       forget(find(workspaceId, paneId));
     },
 
-    async restart(workspaceId, paneId, size) {
+    async restart(workspaceId, paneId, size, args) {
       requireDeveloperMode();
       const entry = find(workspaceId, paneId);
-      // A launcher's program may have moved or gone since it opened: looked up again, with the same typed arguments.
-      if (entry.command !== undefined && options.launchers !== undefined) {
-        const again = await options.launchers.command(entry.pane.launcherId, entry.typed);
+      // What the user typed in the launcher's field now (a stopped pane has none kept), else what it was started with.
+      const typed = args === undefined ? entry.typed : splitLauncherArgs(args);
+      if (typed === undefined) throw new ValidationError('The arguments are not closed quotes or are too many.', [{ path: ['args'], message: 'unreadable arguments' }]);
+      // A launcher's program may have moved or gone since it opened (or the server restarted): looked up again.
+      if (entry.pane.launcherId !== 'shell' && options.launchers !== undefined) {
+        const again = await options.launchers.command(entry.pane.launcherId, typed);
+        entry.typed = typed;
         if (!again.ok) throw new LauncherUnavailableError(again.code, again.reason, options.launchers.get(entry.pane.launcherId)?.installUrl);
         entry.command = { file: again.file, args: again.args };
       }

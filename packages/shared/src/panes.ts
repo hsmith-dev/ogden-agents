@@ -23,8 +23,10 @@ export const MAX_PANES_PER_INSTALL = 16;
  *   ConPTY can hold the first output back; the page offers Restart pane).
  * - `running`: it has printed.
  * - `exited`: the program ended, by itself or by Restart or close.
+ * - `stopped` (story 16.7): the pane came back after the server stopped, or Developer mode was
+ *   turned off: it is kept as a shape and starts a fresh program when the user presses Start.
  */
-export const PaneState = z.enum(['starting', 'running', 'exited']);
+export const PaneState = z.enum(['starting', 'running', 'exited', 'stopped']);
 export type PaneState = z.infer<typeof PaneState>;
 
 /** The launchers a pane can run. The tracer has only the user's own shell; story 16.5 adds the CLIs as data. */
@@ -219,7 +221,7 @@ export const OpenPaneRequest = z.object({ ...size, placement: PanePlacement.opti
 export type OpenPaneRequest = z.infer<typeof OpenPaneRequest>;
 
 /** `POST` pane restart: the size to start at. */
-export const RestartPaneRequest = z.object({ ...size });
+export const RestartPaneRequest = z.object({ ...size, /** What the user typed in the launcher's field (a stopped pane is started again with them). */ args: PaneLauncherArgs.optional() });
 export type RestartPaneRequest = z.infer<typeof RestartPaneRequest>;
 
 export const PaneResponse = z.object({ pane: Pane });

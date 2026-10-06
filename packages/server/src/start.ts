@@ -307,7 +307,7 @@ async function listenAndAnnounce({
   // One terminal port for the chat and the toggle's availability check (story 3.7): they agree on node-pty.
   const terminal = createPtyTerminalPort(options.loadPty);
   // Terminal panes (epic 16): in memory, Developer mode only, stopped with the server.
-  const panes = createPanesWiring({ options, hooks, core, terminal, onError: (error) => log.warn('a terminal pane listener failed', { error: error instanceof Error ? error.name : 'unknown' }) });
+  const panes = createPanesWiring({ options, hooks, core, terminal, dataDir, onError: (error) => log.warn('a terminal pane listener failed', { error: error instanceof Error ? error.name : 'unknown' }), onSweep: (result) => log.info('terminal panes left running by a hard stop were cleaned up', result) });
   // Document cards (story 4.7, `start-planning.ts`).
   const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, agentOf, log });
   const chat = createChat({

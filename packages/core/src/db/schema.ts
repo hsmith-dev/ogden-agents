@@ -300,3 +300,31 @@ export const workspaceBuildSettings = sqliteTable('workspace_build_settings', {
   maxConcurrentRuns: integer('max_concurrent_runs'),
   testCommand: text('test_command'),
 });
+
+/**
+ * A project's terminal panes (epic 16, story 16.7): what a pane IS, never what
+ * it printed: its id, launcher, name and when it was made. The program's
+ * output and the arguments the user typed are not kept. After a restart each
+ * comes back stopped, with a Start button.
+ */
+export const terminalPanes = sqliteTable(
+  'terminal_panes',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    launcherId: text('launcher_id').notNull(),
+    title: text('title').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [index('terminal_panes_workspace_idx').on(table.workspaceId, table.createdAt)],
+);
+
+/** A project's terminal layout (tabs of split trees of pane ids and titles) as JSON; one row per project, written on change. */
+export const terminalLayouts = sqliteTable('terminal_layouts', {
+  workspaceId: text('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  layout: text('layout').notNull(),
+});

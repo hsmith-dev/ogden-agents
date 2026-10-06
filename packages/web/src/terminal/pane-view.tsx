@@ -12,6 +12,9 @@ import { restartPane } from './panes-api';
 import { RECONNECT_DELAYS_MS, STABLE_CONNECTION_MS } from './terminal-panel';
 import { loadXterm, enableUnicode11 } from './xterm-setup';
 
+/** The longest text of an argument field (the server's own limit). */
+const MAX_ARGS_LENGTH = 500;
+
 /** How long a pane may print nothing after it started before the page offers Restart pane (spike 16.1 finding 2: Windows ConPTY can hold the first output back). */
 export const SLOW_START_MS = 10_000;
 
@@ -34,6 +37,8 @@ export interface PaneViewProps {
   onSplit?: ((paneId: string, direction: 'row' | 'column') => void) | undefined;
   /** Rename this pane. Absent: the name is not editable. */
   onRename?: ((paneId: string, title: string) => void) | undefined;
+  /** How the program's own resume is offered (plain words), shown on a stopped pane; a launcher without one has none. */
+  resumeHint?: string | undefined;
   /** Take keyboard focus when the terminal has loaded (a pane the user just opened). */
   focusOnOpen?: boolean | undefined;
   /** Why a split is not offered now (the limit of panes), in plain words. */
@@ -51,7 +56,8 @@ export interface PaneViewProps {
  * After an abnormal close it reconnects as the chat terminal does. Nothing
  * typed or printed is kept or logged here.
  */
-export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRename, splitDisabledReason, focusOnOpen = false, className }: PaneViewProps) {
+export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRename, splitDisabledReason, focusOnOpen = false, resumeHint, className }: PaneViewProps) {
+  const [typedArgs, setTypedArgs] = useState('');
   const focusRef = useRef(focusOnOpen);
   focusRef.current = focusOnOpen;
   const [renaming, setRenaming] = useState(false);
@@ -211,7 +217,7 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
     const term = terminal.current;
     setRestarting(true);
     setRestartError(undefined);
-    restartPane(wsId, pane.id, { cols: term?.cols ?? 100, rows: term?.rows ?? 30 }).then(
+    restartPane(wsId, pane.id, { cols: term?.cols ?? 100, rows: term?.rows ?? 30 }, state === 'stopped' && pane.launcherId !== 'shell' ? typedArgs : undefined).then(
       () => setRestarting(false),
       (failure: unknown) => {
         setRestarting(false);
@@ -220,8 +226,8 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
     );
   };
 
-  const words = restartError ?? linkWords(link) ?? stateWords(state, exitCode, slow);
-  const canRestart = link === 'connected' && (state === 'exited' || (state === 'starting' && slow) || restartError !== undefined);
+  const words = restartError ?? linkWords(link) ?? stateWords(state, exitCode, slow, resumeHint);
+  const canRestart = link === 'connected' && (state === 'exited' || state === 'stopped' || (state === 'starting' && slow) || restartError !== undefined);
   return (
     <section
       aria-label={`${pane.title}`}
@@ -261,7 +267,7 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
         )}
         <span className="flex items-center gap-2">
           <Text variant="caption" data-testid="pane-status-chip" data-status={liveStatus ?? pane.status} title="A guess from what the program prints" className="text-terminal-foreground">
-            {STATUS_WORDS[liveStatus ?? pane.status]}
+            {state === 'stopped' ? 'Stopped' : STATUS_WORDS[liveStatus ?? pane.status]}
           </Text>
           {onSplit === undefined ? null : (
             <>
@@ -273,9 +279,20 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
               </Button>
             </>
           )}
+          {canRestart && state === 'stopped' && pane.launcherId !== 'shell' ? (
+            <input
+              aria-label={`Arguments for ${pane.title}`}
+              data-testid="pane-start-args"
+              placeholder="Arguments (optional)"
+              maxLength={MAX_ARGS_LENGTH}
+              value={typedArgs}
+              onChange={(event) => setTypedArgs(event.target.value)}
+              className="h-(--control-height) min-w-32 rounded-md border border-border bg-transparent px-2 text-label text-terminal-foreground"
+            />
+          ) : null}
           {canRestart ? (
             <Button variant="outline" size="sm" onClick={restart} disabled={restarting} data-testid="pane-restart">
-              Restart
+              {state === 'stopped' ? 'Start' : 'Restart'}
             </Button>
           ) : null}
           <Button variant="outline" size="sm" onClick={() => onClose(pane.id)} data-testid="pane-close">
@@ -314,7 +331,8 @@ function linkWords(link: Link): string | undefined {
   }
 }
 
-function stateWords(state: PaneState, exitCode: number | null, slow: boolean): string | undefined {
+function stateWords(state: PaneState, exitCode: number | null, slow: boolean, resumeHint?: string): string | undefined {
+  if (state === 'stopped') return `This terminal is stopped, because Ogden Agents was restarted or Developer mode was turned off. Press Start to run it again.${resumeHint === undefined ? '' : ` ${resumeHint}`}`;
   if (state === 'starting') return slow ? 'This terminal is slow to start. You can restart it.' : 'Starting the terminal';
   if (state === 'exited') return exitCode === null ? 'The program in this terminal ended.' : `The program in this terminal ended with code ${exitCode}.`;
   return undefined;

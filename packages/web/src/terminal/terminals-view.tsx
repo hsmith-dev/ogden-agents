@@ -191,6 +191,7 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
                   onClose={(id) => close.mutate(id)}
                   onSplit={(id, direction) => openPane({ kind: 'split', paneId: id as PaneId, direction })}
                   focusOnOpen={pane.id === focusId}
+                  resumeHint={launchers.list.data?.launchers.find((one) => one.launcher.id === pane.launcherId)?.launcher.resumeHint}
                   onRename={(id, title) => rename.mutate({ paneId: id, title })}
                   splitDisabledReason={full ? PANE_LIMIT_REACHED(limit) : open.isPending ? 'Opening a terminal' : undefined}
                 />

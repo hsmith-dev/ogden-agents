@@ -42,8 +42,9 @@ export async function closePane(wsId: string, paneId: string, auth: Auth = tabAu
 }
 
 /** `POST /api/v1/workspaces/:wsId/panes/:paneId/restart`: Restart pane. */
-export async function restartPane(wsId: string, paneId: string, size: { cols: number; rows: number }, auth: Auth = tabAuth): Promise<Pane> {
-  return PaneResponse.parse(await call(auth, apiPath(API_ROUTES.workspacePaneRestart, { wsId, paneId }), postJson(size), "Ogden Agents couldn't restart that terminal")).pane;
+export async function restartPane(wsId: string, paneId: string, size: { cols: number; rows: number }, args?: string, auth: Auth = tabAuth): Promise<Pane> {
+  const body = args === undefined || args.trim() === '' ? size : { ...size, args };
+  return PaneResponse.parse(await call(auth, apiPath(API_ROUTES.workspacePaneRestart, { wsId, paneId }), postJson(body), "Ogden Agents couldn't restart that terminal")).pane;
 }
 
 export const launchersQueryKey = ['terminal-launchers'] as const;

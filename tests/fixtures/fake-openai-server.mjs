@@ -12,11 +12,16 @@
 //   tools present, user text contains "run" and no tool result yet
 //                                -> one tool call (the `bash` tool if offered, else the first)
 //   after a tool result          -> text "tool said: <first 80 chars of the result>"
+//   user text contains MANAGER_CASE:<id> and the `managerCases` option has <id>
+//                                -> the scripted manager reply (epic 15 story 15.1): request n gets
+//                                   replies[min(n, last)] as plain message text whatever the response_format;
+//                                   `hang` never answers until the server closes
 //   otherwise                    -> text "Hello from the fake model."
 import http from 'node:http';
 
-export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = null, slowMs = 4000, modelsDelayMs = 0, models = ['fake-small', 'fake-large', 'fake-nojson', 'fake-noformat'] } = {}) {
+export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = null, slowMs = 4000, modelsDelayMs = 0, models = ['fake-small', 'fake-large', 'fake-nojson', 'fake-noformat'], managerCases = {} } = {}) {
   const log = [];
+  const caseCounts = new Map();
   const sockets = new Set();
   const lastText = (messages) => {
     const m = [...messages].reverse().find((x) => x.role === 'user');
@@ -103,6 +108,16 @@ export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = nul
         if (!models.includes(model)) return send(404, { error: { message: `model '${model}' not found`, type: 'invalid_request_error', code: 'model_not_found' } });
         if (model === 'fake-noformat' && json.response_format) return send(400, { error: { message: 'response_format is not supported by this model', type: 'invalid_request_error' } });
         if (model === 'fake-nojson' && json.response_format?.type === 'json_schema') return send(400, { error: { message: "response_format.type 'json_schema' is not supported, use 'json_object' or 'text'", type: 'invalid_request_error' } });
+        // Story 15.1: a scripted manager, played on cue by `MANAGER_CASE:<id>` in the first user text (the repair request does not repeat it, so the case is found in any user message).
+        const caseId = /MANAGER_CASE:([a-z0-9-]+)/.exec(messages.filter((m) => m.role === 'user').map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n'))?.[1];
+        if (caseId && Object.hasOwn(managerCases, caseId)) {
+          const script = managerCases[caseId];
+          const n = caseCounts.get(caseId) ?? 0;
+          caseCounts.set(caseId, n + 1);
+          if (script.hang) { if (!res.destroyed && !res.closed) await new Promise((r) => res.on('close', r)); return; }
+          const content = script.replies[Math.min(n, script.replies.length - 1)] ?? '';
+          return send(200, { ...base(model), object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] });
+        }
         // A slow structured answer (story 14.8): the slow first token applies to these requests too.
         if (text.includes('SLOW') && (json.response_format || text.includes('MANAGER_TEST'))) await new Promise((r) => setTimeout(r, slowMs));
         // Story 14.8: a model that only gets it right when asked again (REPAIRABLE), and one whose answer is huge (HUGE).

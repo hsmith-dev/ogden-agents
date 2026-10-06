@@ -1,7 +1,7 @@
 /**
  * Installing the Local model's harness (epic 14, story 14.2): the pinned
  * OpenCode archive for this computer is downloaded into the data folder as
- * Antigravity's is (`setup-antigravity/download.ts`: resumed, never more than
+ * Antigravity's is (`archive/download.ts`: resumed, never more than
  * the pinned size, SHA-256 checked), unpacked file by file into a staging
  * folder (only the pinned file, checked against its own pinned SHA-256), and
  * renamed into `<dataDir>/agents/local/<version>/` with Ogden's install record.
@@ -18,14 +18,14 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { join } from 'node:path';
 import { AgentSetupError, type AgentInstallProgress, type AgentPlatform } from '@ogden-agents/core';
 import { errorCode } from '../error-code.js';
-import { DownloadError, discardPartial, downloadVerified } from '../setup-antigravity/download.js';
-import { UnsafeArchiveError, extractPinned } from '../setup-antigravity/unzip.js';
+import { DownloadError, discardPartial, downloadVerified } from '../archive/download.js';
+import { UnsafeArchiveError, extractPinned } from '../archive/unzip.js';
 import { renameWithRetry } from '../toolchain-uv/uv-toolchain.js';
 import { readZip, ArchiveError } from '../toolchain-uv/archive.js';
 import { LOCAL, OPENCODE } from '../acp-opencode/constants.js';
 import { LOCAL_PINS, type LocalArchivePin, type LocalPins, type LocalRipgrepPin } from './descriptor.js';
 import { RIPGREP_FILE, currentPlatform, installedOpenCode, localInstallDir, localPin, localVersionDir, ripgrepPin, writeLocalInstallRecord, type InstalledOpenCode } from './layout.js';
-import { extractPinnedTarGz } from './untar.js';
+import { extractPinnedTarGz } from '../archive/untar.js';
 
 /** Prefixes of the work folders an install uses inside the install folder. */
 export const STAGING_PREFIX = '.staging-';

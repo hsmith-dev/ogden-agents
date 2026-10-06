@@ -34,6 +34,7 @@ export function grokWiring(input: {
       input.given?.agent ??
       createGrokAgent({
         dataDir: input.dataDir,
+        ...(input.install?.binarySha256 === undefined ? {} : { binarySha256: input.install.binarySha256 }),
         ...(input.serverScript === undefined ? {} : { server: () => ({ command: process.execPath, args: [input.serverScript!] }) }),
         onDiagnostic: input.onDiagnostic,
       }),

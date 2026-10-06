@@ -20,6 +20,7 @@ import {
   createClaudeCodeAgent,
   createClaudeCodeSetup,
   createKeyringSecretStore,
+  ENDPOINT_PRESETS,
   SAFE_MODEL_ID,
   localModelId,
   LOCAL_AGENT_ID,
@@ -244,7 +245,9 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
     );
   };
   const localModels = createLocalModels({ onModels: rememberLocalModels, endpoints: localEndpoints(), port: localModelPort, detectPort: options.localModelPort ?? createOpenAiLocalModel({ timeoutMs: DETECT_PROBE_TIMEOUT_MS }) });
-  return { localModels, localModelPort, localEndpoints: localEndpoints(), claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
+  // What the app's routes need for the Local model's endpoints (epic 14).
+  const endpointApi = { localModels, localEndpoints: localEndpoints(), endpointPresets: options.endpointPresets ?? ENDPOINT_PRESETS };
+  return { endpointApi, localModelPort, claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
 }
 
 /**

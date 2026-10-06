@@ -33,6 +33,7 @@ import {
   type AgentAuthMethodKind,
   type AgentAuthState,
   type AgentSetupStatus,
+  keyWordOf,
 } from '@ogden-agents/shared';
 import type { AgentInstallProgress, AgentPortStatus, AgentSetupPort, AgentSubscriptionState, ApiKeyVerification } from './agent-setup-port.js';
 import { AgentBusyError, AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, apiKeySecretName, type AgentSetup, type AgentSetupOptions, type Flight, type SavedKey } from './agent-setup-types.js';
@@ -503,7 +504,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
           report(agentId, 'verify_api_key', error);
           verification = 'unchecked';
         }
-        if (verification === 'refused') throw new ApiKeyRefusedError();
+        if (verification === 'refused') throw new ApiKeyRefusedError(keyWordOf(support.keyName));
         if (disposed) throw new SecretsUnavailableError(undefined, { cause: 'stopping' });
 
         const wasInUse = keyInUse(port);

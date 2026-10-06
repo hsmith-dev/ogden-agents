@@ -25,7 +25,7 @@ import { currentPlatform, installedOpenCode, localInstallDir, localPin } from '.
 export { LOCAL_DESCRIPTOR, LOCAL_PINS, type LocalArchivePin, type LocalFilePin, type LocalPins, type LocalRipgrepPin } from './descriptor.js';
 export { LOCAL_INSTALL_RECORD, RIPGREP_FILE, installedOpenCode, localInstallDir, localPin, localVersionDir, readLocalInstallRecord, ripgrepPin, writeLocalInstallRecord, type LocalInstallRecord, type InstalledOpenCode } from './layout.js';
 export { installLocal, removeLocalLeftovers, type InstallLocalOptions } from './install.js';
-export { extractPinnedTarGz } from './untar.js';
+export { extractPinnedTarGz } from '../archive/untar.js';
 
 /** The privacy statement the card shows in every state (user decision, 2026-10-05). Plain words, no secrets. */
 export const LOCAL_PRIVACY_NOTICE = `Nothing leaves this computer except to the server you set up. Your chats with the ${LOCAL} are saved in plain text in Ogden Agents' data folder.`;

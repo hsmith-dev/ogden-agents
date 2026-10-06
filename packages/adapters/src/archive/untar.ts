@@ -5,7 +5,7 @@
  * archives whole).
  *
  * The archive has already matched its pinned SHA-256 before this runs; these
- * checks are a second line, as `setup-antigravity/unzip.ts` for zip:
+ * checks are a second line, as `unzip.ts` for zip:
  *
  * - Only regular files named exactly as in the pin are unpacked, each under
  *   that pinned name in `dir` (no path from the archive is used as a file
@@ -20,8 +20,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { join } from 'node:path';
 import { createGunzip } from 'node:zlib';
-import { UnsafeArchiveError, isSafeEntryName } from '../setup-antigravity/unzip.js';
-import type { LocalFilePin } from './descriptor.js';
+import { UnsafeArchiveError, isSafeEntryName, type PinnedFile } from './unzip.js';
 
 const BLOCK = 512;
 
@@ -39,7 +38,7 @@ function octal(buffer: Buffer, start: number, length: number): number {
 }
 
 /** Unpacks the pinned `files` of `archive` into `dir` (which must exist). Rejects with {@link UnsafeArchiveError} for an archive that isn't what the pin says. */
-export async function extractPinnedTarGz(archive: string, dir: string, files: Readonly<Record<string, LocalFilePin>>): Promise<void> {
+export async function extractPinnedTarGz(archive: string, dir: string, files: Readonly<Record<string, PinnedFile>>): Promise<void> {
   const pinnedTotal = Object.values(files).reduce((sum, file) => sum + Math.ceil(file.size / BLOCK) * BLOCK, 0);
   // Pinned data, a header block and some padding per file, and the end blocks, with a little slack.
   const cap = pinnedTotal + (Object.keys(files).length + 4) * BLOCK + 64 * 1024;
@@ -48,7 +47,7 @@ export async function extractPinnedTarGz(archive: string, dir: string, files: Re
   let pending: Buffer = Buffer.alloc(0);
   let ended = false;
   /** The entry being written, if any. */
-  let current: { name: string; remaining: number; padding: number; pin: LocalFilePin; hash: ReturnType<typeof createHash>; out: ReturnType<typeof createWriteStream>; written: number } | undefined;
+  let current: { name: string; remaining: number; padding: number; pin: PinnedFile; hash: ReturnType<typeof createHash>; out: ReturnType<typeof createWriteStream>; written: number } | undefined;
   let skipping = 0;
   /** A write that failed after the file was opened (no space, say): it ends the unpack instead of hanging it. */
   let writeError: Error | undefined;

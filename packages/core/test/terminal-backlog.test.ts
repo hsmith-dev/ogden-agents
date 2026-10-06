@@ -31,6 +31,20 @@ describe('trimBacklog (story 3.9)', () => {
     expect(trimBacklog(`${ESC}[31mred\nmore\nlast`, 9)).toBe('last');
   });
 
+  it('a cut just after an ESC that a line feed follows keeps that line feed as the break (3.9 review F2)', () => {
+    // `old` + ESC + LF + `next` + LF + `last`: cutting right after the ESC starts at the line after the LF, not the one after.
+    const text = `old${ESC}\nnext\nlast`;
+    expect(trimBacklog(text, text.length - 4)).toBe('next\nlast');
+  });
+
+  it('with no line break after the cut, never starts on the second half of an emoji (3.9 review F3)', () => {
+    const text = 'abc\u{1F600}def';
+    // Cut inside the emoji (between its two UTF-16 halves): the replay starts after it.
+    expect(trimBacklog(text, 'def'.length + 1)).toBe('def');
+    // A cut before it keeps it whole.
+    expect(trimBacklog(text, 'def'.length + 2)).toBe('\u{1F600}def');
+  });
+
   it('a cut inside a CSI (a 256-colour SGR) starts after it, at the next line break', () => {
     const { text, max } = cutInside(`${ESC}[38;5;196m`, 4, 'red text\nnext line');
     expect(trimBacklog(text, max)).toBe('next line');

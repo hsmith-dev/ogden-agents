@@ -90,6 +90,8 @@ export const ChatAgent = z.object({
   signInMethods: z.array(AgentSignInMethod),
   /** Plain words on what its API key looks like, when it takes one ("Starts with sk-ant-"). Never a key. */
   apiKeyFormat: z.string().min(1).optional(),
+  /** What the agent calls its key in plain words, when it is not "API key" (Grok: "xAI API access token"). Never a key. */
+  apiKeyName: z.string().min(1).max(60).optional(),
   install: AgentInstallState,
   auth: AgentAuthState,
   terminalResume: z.boolean(),

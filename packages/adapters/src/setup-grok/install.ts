@@ -17,7 +17,7 @@
  */
 import { grokAcceptsToken } from './token-probe.js';
 import { renameWithRetry } from '../toolchain-uv/uv-toolchain.js';
-import { createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, chmodSync } from 'node:fs';
+import { chmodSync, closeSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { Transform } from 'node:stream';
@@ -128,6 +128,8 @@ function finalizeFor(hashes: GrokBinaryHashes, probe: (binary: string) => Promis
       // A freshly written binary can be held by an antivirus scan on Windows: retried as the folder swap is.
       await renameWithRetry(unchecked, target, 10);
       if (process.platform !== 'win32') chmodSync(target, 0o755);
+      // What was checked, for a later release that moves the pin while this install keeps working (see `grokBinaryUnchanged`).
+      writeFileSync(`${target}${GROK_CHECK_RECORD_SUFFIX}`, `${sha256}\n`);
     } catch (error) {
       rmSync(unchecked, { force: true });
       throw new AgentSetupError(words.couldNotPlace, { details: { step: 'binary', code: String((error as NodeJS.ErrnoException).code ?? 'unknown').slice(0, 40) }, cause: error });
@@ -166,6 +168,61 @@ export const GROK_INSTALL_SPEC: PinnedNpmSpec = grokInstallSpec();
 /** The package version `pins` installs. */
 export function pinnedGrokVersion(pins: AdapterPins = GROK_PINS): string {
   return pinnedVersionOf(GROK_INSTALL_SPEC, pins);
+}
+
+/** The file beside the checked binary that records the SHA-256 the install checked (its name is the binary's plus this). */
+export const GROK_CHECK_RECORD_SUFFIX = '.sha256';
+
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/** A file changed more recently than this is hashed again each time: file times are coarse, so equal times prove nothing yet. */
+const RACY_MS = 3000;
+
+/** Binaries already re-checked in this process, by what identifies this file's state (size, inode, change and modify times). */
+const rechecked = new Map<string, string>();
+
+function sha256OfFile(path: string): string {
+  const hash = createHash('sha256');
+  const fd = openSync(path, 'r');
+  try {
+    const buffer = Buffer.allocUnsafe(1 << 20);
+    for (let read = readSync(fd, buffer, 0, buffer.length, null); read > 0; read = readSync(fd, buffer, 0, buffer.length, null)) hash.update(buffer.subarray(0, read));
+  } finally {
+    closeSync(fd);
+  }
+  return hash.digest('hex');
+}
+
+/**
+ * Whether the checked binary is still the one the install checked (AD-16, 12.4 review): its SHA-256 against the
+ * pinned table for the pinned version, else against the record the install wrote beside it. Hashed in full the
+ * first time in a server run, then not again while the file's size, inode and change time stand (the change time
+ * moves when the file's content or metadata does, and no user program can set it back). A binary with no pin and
+ * no record, or any read failure, is not trusted. Synchronous: `launch` is.
+ */
+export function grokBinaryUnchanged(grok: InstalledGrok, hashes: GrokBinaryHashes = GROK_BINARY_SHA256, pinnedVersion: string = pinnedGrokVersion()): boolean {
+  try {
+    const info = statSync(grok.path);
+    if (!info.isFile()) return false;
+    const state = `${info.size}:${info.ino}:${info.ctimeMs}:${info.mtimeMs}`;
+    if (rechecked.get(grok.path) === state) return true;
+    const platform = `${process.platform}-${process.arch}` as AgentPlatform;
+    let expected: string | undefined;
+    if (grok.version === pinnedVersion) expected = hashes[platform];
+    else {
+      const recorded = readFileSync(`${grok.path}${GROK_CHECK_RECORD_SUFFIX}`, 'utf8').trim();
+      expected = SHA256_HEX.test(recorded) ? recorded : undefined;
+    }
+    if (expected === undefined || sha256OfFile(grok.path) !== expected) {
+      rechecked.delete(grok.path);
+      return false;
+    }
+    // Remembered only once the file is older than the clock's granularity (Windows stamps in ticks of about 16 ms), so a rewrite right after the hash can't carry the same state.
+    if (Date.now() - Math.max(info.ctimeMs, info.mtimeMs) > RACY_MS) rechecked.set(grok.path, state);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface InstalledGrok {

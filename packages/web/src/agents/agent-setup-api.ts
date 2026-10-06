@@ -60,17 +60,17 @@ export const sendSignInCode = (agentId: string, code: string, auth: Auth = tabAu
   callNoContent(auth, apiPath(API_ROUTES.agentSignInCode, { agentId }), postJson({ code }), "Ogden Agents couldn't send the code");
 
 /** `PUT /api/v1/agents/:agentId/api-key`: checks the key and keeps it in the keychain. */
-export const saveApiKey = (agentId: string, apiKey: string, auth: Auth = tabAuth) =>
+export const saveApiKey = (agentId: string, apiKey: string, auth: Auth = tabAuth, keyName = 'API key') =>
   callNoContent(
     auth,
     apiPath(API_ROUTES.agentApiKey, { agentId }),
     { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ apiKey }) },
-    "Ogden Agents couldn't save the API key",
+    `Ogden Agents couldn't save the ${keyName}`,
   );
 
 /** `DELETE /api/v1/agents/:agentId/api-key`: removes the key from the keychain. */
-export const removeApiKey = (agentId: string, auth: Auth = tabAuth) =>
-  callNoContent(auth, apiPath(API_ROUTES.agentApiKey, { agentId }), { method: 'DELETE' }, "Ogden Agents couldn't remove the API key");
+export const removeApiKey = (agentId: string, auth: Auth = tabAuth, keyName = 'API key') =>
+  callNoContent(auth, apiPath(API_ROUTES.agentApiKey, { agentId }), { method: 'DELETE' }, `Ogden Agents couldn't remove the ${keyName}`);
 
 /** The seq of the newest `agent.*` event received, or 0. */
 function lastAgentSeq(events: readonly { seq: number; type: string }[]): number {
@@ -199,7 +199,7 @@ export interface ApiKeyActions {
 }
 
 /** Saving and removing an agent's API key (9.2), for Settings: Agents and Welcome (9.5). */
-export function useApiKey(agentId: string, auth: Auth = tabAuth): ApiKeyActions {
+export function useApiKey(agentId: string, auth: Auth = tabAuth, keyName = 'API key'): ApiKeyActions {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -209,10 +209,10 @@ export function useApiKey(agentId: string, auth: Auth = tabAuth): ApiKeyActions 
     setBusy(true);
     setError(undefined);
     try {
-      await saveApiKey(agentId, apiKey, auth);
+      await saveApiKey(agentId, apiKey, auth, keyName);
       return true;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Ogden Agents couldn't save the API key. Try again.");
+      setError(caught instanceof Error ? caught.message : `Ogden Agents couldn't save the ${keyName}. Try again.`);
       return false;
     } finally {
       setBusy(false);
@@ -223,14 +223,14 @@ export function useApiKey(agentId: string, auth: Auth = tabAuth): ApiKeyActions 
   const remove = () => {
     setBusy(true);
     setError(undefined);
-    removeApiKey(agentId, auth).then(
+    removeApiKey(agentId, auth, keyName).then(
       () => {
         setBusy(false);
         refresh();
       },
       (caught: unknown) => {
         setBusy(false);
-        setError(caught instanceof Error ? caught.message : "Ogden Agents couldn't remove the API key. Try again.");
+        setError(caught instanceof Error ? caught.message : `Ogden Agents couldn't remove the ${keyName}. Try again.`);
         refresh();
       },
     );

@@ -551,8 +551,9 @@ export class SecretsUnavailableError extends CoreError {
 /** The agent's provider refused the API key (story 9.2); it was not stored. The message never echoes the key. */
 export class ApiKeyRefusedError extends CoreError {
   override readonly name = 'ApiKeyRefusedError';
-  constructor() {
-    super('api_key_refused', 'That key was refused. Check it and paste it again.');
+  /** `word`: what the agent calls its key ("key", or "token" for Grok's xAI API access token). */
+  constructor(word: string = 'key') {
+    super('api_key_refused', `That ${word} was refused. Check it and paste it again.`);
   }
 }
 

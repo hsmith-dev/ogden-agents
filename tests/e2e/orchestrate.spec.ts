@@ -325,7 +325,7 @@ async function apiKeyWorker(agentId: string, displayName: string) {
   const worker = await fakeSecondAgent({ agentId, displayName });
   return {
     ...worker,
-    descriptor: { ...worker.descriptor, signInMethods: [{ id: 'fake-key', kind: 'api_key' as const, label: 'Use an API key', apiKey: { envNames: ['FAKE_AGENT_KEY'], format: 'Starts with fake-' } }] },
+    descriptor: { ...worker.descriptor, signInMethods: [{ id: 'fake-key', kind: 'api_key' as const, label: 'Use an API key', apiKey: { envNames: ['FAKE_AGENT_KEY'] as [string, ...string[]], format: 'Starts with fake-' } }] },
   };
 }
 

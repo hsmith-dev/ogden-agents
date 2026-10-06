@@ -19,6 +19,7 @@ import {
   ValidationError,
   WorkspaceBusyError,
   type BmadFeatures,
+  type BuildsUseCases,
   type Chat,
   type Permissions,
 } from '@ogden-agents/core';
@@ -62,11 +63,13 @@ export interface WorkspaceRoutesOptions {
    * and only when its test hook is allowed (`test-hooks.ts` `testBmadProbe`).
    */
   bmadProbe?: boolean;
+  /** The builds, so a project whose Unattended builds piece is turned back on starts its queued runs (story 5.8 review). */
+  builds?: Pick<BuildsUseCases, 'dispatchQueued'> | undefined;
   log: Logger;
 }
 
 export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptions): void {
-  const { chat, permissions, bmad, bmadProbe, log } = options;
+  const { chat, permissions, bmad, bmadProbe, builds, log } = options;
   const limit = bodyLimit({
     maxSize: MAX_BODY_BYTES,
     onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.'),
@@ -144,6 +147,8 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
           defaultPermissionMode: settings.defaultPermissionMode ?? 'ask',
           orchestrationMode: settings.orchestrationMode ?? 'approve_each',
         });
+        // Runs queued while the builds piece was off start now it is on (the queue also drains when another run ends).
+        if (settings.bmadPieces.includes('builds')) void builds?.dispatchQueued().catch(() => undefined);
         return c.json(WorkspaceSettingsResponse.parse({ settings }));
       } catch (error) {
         return refusal(c, error);

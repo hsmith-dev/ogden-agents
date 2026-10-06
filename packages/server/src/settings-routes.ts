@@ -6,7 +6,7 @@
  * Skip-all chat to Ask in the same transaction. Without core's settings the
  * routes answer 501 and read no body.
  */
-import { CoreError, type InstallSettings, type NewProjectDefaultsStore } from '@ogden-agents/core';
+import { CoreError, type InstallSettings, type NewProjectDefaultsStore, type Panes } from '@ogden-agents/core';
 import { API_ROUTES, ChatSettingsResponse, DeveloperModeResponse, SetChatSettingsRequest, SetDeveloperModeRequest } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -21,10 +21,12 @@ export interface SettingsRoutesOptions {
   installSettings?: Pick<InstallSettings, 'developerMode' | 'developerModeEverSet' | 'setDeveloperMode' | 'whileWorking' | 'setWhileWorking'> | undefined;
   /** The app-wide default for new projects: a Skip all default goes back to Ask when Developer mode is turned off. */
   newProjectDefaults?: Pick<NewProjectDefaultsStore, 'dropSkipAll'> | undefined;
+  /** Terminal panes (epic 16, story 16.9): turning Developer mode off asks what to do with running ones. */
+  panes?: Pick<Panes, 'runningCount' | 'keepRunningOnNextDeveloperModeOff'> | undefined;
   log: Logger;
 }
 
-export function registerSettingsRoutes(app: Hono, { installSettings, newProjectDefaults, log }: SettingsRoutesOptions): void {
+export function registerSettingsRoutes(app: Hono, { installSettings, newProjectDefaults, panes, log }: SettingsRoutesOptions): void {
   if (installSettings === undefined) {
     app.get(API_ROUTES.developerMode, notImplemented);
     app.put(API_ROUTES.developerMode, notImplemented);
@@ -58,7 +60,23 @@ export function registerSettingsRoutes(app: Hono, { installSettings, newProjectD
       const body = await readBody(c, SetDeveloperModeRequest);
       if (!body.ok) return body.response;
       try {
-        const result = installSettings.setDeveloperMode(body.value.developerMode);
+        // Turning it off with terminals running asks first: stop them, or keep them running in the background until the server stops.
+        if (!body.value.developerMode && installSettings.developerMode() && panes !== undefined) {
+          const running = panes.runningCount();
+          if (running > 0) {
+            if (body.value.panes === undefined) {
+              return apiError(c, 409, 'panes_running', running === 1 ? 'A terminal is still running. Stop it, or keep it running in the background until Ogden Agents stops?' : `${running} terminals are still running. Stop them, or keep them running in the background until Ogden Agents stops?`, { running });
+            }
+            panes.keepRunningOnNextDeveloperModeOff(body.value.panes === 'keep');
+          }
+        }
+        let result: ReturnType<typeof installSettings.setDeveloperMode>;
+        try {
+          result = installSettings.setDeveloperMode(body.value.developerMode);
+        } finally {
+          // The choice is for this request only: a failed save must not decide a later one.
+          panes?.keepRunningOnNextDeveloperModeOff(false);
+        }
         // The app-wide default lives in a file, outside core's transaction: it already reads as Ask while Developer mode is off,
         // and is rewritten here so it stays Ask when Developer mode comes back (default permission mode).
         let appDefaultBackInAsk = false;

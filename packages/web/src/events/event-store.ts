@@ -269,8 +269,21 @@ function trimWorkspace(state: EventStoreState, wsId: string, workspace: Workspac
   const newestState = new Set<number>();
   const statesSeen = new Set<string>();
   const answered = new Set<string>();
+  // Terminal panes (epic 16): what the Needs you rows fold from is kept for each pane still alive (its open, its newest name and status).
+  const closedPanes = new Set<string>();
+  const paneKept = new Set<number>();
+  const paneSeen = new Set<string>();
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]!;
+    if (event.type === 'terminal.pane_closed') closedPanes.add(event.payload.paneId);
+    else if (event.type.startsWith('terminal.pane_') && !closedPanes.has((event.payload as { paneId: string }).paneId)) {
+      const paneId = (event.payload as { paneId: string }).paneId;
+      const key = `${paneId}:${event.type === 'terminal.pane_opened' || event.type === 'terminal.pane_renamed' ? event.type : 'state'}`;
+      if (!paneSeen.has(key)) {
+        paneSeen.add(key);
+        paneKept.add(event.seq);
+      }
+    }
     if (event.type === 'session.state_changed' && !statesSeen.has(event.streamId)) {
       statesSeen.add(event.streamId);
       newestState.add(event.seq);
@@ -282,6 +295,7 @@ function trimWorkspace(state: EventStoreState, wsId: string, workspace: Workspac
     // The permission cards' Undo reads it (story 2.10 review F1).
     event.type === 'workspace.permission_rule_removed' ||
     newestState.has(event.seq) ||
+    paneKept.has(event.seq) ||
     (event.type === 'permission.requested' && !answered.has(event.payload.requestId));
 
   // Only what may be trimmed counts against the limit, so held events never crowd out new ones (review F2).

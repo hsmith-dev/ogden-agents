@@ -111,6 +111,8 @@ export interface VerifyInput {
   env: Readonly<Record<string, string>>;
   /** The test command from the main checkout and the project's settings, `undefined` when none. */
   testCommand: string | undefined;
+  /** Aborted when the run is stopped or the server quits: the re-run ends and the tests check fails as not runnable. */
+  signal?: AbortSignal | undefined;
 }
 
 export interface VerifyDeps {
@@ -145,7 +147,7 @@ export async function verifyRun(deps: VerifyDeps, input: VerifyInput): Promise<V
     testsCheck = check('tests_pass', 'fail', TESTS_NOT_RUNNABLE_DETAIL);
   } else {
     const ran = await deps.sandbox
-      .run({ sandbox: input.sandbox, cwd: input.cwd, command: input.testCommand, env: input.env, timeoutMs: TEST_RERUN_TIMEOUT_MS, maxOutputBytes: MAX_TEST_OUTPUT_TAIL_BYTES })
+      .run({ sandbox: input.sandbox, cwd: input.cwd, command: input.testCommand, env: input.env, timeoutMs: TEST_RERUN_TIMEOUT_MS, maxOutputBytes: MAX_TEST_OUTPUT_TAIL_BYTES, signal: input.signal })
       .catch(() => undefined);
     if (ran === undefined) {
       testsCheck = check('tests_pass', 'fail', TESTS_NOT_RUNNABLE_DETAIL);

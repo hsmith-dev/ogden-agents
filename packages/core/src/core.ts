@@ -17,6 +17,8 @@ import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
 import { createAgentModels, type AgentModels } from './agent-models.js';
 import { createInstallSettings, type InstallSettings } from './install-settings.js';
+import { createPaneStore, type PaneStore } from './pane-store.js';
+import { createTerminalsSettings, type TerminalsSettingsStore } from './terminals-settings.js';
 import { createPermissions, type Permissions } from './permissions.js';
 import { createSessionEvents, type SessionEvents } from './session-events.js';
 
@@ -55,6 +57,10 @@ export interface Core {
    * builds use-cases register it, the chat reads it. In memory only.
    */
   readonly buildSessions: BuildSessions;
+  /** Where terminal panes and their layouts are kept between runs (epic 16, story 16.7). */
+  readonly paneStore: PaneStore;
+  /** The install's Terminals settings (epic 16, story 16.9). */
+  readonly terminalsSettings: TerminalsSettingsStore;
   /** Unattended builds' limits and a project's build settings (story 5.8). */
   readonly buildSettings: BuildSettings;
   /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
@@ -162,6 +168,8 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     agentModels,
     buildSessions: createBuildSessions(),
     buildSettings: createBuildSettings({ db, events, entities }),
+    paneStore: createPaneStore({ db }),
+    terminalsSettings: createTerminalsSettings({ db, events }),
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),
     localEndpoints: (secrets) => createLocalEndpoints({ db, events, secrets }),
     close: () => {

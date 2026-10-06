@@ -99,6 +99,7 @@ export function createAgents(
       ...(entry.guardsRequested ? { protectedPaths: ctx.protectedPaths() } : {}),
       ...(startModel === null ? {} : { model: startModel }),
       ...(unattended === undefined ? {} : { sandbox: unattended.sandbox }),
+      ...(build?.attended === true ? { attended: true as const } : {}),
     };
     const previous = storedAgentSessionId(session.id);
     // A chat that reached an agent before, and has none now, reopens that agent's session (2.7).

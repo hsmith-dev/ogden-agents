@@ -48,6 +48,8 @@ export interface SandboxRunRequest {
   timeoutMs: number;
   /** The most output kept, from the end. */
   maxOutputBytes: number;
+  /** Aborted when the run is stopped or the server quits: the command's whole process tree stops and the result is `{ exitCode: null, timedOut: false }`. */
+  signal?: AbortSignal | undefined;
 }
 
 /** What the command did: its exit code (`null` when it timed out or could not start), whether it timed out, and the end of its output. */

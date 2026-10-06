@@ -189,7 +189,7 @@ function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEd
   const live = isLive(run.state);
   // While the run is paused on a worker's card, nothing is approved or sent from here: the user answers on the worker's own card.
   const canAct = live && run.state !== 'paused';
-  const suggested = live && decision?.action === 'dispatch' ? decision.stepId : undefined;
+  const suggested = live && decision?.action === 'dispatch' && ['proposed', 'approved'].includes(steps.find((one) => one.stepId === decision.stepId)?.state ?? '') ? decision.stepId : undefined;
   const stateOf = new Map(steps.map((step) => [step.stepId, step.state]));
   // The instruction counter: what was sent, nothing about money.
   const sent = steps.filter((step) => step.sessionId !== null).length;

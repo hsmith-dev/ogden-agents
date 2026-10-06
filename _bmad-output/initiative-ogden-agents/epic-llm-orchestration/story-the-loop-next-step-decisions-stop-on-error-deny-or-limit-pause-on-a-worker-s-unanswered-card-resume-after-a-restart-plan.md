@@ -3,12 +3,12 @@ title: "The loop: next-step decisions, stop on error, Deny or limit, pause on a 
 type: 'feature'
 ticket: '15.9'
 created: '2026-10-06'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: 'de5dfa2a3a31a79088ad150b24e1068e4e4cbeba'
 context:
@@ -68,11 +68,11 @@ context:
 
 ## Tasks & Acceptance
 
-- [ ] shared contracts, events, routes
-- [ ] core: decision loop, pause, Deny, told manager, answer, resume
-- [ ] server route and resume at start
-- [ ] web: waiting reasons, question, suggestion
-- [ ] tests (core, server restart, DOM, architecture, e2e)
+- [x] shared contracts, events, routes
+- [x] core: decision loop, pause, Deny, told manager, answer, resume
+- [x] server route and resume at start
+- [x] web: waiting reasons, question, suggestion
+- [x] tests (core, server restart, DOM, architecture, e2e)
 
 **Acceptance Criteria:**
 - Given a fake manager and fake workers, each finished step is followed by a decision and a `dispatch`, `ask_user`, `done` and `stop` are each honoured; a decision naming a step not in the plan, or not waiting, is refused.
@@ -106,8 +106,10 @@ None yet.
 
 ## Review Triage Log
 
-(After the reviews.)
+2026-10-06, security and correctness reviewers, no critical or high findings. Patched: a manager decision that landed after the user had sent another step finished or stopped the run under a working worker, or forced `awaiting_user` (medium, both), now the answer is only logged and the new result owes its own decision (test added); a failed decision killed an automatic run the user had just switched back to Approve each instruction (medium), now the mode is read after the call; a paused run could not move to `finished`, yet `run_finished` was appended (medium), now a paused run waits again first; a step the mode approved that could no longer be sent after a switch back to Approve each stalled silently (medium), now it is handed back to the user; a card or state change woke only one of two runs sharing a chat (low), now all; an answer given while the user's own step ran was lost (low), now refused until the worker is done; the page kept offering a suggestion after its step was sent (low), now hidden. Not changed: `loopOf` filters the workspace stream by run with `json_extract`, an unindexed scan per read (medium for a very long lived project; the stream holds only orchestration and settings events, so it stays small, and a per run index or cached state is for the sweep); the Deny and read-back window is the last 500 events of the worker's chat (low, a Deny is also caught live by the listener, and the instruction's seq could be recorded at dispatch); a hard kill between the send and the `dispatched` write could send a mode approved step again after a restart (low, no await between the two writes); the Deny tool's title is secret masked and cut to 80 characters but not path stripped (low, as the other reports); an owed decision at start may find the manager not ready and stop an automatic run `manager_refused` (low, the status is read from the database, so it is ready at start); `tell` has no abort signal (low, bounded by the manager's own deadline); a port that does not validate could be asked again in a loop when its dispatch is no longer possible (low, unreachable with the shipped ports, which validate); an unanswered question in an automatic run does not time out (low, Stop is always there); an answer is lost if the manager is unavailable after it (low); the run may read `awaiting_user` while a continued worker runs (cosmetic).
 
 ## Verification
 
-(After the runs.)
+**Results:** `pnpm typecheck` clean; `pnpm test` 338 files, 4234 passed, 8 skipped; Playwright `orchestrate` (13) passed; `PROVENANCE_BASE=origin/main pnpm provenance` passes.
+
+**Commands:** `pnpm typecheck`, `pnpm test`, `npx playwright test tests/e2e/orchestrate.spec.ts` (after `pnpm run build`), `PROVENANCE_BASE=origin/main pnpm provenance`.

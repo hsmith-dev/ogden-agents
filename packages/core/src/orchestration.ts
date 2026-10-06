@@ -248,6 +248,11 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
   const moveRun = (runId: string, to: OrchestrationRunState, stopReason?: OrchestrationRun['stopReason']): void => {
     const row = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, runId)).get();
     if (row === undefined || row.state === to) return;
+    // A paused run has no way to `finished`: it is waiting again first (the worker's card was answered, so it is not paused any more).
+    if (row.state === 'paused' && to === 'finished') {
+      orm.update(orchestrationRuns).set({ state: 'awaiting_user', updatedAt: now() }).where(eq(orchestrationRuns.id, runId)).run();
+      row.state = 'awaiting_user';
+    }
     if (!canMoveRun(row.state as OrchestrationRunState, to)) return;
     orm.update(orchestrationRuns).set({ state: to, stopReason: stopReason ?? row.stopReason, updatedAt: now() }).where(eq(orchestrationRuns.id, runId)).run();
   };
@@ -899,6 +904,11 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       return;
     }
     const fresh = stepsOf(run.id);
+    // The user may have sent another step while the manager thought: with a worker on a step, the answer is only logged (its result owes the next decision).
+    if (fresh.some((step) => step.state === 'dispatched')) {
+      events.transaction(() => noteReply(workspaceId, runId, result.record));
+      return;
+    }
     let decision: ManagerDecision | undefined = result.ok ? result.value : undefined;
     // The plan may have changed while the manager thought (the user skipped, edited or sent a step): a step it chose must still be one that can
     // be sent. If not, its answer is only logged and it is asked again.
@@ -909,7 +919,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     }
     const words = result.ok ? '' : result.reason;
     const record = decisionRecord(decision, words);
-    const automatic = run.mode === 'automatic';
+    // The user may have switched the mode while the manager thought: what it is now decides what a failed decision means.
+    const automatic = live.mode === 'automatic';
     events.transaction(() => {
       noteReply(workspaceId, runId, result.record);
       events.append({ type: 'orchestration.decision_made', workspaceId, streamId: workspaceId, payload: { runId, after: owed.after, ...record } });
@@ -1075,7 +1086,18 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     try {
       await api.dispatchStep(workspaceId, run.id, next.stepId);
     } catch (error) {
-      if (error instanceof StepNotApprovedError || error instanceof OrchestrationOffError) return;
+      if (error instanceof OrchestrationOffError) return;
+      if (error instanceof StepNotApprovedError) {
+        // A step the mode approved that can no longer be sent by the mode (the project went back to Approve each instruction): it is the user's again.
+        const handedBack = events.transaction(() => {
+          const step = requireStep(run.id, next.stepId);
+          if (step.state !== 'approved' || step.approvedBy !== 'mode') return false;
+          orm.update(orchestrationSteps).set({ state: 'proposed', approvedBy: null }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, next.stepId))).run();
+          return true;
+        });
+        if (handedBack) waitForUser(workspaceId, run, next.stepId);
+        return;
+      }
       if (error instanceof DispatchRefusedError && error.reason === 'approve_each_only') {
         // The worker turned out to be one only the user may send to: the step is the user's again.
         events.transaction(() => {
@@ -1097,13 +1119,11 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
   // A worker's chat going quiet or waiting, a card being answered or the project's mode changing, lets a run go on, pause, or go back to asking the user.
   events.subscribe(events.lastSeq(), (event) => {
     try {
-      const dispatchedOn = (sessionId: string): { runId: string } | undefined => orm.select({ runId: orchestrationSteps.runId }).from(orchestrationSteps).where(and(eq(orchestrationSteps.sessionId, sessionId), eq(orchestrationSteps.state, 'dispatched'))).get();
+      const dispatchedOn = (sessionId: string): Array<{ runId: string }> => orm.select({ runId: orchestrationSteps.runId }).from(orchestrationSteps).where(and(eq(orchestrationSteps.sessionId, sessionId), eq(orchestrationSteps.state, 'dispatched'))).all();
       if (event.type === 'session.state_changed' && (event.payload.state !== 'working' || event.payload.previous === 'waiting')) {
-        const step = dispatchedOn(event.payload.sessionId);
-        if (step !== undefined && event.workspaceId !== null) void scheduleAdvance(event.workspaceId, step.runId);
+        for (const step of dispatchedOn(event.payload.sessionId)) if (event.workspaceId !== null) void scheduleAdvance(event.workspaceId, step.runId);
       } else if (event.type === 'permission.resolved' && event.payload.decision === 'deny') {
-        const step = dispatchedOn(event.payload.sessionId);
-        if (step !== undefined && event.workspaceId !== null) void scheduleAdvance(event.workspaceId, step.runId);
+        for (const step of dispatchedOn(event.payload.sessionId)) if (event.workspaceId !== null) void scheduleAdvance(event.workspaceId, step.runId);
       } else if (event.type === 'workspace.settings_changed' && (event.payload.orchestrationMode !== undefined || event.payload.orchestrationEnabled === true)) {
         for (const live of orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.workspaceId, event.workspaceId)).all()) {
           if (!isRunOver(live.state as OrchestrationRunState)) void scheduleAdvance(event.workspaceId, live.id);
@@ -1327,7 +1347,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         if (live === undefined || !isLive(live.state)) throw new RunNotOpenError();
         // Only a question the manager asked and the user has not answered: the answer goes once.
         const loop = loopOf(workspaceId, run.id);
-        if (loop.decision?.action !== 'ask_user' || loop.owed !== null) throw new NoQuestionPendingError();
+        if (loop.decision?.action !== 'ask_user' || loop.owed !== null || stepsOf(run.id).some((step) => step.state === 'dispatched')) throw new NoQuestionPendingError();
         events.append({ type: 'orchestration.question_answered', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], answer: parsed.data.answer } });
       });
       // The answer is data for the manager's next decision.

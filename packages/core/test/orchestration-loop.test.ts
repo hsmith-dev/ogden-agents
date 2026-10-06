@@ -345,6 +345,32 @@ describe('the next decision after a result', () => {
   });
 });
 
+describe('the user acts while the manager thinks', () => {
+  it('keeps a decision that lands after the user sent another step as a log entry only: a done does not finish the run under a working worker', async () => {
+    let release: (value: ManagerResult<ManagerDecision>) => void = () => undefined;
+    const slow = (scripted: ManagerPort): ManagerPort => ({
+      proposePlan: scripted.proposePlan,
+      decideNext: (context) => new Promise((resolve) => (release = (value) => resolve(value) as never)).then(() => validateDecisionFor(context, decision('done'))),
+    });
+    const kit = setUp({ plan: THREE, mode: 'approve_each', firstManager: slow });
+    const { run } = await kit.orchestration.startRun(kit.workspaceId, { goal: 'Do the work' });
+    await kit.orchestration.approveStep(kit.workspaceId, run.id, 's1');
+    kit.finish(kit.sessionOf(await kit.orchestration.dispatchStep(kit.workspaceId, run.id, 's1'), 's1'));
+    await kit.read(run.id);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect((await kit.read(run.id)).thinking).toBe(true);
+    // The user does not wait: they approve and send the second step.
+    await kit.orchestration.approveStep(kit.workspaceId, run.id, 's2');
+    await kit.orchestration.dispatchStep(kit.workspaceId, run.id, 's2');
+    release({ ok: true, value: decision('done') as ManagerDecision });
+    await kit.settle();
+    const after = await kit.read(run.id);
+    expect(after.run.state).not.toBe('finished');
+    expect(stateOf(after, 's2')).toBe('dispatched');
+    expect(eventsOf(kit.core, 'orchestration.decision_made')).toHaveLength(0);
+  });
+});
+
 describe('the manager asks the user a question', () => {
   const ASK = decision('ask_user', { question: 'Which database should it use?' });
 

@@ -22,7 +22,6 @@ export default defineConfig({
     // The time limits are in tests/fixtures/test-timeouts.ts: longer on CI and Windows, 5 s locally (story 2.13).
     testTimeout: TEST_TIMEOUT_MS,
     hookTimeout: HOOK_TIMEOUT_MS,
-    // Experiment (main run 37458461174: Windows files took up to 69 s with the default 3 workers on 4 vCPUs, each file spawning git, node and PTYs): two workers on the Windows runner, so the spawns starve each other less. Locally and elsewhere Vitest's default.
-    ...(process.env.CI && process.platform === 'win32' ? { maxWorkers: 2 } : {}),
+    // No maxWorkers override: two Windows CI workers instead of the default three measured slower (PR 222: 879 and 952 s against 735 and 677 s) with no fewer slow files.
   },
 });

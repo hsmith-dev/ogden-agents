@@ -3,12 +3,12 @@ title: 'Refactor sweep (epic 15)'
 type: 'refactor'
 ticket: '15.13'
 created: '2026-10-06'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '4bcf88c756a7f90c5b796e9830395746dbd31214'
 context:
@@ -88,8 +88,10 @@ None yet.
 
 ## Review Triage Log
 
-Pending.
+2026-10-06, security and correctness reviewers (2 lenses), no critical, high or medium findings. Both read every moved function against the original (`git show 4bcf88c7:packages/core/src/orchestration.ts`) and found no change of behaviour. Patched: the assembly (`createOrchestration`) was exempt from the user action guard, so a call to a user action could have been added there unseen (low security), now the guard checks that slice with planted cases; the two places in `advancePass` that give a mode approved step back to the user lost the step read that threw for a missing step (low correctness, cosmetic), now kept for exact parity. Not changed: none.
 
 ## Verification
 
-Pending.
+**Results:** `pnpm typecheck` clean; `pnpm test` 351 files, 4445 passed, 8 skipped (the three added tests: a chunked body is 413, Move beside a sent step is off, the assembly guard cases are inside the architecture test); Playwright `orchestrate` 18 passed; `PROVENANCE_BASE=origin/main pnpm provenance` passes.
+
+**Commands:** `pnpm typecheck`, `pnpm test`, `npx playwright test tests/e2e/orchestrate.spec.ts` (after `pnpm run build`), `PROVENANCE_BASE=origin/main pnpm provenance`.

@@ -361,13 +361,19 @@ export function createEngine(k: Base & RowsApi & TranscriptApi & LoopStateApi & 
       if (error instanceof OrchestrationOffError) return;
       if (error instanceof StepNotApprovedError) {
         // A step the mode approved that can no longer be sent by the mode (the project went back to Approve each instruction): it is the user's again.
-        const handedBack = events.transaction(() => returnToUser(run.id, next.stepId));
+        const handedBack = events.transaction(() => {
+          requireStep(run.id, next.stepId);
+          return returnToUser(run.id, next.stepId);
+        });
         if (handedBack) waitForUser(workspaceId, run, next.stepId);
         return;
       }
       if (error instanceof DispatchRefusedError && error.reason === 'approve_each_only') {
         // The worker turned out to be one only the user may send to: the step is the user's again.
-        events.transaction(() => returnToUser(run.id, next.stepId));
+        events.transaction(() => {
+          requireStep(run.id, next.stepId);
+          returnToUser(run.id, next.stepId);
+        });
         return waitForUser(workspaceId, run, next.stepId);
       }
       // The first refusal or error stops the run (a refusal is already an event; the stop is its own). The manager is told of a refusal as a result.

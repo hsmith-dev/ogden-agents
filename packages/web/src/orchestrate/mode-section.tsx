@@ -197,7 +197,8 @@ export function DefaultsView({ mode, limits, saving, error, saved, onMode, onLim
         description="A project you add starts on Approve each instruction whatever you choose here. Each project asks you to confirm Dispatch automatically for itself, once."
         confirmTitle="Offer Dispatch automatically?"
       />
-      <form className="flex flex-col gap-3" onSubmit={submit} data-testid="orchestration-limits-form">
+      {/* The server checks every limit against its bounds and says so in plain words, so the browser's own message stays out of the way. */}
+      <form className="flex flex-col gap-3" noValidate onSubmit={submit} data-testid="orchestration-limits-form">
         <Text variant="label">Limits of every run</Text>
         <Text variant="caption">These are safety limits, not a budget. Nothing here tracks money.</Text>
         {LIMIT_FIELDS.map(({ key, label, description }) => (

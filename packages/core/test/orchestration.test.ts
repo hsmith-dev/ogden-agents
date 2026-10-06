@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  AgentNotReadyError,
   DispatchRefusedError,
   DriverIsTerminalError,
   SessionNotIdleError,
@@ -814,8 +815,7 @@ describe('dispatch into a chat the step names (15.7)', () => {
     expect(sent).toEqual([]);
     tamper("UPDATE orchestration_steps SET chat = ? WHERE run_id = ?", own.id, run.id);
     tamper("UPDATE sessions SET agent_id = 'codex' WHERE id = ?", own.id);
-    expect(chatsOf(core, workspace.id).length).toBeGreaterThan(0);
-    void before;
+    expect(chatsOf(core, workspace.id)).toBe(before);
   });
 
   it('takes back an instruction the chat queued behind a turn that was ending, and refuses', async () => {
@@ -840,6 +840,55 @@ describe('dispatch into a chat the step names (15.7)', () => {
     expect(stepOf(await orchestration.getRun(workspace.id, run.id), 's1').state).toBe('approved');
     sendBehaviour.throws = undefined;
     expect((await orchestration.dispatchStep(workspace.id, run.id, 's1')).steps[0]!.state).toBe('dispatched');
+  });
+});
+
+describe('review fixes (15.7)', () => {
+  it('maps a chat that cannot be made to a plain refusal, with nothing created and the step still approved', async () => {
+    const kit = setUp(stubManager(planOf(['codex'])), { agents: WORKERS });
+    const { run } = await kit.orchestration.startRun(kit.workspace.id, { goal: 'Do the work' });
+    await kit.orchestration.approveStep(kit.workspace.id, run.id, 's1');
+    // The use-case over a chat whose agent turned signed out between the check and the start.
+    const own: OrchestrationChat = {
+      chatAgents: async () => ({ defaultAgentId: 'codex', agents: WORKERS }) as never,
+      createChatSession: () => Promise.reject(new AgentNotReadyError('agent_signed_out', 'Signed out.', 'codex' as never, 'sign_in')),
+      sendMessage: () => {
+        throw new Error('must not be reached');
+      },
+      getSession: (workspaceId, sessionId) => kit.core.entities.getSession(sessionId)!,
+      listSessions: () => [],
+      renameSession: () => {
+        throw new Error('must not be reached');
+      },
+      removeQueuedMessage: () => undefined,
+      cancel: () => undefined,
+    };
+    const use = kit.core.createOrchestration({ chat: own, manager: stubManager() });
+    const error = await use.dispatchStep(kit.workspace.id, run.id, 's1').catch((failure: unknown) => failure);
+    expect((error as DispatchRefusedError).reason).toBe('worker_signed_out');
+    expect(stepOf(await use.getRun(kit.workspace.id, run.id), 's1').state).toBe('approved');
+    expect(kit.core.entities.listSessions(kit.workspace.id)).toEqual([]);
+  });
+
+  it('leaves a named chat and its step untouched when the chat fails to take the instruction, and counts a message that was sent meanwhile as sent', async () => {
+    const kit = withOwnChat();
+    const { run } = await kit.orchestration.startRun(kit.workspace.id, { goal: 'Do the work' });
+    kit.sendBehaviour.throws = new Error('Ogden Agents is stopping.');
+    const failed = await trySend(kit.orchestration, kit.workspace.id, run.id, 's1');
+    expect((failed.error as Error).message).toBe('Ogden Agents is stopping.');
+    expect(stepOf(await kit.orchestration.getRun(kit.workspace.id, run.id), 's1')).toMatchObject({ state: 'approved', sessionId: null });
+    expect(kit.renamed).toEqual([]);
+  });
+
+  it('shows nothing of a reused chat\'s own history when the instruction is not among its newest events', async () => {
+    const { core, workspace, orchestration, own, finish, tamper } = withOwnChat();
+    finish(own.id, 'The user\'s own earlier conversation.');
+    const { run } = await orchestration.startRun(workspace.id, { goal: 'Do the work' });
+    await trySend(orchestration, workspace.id, run.id, 's1');
+    tamper("UPDATE orchestration_steps SET instruction = 'Another text.' WHERE run_id = ?", run.id);
+    finish(own.id, 'Newer output.');
+    expect(stepOf(await orchestration.getRun(workspace.id, run.id), 's1').report?.summary).toBe('');
+    void core;
   });
 });
 
@@ -931,6 +980,8 @@ describe('a send that fails leaves no empty chat unmarked (15.7)', () => {
     const step = stepOf(await kit.orchestration.getRun(kit.workspace.id, run.id), 's1');
     expect(step).toMatchObject({ state: 'failed', sessionId: kit.renamed[0]!.sessionId });
     expect(kit.renamed).toEqual([{ sessionId: step.sessionId, title: 'Not sent: step s1' }]);
+    // A failed send is final for the run, and the empty chat is never offered back to the manager.
+    expect((await kit.orchestration.getRun(kit.workspace.id, run.id)).run).toMatchObject({ state: 'failed', stopReason: 'worker_error' });
     kit.sendBehaviour.throws = undefined;
     await expect(kit.orchestration.dispatchStep(kit.workspace.id, run.id, 's1')).rejects.toBeInstanceOf(StepNotApprovedError);
     expect(kit.created).toHaveLength(1);

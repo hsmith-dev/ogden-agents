@@ -3,12 +3,12 @@ title: 'Dispatch and read-back across workers: handoff and send-message dispatch
 type: 'feature'
 ticket: '15.7'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '91c62fd25ed546539ceea880b4a5d0495bbe3297'
 context:
@@ -92,7 +92,7 @@ None yet.
 
 ## Review Triage Log
 
-(Filled in after review.)
+2026-10-05, security and correctness reviewers, no critical or high findings. Patched: a queued message that could not be taken back was refused as busy although it had been sent, so a retry would send twice (medium, both), now counted as sent; a named chat that failed to take an instruction was marked failed with the user's own chat id, and the read-back then showed that chat's older history (medium, both), now the step and chat are left as they were; a reused chat whose instruction is not in the newest events showed the user's earlier replies as the worker's result (medium), now an empty summary; a failed send left the run waiting forever (medium), now the run fails with `worker_error` as a worker's own error does; the empty chat of a failed send was offered back to the manager (medium), now excluded; tool titles were cut before masking (low), now masked first; the terminal check allowed any driver but `terminal` (low), now only the chat driver; tests: a vacuous unchanged check, the untested mapping of a chat that cannot be made, and stale test stubs of the chat. Not changed: a chat named by the step need not be one of the five offered (any idle plain chat of the worker, approved by the user, is allowed; the page shows the chat id); the worker's readiness is not read again after the chat is made (the window is one chat creation); a worker stopped by the user reads as done with a partial reply (existing, 15.8 Stop); tool call order follows each call's last update (cosmetic); identical instructions in one chat or a worker busier than 500 events can show a later step's output (known limit); worker text reaching the manager is wrapped as untrusted data by 15.4's input builder; a subscription test is any agent listing a subscription sign in (over restricts, never bypasses).
 
 ## Verification
 

@@ -34,6 +34,7 @@ function setUp(reply: (request: StructuredRequest) => StructuredResult = () => (
   };
   const source = core.createManagerSource({ endpoints: () => endpoints, port });
   const chat = {
+    listSessions: () => [],
     async chatAgents() {
       return { defaultAgentId: 'claude-code', agents: [{ agentId: 'claude-code', displayName: 'Claude Code', permissionModes: ['ask'] }] } as unknown as Awaited<ReturnType<OrchestrationChat['chatAgents']>>;
     },

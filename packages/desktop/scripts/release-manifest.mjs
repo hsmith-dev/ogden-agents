@@ -24,6 +24,11 @@ const FILE_RULES = [
   { test: (n) => n === 'Ogden Agents.app.tar.gz', name: (v) => `Ogden-Agents_${v}_universal.app.tar.gz`, platforms: ['darwin-aarch64', 'darwin-x86_64'], onlyWithUpdater: true },
   { test: (n) => /^Ogden Agents_.+_x64-setup\.exe$/.test(n), name: (v) => `Ogden-Agents_${v}_x64-setup.exe`, platforms: ['windows-x86_64'] },
   { test: (n) => /^Ogden Agents_.+_arm64-setup\.exe$/.test(n), name: (v) => `Ogden-Agents_${v}_arm64-setup.exe`, platforms: ['windows-aarch64'] },
+  // Linux (story 13.15): the AppImage is the update file (with its .sig); the .deb is an installer only.
+  { test: (n) => /^Ogden Agents_.+_amd64\.AppImage$/.test(n), name: (v) => `Ogden-Agents_${v}_amd64.AppImage`, platforms: ['linux-x86_64'] },
+  { test: (n) => /^Ogden Agents_.+_aarch64\.AppImage$/.test(n), name: (v) => `Ogden-Agents_${v}_aarch64.AppImage`, platforms: ['linux-aarch64'] },
+  { test: (n) => /^Ogden Agents_.+_amd64\.deb$/.test(n) || /^ogden-agents_.+_amd64\.deb$/.test(n), name: (v) => `Ogden-Agents_${v}_amd64.deb`, platforms: [] },
+  { test: (n) => /^Ogden Agents_.+_arm64\.deb$/.test(n) || /^ogden-agents_.+_arm64\.deb$/.test(n), name: (v) => `Ogden-Agents_${v}_arm64.deb`, platforms: [] },
 ];
 
 /**

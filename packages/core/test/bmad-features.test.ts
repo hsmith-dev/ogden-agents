@@ -142,7 +142,7 @@ describe('availability and the dependency rule (story 10.2)', () => {
     const core = openTestCore(undefined, undefined, ALL);
     const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
     const before = core.events.lastSeq();
-    for (const pieces of [['builds'], ['retrospectives'], ['board', 'retrospectives'], ['planning', 'builds']]) {
+    for (const pieces of [['builds'], ['retrospectives'], ['planning', 'retrospectives'], ['planning', 'builds']]) {
       expect(() => core.permissions.updateSettings(workspace.id, { bmadPieces: pieces }), JSON.stringify(pieces)).toThrow(ValidationError);
     }
     expect(core.events.lastSeq()).toBe(before);

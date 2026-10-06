@@ -1,5 +1,5 @@
-import { boardCardLabel, boardColumnOf, BUILD_LABEL, RUN_PHASE_LABELS, type TicketRow } from '@ogden-agents/shared';
-import { Hammer, Lock, Prohibit } from '@phosphor-icons/react';
+import { boardCardLabel, boardColumnOf, BUILD_THIS_STORY_LABEL, buildFailedText, RUN_PHASE_LABELS, type TicketRow } from '@ogden-agents/shared';
+import { Hammer, Lock, Prohibit, XCircle } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { memo } from 'react';
 import { Badge } from '@/ui/badge';
@@ -28,6 +28,8 @@ export interface TicketCardProps {
   building?: boolean;
   /** Whether this ticket's build waits in the queue (story 5.8): the card says Queued in place of Build. */
   queued?: boolean;
+  /** The failing check of the ticket's latest build, in words (story 11.2); shown under the status. */
+  buildFailure?: string | undefined;
 }
 
 /**
@@ -39,9 +41,10 @@ export interface TicketCardProps {
  * right, always visible, beside the link (never inside it). Memoized: a
  * refetch re-renders only the cards whose props changed.
  */
-export const TicketCard = memo(function TicketCard({ wsId, row, status, highlighted, onChoose, busy = false, onBuild, building = false, queued = false }: TicketCardProps) {
+export const TicketCard = memo(function TicketCard({ wsId, row, status, highlighted, onChoose, busy = false, onBuild, building = false, queued = false, buildFailure }: TicketCardProps) {
   const column = boardColumnOf(row);
-  const buildable = onBuild !== undefined && row.status === 'ready-for-dev' && !queued;
+  // Never on a ticket with an unmet prerequisite (it keeps "Waits for 1.2", story 11.3).
+  const buildable = onBuild !== undefined && row.status === 'ready-for-dev' && !queued && status.kind !== 'waits';
   return (
     <div className="relative min-w-0">
       <Link
@@ -51,7 +54,7 @@ export const TicketCard = memo(function TicketCard({ wsId, row, status, highligh
         data-ref={row.ref}
         data-column={column ?? 'dropped'}
         data-highlighted={highlighted ? 'true' : undefined}
-        aria-label={boardCardLabel(row.ref, row.title, status.text)}
+        aria-label={boardCardLabel(row.ref, row.title, buildFailure === undefined ? status.text : `${status.text}. ${buildFailedText(buildFailure)}`)}
         className={cn(
           'relative flex min-h-(--control-height) min-w-0 flex-col gap-1 overflow-hidden rounded-lg border border-border bg-card px-3 py-2 text-card-foreground',
           'transition-colors duration-(--motion-fast) ease-standard hover:bg-accent',
@@ -75,6 +78,12 @@ export const TicketCard = memo(function TicketCard({ wsId, row, status, highligh
           {status.kind === 'blocked' ? <Prohibit aria-hidden className="size-3.5 shrink-0 text-state-error" /> : null}
           <span className="min-w-0 truncate">{status.text}</span>
         </span>
+        {buildFailure === undefined ? null : (
+          <span className="flex min-w-0 items-center gap-1.5 text-caption text-state-error" data-testid="ticket-build-failure">
+            <XCircle aria-hidden className="size-3.5 shrink-0" />
+            <span className="min-w-0 break-words">{buildFailedText(buildFailure)}</span>
+          </span>
+        )}
       </Link>
       {onChoose === undefined ? null : <TicketStatusMenu row={row} onChoose={onChoose} busy={busy} className="absolute top-1 right-1" />}
       {queued ? (
@@ -89,14 +98,14 @@ export const TicketCard = memo(function TicketCard({ wsId, row, status, highligh
           size="sm"
           className="absolute right-1 bottom-1"
           data-testid="ticket-build"
-          aria-label={`${BUILD_LABEL} ${row.ref}`}
+          aria-label={`${BUILD_THIS_STORY_LABEL} ${row.ref}`}
           aria-disabled={building || undefined}
           onClick={() => {
             if (!building) onBuild(row.ref);
           }}
         >
           <Hammer aria-hidden />
-          {BUILD_LABEL}
+          {BUILD_THIS_STORY_LABEL}
         </Button>
       ) : null}
     </div>

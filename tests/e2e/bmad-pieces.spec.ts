@@ -81,7 +81,7 @@ test('Retrospectives is greyed, marked Coming soon and cannot be turned on; Plan
     await expect(page.getByTestId('bmad-use-coming-soon')).toHaveCount(0);
     // Opened at the anchor: the section's heading has focus.
     await expect(page.getByRole('heading', { name: 'BMad Method' })).toBeFocused();
-  });
+  }, { extra: { shippedBmadPieces: ['planning', 'board', 'builds'] } });
 });
 
 const SHIPPED: readonly BmadPiece[] = ['planning', 'board', 'builds'];
@@ -146,5 +146,5 @@ test('the BMad Method section: the rule as the user picks, Coming soon, and the 
     } finally {
       await context.close();
     }
-  }, { extra: { availableBmadPieces: SHIPPED } });
+  }, { extra: { shippedBmadPieces: SHIPPED, availableBmadPieces: SHIPPED } });
 });

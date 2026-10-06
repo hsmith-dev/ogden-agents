@@ -438,6 +438,42 @@ export const API_ROUTES = {
    * `vcs_unavailable` without a branch or a usable git.
    */
   workspaceBuildCommitPlan: `${API_BASE}/workspaces/:wsId/builds/:ref/commit-plan`,
+  /**
+   * `POST` (no body) → 201 `SessionResponse` (story 7.1's tracer): looks back
+   * on the epic whose folder name is `:epic` (an epic of the board's initiative):
+   * a session of kind `planning` whose first message invokes the project's
+   * retrospective skill on the epic's folder. Serves the `retrospectives`
+   * piece and needs the project's script trust (it reads the board). 400 for
+   * a malformed `:epic`, 404 for an epic not on the board or a project whose
+   * BMad Method has no such skill.
+   */
+  workspaceEpicLookBack: `${API_BASE}/workspaces/:wsId/epics/:epic/look-back`,
+  /**
+   * `GET` → `LookBackOffersResponse` (story 7.2): the epics whose finished-epic
+   * offer the user answered with Not now. Serves `retrospectives`, with the trust.
+   */
+  workspaceLookBackOffers: `${API_BASE}/workspaces/:wsId/look-back-offers`,
+  /**
+   * `DELETE` → 204 (story 7.2): Not now on epic `:epic`'s offer, kept per
+   * project and epic; the first one appends `workspace.look_back_offer_dismissed`,
+   * a repeat changes nothing. 400 for a malformed `:epic`. Serves
+   * `retrospectives`, with the trust.
+   */
+  workspaceEpicLookBackOffer: `${API_BASE}/workspaces/:wsId/epics/:epic/look-back-offer`,
+  /**
+   * `POST StartRetrospectiveStepRequest` → 201 `SessionResponse` (frozen by
+   * 7.2, served by 7.5): a planning session on one of the retrospective's
+   * next steps with the epic's retrospective file. 501 `not_implemented` until 7.5.
+   * Serves `retrospectives`, with the trust.
+   */
+  workspaceRetrospectiveSessions: `${API_BASE}/workspaces/:wsId/epics/:epic/retrospective/sessions`,
+  /**
+   * `POST` (no body) → `SaveLessonsResponse` (frozen by 7.2, served by 7.5):
+   * Save the lessons for later builds. 409 `nothing_to_save`,
+   * `checkout_busy` or `agents_file_missing` with nothing committed; 501
+   * `not_implemented` until 7.5. Serves `retrospectives`, with the trust.
+   */
+  workspaceRetrospectiveSave: `${API_BASE}/workspaces/:wsId/epics/:epic/retrospective/save`,
   /** `GET` → `SessionRunResponse` (story 5.2): the run of a `build` session; 404 for one without a run. */
   sessionRun: `${API_BASE}/workspaces/:wsId/sessions/:sesId/run`,
   // Pre-registered by story 5.3 for epics 5 and 11: each serves `builds`
@@ -480,6 +516,22 @@ export const API_ROUTES = {
   notificationWebhook: `${API_BASE}/settings/notifications/webhooks/:webhookId`,
   /** `POST` → `WebhookTestResult` (11.4): Send test, with the HTTP result inline. */
   notificationWebhookTest: `${API_BASE}/settings/notifications/webhooks/:webhookId/test`,
+  /**
+   * `GET` → `PanesResponse` (epic 16, story 16.2): the project's terminal
+   * panes and whether panes can open here. `POST OpenPaneRequest` → 201
+   * `PaneResponse`: opens a pane running the user's plain shell in the
+   * project folder. Developer mode only, enforced here: 403
+   * `developer_mode_required` otherwise; 409 `pane_limit_reached`; 409
+   * `terminal_unavailable` when `node-pty` could not load (AD-19). Never
+   * guarded by a piece (E16-R3).
+   */
+  workspacePanes: `${API_BASE}/workspaces/:wsId/panes`,
+  /** `PUT ArrangePanesRequest` → `PanesResponse` (epic 16, story 16.4): the project's layout arrangement. 400 unless it is the same panes, each once. Developer mode only. */
+  workspacePaneLayout: `${API_BASE}/workspaces/:wsId/pane-layout`,
+  /** `PATCH RenamePaneRequest` → `PaneResponse` (story 16.4): rename a pane. `DELETE` → 204 (epic 16): closes the pane and stops its process tree. Developer mode only. 404 for another workspace's pane. */
+  workspacePane: `${API_BASE}/workspaces/:wsId/panes/:paneId`,
+  /** `POST` → `PaneResponse` (epic 16): Restart pane. Stops what is left of the pane's program and starts it again in the same pane. Developer mode only. */
+  workspacePaneRestart: `${API_BASE}/workspaces/:wsId/panes/:paneId/restart`,
 } as const;
 
 /**
@@ -490,6 +542,15 @@ export const API_ROUTES = {
  * Not an `API_ROUTES` entry: it is no REST route.
  */
 export const TERMINAL_SOCKET_ROUTE = '/ws/terminal/:sesId' as const;
+
+/**
+ * The WebSocket of one terminal pane (epic 16, story 16.2): under `/ws`, so
+ * the gate checks it exactly as the event socket and the session terminal
+ * (Host, the tab-token subprotocol, Origin; AD-15), and the server
+ * additionally refuses it without Developer mode. Frames as
+ * `TERMINAL_SOCKET_ROUTE`'s, plus `PaneServerFrame`.
+ */
+export const PANE_SOCKET_ROUTE = '/ws/pane/:paneId' as const;
 
 /** The parameters a route pattern names, e.g. `{ wsId, sesId }`. */
 type RouteParams<Route extends string> = Route extends `${string}:${infer Name}/${infer Rest}`

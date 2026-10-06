@@ -40,7 +40,7 @@ import { openTestCore, soleAgent, tempDir, unusedCatalogParts } from './helpers.
 
 const UNKNOWN = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId;
 const SKILLS: CatalogSkill[] = [CatalogSkill.parse({ name: 'bmad-spec', description: 'Write a spec.' }), CatalogSkill.parse({ name: 'bmad-ticket', description: 'Make tickets.' })];
-const CATALOG: Catalog = { modules: [], skills: SKILLS, agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: true } };
+const CATALOG: Catalog = { modules: [], skills: SKILLS, agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: true, look_back: true } };
 const TICKETS: TicketsResponse = {
   tickets: [TicketRow.parse({ ref: '1.1', id: 1, epic: 'epic-one', title: 'First', type: 'story', status: '', state: 'planned', blocked_reason: '' })],
   problems: [],

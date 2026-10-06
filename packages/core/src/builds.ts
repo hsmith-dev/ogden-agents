@@ -98,7 +98,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
   } = ctx;
   const { startLocked } = start;
   const { deciding, unsubscribe } = outcome;
-  const { resumeLocked, rebaseLocked, applyFixLocked, retryLocked, extendAll, drainQueue, scheduleDrain } = dispatch;
+  const { resumeLocked, rebaseLocked, applyFixLocked, checkAgainLocked, retryLocked, extendAll, drainQueue, scheduleDrain } = dispatch;
   const { reviewOf } = reviewer;
 
   return {
@@ -347,6 +347,12 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       const { repoPath } = await guarded(workspaceId);
       const checked = checkedRunId(runId);
       return inDispatch(() => serializedByRepo(repoPath, () => resumeLocked(workspaceId, repoPath, checked, undefined)));
+    },
+
+    async checkAgain(workspaceId, runId) {
+      const { repoPath } = await guarded(workspaceId);
+      const checked = checkedRunId(runId);
+      return inDispatch(() => serializedByRepo(repoPath, () => checkAgainLocked(workspaceId, repoPath, checked)));
     },
 
     async retry(workspaceId, runId, request) {

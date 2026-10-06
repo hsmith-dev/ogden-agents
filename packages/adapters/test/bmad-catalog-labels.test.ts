@@ -29,8 +29,8 @@ describe('readModuleLabels', () => {
     });
     expect(problems).toEqual([]);
     expect(labels.entry).toBe('alpha');
-    expect(labels.skills.get('alpha')).toEqual({ label: 'Describe your idea', description: 'One sentence.', group: 'planning', next: { skill: 'beta', label: 'Turn this into a spec' } });
-    expect(labels.skills.get('beta')).toEqual({ label: 'Write the spec', description: null, group: null, next: null });
+    expect(labels.skills.get('alpha')).toEqual({ label: 'Describe your idea', description: 'One sentence.', group: 'planning', next: { skill: 'beta', label: 'Turn this into a spec' }, scope: null, nexts: [] });
+    expect(labels.skills.get('beta')).toEqual({ label: 'Write the spec', description: null, group: null, next: null, scope: null, nexts: [] });
   });
 
   it('leaves out a bad entry or field, keeps the rest, and reports each, unknown keys included', () => {
@@ -49,7 +49,7 @@ describe('readModuleLabels', () => {
     });
     expect(labels.entry).toBeNull();
     expect([...labels.skills.keys()]).toEqual(['badfields', 'typos', 'good']);
-    expect(labels.skills.get('badfields')).toEqual({ label: 'Fine', description: null, group: null, next: null });
+    expect(labels.skills.get('badfields')).toEqual({ label: 'Fine', description: null, group: null, next: null, scope: null, nexts: [] });
     expect(labels.skills.get('typos')?.next).toEqual({ skill: 'good', label: 'Go' });
     expect(problems).toEqual([
       "skill-labels.json has an unknown key 'extra'",
@@ -72,6 +72,70 @@ describe('readModuleLabels', () => {
     expect(labels.skills.size).toBe(0);
     expect(problems).toEqual(["'skills' is not an object"]);
     expect(readModuleLabels({ entry: null, skills: {} }).problems).toEqual([]);
+  });
+});
+
+describe('epic scope and further next steps (story 7.3)', () => {
+  it('reads an epic scope and a list of further next steps, each once and bounded', () => {
+    const { labels, problems } = readModuleLabels({
+      skills: {
+        alpha: { label: 'Look back', scope: 'epic', nexts: [{ skill: 'beta', label: 'Add lessons' }, { skill: 'gamma', label: ' Make tickets ' }] },
+        beta: { label: 'Plain' },
+      },
+    });
+    expect(problems).toEqual([]);
+    expect(labels.skills.get('alpha')).toMatchObject({ scope: 'epic', nexts: [{ skill: 'beta', label: 'Add lessons' }, { skill: 'gamma', label: 'Make tickets' }] });
+    expect(labels.skills.get('beta')).toMatchObject({ scope: null, nexts: [] });
+  });
+
+  it('leaves out and reports a bad scope or step instead of failing, and bounds the list', () => {
+    const many = Array.from({ length: 10 }, (_, index) => ({ skill: `s${index}`, label: 'x' }));
+    const { labels, problems } = readModuleLabels({
+      skills: {
+        one: { label: 'One', scope: 'initiative' },
+        dup: { label: 'Dup', nexts: [{ skill: 'a', label: 'A' }, { skill: 'a', label: 'Again' }, { skill: 'dup', label: 'Itself' }] },
+        two: { label: 'Two', nexts: 'x' },
+        three: { label: 'Three', nexts: [{ skill: '../x', label: 'Go' }, { skill: 'ok', label: 'Fine', lable: 'x' }, 5] },
+        four: { label: 'Four', nexts: many },
+      },
+    });
+    expect(labels.skills.get('one')?.scope).toBeNull();
+    expect(labels.skills.get('two')?.nexts).toEqual([]);
+    expect(labels.skills.get('dup')?.nexts).toEqual([{ skill: 'a', label: 'A' }]);
+    expect(labels.skills.get('three')?.nexts).toEqual([{ skill: 'ok', label: 'Fine' }]);
+    expect(labels.skills.get('four')?.nexts).toHaveLength(8);
+    expect(problems).toEqual([
+      "skills.one.scope is not 'epic'",
+      'skills.two.nexts is not a list',
+      'skills.three.nexts[0] needs a skill name and a label',
+      "skills.three.nexts[1] has an unknown key 'lable'",
+      'skills.three.nexts[2] needs a skill name and a label',
+      'skills.four.nexts has more than 8 steps',
+    ]);
+  });
+
+  it('applyLabels gives the scope and only the steps whose skills are installed, and nothing to an unverified skill', () => {
+    const mapping = readModuleLabels({
+      skills: { alpha: { label: 'Look back', scope: 'epic', nexts: [{ skill: 'beta', label: 'Lessons' }, { skill: 'missing', label: 'Gone' }] }, beta: { label: 'Lessons' } },
+    }).labels;
+    const verified = applyLabels(installed, mapping, new Set(['alpha', 'beta'])).skills;
+    expect(verified[0]).toMatchObject({ name: 'alpha', scope: 'epic', nexts: [{ skill: 'beta', label: 'Lessons' }] });
+    expect(verified[1]).toMatchObject({ name: 'beta', scope: null, nexts: [] });
+    expect(applyLabels(installed, mapping, new Set(['beta'])).skills[0]).toMatchObject({ name: 'alpha', scope: null, nexts: [] });
+  });
+
+  it('the shipped mapping makes the retrospective an epic action with the lessons and the action items as its next steps, in plain words', () => {
+    const look = SKILL_LABELS.skills['bmad-retrospective']!;
+    expect(look).toMatchObject({ label: 'Look back on this epic', scope: 'epic' });
+    expect(look.nexts).toEqual([
+      { skill: 'bmad-project-context', label: 'Add the lessons to AGENTS.md' },
+      { skill: 'bmad-ticket', label: 'Turn the action items into tickets' },
+    ]);
+    expect(SKILL_LABELS.skills['bmad-project-context']!.label).toBe('Record lessons for later builds');
+    expect(readModuleLabels(SKILL_LABELS).problems).toEqual([]);
+    for (const text of [look.label, ...look.nexts!.map((step) => step.label)]) expect(text).not.toMatch(/[\u2013\u2014]/);
+    // Only the retrospective is epic-scoped.
+    expect(Object.entries(SKILL_LABELS.skills).filter(([, each]) => each.scope === 'epic').map(([name]) => name)).toEqual(['bmad-retrospective']);
   });
 });
 
@@ -105,10 +169,10 @@ describe('applyLabels', () => {
   it('labels a skill, keeps the SKILL.md description without a sentence, and leaves an unlabelled skill null', () => {
     const { skills, entryAction, labelled } = applyLabels(installed, labels, ALL);
     expect(skills).toEqual([
-      { name: 'alpha', description: 'Alpha in one sentence.', label: 'Describe your idea', group: 'planning', module: null, installedAt: null, next: { skill: 'beta', label: 'Next' } },
+      { name: 'alpha', description: 'Alpha in one sentence.', label: 'Describe your idea', group: 'planning', module: null, installedAt: null, next: { skill: 'beta', label: 'Next' }, scope: null, nexts: [] },
       // An unknown group is kept as written (the Plan page shows it under Other); a next that isn't installed is null.
-      { name: 'beta', description: 'Beta from SKILL.md.', label: 'Beta label', group: 'someday', module: null, installedAt: null, next: null },
-      { name: 'gamma', description: '', label: null, group: null, module: null, installedAt: null, next: null },
+      { name: 'beta', description: 'Beta from SKILL.md.', label: 'Beta label', group: 'someday', module: null, installedAt: null, next: null, scope: null, nexts: [] },
+      { name: 'gamma', description: '', label: null, group: null, module: null, installedAt: null, next: null, scope: null, nexts: [] },
     ]);
     expect(entryAction).toBe('alpha');
     expect(labelled).toBe(true);
@@ -128,9 +192,9 @@ describe('applyLabels', () => {
   it('labels only verified skills (entry 4.12): an unverified one keeps its SKILL.md text, is never the entry action, and no next points at it', () => {
     const { skills, entryAction, labelled } = applyLabels(installed, labels, new Set(['beta']));
     expect(skills).toEqual([
-      { name: 'alpha', description: 'Alpha from SKILL.md.', label: null, group: null, module: null, installedAt: null, next: null },
-      { name: 'beta', description: 'Beta from SKILL.md.', label: 'Beta label', group: 'someday', module: null, installedAt: null, next: null },
-      { name: 'gamma', description: '', label: null, group: null, module: null, installedAt: null, next: null },
+      { name: 'alpha', description: 'Alpha from SKILL.md.', label: null, group: null, module: null, installedAt: null, next: null, scope: null, nexts: [] },
+      { name: 'beta', description: 'Beta from SKILL.md.', label: 'Beta label', group: 'someday', module: null, installedAt: null, next: null, scope: null, nexts: [] },
+      { name: 'gamma', description: '', label: null, group: null, module: null, installedAt: null, next: null, scope: null, nexts: [] },
     ]);
     expect(entryAction).toBeNull();
     expect(labelled).toBe(true);

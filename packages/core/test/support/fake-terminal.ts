@@ -10,7 +10,7 @@
  * off), records every write and resize, and exits when the test says so or a
  * moment after it is killed.
  */
-import type { OpenTerminal, TerminalAvailability, TerminalPort, TerminalProcess, TerminalSize } from '../../src/index.js';
+import type { OpenPane, OpenTerminal, PaneProcess, TerminalAvailability, TerminalPort, TerminalProcess, TerminalSize } from '../../src/index.js';
 
 /** One terminal the fake opened, with what the test can read and do. */
 export interface FakeCli {
@@ -57,8 +57,24 @@ export function fakeTerminal({
   opening,
 }: FakeTerminalOptions = {}) {
   const processes: FakeCli[] = [];
+  /** What each terminal has printed so far, which a pane's snapshot is (the fake has no screen to serialize). */
+  const printed = new Map<TerminalProcess, string>();
+  let nextPid = 1000;
   const port: TerminalPort = {
     available: async () => available,
+    async openPane(input: OpenPane): Promise<PaneProcess> {
+      const process = await port.open(input);
+      printed.set(process, '');
+      process.onData((text) => printed.set(process, (printed.get(process) ?? '') + text));
+      return {
+        ...process,
+        pid: nextPid++,
+        attach(onSnapshot, onData) {
+          onSnapshot(printed.get(process) ?? '');
+          return process.onData(onData);
+        },
+      };
+    },
     async open(input) {
       await opening?.();
       if (!available.ok) throw new Error(available.reason);

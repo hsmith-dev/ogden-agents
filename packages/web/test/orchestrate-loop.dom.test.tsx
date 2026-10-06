@@ -133,7 +133,7 @@ describe('what the manager decided', () => {
   it('says the manager finished the run, leaves the steps never sent as not needed, and offers nothing more', () => {
     mount(view([step('s1', { state: 'done', sessionId: SES }), step('s2')], 'finished', { decision: { action: 'done', reason: 'The first step was enough.', at } }));
     expect((screen.getByTestId('orchestrate-decision')).textContent).toContain('The manager says the goal is done. The first step was enough.');
-    expect((screen.getAllByTestId('orchestrate-step-state')[1]).textContent).toContain('Not needed, the manager said the goal is done');
+    expect((screen.getAllByTestId('orchestrate-step-state')[1]!).textContent).toContain('Not needed, the manager said the goal is done');
     expect(screen.queryByTestId('orchestrate-approve')).toBeNull();
   });
 
@@ -147,7 +147,7 @@ describe('what the manager decided', () => {
     mount(
       view([step('s1', { state: 'failed', sessionId: SES, sessionState: 'working' }), step('s2')], 'stopped', { decision: { action: 'stop', reason: 'Denied, so I stop.', told: 'denied', at } }, { stopReason: 'permission_denied' }),
     );
-    expect((screen.getAllByTestId('orchestrate-step-state')[0]).textContent).toContain('Denied, the step ended');
+    expect((screen.getAllByTestId('orchestrate-step-state')[0]!).textContent).toContain('Denied, the step ended');
     expect((screen.getByTestId('orchestrate-stop-reason')).getAttribute('data-stop-reason')).toBe('permission_denied');
     expect((screen.getByTestId('orchestrate-stop-reason')).textContent).toContain('denied, so that step ended and the run stopped. The manager was told.');
     expect((screen.getByTestId('orchestrate-decision')).textContent).toContain('The manager was told the permission was denied. It said: stop. Denied, so I stop.');

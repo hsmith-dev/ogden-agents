@@ -466,8 +466,8 @@ export const BoundedRunLimits = z.strictObject({
 
 /**
  * How deep a step is (15.8): a step that needs nothing is at depth 1, and any other is one deeper than the deepest step it needs, so a
- * run's depth is its longest chain of `depends_on`. (The manager's own decisions nest no deeper than that until the loop, entry 9,
- * which counts a decision that follows a result as one more level.) A step that needs one not in the list is counted as if it did not.
+ * run's depth is its longest chain of `depends_on`. (The loop, 15.9, adds no level: the manager can only choose among the plan's steps, so a
+ * decision never nests deeper than the plan does.) A step that needs one not in the list is counted as if it did not.
  */
 export function stepDepths(steps: ReadonlyArray<{ stepId: string; dependsOn: readonly string[] }>): Map<string, number> {
   const needs = new Map(steps.map((step) => [step.stepId, step.dependsOn]));

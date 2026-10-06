@@ -43,3 +43,19 @@ Grok (v1.1) modes: no session modes; the chat's mode is given once at chat start
   Unattended runs never go unsandboxed.
 - **Sign-in (CAP-16):** terminal-type auth methods (Claude Code) run in a hidden PTY driven by the UI, with `clientCapabilities.auth.terminal` advertised; other agents use ACP `authenticate` or their CLI login. API keys come from the keychain (`SecretStorePort`, AD-16) and are passed only in the child process environment.
 - **Permission modes (CAP-4, 2026-10-02):** each agent declares the per-chat modes it supports (Ask, Auto, Skip all; the standalone permission modes story defines all three for Claude Code). Antigravity declares a mode only where its own ACP mode means the same (third-party reports name `default`, `auto-edit` and `yolo`; verify in 6.1).
+
+## Terminal panes (epic 16, Developer mode)
+
+Each agent's own CLI can run in a terminal pane, found by detection and never installed by Ogden Agents (the user installs it, then presses Detect). The user signs in inside the CLI; Ogden Agents never sees or stores that sign in, and passes the pane no key or token. A pane starts the program by the absolute path detection found, with no flag of Ogden Agents' own that skips a permission prompt. The names and places below come from each vendor's public docs and the spike 16.1 findings; the user's live checks on a Mac and a Windows machine confirm each.
+
+| Launcher | Program | Where an install usually puts it | Install page | Notes for panes |
+|---|---|---|---|---|
+| Claude Code | `claude` | macOS and Linux `~/.local/bin/claude`; Windows `%USERPROFILE%\.local\bin\claude.exe`; npm global `claude` or `claude.cmd` | docs.anthropic.com Claude Code | resume: `claude --resume` |
+| Codex | `codex` | npm global (Windows `%APPDATA%\npm\codex.cmd`), Homebrew | github.com/openai/codex | full screen program, so a refresh needs the server's screen mirror; resume: `codex resume` |
+| Grok | `grok` | `~/.local/bin`, `~/.grok/bin`; npm | x.ai/cli | young, expect changes; resume: `grok --resume` |
+| Antigravity | `agy` | `~/.local/bin/agy`; Windows `%LOCALAPPDATA%\agy\bin` | antigravity.google | replaced the Gemini CLI for Google's consumer plans |
+| Copilot | `copilot` | npm global, WinGet `GitHub.Copilot`, Homebrew | docs.github.com Copilot CLI | interactive only: never fed by Ogden Agents, never started on a schedule or by another agent, left out of any automation |
+| Gemini | `gemini` | npm global | github.com/google-gemini/gemini-cli | offered only when it is already installed |
+| Shell | the user's `SHELL`; Windows PowerShell | the system's | none | PowerShell can take seconds to start, so a pane shows Starting and offers Restart |
+
+Status (working, needs attention, idle) is a guess from output and each launcher's prompt patterns, which are data and need the user's live check of the exact words each CLI shows at a permission question.

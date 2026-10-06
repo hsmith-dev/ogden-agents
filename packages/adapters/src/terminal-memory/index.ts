@@ -8,7 +8,7 @@
  * `open` that rejects, a CLI that ignores its kill, and one that crashes as
  * it starts.
  */
-import type { OpenTerminal, TerminalAvailability, TerminalPort, TerminalProcess } from '@ogden-agents/core';
+import type { OpenPane, OpenTerminal, PaneProcess, TerminalAvailability, TerminalPort, TerminalProcess } from '@ogden-agents/core';
 
 /** One terminal the memory port opened, with what the test can read and do. */
 export interface MemoryTerminalProcess extends TerminalProcess {
@@ -120,6 +120,20 @@ export function createMemoryTerminalPort(options: MemoryTerminalOptions = {}): M
       availability = next;
     },
     available: async () => availability,
+    async openPane(input: OpenPane): Promise<PaneProcess> {
+      const process = await this.open(input);
+      let printed = '';
+      process.onData((text) => (printed += text));
+      return {
+        ...process,
+        pid: undefined,
+        // No screen to serialize: the snapshot is what was printed so far.
+        attach(onSnapshot, onData) {
+          onSnapshot(printed);
+          return process.onData(onData);
+        },
+      };
+    },
     async open(input) {
       if (!availability.ok) throw new Error(availability.reason);
       if (options.openError !== undefined) throw options.openError;

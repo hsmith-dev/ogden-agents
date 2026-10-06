@@ -26,6 +26,7 @@ vi.mock('@xterm/xterm', () => ({
     constructor() {
       fakes.terminals.push(this);
     }
+    unicode = { activeVersion: '6' };
     loadAddon() {}
     open() {}
     focus() {}
@@ -46,6 +47,7 @@ vi.mock('@xterm/xterm', () => ({
   },
 }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
+vi.mock('@xterm/addon-unicode11', () => ({ Unicode11Addon: class {} }));
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
 vi.mock('../src/terminal/terminal-socket', () => ({
   connectTerminal: (_sesId: string, handlers: TerminalSocketHandlers) => {

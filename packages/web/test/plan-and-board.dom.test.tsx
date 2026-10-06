@@ -1138,7 +1138,7 @@ describe('Commit plan files on the board (story 5.5)', () => {
     state.commitPlan = { committed: ['_bmad-output/plan.md'], revision: 'a'.repeat(40) };
     mount(<BoardTickets wsId={WS} builds={{ onStarted: () => {} }} />);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Build 1.1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Build this story 1.1' }));
     await settle();
     expect(screen.getByTestId('board-build-error').textContent).toContain(PLAN_UNCOMMITTED_MESSAGE);
     fireEvent.click(screen.getByRole('button', { name: COMMIT_PLAN_FILES_LABEL }));
@@ -1153,7 +1153,7 @@ describe('Commit plan files on the board (story 5.5)', () => {
     state.build = { status: 409, code: 'plan_uncommitted', message: BMAD_FILES_UNCOMMITTED_MESSAGE };
     mount(<BoardTickets wsId={WS} builds={{ onStarted: () => {} }} />);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Build 1.1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Build this story 1.1' }));
     await settle();
     expect(screen.getByTestId('board-build-error').textContent).toContain(BMAD_FILES_UNCOMMITTED_MESSAGE);
     expect(screen.queryByRole('button', { name: COMMIT_PLAN_FILES_LABEL })).toBeNull();
@@ -1163,7 +1163,7 @@ describe('Commit plan files on the board (story 5.5)', () => {
     state.commitPlan = { committed: [], revision: 'a'.repeat(40) };
     mount(<BoardTickets wsId={WS} builds={{ onStarted: () => {} }} />);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Build 1.1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Build this story 1.1' }));
     await settle();
     fireEvent.click(screen.getByRole('button', { name: COMMIT_PLAN_FILES_LABEL }));
     await settle();

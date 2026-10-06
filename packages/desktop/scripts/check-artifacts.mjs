@@ -40,6 +40,17 @@ if (target.includes('apple-darwin')) {
   }
   // One Windows installer only: the spike found the MSI and NSIS installers share one folder and remove each other.
   if (files(join(bundle, 'msi')).length > 0) problems.push('an MSI was built; only the NSIS installer ships');
+} else if (target.includes('linux')) {
+  // AppImage (the updater's file, with its .sig) and a .deb (installs through the package manager; it cannot self-update).
+  const appimage = files(join(bundle, 'appimage')).filter((f) => f.endsWith('.AppImage'));
+  const deb = files(join(bundle, 'deb')).filter((f) => f.endsWith('.deb'));
+  if (appimage.length !== 1) problems.push(`expected one .AppImage, found ${appimage.length}`);
+  if (deb.length !== 1) problems.push(`expected one .deb, found ${deb.length}`);
+  for (const f of appimage) {
+    if (updater && !existsSync(join(bundle, 'appimage', `${f}.sig`))) problems.push(`${f} has no .sig`);
+    console.log(`${f}: ${MB(statSync(join(bundle, 'appimage', f)).size)}`);
+  }
+  for (const f of deb) console.log(`${f}: ${MB(statSync(join(bundle, 'deb', f)).size)}`);
 } else problems.push(`unknown target ${target}`);
 
 if (problems.length > 0) {

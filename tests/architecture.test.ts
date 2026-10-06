@@ -149,6 +149,8 @@ export const AGENT_ENV_NAMES = [
   'GROK_HOME',
   'GEMINI_API_KEY',
   'GEMINI_HOME',
+  'OPENCODE_CONFIG',
+  'OGDEN_ENDPOINT_KEY',
 ] as const;
 
 /** The packages that must name no agent id. */
@@ -176,6 +178,12 @@ export function findAgentIdViolations(files: readonly SourceFile[], ids: readonl
 }
 
 describe('AD-1: core and shared name no agent (epic 6)', () => {
+  it("core, shared and the web never use the string 'local' as an agent id (epic 14; a longer name such as local_endpoints is not one)", () => {
+    const violations = loadWorkspaceSources().filter((file) => (AGENT_NEUTRAL.has(file.pkg) || WEB_SOURCE.test(file.path)) && /(['"`])local\1/.test(withoutComments(file.source))).map((file) => file.path);
+    expect(violations).toEqual([]);
+  });
+
+
   it('no core or shared source names an agent id outside tests', () => {
     const files = loadWorkspaceSources();
     expect(files.some((file) => file.pkg === '@ogden-agents/core')).toBe(true);
@@ -292,6 +300,49 @@ describe('E6-R3: the shared ACP client names no agent (6.4)', () => {
       'packages/adapters/src/acp-base/b.ts: the shared ACP client imports ../acp-claude-code/x.js (an agent\'s own adapter)',
       'packages/adapters/src/acp-base/d.ts: the shared ACP client imports ../index.js (an agent\'s own adapter)',
       'packages/adapters/src/acp-base/d.ts: the shared ACP client imports @ogden-agents/adapters (an agent\'s own adapter)',
+    ]);
+  });
+});
+
+/**
+ * E14-R1 (epic 14): core, shared, the shared ACP client and the web name neither
+ * Ollama, LM Studio nor the route's harness. They come from the Local model's own
+ * adapter and descriptor (the presets are data the server serves).
+ */
+const LOCAL_MODEL_WORDS = /ollama|lm[ -]?studio|opencode/gi;
+const LOCAL_MODEL_NEUTRAL = /(^|[\\/])packages[\\/](?:core|shared|web)[\\/]src[\\/]|(^|[\\/])packages[\\/]adapters[\\/]src[\\/]acp-base[\\/]/;
+
+/** One message per local server or harness name in neutral code (comments aside). */
+export function findLocalModelNameViolations(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    if (!LOCAL_MODEL_NEUTRAL.test(path)) continue;
+    for (const match of withoutComments(source).matchAll(LOCAL_MODEL_WORDS)) violations.push(`${path}: neutral code names ${match[0]} (E14-R1: it comes from the Local model's adapter and descriptor)`);
+  }
+  return violations;
+}
+
+describe('E14-R1: core, shared, the shared ACP client and the web name no local server or harness (epic 14)', () => {
+  it('no neutral source names Ollama, LM Studio or the route\'s harness', () => {
+    const files = loadWorkspaceSources();
+    for (const area of ['core', 'shared', 'web', 'acp-base']) expect(files.some((file) => (area === 'acp-base' ? ACP_BASE.test(file.path) : file.path.split('\\').join('/').includes(`packages/${area}/src/`))), area).toBe(true);
+    expect(findLocalModelNameViolations(files)).toEqual([]);
+  });
+
+  it('flags a planted name, but not in a comment, in adapters, or in the server', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/a.ts', source: "const url = 'http://localhost:11434'; // Ollama\nconst label = 'LM Studio';" },
+      { pkg: '@ogden-agents/shared', path: 'packages/shared/src/b.ts', source: 'const kind = `lmstudio`;' },
+      { pkg: '@ogden-agents/web', path: 'packages/web/src/c.tsx', source: "const harness = 'OpenCode';" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-base/d.ts', source: "const x = 'opencode';" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-opencode/e.ts', source: "const x = 'OpenCode';" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/f.ts', source: "const x = 'Ollama';" },
+    ];
+    expect(findLocalModelNameViolations(files)).toEqual([
+      "packages/core/src/a.ts: neutral code names LM Studio (E14-R1: it comes from the Local model's adapter and descriptor)",
+      "packages/shared/src/b.ts: neutral code names lmstudio (E14-R1: it comes from the Local model's adapter and descriptor)",
+      "packages/web/src/c.tsx: neutral code names OpenCode (E14-R1: it comes from the Local model's adapter and descriptor)",
+      "packages/adapters/src/acp-base/d.ts: neutral code names opencode (E14-R1: it comes from the Local model's adapter and descriptor)",
     ]);
   });
 });
@@ -465,5 +516,40 @@ describe('AD-10: only an approved merge marks a ticket done (story 5.9)', () => 
 
   it("only core's builds use-case marks done with approve: true (the store's own refusal aside)", () => {
     expect(approvers()).toEqual(['core/builds.ts']);
+  });
+});
+
+/** The programs a terminal pane may launch (epic 16): launchers are data in the adapters, so the neutral packages name none, not even by executable name. */
+const PANE_PROGRAM_NAMES = ['claude', 'codex', 'grok', 'gemini', 'agy', 'copilot', 'antigravity'] as const;
+
+/** One message per mention of a program name in code (comments allowed to give examples) of a neutral pane file, or of `acp-base`. */
+export function findPaneProgramViolations(files: readonly SourceFile[]): string[] {
+  const named = new RegExp(`(?<![A-Za-z0-9])(${PANE_PROGRAM_NAMES.join('|')})(?![A-Za-z0-9])`, 'gi');
+  const violations: string[] = [];
+  for (const { pkg, path, source } of files) {
+    const neutral = ((pkg === '@ogden-agents/core' || pkg === '@ogden-agents/shared') && /(^|[\\/])(panes?|events-panes|terminal-port)\.ts$/.test(path)) || /[\\/]acp-base[\\/]/.test(path);
+    if (!neutral) continue;
+    for (const match of withoutComments(source).matchAll(named)) violations.push(`${path}: names the program ${match[1]} (epic 16: launchers are data in the adapters)`);
+  }
+  return violations;
+}
+
+describe('epic 16: core, shared and acp-base name no pane program', () => {
+  it('the pane contracts and use-cases name none', () => {
+    const files = loadWorkspaceSources();
+    expect(files.some((file) => /panes\.ts$/.test(file.path))).toBe(true);
+    expect(findPaneProgramViolations(files)).toEqual([]);
+  });
+
+  it('flags a program name in code, but not in a comment or a longer word', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'core/src/panes.ts', source: "const file = 'claude';\n// codex is only an example\nconst x = 'codexes';" },
+      { pkg: '@ogden-agents/shared', path: 'shared/src/panes.ts', source: 'const a = `run grok`;' },
+      { pkg: '@ogden-agents/adapters', path: 'adapters/src/pane-launchers/index.ts', source: "const id = 'claude';" },
+    ];
+    expect(findPaneProgramViolations(files)).toEqual([
+      'core/src/panes.ts: names the program claude (epic 16: launchers are data in the adapters)',
+      'shared/src/panes.ts: names the program grok (epic 16: launchers are data in the adapters)',
+    ]);
   });
 });

@@ -7,10 +7,10 @@ import { PermissionMode } from './entities.js';
  * 10.2). Every shape, rule and user-facing text of epic 10 lives here, so
  * epics 4 to 7 and entries 10.3 to 10.6 build against one list:
  *
- * - the four pieces, each with its plain label, one sentence and what it needs;
+ * - the five pieces, each with its plain label, one sentence and what it needs;
  * - the dependency rule as one function ({@link applyBmadPieceChoice}) and
  *   one check ({@link bmadPiecesProblem});
- * - what the install ships ({@link BmadPiecesResponse}: all four, each
+ * - what the install ships ({@link BmadPiecesResponse}: all five, each
  *   available or not with the coming-soon reason);
  * - the app-wide default for new projects, Welcome's one-time answer for the
  *   first project, the read-only detection of a repo's `_bmad/`, and the
@@ -26,7 +26,7 @@ import { PermissionMode } from './entities.js';
  * piece off (there is no master flag). Widening this list keeps stored
  * events parseable.
  */
-export const BMAD_PIECES = ['planning', 'board', 'builds', 'retrospectives'] as const;
+export const BMAD_PIECES = ['planning', 'board', 'builds', 'retrospectives', 'orchestration'] as const;
 export const BmadPiece = z.enum(BMAD_PIECES);
 export type BmadPiece = z.infer<typeof BmadPiece>;
 
@@ -64,6 +64,8 @@ export const BMAD_PIECE_INFO: Readonly<Record<BmadPiece, BmadPieceInfo>> = {
   board: { label: 'Board', sentence: "See this project's tickets on a board and move them along.", needs: [], runsProjectScripts: true },
   builds: { label: 'Unattended builds', sentence: 'Let an agent build tickets on its own, then review and approve the work.', needs: ['board'], runsProjectScripts: true },
   retrospectives: { label: 'Retrospectives', sentence: 'Look back on finished work and record what to change next time.', needs: ['board'], runsProjectScripts: true },
+  // Epic 15 (story 15.2 registers it, off by default): a manager model tells the other agents what to do; it works on chats, so it needs no other piece and runs none of the project's scripts.
+  orchestration: { label: 'Orchestration', sentence: 'Let a manager model plan the work and tell your other agents what to do, with you approving each instruction.', needs: [], runsProjectScripts: false },
 };
 
 /** Whether any of `pieces` runs the project's own BMad Method scripts (so turning it on asks for the project's trust first). */
@@ -241,7 +243,7 @@ export const BmadPieceAvailability = z
   .refine((entry) => entry.available === (entry.reason === undefined), 'A reason is given exactly when a piece is unavailable.');
 export type BmadPieceAvailability = z.infer<typeof BmadPieceAvailability>;
 
-/** `GET /api/v1/bmad/pieces`: always all four pieces, in canonical order. */
+/** `GET /api/v1/bmad/pieces`: always all five pieces, in canonical order. */
 export const BmadPiecesResponse = z.object({
   pieces: z
     .array(BmadPieceAvailability)
@@ -340,7 +342,7 @@ export const BMAD_SECTION_INTRO = 'Projects start as simple chats. Turn on the B
 export const BMAD_USE_LABEL = 'Use BMad Method in this project';
 /** The main switch's sentence. */
 export const BMAD_USE_DESCRIPTION = 'Turns on the features most projects start with. Turning it off turns every feature off. Choose each feature below.';
-/** The accessible name of the list of the four pieces under the main switch. */
+/** The accessible name of the list of the five pieces under the main switch. */
 export const BMAD_PIECES_LIST_LABEL = 'BMad Method features';
 /** Said when the main switch turned BMad on. */
 export const BMAD_ON_TEXT = 'BMad Method is on in this project.';

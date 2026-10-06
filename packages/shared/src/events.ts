@@ -27,6 +27,13 @@ export {
 import { SettingsLocalEndpointsChangedEvent, SettingsLocalEndpointsChangedInput } from './events-local.js';
 
 export { LOCAL_ENDPOINT_CHANGES, SettingsLocalEndpointsChangedEvent } from './events-local.js';
+// The orchestration events (epic 15 story 15.2).
+import * as orch from './events-orchestration.js';
+
+export {
+  OrchestrationModeChangedEvent, OrchestrationPlanProposedEvent, OrchestrationResultReadEvent, OrchestrationRunFinishedEvent, OrchestrationRunPausedEvent, OrchestrationRunStartedEvent,
+  OrchestrationRunStoppedEvent, OrchestrationStepApprovedEvent, OrchestrationStepDispatchedEvent, OrchestrationStepEditedEvent, OrchestrationStepProposedEvent, OrchestrationStepSkippedEvent,
+} from './events-orchestration.js';
 // Build run events and the builds and notification settings events (stories 5.2, 5.3).
 import * as runs from './events-runs.js';
 
@@ -80,6 +87,8 @@ import {
 } from './events-session.js';
 import { ModelId, PermissionMode, Workspace } from './entities.js';
 import { BmadPieces } from './bmad.js';
+import { OrchestrationMode } from './orchestration.js';
+import { TeamRoster } from './team.js';
 import {
   BmadSetupCompletedEvent,
   BmadSetupCompletedInput,
@@ -305,6 +314,17 @@ const WorkspaceSettingsChangedInput = z.object({
      */
     whileWorking: WhileWorking.nullable().optional(),
     previousWhileWorking: WhileWorking.nullable().optional(),
+    /**
+     * The project's orchestration mode and roster, now and before (epic 15
+     * story 15.2), present when they changed; `orchestrationAutomaticConfirmed`
+     * when the user confirmed the switch to automatic dispatch. Optional, so
+     * every earlier event still parses.
+     */
+    orchestrationMode: OrchestrationMode.optional(),
+    previousOrchestrationMode: OrchestrationMode.optional(),
+    orchestrationRoster: TeamRoster.optional(),
+    previousOrchestrationRoster: TeamRoster.optional(),
+    orchestrationAutomaticConfirmed: z.literal(true).optional(),
   }),
 });
 /**
@@ -383,6 +403,8 @@ export const CoreEvent = z.discriminatedUnion('type', [
   runs.SettingsRunLimitsChangedEvent,
   runs.SettingsNotificationsChangedEvent,
   SettingsLocalEndpointsChangedEvent,
+  orch.OrchestrationRunStartedEvent, orch.OrchestrationPlanProposedEvent, orch.OrchestrationStepProposedEvent, orch.OrchestrationStepApprovedEvent, orch.OrchestrationStepEditedEvent, orch.OrchestrationStepSkippedEvent,
+  orch.OrchestrationStepDispatchedEvent, orch.OrchestrationResultReadEvent, orch.OrchestrationRunPausedEvent, orch.OrchestrationRunStoppedEvent, orch.OrchestrationRunFinishedEvent, orch.OrchestrationModeChangedEvent,
   SettingsUpdateNoticeChangedEvent,
   AppUpdateAvailableEvent,
   AppUpdateRequestedEvent,
@@ -447,6 +469,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   runs.SettingsRunLimitsChangedInput,
   runs.SettingsNotificationsChangedInput,
   SettingsLocalEndpointsChangedInput,
+  ...orch.ORCHESTRATION_INPUTS,
   SettingsUpdateNoticeChangedInput,
   AppUpdateAvailableInput,
   AppUpdateRequestedInput,

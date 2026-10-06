@@ -11,7 +11,13 @@ import {
   canonicalBmadPieces,
   CautionLevel as CautionLevelSchema,
   DEFAULT_CAUTION_LEVEL,
+  AUTOMATIC_NEEDS_CONFIRMATION,
+  DEFAULT_ORCHESTRATION_MODE,
   DefaultModeNotice as DefaultModeNoticeSchema,
+  OrchestrationMode as OrchestrationModeSchema,
+  TeamRoster as TeamRosterSchema,
+  type OrchestrationMode,
+  type TeamRoster,
   PermissionMode as PermissionModeSchema,
   ModelId as ModelIdSchema,
   type AgentId,
@@ -58,7 +64,17 @@ export interface WorkspaceSettingsAccess {
    */
   updateSettings(
     workspaceId: WorkspaceId,
-    input: { cautionLevel?: unknown; bmadPieces?: unknown; defaultAgentId?: unknown; defaultPermissionMode?: unknown; confirm?: unknown; defaultModels?: unknown; whileWorking?: unknown },
+    input: {
+      cautionLevel?: unknown;
+      bmadPieces?: unknown;
+      defaultAgentId?: unknown;
+      defaultPermissionMode?: unknown;
+      confirm?: unknown;
+      defaultModels?: unknown;
+      whileWorking?: unknown;
+      orchestrationMode?: unknown;
+      orchestrationRoster?: unknown;
+    },
   ): WorkspaceSettings;
 }
 
@@ -187,6 +203,49 @@ export function readWhileWorking(orm: Orm, workspaceId: string): WhileWorking | 
   return parsed.success ? parsed.data : undefined;
 }
 
+/**
+ * The project's orchestration mode (epic 15): Approve each instruction when
+ * none is stored or the value is unreadable (the safe reading); `undefined`
+ * for an unknown workspace.
+ */
+export function readOrchestrationMode(orm: Orm, workspaceId: string): OrchestrationMode | undefined {
+  const row = orm.select({ mode: workspaces.orchestrationMode }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
+  if (row === undefined) return undefined;
+  const parsed = OrchestrationModeSchema.safeParse(row.mode);
+  return parsed.success ? parsed.data : DEFAULT_ORCHESTRATION_MODE;
+}
+
+/**
+ * The project's team roster (epic 15): nobody assigned when none is stored or
+ * the value is damaged; `undefined` for an unknown workspace. Assignees naming
+ * an agent no longer registered stay stored (they apply again if it comes back).
+ */
+export function readOrchestrationRoster(orm: Orm, workspaceId: string): TeamRoster | undefined {
+  const row = orm.select({ roster: workspaces.orchestrationRoster }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
+  if (row === undefined) return undefined;
+  let stored: unknown;
+  try {
+    stored = row.roster === null ? {} : JSON.parse(row.roster);
+  } catch {
+    stored = {};
+  }
+  const parsed = TeamRosterSchema.safeParse(stored);
+  return parsed.success ? parsed.data : TeamRosterSchema.parse({});
+}
+
+const sameRoster = (a: TeamRoster, b: TeamRoster): boolean => JSON.stringify(canonicalRoster(a)) === JSON.stringify(canonicalRoster(b));
+/** The roster with its roles in a fixed order, so equal rosters compare equal. */
+const canonicalRoster = (roster: TeamRoster) => ({ manager: roster.manager, planner: roster.planner, worker: roster.worker, reviewer: roster.reviewer });
+
+/** The settings' orchestration fields, present only when they differ from the defaults. */
+const orchestrationFields = (mode: OrchestrationMode, roster: TeamRoster) => ({
+  ...(mode === DEFAULT_ORCHESTRATION_MODE ? {} : { orchestrationMode: mode }),
+  ...(sameRoster(roster, TeamRosterSchema.parse({})) ? {} : { orchestrationRoster: roster }),
+});
+
+/** The message refusing a roster that names an agent this install doesn't have. */
+const ROSTER_UNKNOWN_AGENT = 'Choose agents this install has for each role.';
+
 /** The workspace's stored level; the strictest one when it can't be read; `undefined` for an unknown workspace. */
 export function readCautionLevel(orm: Orm, workspaceId: string): CautionLevel | undefined {
   const row = orm.select({ cautionLevel: workspaces.cautionLevel }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
@@ -230,7 +289,9 @@ export function createWorkspaceSettings({
       const mode = readDefaultPermissionMode(orm, workspaceId);
       const defaultModels = readDefaultModels(orm, workspaceId);
       const whileWorking = readWhileWorking(orm, workspaceId);
-      if (cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null || mode === undefined || defaultModels === null || whileWorking === null) {
+      const orchestrationMode = readOrchestrationMode(orm, workspaceId);
+      const orchestrationRoster = readOrchestrationRoster(orm, workspaceId);
+      if (orchestrationMode === undefined || orchestrationRoster === undefined || cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null || mode === undefined || defaultModels === null || whileWorking === null) {
         throw new NotFoundError('workspace', workspaceId);
       }
       return {
@@ -241,6 +302,7 @@ export function createWorkspaceSettings({
         ...modeFields(mode),
         ...modelsField(defaultModels),
         ...(whileWorking === undefined ? {} : { whileWorking }),
+        ...orchestrationFields(orchestrationMode, orchestrationRoster),
       };
     },
 
@@ -293,7 +355,30 @@ export function createWorkspaceSettings({
         if (!parsed.success) throw new ValidationError('Choose Wait until it finishes or Send right away.', [{ path: ['whileWorking'], message: 'unknown choice' }]);
         whileWorking = parsed.data;
       }
-      if (cautionLevel === undefined && bmadPieces === undefined && agent === undefined && permissionMode === undefined && modelChanges === undefined && whileWorking === undefined) {
+      // Orchestration (epic 15): the mode, and the team roster (agents this install has; a model's endpoint is checked by the roster story, 15.4).
+      let orchestrationMode: OrchestrationMode | undefined;
+      if (input.orchestrationMode !== undefined) {
+        const parsed = OrchestrationModeSchema.safeParse(input.orchestrationMode);
+        if (!parsed.success) throw new ValidationError('Choose Approve each instruction or Dispatch automatically.', [{ path: ['orchestrationMode'], message: 'unknown mode' }]);
+        orchestrationMode = parsed.data;
+      }
+      let orchestrationRoster: TeamRoster | undefined;
+      if (input.orchestrationRoster !== undefined) {
+        const parsed = TeamRosterSchema.safeParse(input.orchestrationRoster);
+        if (!parsed.success) throw new ValidationError('Choose who takes each role: an agent, or a model.', [{ path: ['orchestrationRoster'], message: 'not a roster' }]);
+        for (const assignee of Object.values(parsed.data)) if (assignee?.kind === 'agent' && !isAgentRegistered(assignee.agentId)) throw new UnknownAgentError(ROSTER_UNKNOWN_AGENT);
+        orchestrationRoster = parsed.data;
+      }
+      if (
+        cautionLevel === undefined &&
+        bmadPieces === undefined &&
+        agent === undefined &&
+        permissionMode === undefined &&
+        modelChanges === undefined &&
+        whileWorking === undefined &&
+        orchestrationMode === undefined &&
+        orchestrationRoster === undefined
+      ) {
         throw new ValidationError('Choose a setting to change.', [{ path: [], message: 'nothing to change' }]);
       }
       return events.transaction(() => {
@@ -302,12 +387,26 @@ export function createWorkspaceSettings({
           if (!developerMode()) throw new DeveloperModeRequiredError(SKIP_ALL_DEFAULT_NEEDS_DEVELOPER_MODE);
           if (input.confirm !== true) throw new ConfirmationRequiredError(SKIP_ALL_DEFAULT_NEEDS_CONFIRMATION);
         }
+        // The server is the gate here too (E15-R3): the manager dispatching on its own needs the user's confirmation.
+        if (orchestrationMode === 'automatic' && input.confirm !== true) throw new ConfirmationRequiredError(AUTOMATIC_NEEDS_CONFIRMATION);
         const previous = readCautionLevel(orm, workspaceId);
         const previousBmadPieces = readBmadPieces(orm, workspaceId);
         const previousAgent = readDefaultAgent(orm, workspaceId, isAgentRegistered);
         const previousMode = readDefaultPermissionMode(orm, workspaceId);
         const previousWhileWorking = readWhileWorking(orm, workspaceId);
-        if (previous === undefined || previousBmadPieces === undefined || previousAgent === null || previousMode === undefined || previousWhileWorking === null) throw new NotFoundError('workspace', workspaceId);
+        const previousOrchestrationMode = readOrchestrationMode(orm, workspaceId);
+        const previousOrchestrationRoster = readOrchestrationRoster(orm, workspaceId);
+        if (
+          previous === undefined ||
+          previousBmadPieces === undefined ||
+          previousAgent === null ||
+          previousMode === undefined ||
+          previousWhileWorking === null ||
+          previousOrchestrationMode === undefined ||
+          previousOrchestrationRoster === undefined
+        ) {
+          throw new NotFoundError('workspace', workspaceId);
+        }
         const level = cautionLevel ?? previous;
         // Compared as sets: the same pieces in another order change nothing.
         const piecesChanged =
@@ -334,6 +433,10 @@ export function createWorkspaceSettings({
         const modelsChanged = !sameModels(defaultModels, previousModels);
         const whileWorkingChanged = whileWorking !== undefined && (whileWorking ?? undefined) !== previousWhileWorking;
         const projectWhileWorking = whileWorkingChanged ? (whileWorking ?? undefined) : previousWhileWorking;
+        const modeNow = orchestrationMode ?? previousOrchestrationMode;
+        const orchestrationModeChanged = modeNow !== previousOrchestrationMode;
+        const rosterNow = orchestrationRoster ?? previousOrchestrationRoster;
+        const orchestrationRosterChanged = !sameRoster(rosterNow, previousOrchestrationRoster);
         const settings = {
           cautionLevel: level,
           bmadPieces: pieces,
@@ -342,8 +445,9 @@ export function createWorkspaceSettings({
           ...modeFields(mode),
           ...modelsField(defaultModels),
           ...(projectWhileWorking === undefined ? {} : { whileWorking: projectWhileWorking }),
+          ...orchestrationFields(modeNow, rosterNow),
         };
-        if (level === previous && !piecesChanged && !agentChanged && !modeChanged && !modelsChanged && !whileWorkingChanged) return settings;
+        if (level === previous && !piecesChanged && !agentChanged && !modeChanged && !modelsChanged && !whileWorkingChanged && !orchestrationModeChanged && !orchestrationRosterChanged) return settings;
         orm
           .update(workspaces)
           .set({
@@ -353,6 +457,8 @@ export function createWorkspaceSettings({
             ...(modeChanged ? { defaultPermissionMode: mode.mode, defaultPermissionModeNotice: null } : {}),
             ...(modelsChanged ? { defaultModels: JSON.stringify(defaultModels) } : {}),
             ...(whileWorkingChanged ? { whileWorking: whileWorking ?? null } : {}),
+            ...(orchestrationModeChanged ? { orchestrationMode: modeNow } : {}),
+            ...(orchestrationRosterChanged ? { orchestrationRoster: JSON.stringify(canonicalRoster(rosterNow)) } : {}),
           })
           .where(eq(workspaces.id, workspaceId))
           .run();
@@ -376,6 +482,15 @@ export function createWorkspaceSettings({
               : {}),
             ...(modelsChanged ? { defaultModels, previousDefaultModels: previousModels } : {}),
             ...(whileWorkingChanged ? { whileWorking: whileWorking ?? null, previousWhileWorking: previousWhileWorking ?? null } : {}),
+            ...(orchestrationModeChanged
+              ? {
+                  orchestrationMode: modeNow,
+                  previousOrchestrationMode,
+                  // The user's confirmation of the switch to automatic dispatch for this project, on the record (E15-R3).
+                  ...(modeNow === 'automatic' ? { orchestrationAutomaticConfirmed: true as const } : {}),
+                }
+              : {}),
+            ...(orchestrationRosterChanged ? { orchestrationRoster: rosterNow, previousOrchestrationRoster } : {}),
           },
         });
         return settings;

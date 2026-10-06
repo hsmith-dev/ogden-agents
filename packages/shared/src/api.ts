@@ -499,6 +499,13 @@ export const API_ROUTES = {
    */
   workspaceBuildSettings: `${API_BASE}/workspaces/:wsId/build-settings`,
   /**
+   * `GET` → `OrchestrationSettingsResponse` (epic 15, 15.2): the project's
+   * orchestration mode, run limits and roster, behind the `orchestration`
+   * piece (409 `feature_off` while it is off). The mode and roster change
+   * through the workspace settings route.
+   */
+  workspaceOrchestration: `${API_BASE}/workspaces/:wsId/orchestration`,
+  /**
    * `GET` → `RunLimitSettingsResponse`; `PATCH UpdateRunLimitSettingsRequest`
    * (5.8): the install's limits (builds at a time, time limit). Install-level,
    * not a piece's (no workspace); 501 until 5.8.

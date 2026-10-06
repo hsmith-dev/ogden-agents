@@ -18,7 +18,7 @@ import type {
   SessionKind,
   SessionState,
 } from '@ogden-agents/shared';
-import { foreignKey, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const workspaces = sqliteTable(
   'workspaces',
@@ -101,6 +101,14 @@ export const workspaces = sqliteTable(
      * does (`wait` | `now`; send now or wait), or NULL for the app-wide one.
      */
     whileWorking: text('while_working'),
+    /**
+     * The project's orchestration mode (epic 15 story 15.2): `approve_each` or
+     * `automatic`; NULL (and anything unreadable) is Approve each instruction.
+     * Changed only through the workspace settings use-case.
+     */
+    orchestrationMode: text('orchestration_mode'),
+    /** The project's team roster as JSON (`TeamRoster`), or NULL for nobody assigned. Read only through `readOrchestrationRoster`. */
+    orchestrationRoster: text('orchestration_roster'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],
@@ -351,3 +359,55 @@ export const notificationSettings = sqliteTable('notification_settings', {
   id: integer('id').primaryKey(),
   browserNotifications: integer('browser_notifications', { mode: 'boolean' }).notNull().default(false),
 });
+
+/**
+ * An orchestration run (epic 15 story 15.2): a goal, the mode and limits it
+ * runs under, and its state. No behaviour yet: entries 3 to 9 write it. The
+ * manager's text is masked before it is stored (AD-16).
+ */
+export const orchestrationRuns = sqliteTable(
+  'orchestration_runs',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    goal: text('goal').notNull(),
+    /** `OrchestrationRunState`. */
+    state: text('state').notNull(),
+    /** `OrchestrationMode` the run started under. */
+    mode: text('mode').notNull(),
+    /** The run's `RunLimits` as JSON. */
+    limits: text('limits').notNull(),
+    /** `OrchestrationStopReason`, once stopped. */
+    stopReason: text('stop_reason'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [index('orchestration_runs_workspace').on(t.workspaceId)],
+);
+
+/** One step of an orchestration run's plan, keyed by the run and the plan's own step id. */
+export const orchestrationSteps = sqliteTable(
+  'orchestration_steps',
+  {
+    runId: text('run_id')
+      .notNull()
+      .references(() => orchestrationRuns.id),
+    stepId: text('step_id').notNull(),
+    position: integer('position').notNull(),
+    worker: text('worker').notNull(),
+    /** `new` or a chat id. */
+    chat: text('chat').notNull(),
+    instruction: text('instruction').notNull(),
+    /** The step ids this one waits on, as JSON. */
+    dependsOn: text('depends_on').notNull().default('[]'),
+    /** `OrchestrationStepState`. */
+    state: text('state').notNull(),
+    /** `user` or `mode`; NULL until approved. */
+    approvedBy: text('approved_by'),
+    /** The chat the instruction was sent to, once dispatched. */
+    sessionId: text('session_id'),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.stepId] })],
+);

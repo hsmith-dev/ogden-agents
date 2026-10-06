@@ -169,6 +169,13 @@
       "when": 1791249188580,
       "tag": "0023_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1791258730493,
+      "tag": "0024_orchestration_contracts",
+      "breakpoints": true
     }
   ]
 }

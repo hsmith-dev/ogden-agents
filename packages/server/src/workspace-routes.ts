@@ -138,6 +138,7 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
           bmadPieces: settings.bmadPieces.join(','),
           defaultAgentId: settings.defaultAgentId ?? 'install default',
           defaultPermissionMode: settings.defaultPermissionMode ?? 'ask',
+          orchestrationMode: settings.orchestrationMode ?? 'approve_each',
         });
         return c.json(WorkspaceSettingsResponse.parse({ settings }));
       } catch (error) {

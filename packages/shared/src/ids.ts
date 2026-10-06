@@ -19,6 +19,8 @@ export const ID_PREFIXES = {
   pane: 'pan',
   /** An OpenAI-compatible endpoint the Local model talks to (epic 14 story 14.3). */
   localEndpoint: 'lep',
+  /** An orchestration run: a manager's goal and plan (epic 15, story 15.2). */
+  orchestrationRun: 'orc',
 } as const;
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
 
@@ -59,3 +61,7 @@ export type PaneId = z.infer<typeof PaneId>;
 /** An OpenAI-compatible endpoint (epic 14 story 14.3); its key is `agent-endpoint-key/<id>` in the keychain (AD-16). */
 export const LocalEndpointId = prefixedUlid('lep');
 export type LocalEndpointId = z.infer<typeof LocalEndpointId>;
+
+/** An orchestration run (epic 15 story 15.2). */
+export const OrchestrationRunId = prefixedUlid('orc');
+export type OrchestrationRunId = z.infer<typeof OrchestrationRunId>;

@@ -21,6 +21,7 @@ export * from './catalog-memory/index.js';
 export * from './child-env.js';
 export * from './local-model-memory/index.js';
 export * from './local-model-openai/index.js';
+export * from './manager-memory/index.js';
 export { projectFilesFingerprint } from './project-files-fingerprint.js';
 export { errorCode } from './error-code.js';
 export * from './secrets-keyring/index.js';

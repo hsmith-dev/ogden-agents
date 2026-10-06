@@ -44,6 +44,7 @@ import { registerPaneRoutes } from './pane-routes.js';
 import { registerPaneSocket } from './pane-socket.js';
 import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
+import { registerOrchestrationRoutes } from './orchestration-routes.js';
 import { registerRetrospectiveRoutes } from './retrospective-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
 import { registerLocalEndpointRoutes } from './local-endpoint-routes.js';
@@ -321,6 +322,8 @@ export function createApp({
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, bmadSetup, log });
   // Retrospectives (story 7.1): the same helper, guard and trust.
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerRetrospectiveRoutes(app, { bmad, scriptTrust: bmadScriptTrust, retrospectives, log });
+  // Orchestration (epic 15, story 15.2): the same helper and guard; it runs no project script, so no trust.
+  if (bmad !== undefined) registerOrchestrationRoutes(app, { bmad, permissions, log });
   // Unattended builds (story 5.2): the same helper, guard and trust.
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, buildSettings, log });
   // Terminal panes (epic 16): behind the gate, and Developer mode enforced by core on every call.

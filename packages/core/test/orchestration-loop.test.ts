@@ -248,6 +248,24 @@ describe('the next decision after a result', () => {
     }
   });
 
+  it('does not ask when nothing is left the manager could choose: every step left waits on a skipped step, so the run waits for the user', async () => {
+    for (const mode of ['approve_each', 'automatic'] as const) {
+      const kit = setUp({ plan: CHAIN3, mode });
+      const { run } = await kit.orchestration.startRun(kit.workspaceId, { goal: 'Do the work' });
+      if (mode === 'approve_each') await kit.orchestration.approveStep(kit.workspaceId, run.id, 's1');
+      const sent = mode === 'approve_each' ? await kit.orchestration.dispatchStep(kit.workspaceId, run.id, 's1') : await kit.read(run.id);
+      await kit.orchestration.skipStep(kit.workspaceId, run.id, 's2');
+      kit.finish(kit.sessionOf(sent, 's1'));
+      await kit.read(run.id);
+      await kit.settle();
+      const view = await kit.read(run.id);
+      expect(kit.contexts).toHaveLength(0);
+      expect(view.run.state).toBe('awaiting_user');
+      expect(view.steps.map((step) => step.state)).toEqual(['done', 'skipped', 'proposed']);
+      expect(kit.shared.sent).toHaveLength(1);
+    }
+  });
+
   it('stops an automatic run when the manager gives no usable decision, and sends nothing more', async () => {
     const kit = setUp({ plan: CHAIN3, script: [decision('dispatch', { step_id: 's9' })] });
     const { run } = await kit.orchestration.startRun(kit.workspaceId, { goal: 'Do the work' });

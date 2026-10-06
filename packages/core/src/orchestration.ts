@@ -1031,6 +1031,10 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       if (stale || (loop.decision.action === 'unavailable' && automatic)) owed = { after: loop.lastAfter, report: loop.lastReport, answer: null };
     }
     const remaining = rows.filter((step) => step.state === 'proposed' || step.state === 'approved');
+    // Nothing the manager could choose: every step left is the user's to send or waits on a step that was skipped. Then there is nothing to ask,
+    // and the run waits for the user (the engine below says so in automatic mode).
+    const choosable = dispatchableSteps({ plan: planOfRows(run, rows), stepStates: statesOf(rows) }) ?? [];
+    if (owed !== null && remaining.length > 0 && choosable.length === 0) owed = null;
     if (owed !== null) {
       if (remaining.length === 0) {
         // Nothing is left for the manager to choose: the plan is done.

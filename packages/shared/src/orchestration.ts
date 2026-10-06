@@ -726,7 +726,7 @@ export const dispatchRefusalWords = (reason: DispatchRefusalReason, worker: stri
 /** What the user is asked, once for a project, before it may dispatch automatically. Plain words, no dashes. */
 export const ORCHESTRATION_AUTOMATIC_CONFIRM_TITLE = 'Dispatch automatically in this project?';
 export const ORCHESTRATION_AUTOMATIC_CONFIRM_WORDS =
-  'The manager will send each instruction to your agents on its own, without asking you each time. It stops at the first problem, when it reaches the limits below, or when you press Stop. Your agents still ask you before they run a command or change a file. An agent that signs in with your account, like Claude Code or Antigravity, still waits for you to approve each instruction. You will not be asked again in this project.';
+  'The manager will send each instruction to your agents on its own, without asking you each time. It stops at the first problem, when it reaches the limits below, or when you press Stop. Your agents still ask you before they run a command or change a file. An agent that signs in with your account still waits for you to approve each instruction. You will not be asked again in this project.';
 export const ORCHESTRATION_AUTOMATIC_CONFIRM_BUTTON = 'Dispatch automatically';
 
 /** A new project starts on Approve each instruction whatever the install default says, until the user confirms automatic for that project. */

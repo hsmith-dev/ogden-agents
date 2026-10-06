@@ -236,16 +236,20 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     const fresh = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? run;
     if (isRunOver(fresh.state as OrchestrationRunState)) return fresh;
     const projectMode = readOrchestrationMode(orm, workspaceId) ?? DEFAULT_ORCHESTRATION_MODE;
-    if (projectMode === fresh.mode) return fresh;
+    /** In the default mode only the user approves: what the mode approved and did not send waits for the user again (whatever left it so). */
+    const returnToUser = (): void => {
+      for (const step of stepsOf(run.id)) {
+        if (step.state === 'approved' && step.approvedBy === 'mode') orm.update(orchestrationSteps).set({ state: 'proposed', approvedBy: null }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
+      }
+    };
+    if (projectMode === fresh.mode) {
+      if (projectMode === 'approve_each' && stepsOf(run.id).some((step) => step.state === 'approved' && step.approvedBy === 'mode')) events.transaction(returnToUser);
+      return fresh;
+    }
     events.transaction(() => {
       orm.update(orchestrationRuns).set({ mode: projectMode, updatedAt: now() }).where(eq(orchestrationRuns.id, run.id)).run();
       events.append({ type: 'orchestration.mode_changed', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], mode: projectMode, previous: fresh.mode as OrchestrationRun['mode'] } });
-      if (projectMode === 'approve_each') {
-        // What the mode approved and did not send waits for the user again; what the user approved stays approved.
-        for (const step of stepsOf(run.id)) {
-          if (step.state === 'approved' && step.approvedBy === 'mode') orm.update(orchestrationSteps).set({ state: 'proposed', approvedBy: null }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
-        }
-      }
+      if (projectMode === 'approve_each') returnToUser();
     });
     return orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? fresh;
   };

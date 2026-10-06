@@ -298,6 +298,7 @@ describe('the orchestration events', () => {
     'orchestration.step_skipped': { runId: RUN, stepId: 's1' },
     'orchestration.steps_reordered': { runId: RUN, order: ['s2', 's1'] },
     'orchestration.step_dispatched': { runId: RUN, stepId: 's1', worker: 'agent-a', sessionId: CHAT },
+    'orchestration.dispatch_refused': { runId: RUN, stepId: 's1', worker: 'agent-a', reason: 'worker_not_ready', message: 'Agent A is not ready, so the instruction was not sent.' },
     'orchestration.result_read': { runId: RUN, report: makeStatusReport({ stepId: 's1', worker: 'agent-a', state: 'done', text: 'ok' }) },
     'orchestration.run_paused': { runId: RUN, reason: 'permission_card' },
     'orchestration.run_stopped': { runId: RUN, reason: 'user' },
@@ -305,8 +306,8 @@ describe('the orchestration events', () => {
     'orchestration.mode_changed': { runId: RUN, mode: 'automatic', previous: 'approve_each' },
   };
 
-  it('names the events of the run (the entry\'s twelve and the reorder) and parses each, as an input and as a stored event', () => {
-    expect(Object.keys(samples)).toHaveLength(13);
+  it('names the events of the run (the entry\'s twelve, the reorder and the refused dispatch) and parses each, as an input and as a stored event', () => {
+    expect(Object.keys(samples)).toHaveLength(14);
     for (const [type, payload] of Object.entries(samples)) {
       const input = { type, workspaceId: WS, streamId: WS, payload };
       expect(NewCoreEvent.safeParse(input).success, type).toBe(true);

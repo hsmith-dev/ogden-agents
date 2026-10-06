@@ -143,11 +143,12 @@ describe('the route helper', () => {
         `POST ${API_ROUTES.workspaceOrchestrationStepSkip}`,
         `POST ${API_ROUTES.workspaceOrchestrationReorder}`,
         `POST ${API_ROUTES.workspaceOrchestrationStop}`,
+        `GET ${API_ROUTES.workspaceOrchestrationActivity}`,
       ].sort(),
     );
     expect(guardedRouteKeys(app)).not.toContain(`GET ${API_ROUTES.workspaceOrchestration}`);
-    // Every route under an orchestration path is one the helper registered: a new one cannot skip the guard.
-    const served = [...new Set(app.routes.filter((route) => /\/orchestration(\/|$)/.test(route.path)).map((route) => `${route.method} ${route.path}`))].sort();
+    // Every route under a project's orchestration path is one the helper registered (the install's defaults are not a project's): a new one cannot skip the guard.
+    const served = [...new Set(app.routes.filter((route) => /\/workspaces\/:wsId\/orchestration(\/|$)/.test(route.path)).map((route) => `${route.method} ${route.path}`))].sort();
     expect(served).toEqual(orchestrationRouteKeys(app));
   });
 

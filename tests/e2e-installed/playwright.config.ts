@@ -67,6 +67,8 @@ export default defineConfig({
     { name: 'grok', testMatch: /(^|[\\/])grok-journey\.spec\.ts$/, dependencies: ['codex'] },
     // Epic 11's builds journey (story 11.6): Build all ready, the run view, a failing re-run, Needs you and the webhook, an intent gap.
     { name: 'builds', testMatch: /(^|[\\/])builds-journey\.spec\.ts$/, dependencies: ['grok'] },
-    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['builds'] },
+    // Epic 17's builds with other agents (story 17.11): the picker, Claude Code and Codex building, a usage limit, no sandbox.
+    { name: 'builds-agents', testMatch: /(^|[\\/])builds-agents-journey\.spec\.ts$/, dependencies: ['builds'] },
+    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['builds-agents'] },
   ],
 });

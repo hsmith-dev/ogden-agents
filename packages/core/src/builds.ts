@@ -298,7 +298,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         // is not in the project, refuses it and leaves the run, its copy and its work as they were.
         if (parsed.data.retry && parsed.data.agent !== undefined && parsed.data.agent !== run.agent) {
           const again = parsed.data.agent;
-          if (run.sandbox !== ATTENDED_SANDBOX) await requireSandbox(again);
+          // The mode it is built again in: the person's choice (an agent that builds with you watching), else the run's own.
+          if ((parsed.data.mode ?? (run.sandbox === ATTENDED_SANDBOX ? 'attended' : 'unattended')) !== 'attended') await requireSandbox(again);
           const noSkill = runnerFor(again) !== runner ? deps.skillReach?.(again, repoPath) : undefined;
           if (noSkill !== undefined) throw new BuildRefusedError('plan_uncommitted', noSkill);
         }
@@ -310,11 +311,11 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         }
         // A run already rejected stays as it is: a repeat Reject writes nothing (review, story 5.3); with retry it builds the ticket again (a start that was refused the first time).
         if (run.decision === 'rejected') {
-          attended = run.sandbox === ATTENDED_SANDBOX;
+          attended = (parsed.data.mode ?? (run.sandbox === ATTENDED_SANDBOX ? 'attended' : 'unattended')) === 'attended';
           retryAgent = parsed.data.agent ?? run.agent ?? runner.agent;
           return { review: await reviewOf(repoPath, run), fresh: parsed.data.retry };
         }
-        attended = run.sandbox === ATTENDED_SANDBOX;
+        attended = (parsed.data.mode ?? (run.sandbox === ATTENDED_SANDBOX ? 'attended' : 'unattended')) === 'attended';
         retryAgent = parsed.data.agent ?? run.agent ?? runner.agent;
         await release(run);
         entities.setRunOutcome(run.id, 'stopped', run.reason);

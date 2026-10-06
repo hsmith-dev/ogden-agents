@@ -260,11 +260,12 @@ describe('failure words for a build (epic 17)', () => {
     expect(screen.queryByTestId('build-run-again-claude-code')).toBeNull();
     expect(screen.queryByTestId('build-run-again-grok')).toBeNull();
     const again = screen.getByTestId('build-run-again-codex');
-    expect(again.textContent).toBe('Build again with Codex');
+    // Codex builds with you watching, so that is how it is built again (whatever the first run was).
+    expect(again.textContent).toBe('Build again with Codex, with me watching');
     expect(again.getAttribute('title')).toContain('fresh copy');
     fireEvent.click(again);
     await settle();
     expect(state.calls).toContain(`POST /api/v1/workspaces/${WS}/builds/1.1/reject`);
-    expect(state.bodies).toContainEqual({ retry: true, agent: 'codex' });
+    expect(state.bodies).toContainEqual({ retry: true, agent: 'codex', mode: 'attended' });
   });
 });

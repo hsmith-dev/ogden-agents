@@ -9,6 +9,7 @@ import {
   type BuildAgentChoice,
   BUILD_DIALOG_CONFIRM_BUTTON,
   BUILD_DIALOG_CONFIRM_TEXT,
+  buildDialogConfirmTextFor,
   BUILD_DIALOG_LOAD_FAILED,
   BUILD_DIALOG_READY_TEXT,
   BUILD_DIALOG_TITLE,
@@ -119,7 +120,7 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = fal
   const [chosen, setChosen] = useState<string | undefined>();
   const usable = agents.filter((agent) => agent.way !== 'unavailable');
   const agentId: string | undefined =
-    agents.length < 2 ? undefined : chosen !== undefined && usable.some((agent) => agent.agentId === chosen) ? chosen : (usable.find((agent) => agent.agentId === agentsQuery.data?.defaultAgentId) ?? usable[0])?.agentId;
+    usable.length < 2 ? undefined : chosen !== undefined && usable.some((agent) => agent.agentId === chosen) ? chosen : (usable.find((agent) => agent.agentId === agentsQuery.data?.defaultAgentId) ?? usable[0])?.agentId;
   const agentName = agents.find((agent) => agent.agentId === agentId)?.displayName;
   const groupRef = useRef<HTMLDivElement | null>(null);
   const sandbox = useQuery({
@@ -162,14 +163,14 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = fal
     if (id === 'other_agent') {
       // Enabled when another agent can build here: it moves you to the picker (epic 17).
       const others = usable.filter((agent) => agent.agentId !== agentId);
-      const canSwitch = agents.length >= 2 && others.length > 0;
+      const canSwitch = usable.length >= 2 && others.length > 0;
       return (
         <li key={id} className="flex flex-col gap-1" data-testid="build-dialog-choice" data-choice={id}>
           <Button
             type="button"
             variant="outline"
             disabled={!canSwitch}
-            onClick={() => groupRef.current?.querySelector<HTMLElement>('[role="radio"]:not([disabled])')?.focus()}
+            onClick={() => (groupRef.current?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]') ?? groupRef.current?.querySelector<HTMLElement>('[role="radio"]:not([disabled])'))?.focus()}
             data-testid="build-dialog-other-agent"
           >
             {label}
@@ -216,10 +217,10 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = fal
       <DialogContent title={picker && ready ? buildPickerTitle(ticketRef) : confirm && ready ? buildDialogConfirmTitle(ticketRef) : agentName === undefined ? BUILD_DIALOG_TITLE : buildDialogTitleFor(agentName)} description={`Building ${ticketRef}.`} data-testid="build-dialog" data-confirm={confirm ? 'true' : undefined}>
         {confirm ? (
           <Text variant="body" data-testid="build-dialog-confirm-text">
-            {BUILD_DIALOG_CONFIRM_TEXT}
+            {agentName === undefined ? BUILD_DIALOG_CONFIRM_TEXT : buildDialogConfirmTextFor(agentName)}
           </Text>
         ) : null}
-        {agents.length >= 2 && agentId !== undefined ? <AgentPicker agents={agents} selected={agentId} onSelect={setChosen} groupRef={groupRef} /> : null}
+        {usable.length >= 2 && agentId !== undefined ? <AgentPicker agents={agents} selected={agentId} onSelect={setChosen} groupRef={groupRef} /> : null}
         {sandbox.isPending || agentsQuery.isPending ? (
           <Skeleton className="h-10 w-full" />
         ) : status === undefined ? (

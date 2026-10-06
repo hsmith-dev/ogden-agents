@@ -64,4 +64,6 @@ Migration 0031 (`default_build_agent_id`) was generated with drizzle-kit after t
 
 ## Review Triage Log
 
-(filled after the review)
+One combined security and correctness review (an independent agent), loop 1; no blocker, server enforcement holds (the UI only selects an agent; each start is checked by the server per agent). Fixed: the default rule's fallback is wrapped as a whole (a project that is gone, or an unreadable setting, falls back to the install's agent); the confirm text names the chosen agent; Use another agent focuses the checked radio first; the picker shows only with two or more agents that are ready; the default agent's field is labelled as a group. Existing tests that compared the build settings exactly now include the new field.
+
+Noted for the release notes (entry 11): with no default build agent set, a project whose default chat agent can build (for example Codex) now builds with that agent by default, as the Notes' assumption says; the sandbox rules still apply, so a Build with it ends in the Build dialog until its sandbox is verified. Declined: refusing unknown agent ids when the default is saved (an unwired agent is ignored until it exists, and the stored choice survives).

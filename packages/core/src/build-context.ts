@@ -37,15 +37,15 @@ export function createBuildContext(deps: BuildsDeps) {
    * else its default chat agent when that can build, else the install's (Claude Code).
    */
   const defaultAgentFor = (workspaceId: WorkspaceId): BuildAgent => {
-    let own: BuildAgent | null = null;
     try {
-      own = settings.workspaceSettings(workspaceId).defaultBuildAgentId;
+      const own = settings.workspaceSettings(workspaceId).defaultBuildAgentId;
+      if (own !== null && runnerFor(own) !== undefined) return own;
+      const chatDefault = deps.projectDefaultAgent?.(workspaceId);
+      if (chatDefault !== undefined && runnerFor(chatDefault) !== undefined) return chatDefault;
     } catch {
-      own = null;
+      // A project that is gone, or a setting that can't be read: the install's default agent.
     }
-    if (own !== null && runnerFor(own) !== undefined) return own;
-    const chatDefault = deps.projectDefaultAgent?.(workspaceId);
-    return chatDefault !== undefined && runnerFor(chatDefault) !== undefined ? chatDefault : runner.agent;
+    return runner.agent;
   };
   /** The runner of a run's agent (an old run has none stored: the default build agent's); `undefined` when its agent can no longer build (never another agent's runner). */
   const runnerOf = (run: Pick<Run, 'agent'>): BuildRunnerPort | undefined => runnerFor(run.agent ?? runner.agent);

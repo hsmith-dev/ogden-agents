@@ -275,6 +275,7 @@ export const BUILD_DIALOG_LOAD_FAILED = "Ogden Agents couldn't check what this c
  */
 export const buildDialogConfirmTitle = (ticketRef: string): string => `Build ticket ${ticketRef}?`;
 export const BUILD_DIALOG_CONFIRM_TEXT = 'The manager proposed this build. Nothing starts until you press a button here. Claude Code builds it in its own copy of the project, and you review the result before anything is kept.';
+export const buildDialogConfirmTextFor = (agentName: string): string => BUILD_DIALOG_CONFIRM_TEXT.replace('Claude Code builds it', `${agentName} builds it`);
 export const BUILD_DIALOG_CONFIRM_BUTTON = 'Build';
 export const BUILD_DIALOG_READY_TEXT = 'A sandbox is ready now. Close this and press Build again.';
 export const OTHER_AGENT_DISABLED_TEXT = 'No other agent can build here yet.';

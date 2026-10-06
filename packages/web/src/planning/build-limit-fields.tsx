@@ -167,7 +167,7 @@ function DefaultBuildAgentSetting({ wsId, value, onSaved }: { wsId: string; valu
     );
   };
   return (
-    <Field id="default-build-agent" label={DEFAULT_BUILD_AGENT_LABEL} description={DEFAULT_BUILD_AGENT_HINT}>
+    <Field id="default-build-agent" control="group" label={DEFAULT_BUILD_AGENT_LABEL} description={DEFAULT_BUILD_AGENT_HINT}>
       <RadioGroup value={value ?? AUTOMATIC} onValueChange={choose} aria-labelledby="default-build-agent-label" data-testid="default-build-agent">
         <RadioGroupOption id="default-build-agent-automatic" value={AUTOMATIC} label={DEFAULT_BUILD_AGENT_AUTOMATIC} data-testid="default-build-agent-automatic" />
         {agents.data.agents.map((agent) => (

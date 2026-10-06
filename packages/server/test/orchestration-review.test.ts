@@ -11,6 +11,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryManager } from '@ogden-agents/adapters';
+import { validatePlanFor, type ManagerPort } from '@ogden-agents/core';
 import {
   API_ROUTES,
   ApiErrorBody,
@@ -18,6 +19,7 @@ import {
   MANAGER_PLAN_VERSION,
   ORCHESTRATION_OFF_MESSAGE,
   OrchestrationRunResponse,
+  SessionResponse,
   SessionsResponse,
   WorkspaceResponse,
   type OrchestrationRunView,
@@ -42,8 +44,8 @@ const PLAN3 = {
   ],
 };
 
-async function setUp({ on = true }: { on?: boolean } = {}) {
-  const server = await startTestServer({ manager: createMemoryManager({ plans: [PLAN3] }) });
+async function setUp({ on = true, manager = createMemoryManager({ plans: [PLAN3] }) as ManagerPort }: { on?: boolean; manager?: ManagerPort } = {}) {
+  const server = await startTestServer({ manager });
   servers.push(server);
   const tab = await signIn(server);
   const repo = realpathSync.native(mkdtempSync(join(tmpdir(), 'ogden-agents-repo-')));
@@ -176,5 +178,41 @@ describe('the plan review over REST', () => {
     expect(await refusalOf(await post(server, tab, route('workspaceOrchestrationStepSkip', id, 's1')))).toEqual(off);
     expect(await refusalOf(await post(server, tab, runRoute('workspaceOrchestrationReorder', id), { order: ['s1'] }))).toEqual(off);
     expect(await refusalOf(await post(server, tab, runRoute('workspaceOrchestrationStop', id)))).toEqual(off);
+  });
+});
+
+describe('while the manager is thinking', () => {
+  it('the run reads as planning, Stop works, and the workers\' chats are never held', async () => {
+    let release!: () => void;
+    const slow: ManagerPort = {
+      async proposePlan(context, signal) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+          signal?.addEventListener('abort', () => resolve());
+        });
+        return validatePlanFor(context, PLAN3);
+      },
+      async decideNext() {
+        return { ok: false, kind: 'unavailable', reason: 'not used here' };
+      },
+    };
+    const { server, tab, wsId, runRoute, view } = await setUp({ manager: slow });
+    const starting = post(server, tab, apiPath(API_ROUTES.workspaceOrchestrationRuns, { wsId }), { goal: 'Add a contact form' });
+    await waitFor(async () => (await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceOrchestrationRuns, { wsId }))).json() as { runs: unknown[] }).runs.length === 1, 'the run to be listed');
+    const listed = (await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceOrchestrationRuns, { wsId }))).json()) as { runs: Array<{ run: { id: string; state: string } }> };
+    expect(listed.runs[0]!.run.state).toBe('planning');
+    // Meanwhile a chat starts, takes a message and answers: nothing waits for the manager.
+    const made = await post(server, tab, apiPath(API_ROUTES.workspaceSessions, { wsId }), {});
+    expect(made.status).toBeLessThan(300);
+    const { session } = SessionResponse.parse(await made.json());
+    expect((await post(server, tab, apiPath(API_ROUTES.sessionMessages, { wsId, sesId: session.id }), { text: 'hello' })).status).toBe(202);
+    await waitFor(() => server.core.entities.getSession(session.id)?.state === 'idle', 'the chat to answer');
+    // Stop abandons the manager's call; the run keeps no step.
+    const stopped = await view(await post(server, tab, runRoute('workspaceOrchestrationStop', listed.runs[0]!.run.id)));
+    expect(stopped.run.state).toBe('stopped');
+    release();
+    const final = await starting;
+    expect(final.status).toBe(201);
+    expect((await view(final)).steps).toEqual([]);
   });
 });

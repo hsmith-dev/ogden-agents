@@ -30,6 +30,7 @@ import {
   type PlanningUseCases,
   type Toolchain,
   type AgentModels,
+  type AgentLinkedCommands,
 } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
@@ -170,6 +171,11 @@ export interface AppOptions {
   bmadSetup?: BmadSetupUseCases | undefined;
   /** Core's agent setup use-case: each agent's state and signing in (9.1); without it those routes answer 501. */
   agentSetup?: AgentSetup;
+  /**
+   * Each agent's linked command (epic 12, entry 12), over `core.agentLinkedCommands`; without it the linked-command
+   * routes answer 501 and no `AgentSetupStatus` ever carries `linkedCommand`.
+   */
+  agentLinkedCommands?: AgentLinkedCommands;
   /** Whether the first-run Welcome is done (9.5); without it those routes answer 501. */
   onboarding?: Onboarding;
   /**
@@ -231,6 +237,7 @@ export function createApp({
   bmadSource,
   bmadSetup,
   agentSetup,
+  agentLinkedCommands,
   onboarding,
   newProjectDefaults,
   installSettings,
@@ -335,7 +342,7 @@ export function createApp({
   registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, team, builds, log });
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });
-  registerAgentSetupRoutes(app, { agentSetup, onboarding, log });
+  registerAgentSetupRoutes(app, { agentSetup, onboarding, agentLinkedCommands, log });
   registerBmadRoutes(app, { bmad, newProjectDefaults, log });
   // The pinned upstream BMad Method (story 4.14): install-level, not a piece's.
   registerBmadSourceRoutes(app, { bmadSource, log });

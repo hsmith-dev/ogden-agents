@@ -84,7 +84,7 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   const codex =
     options.codex === false || (options.codex === undefined && !CODEX_SHIPPED && hooks.codexServer === undefined && hooks.codexInstall === undefined)
       ? []
-      : [codexWiring({ dataDir, given: options.codex, serverScript: hooks.codexServer, install: hooks.codexInstall === undefined ? undefined : { pins: hooks.codexInstall.pins, ...(hooks.codexInstall.npmCli === undefined ? {} : { npmCli: hooks.codexInstall.npmCli }) }, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+      : [codexWiring({ dataDir, given: options.codex, serverScript: hooks.codexServer, install: hooks.codexInstall === undefined ? undefined : { pins: hooks.codexInstall.pins, ...(hooks.codexInstall.npmCli === undefined ? {} : { npmCli: hooks.codexInstall.npmCli }) }, linkedCommand: () => core.agentLinkedCommands.get('codex'), onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of codex) checkAgentWiring(wiring);
   // Grok (epic 12 entry 4): the same, in its own folder's switch.
   const grok =
@@ -99,6 +99,7 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
               hooks.grokInstall === undefined
                 ? undefined
                 : { pins: hooks.grokInstall.pins, tokenProbe: async () => true, ...(hooks.grokInstall.npmCli === undefined ? {} : { npmCli: hooks.grokInstall.npmCli }), ...(hooks.grokInstall.binarySha256 === undefined ? {} : { binarySha256: hooks.grokInstall.binarySha256 }) },
+            linkedCommand: () => core.agentLinkedCommands.get('grok'),
             onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of grok) checkAgentWiring(wiring);
   // The Local model's endpoints (epic 14 story 14.3), over the keychain below; a chat asks for its target at each start.
@@ -151,6 +152,8 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
     providerOf: (agentId) => [claudeDescriptor, ...extraAgents.map((wiring) => wiring.descriptor)].find((descriptor) => descriptor.agentId === agentId)?.provider,
     // A key in this server's own environment follows the same rule as a saved one (review F1).
     inheritedEnv: () => agentKeysOf({ ...process.env, ...extraAgentEnv }, envKeys),
+    // A linked command (epic 12, entry 12) bypasses the install gate in `readiness()`.
+    isLinked: (agentId) => core.agentLinkedCommands.get(agentId) !== undefined,
     // Codes and plain reasons only: never a URL, a code or a key.
     onFailure: (agentId, step, error) =>
       log.warn('agent setup step failed', {

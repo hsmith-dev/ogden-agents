@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createClaudeApiKey, createMemorySecretStore, loadPty, type AdapterPins, type NpmRunInput, type NpmRunner, type PtyLoader } from '@ogden-agents/adapters';
+import { createClaudeApiKey, createMemoryAgentSetup, createMemorySecretStore, loadPty, type AdapterPins, type NpmRunInput, type NpmRunner, type PtyLoader } from '@ogden-agents/adapters';
 import { ONBOARDING_FILE, SecretsUnavailableError, type AgentSetupPort, type ApiKeyVerification, type SecretStorePort } from '@ogden-agents/core';
 import {
   AgentSetupStatus,
@@ -501,6 +501,115 @@ describe('agent setup routes: review fixes (story 9.2)', () => {
     expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'keychain', NODE_ENV: 'test' }, dir)).toBeUndefined();
     // A data folder outside the temp folder (a user's own) never gets it, even in a test run.
     expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', NODE_ENV: 'test' }, process.cwd())).toBeUndefined();
+  });
+});
+
+const FAKE_CODEX = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-codex.mjs');
+const FAKE_CODEX_KEY = `sk-proj-${'S'.repeat(40)}4321`;
+const linkedCommandPath = (agentId = 'codex') => apiPath(API_ROUTES.agentLinkedCommand, { agentId });
+const putLinkedCommand = (server: TestServer, tab: SignedIn, body: unknown, agentId?: string) =>
+  send(server, linkedCommandPath(agentId), { method: 'PUT', headers: json(tab), body: JSON.stringify(body) });
+const deleteLinkedCommand = (server: TestServer, tab: SignedIn, agentId?: string) =>
+  send(server, linkedCommandPath(agentId), { method: 'DELETE', headers: tab.headers });
+/** A quoted command line naming the real Node binary and `file`, never a shell: a quote-aware split gives it back exactly. */
+const nodeCommand = (file: string) => `${JSON.stringify(process.execPath)} ${JSON.stringify(file)}`;
+
+describe('agent setup routes: linking a command (epic 12, entry 12)', () => {
+  /**
+   * A real server with Codex in its wiring slot: the real `createCodexAgent`
+   * (no given server), so a chat runs the shared linked-command wiring
+   * exactly as shipped, over a setup that reports installed Codex as never
+   * installed yet always signed in (the API key's own install-gated auth
+   * rule is unrelated to this ticket and kept unchanged; this isolates the
+   * linked-command bypass from it).
+   */
+  async function startLinkableServer(extra: StartOptions = {}) {
+    const base = createMemoryAgentSetup({ agentId: 'codex', displayName: 'Codex', installed: false, auth: 'signed_in' });
+    const setup: AgentSetupPort = {
+      ...base,
+      apiKeyOnly: true,
+      supportsLinkedCommand: true,
+      // Declared so `agentSetup.agentEnv` injects the key below into the agent's chat process once signed out.
+      apiKey: { envName: 'CODEX_API_KEY', check: () => undefined, verify: async () => 'ok' },
+      status: async () => ({ ...(await base.status()), apiKeyOnly: true, supportsLinkedCommand: true, method: 'api_key', subscription: 'signed_out' }),
+    };
+    const server = await startTestServer({ codex: { setup }, extraAgentEnv: { CODEX_API_KEY: FAKE_CODEX_KEY }, ...extra });
+    const tab = await signIn(server);
+    return { server, tab };
+  }
+
+  const newChat = (server: TestServer, tab: SignedIn, wsId: string, agentId: string) =>
+    send(server, apiPath(API_ROUTES.workspaceSessions, { wsId }), { method: 'POST', headers: json(tab), body: JSON.stringify({ agentId }) });
+
+  it('links Codex to a fake binary; the next chat spawns exactly it, bypassing the install gate', async () => {
+    const { server, tab } = await startLinkableServer();
+    const before = (await agents(server, tab)).find((agent) => agent.agentId === 'codex');
+    expect(before).toMatchObject({ install: 'not_installed', supportsLinkedCommand: true });
+    expect(before!.linkedCommand).toBeUndefined();
+
+    const linked = await putLinkedCommand(server, tab, { command: nodeCommand(FAKE_CODEX) });
+    expect(linked.status).toBe(204);
+    expect(linked.body).toBe('');
+
+    const after = (await agents(server, tab)).find((agent) => agent.agentId === 'codex');
+    expect(after).toMatchObject({ install: 'not_installed', linkedCommand: { command: nodeCommand(FAKE_CODEX) } });
+
+    const repo = mkdtempSync(join(tmpdir(), 'ogden-agents-linked-repo-'));
+    removeAfterTest(repo);
+    const { workspace } = WorkspaceResponse.parse(await (await send(server, API_ROUTES.workspaces, { method: 'POST', headers: json(tab), body: JSON.stringify({ path: repo }) })).json());
+    // Not installed, but linked: the chat starts anyway (readiness bypass).
+    const started = await newChat(server, tab, workspace.id, 'codex');
+    expect(started.status).toBe(201);
+    const { session } = SessionResponse.parse(started.json());
+    expect((await send(server, apiPath(API_ROUTES.sessionMessages, { wsId: workspace.id, sesId: session.id }), { method: 'POST', headers: json(tab), body: JSON.stringify({ text: 'whoami' }) })).status).toBe(202);
+    await waitFor(() => settledState(server, session.id) !== undefined, 'the linked binary\'s reply', 20_000);
+    expect(settledState(server, session.id)).toBe('idle');
+    const reply = server.core.events.readAfter(0).flatMap((event) => (event.type === 'session.message_completed' && event.payload.role === 'agent' ? [event.payload.content] : []));
+    expect(reply.at(-1)).toContain('agent=codex');
+
+    // Cleared: idempotent, and the next chat is refused again (nothing was ever actually installed).
+    expect((await deleteLinkedCommand(server, tab)).status).toBe(204);
+    expect((await deleteLinkedCommand(server, tab)).status).toBe(204);
+    expect((await agents(server, tab)).find((agent) => agent.agentId === 'codex')!.linkedCommand).toBeUndefined();
+    const refused = await newChat(server, tab, workspace.id, 'codex');
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(refused.json()).error.code).toBe('agent_not_installed');
+  }, 30_000);
+
+  it('refuses a command that cannot be found, saving nothing', async () => {
+    const { server, tab } = await startLinkableServer();
+    const refused = await putLinkedCommand(server, tab, { command: '/no/such/file --flag' });
+    expect(refused.status).toBe(400);
+    expect(ApiErrorBody.parse(refused.json()).error.code).toBe('invalid_request');
+    expect((await agents(server, tab)).find((agent) => agent.agentId === 'codex')!.linkedCommand).toBeUndefined();
+  });
+
+  it('refuses a working directory that does not exist, saving nothing', async () => {
+    const { server, tab } = await startLinkableServer();
+    const refused = await putLinkedCommand(server, tab, { command: nodeCommand(FAKE_CODEX), cwd: '/no/such/dir' });
+    expect(refused.status).toBe(400);
+    expect(ApiErrorBody.parse(refused.json()).error.code).toBe('invalid_request');
+    expect((await agents(server, tab)).find((agent) => agent.agentId === 'codex')!.linkedCommand).toBeUndefined();
+  });
+
+  it('refuses to link an agent that does not support it', async () => {
+    const { server, tab } = await startLinkableServer();
+    const refused = await putLinkedCommand(server, tab, { command: nodeCommand(FAKE_CODEX) }, 'claude-code');
+    expect(refused.status).toBe(400);
+    const error = ApiErrorBody.parse(refused.json()).error;
+    expect(error).toMatchObject({ code: 'invalid_request' });
+    expect(error.message).toContain("can't be linked");
+  });
+
+  it('404s an unknown agent, for both routes', async () => {
+    const { server, tab } = await startLinkableServer();
+    expect((await putLinkedCommand(server, tab, { command: nodeCommand(FAKE_CODEX) }, 'no-such-agent')).status).toBe(404);
+    expect((await deleteLinkedCommand(server, tab, 'no-such-agent')).status).toBe(404);
+  });
+
+  it('clearing a command that was never linked is a no-op (204)', async () => {
+    const { server, tab } = await startLinkableServer();
+    expect((await deleteLinkedCommand(server, tab)).status).toBe(204);
   });
 });
 

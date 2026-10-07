@@ -1,5 +1,5 @@
-import { MAX_API_KEY_LENGTH, type AgentSetupStatus } from '@ogden-agents/shared';
-import { DownloadSimple, Key, SignIn as SignInIcon, SignOut as SignOutIcon, Trash } from '@phosphor-icons/react';
+import { MAX_API_KEY_LENGTH, MAX_LINKED_COMMAND_LENGTH, type AgentSetupStatus } from '@ogden-agents/shared';
+import { DownloadSimple, Key, SignIn as SignInIcon, SignOut as SignOutIcon, Terminal, Trash } from '@phosphor-icons/react';
 import { useState, type KeyboardEvent } from 'react';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
@@ -9,7 +9,18 @@ import { Progress } from '@/ui/progress';
 import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
 import { cn } from '@/ui/utils';
-import { useAgentActions, useApiKey, useInstall, useSignIn, type AgentActions, type ApiKeyActions, type InstallAction, type SignIn } from './agent-setup-api';
+import {
+  useAgentActions,
+  useApiKey,
+  useInstall,
+  useLinkedCommand,
+  useSignIn,
+  type AgentActions,
+  type ApiKeyActions,
+  type InstallAction,
+  type LinkedCommandActions,
+  type SignIn,
+} from './agent-setup-api';
 import { LocalEndpointsSection } from './local-endpoints';
 import { SigningIn } from './signing-in';
 
@@ -40,6 +51,7 @@ export function AgentCard({ agent, selected = false }: { agent: AgentSetupStatus
   const apiKey = useApiKey(agent.agentId, undefined, agent.apiKeyName ?? 'API key');
   const install = useInstall(agent.agentId);
   const actions = useAgentActions(agent.agentId);
+  const linkedCommand = useLinkedCommand(agent.agentId);
   const headingId = `agent-${agent.agentId}-name`;
   return (
     <section
@@ -59,6 +71,13 @@ export function AgentCard({ agent, selected = false }: { agent: AgentSetupStatus
         </Text>
       ) : null}
       {agent.install === 'installed' ? <AgentState agent={agent} signIn={signIn} actions={actions} /> : <InstallState agent={agent} install={install} />}
+      {/* A command the user already installs and manages themselves, in place of this install (epic 12, entry 12): offered whether or not it is installed here, since the point is to skip that install. */}
+      {agent.supportsLinkedCommand === true && agent.auth !== 'signing_in' ? <LinkedCommandSection agent={agent} actions={linkedCommand} /> : null}
+      {linkedCommand.error === undefined ? null : (
+        <Text variant="caption" role="alert" data-testid="agent-linked-command-error">
+          {linkedCommand.error}
+        </Text>
+      )}
       {/* The agent's plain-words notices (epic 12, 12.3): known limitations, network use. */}
       {agent.notices === undefined || agent.notices.length === 0 ? null : (
         <ul className="flex flex-col gap-1" data-testid="agent-notices">
@@ -103,6 +122,10 @@ export function AgentCard({ agent, selected = false }: { agent: AgentSetupStatus
 
 /** Not installed, installing, or a failed install (9.3). */
 function InstallState({ agent, install }: { agent: AgentSetupStatus; install: InstallAction }) {
+  // Linked (epic 12, entry 12): a chat runs the user's own command, so there is nothing here to install.
+  if (agent.linkedCommand !== undefined) {
+    return <StateGlyph state="done" label={`Using your own ${agent.displayName} install`} data-testid="agent-state" />;
+  }
   if (agent.install === 'installing') {
     const progress = agent.progress;
     const label = progress?.step ?? `Installing ${agent.displayName}`;
@@ -378,6 +401,92 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
           aria-describedby={`${fieldId}-description`}
         />
         <Button type="button" variant="secondary" aria-disabled={actions.busy || value.trim() === ''} onClick={submit}>
+          {actions.busy ? 'Saving...' : 'Save'}
+        </Button>
+      </div>
+      <div className="flex">
+        <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A command the user already installs and manages themselves, in place of
+ * this agent's own managed install (epic 12, entry 12): linked (the command
+ * line, **Use Ogden Agents' install instead**), or **Link a command you
+ * already manage**, which opens a field for the command line. Mirrors
+ * {@link ApiKeySection}'s three-state pattern. Offered whether or not this
+ * install is in place, since linking is meant to skip it.
+ */
+function LinkedCommandSection({ agent, actions }: { agent: AgentSetupStatus; actions: LinkedCommandActions }) {
+  const [open, setOpen] = useState(false);
+  const [command, setCommand] = useState('');
+  const fieldId = `agent-${agent.agentId}-linked-command`;
+
+  if (agent.linkedCommand !== undefined) {
+    return (
+      <div className="flex flex-col gap-2" data-testid="agent-linked-command">
+        <Text variant="body" data-testid="agent-linked-command-saved">
+          Using your own command: {agent.linkedCommand.command}
+        </Text>
+        <div className="flex">
+          <Button variant="outline" aria-disabled={actions.busy} onClick={actions.busy ? undefined : actions.remove}>
+            Use Ogden Agents' install instead
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <div className="flex" data-testid="agent-linked-command">
+        <Button variant="ghost" onClick={() => setOpen(true)}>
+          <Terminal aria-hidden />
+          Link a command you already manage
+        </Button>
+      </div>
+    );
+  }
+
+  const submit = () => {
+    const value = command.trim();
+    if (value === '' || actions.busy) return;
+    void actions.save({ command: value }).then((ok) => {
+      if (ok) {
+        setOpen(false);
+        setCommand('');
+      }
+    });
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    submit();
+  };
+
+  return (
+    <div className="flex flex-col gap-1" data-testid="agent-linked-command">
+      <Label htmlFor={fieldId}>Command to run</Label>
+      <Text variant="caption" id={`${fieldId}-description`}>
+        A command you already install and manage yourself (for example <code>{agent.displayName.toLowerCase()}-acp</code>), in place of {agent.displayName} here.
+      </Text>
+      <div className="flex gap-2">
+        <Input
+          id={fieldId}
+          type="text"
+          value={command}
+          onChange={(event) => setCommand(event.target.value)}
+          onKeyDown={onKeyDown}
+          spellCheck={false}
+          maxLength={MAX_LINKED_COMMAND_LENGTH}
+          aria-describedby={`${fieldId}-description`}
+        />
+        <Button type="button" variant="secondary" aria-disabled={actions.busy || command.trim() === ''} onClick={submit}>
           {actions.busy ? 'Saving...' : 'Save'}
         </Button>
       </div>

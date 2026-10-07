@@ -38,7 +38,9 @@
  *   trust off it lists `.claude/skills` as commands (probed).
  */
 import { AgentError, type AgentPort } from '@ogden-agents/core';
+import type { LinkedCommandSpec } from '@ogden-agents/shared';
 import { acpReasons, createAcpAgent, type AcpAgentQuirks } from '../acp-base/acp-agent.js';
+import { resolveLinkedCommand } from '../acp-base/linked-command.js';
 import { slashSkillInvocation } from '../acp-base/quirks.js';
 import type { AcpToolInputPaths } from '../acp-base/tool-paths.js';
 import { GROK_DESCRIPTOR } from '../setup-grok/descriptor.js';
@@ -82,6 +84,14 @@ export interface GrokAgentOptions {
   server?: (() => GrokServerCommand | undefined) | undefined;
   /** The binary hashes the checked binary is re-checked against at each start (tests: a fixture's). Default: the pinned ones. */
   binarySha256?: GrokBinaryHashes | undefined;
+  /**
+   * A user's own command line to run in place of the managed install (epic
+   * 12, entry 12), read fresh at every chat start; `undefined` from it (or
+   * absent) uses the managed install as before. The linked branch never
+   * re-checks the managed binary's SHA-256 (there is no managed binary to
+   * check): a refusal to resolve fails the start as `agent_unavailable`.
+   */
+  linkedCommand?: (() => LinkedCommandSpec | undefined) | undefined;
   /** Called with protocol notes, for the log. Never includes the environment. */
   onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
 }
@@ -93,6 +103,24 @@ export function createGrokAgent(options: GrokAgentOptions): AgentPort {
   const reasons = acpReasons(GROK_DESCRIPTOR.displayName, { apiKeyOnly: true, keyName: 'xAI API access token' });
   const quirks: AcpAgentQuirks = {
     launch({ env }) {
+      // Without its own home Grok would use `~/.grok` (its sign in, sessions and logs, and `~/.grok/bin`'s own copy):
+      // never started so, whichever binary is spawned.
+      const home = env[GROK_HOME_ENV];
+      if (home === undefined || home === '') throw new AgentError('agent_unavailable', reasons.couldNotStart);
+      // A linked command (epic 12, entry 12) bypasses the managed install's npm/SHA-256 path entirely: there is no
+      // managed binary here to re-check.
+      const linked = options.linkedCommand?.();
+      if (linked !== undefined) {
+        const resolved = resolveLinkedCommand(linked, env);
+        if (!resolved.ok) throw new AgentError('agent_unavailable', resolved.reason);
+        return {
+          command: resolved.resolved.command,
+          args: [...resolved.resolved.args],
+          addEnv: { [GROK_DISABLE_AUTOUPDATER_ENV]: '1', [GROK_FOLDER_TRUST_ENV]: '0', ...resolved.resolved.env },
+          ...(resolved.resolved.cwd === undefined ? {} : { cwd: resolved.resolved.cwd }),
+          logFields: { server: resolved.resolved.command, linked: true },
+        };
+      }
       let server: GrokServerCommand | undefined;
       if (options.server !== undefined) server = options.server();
       else {
@@ -107,9 +135,6 @@ export function createGrokAgent(options: GrokAgentOptions): AgentPort {
         }
       }
       if (server === undefined) throw new AgentError('agent_unavailable', reasons.notSetUp);
-      // Without its own home Grok would use `~/.grok` (its sign in, sessions and logs, and `~/.grok/bin`'s own copy): never started so.
-      const home = env[GROK_HOME_ENV];
-      if (home === undefined || home === '') throw new AgentError('agent_unavailable', reasons.couldNotStart);
       return {
         command: server.command,
         args: [...server.args],

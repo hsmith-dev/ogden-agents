@@ -36,6 +36,20 @@ export const SettingsAgentDefaultModelChangedInput = z.object({
 export const SettingsAgentDefaultModelChangedEvent = SettingsAgentDefaultModelChangedInput.extend(assigned);
 export type SettingsAgentDefaultModelChangedEvent = z.infer<typeof SettingsAgentDefaultModelChangedEvent>;
 
+export const SettingsAgentLinkedCommandChangedInput = z.object({
+  type: z.literal('settings.agent_linked_command_changed'),
+  ...onSettingsStream,
+  payload: z.object({ agentId: AgentId, linked: z.boolean() }),
+});
+/**
+ * An agent was linked to (or unlinked from) a command line the user already
+ * installs and manages themselves (epic 12, entry 12), in place of Ogden
+ * Agents' own managed install. Never the command, its folder or its
+ * environment (AD-16): the next chat start resolves whichever is now set.
+ */
+export const SettingsAgentLinkedCommandChangedEvent = SettingsAgentLinkedCommandChangedInput.extend(assigned);
+export type SettingsAgentLinkedCommandChangedEvent = z.infer<typeof SettingsAgentLinkedCommandChangedEvent>;
+
 export const SettingsWhileWorkingChangedInput = z.object({
   type: z.literal('settings.while_working_changed'),
   ...onSettingsStream,

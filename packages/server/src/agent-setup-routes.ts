@@ -24,9 +24,11 @@ import {
   SecretsUnavailableError,
   SignInNotPendingError,
   ValidationError,
+  type AgentLinkedCommands,
   type AgentSetup,
   type Onboarding,
 } from '@ogden-agents/core';
+import { resolveLinkedCommand } from '@ogden-agents/adapters';
 import {
   AgentId,
   AgentSetupStatus,
@@ -34,6 +36,7 @@ import {
   API_ROUTES,
   OnboardingState,
   SetApiKeyRequest,
+  SetLinkedCommandRequest,
   SignInCodeRequest,
   SignInResponse,
 } from '@ogden-agents/shared';
@@ -48,6 +51,11 @@ export interface AgentSetupRoutesOptions {
   agentSetup?: AgentSetup | undefined;
   /** Core's onboarding use-case (9.5): whether Welcome is done; without it those routes answer 501. */
   onboarding?: Onboarding | undefined;
+  /**
+   * Each agent's linked command (epic 12, entry 12), over `core.agentLinkedCommands`; without it the linked-command
+   * routes answer 501 and no `AgentSetupStatus` ever carries `linkedCommand`.
+   */
+  agentLinkedCommands?: AgentLinkedCommands | undefined;
   log: Logger;
 }
 
@@ -55,6 +63,8 @@ export interface AgentSetupRoutesOptions {
 const MAX_CODE_BODY_BYTES = 4 * 1024;
 /** Largest API key body read (a key is at most 1000 characters). */
 const MAX_API_KEY_BODY_BYTES = 4 * 1024;
+/** Largest linked-command body read (a command line, a folder path and a modest set of environment variables). */
+const MAX_LINKED_COMMAND_BODY_BYTES = 16 * 1024;
 /** Largest onboarding body read (`{"welcomeCompleted":false}` is 26 bytes). */
 const MAX_ONBOARDING_BODY_BYTES = 1024;
 
@@ -69,11 +79,13 @@ const COULD_NOT_UNINSTALL = "Ogden Agents couldn't uninstall that. Try again.";
 const COULD_NOT_SIGN_OUT = "Ogden Agents couldn't sign out. Try again.";
 const COULD_NOT_SAVE_WELCOME = "Ogden Agents couldn't save that. Try again.";
 const COULD_NOT_READ_WELCOME = "Ogden Agents couldn't check whether Welcome is done. Try again.";
+const COULD_NOT_SAVE_LINKED_COMMAND = "Ogden Agents couldn't save that command. Try again.";
+const COULD_NOT_REMOVE_LINKED_COMMAND = "Ogden Agents couldn't remove that command. Try again.";
 
 const noStore = (c: Context) => c.header('Cache-Control', 'no-store');
 
 export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOptions): void {
-  const { agentSetup, onboarding, log } = options;
+  const { agentSetup, onboarding, agentLinkedCommands, log } = options;
 
   registerOnboardingRoutes(app, onboarding, log);
 
@@ -100,6 +112,14 @@ export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOpt
       noStore(c);
       return notImplemented(c);
     });
+    app.put(API_ROUTES.agentLinkedCommand, (c) => {
+      noStore(c);
+      return notImplemented(c);
+    });
+    app.delete(API_ROUTES.agentLinkedCommand, (c) => {
+      noStore(c);
+      return notImplemented(c);
+    });
     return;
   }
 
@@ -107,6 +127,18 @@ export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOpt
   const agentIdOf = (c: Context): string | undefined => {
     const parsed = AgentId.safeParse(c.req.param('agentId'));
     return parsed.success ? parsed.data : undefined;
+  };
+
+  /**
+   * `status`, with its agent's linked command merged in from
+   * `core.agentLinkedCommands` (epic 12, entry 12): never part of what a
+   * port's own `status()` reports, and only for an agent whose own status
+   * already says it supports one.
+   */
+  const withLinkedCommand = (status: AgentSetupStatus): AgentSetupStatus => {
+    if (agentLinkedCommands === undefined || status.supportsLinkedCommand !== true) return status;
+    const linkedCommand = agentLinkedCommands.get(status.agentId);
+    return linkedCommand === undefined ? status : { ...status, linkedCommand };
   };
 
   /** Core's refusals as API errors. Only codes are logged, never a URL, a code or a key. */
@@ -127,7 +159,8 @@ export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOpt
   // `GET` → `AgentsResponse`: every supported agent's install and sign-in state.
   app.get(API_ROUTES.agents, async (c) => {
     try {
-      return c.json(AgentsResponse.parse({ agents: await agentSetup.list() }));
+      const agents = (await agentSetup.list()).map(withLinkedCommand);
+      return c.json(AgentsResponse.parse({ agents }));
     } catch (error) {
       return refusal(c, error, COULD_NOT_CHECK);
     }
@@ -140,7 +173,7 @@ export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOpt
     try {
       const { started, agent } = await agentSetup.install(agentId);
       log.info('agent install requested', { agentId, started, install: agent.install });
-      return c.json(AgentSetupStatus.parse(agent), 202);
+      return c.json(AgentSetupStatus.parse(withLinkedCommand(agent)), 202);
     } catch (error) {
       return refusal(c, error, COULD_NOT_INSTALL);
     }
@@ -166,7 +199,7 @@ export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOpt
     try {
       const agent = await agentSetup.signOut(agentId);
       log.info('agent signed out', { agentId });
-      return c.json(AgentSetupStatus.parse(agent));
+      return c.json(AgentSetupStatus.parse(withLinkedCommand(agent)));
     } catch (error) {
       return refusal(c, error, COULD_NOT_SIGN_OUT);
     }
@@ -256,6 +289,59 @@ export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOpt
       return c.body(null, 204);
     } catch (error) {
       return refusal(c, error, COULD_NOT_REMOVE_KEY);
+    }
+  });
+
+  // `PUT SetLinkedCommandRequest` → 204, sent `Cache-Control: no-store` (epic 12, entry 12; its `env` can carry
+  // secret-like values, as `agentApiKey` does): links the agent to a command line the user already installs and
+  // manages, in place of Ogden Agents' own managed install. Resolved to an absolute, runnable path
+  // (`resolveLinkedCommand`) before anything is persisted; a refusal there is plain words, nothing saved.
+  app.put(
+    API_ROUTES.agentLinkedCommand,
+    bodyLimit({ maxSize: MAX_LINKED_COMMAND_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That command is too long.') }),
+    async (c) => {
+      noStore(c);
+      const agentId = agentIdOf(c);
+      if (agentId === undefined) return apiError(c, 404, 'not_found', NO_SUCH_AGENT);
+      if (agentLinkedCommands === undefined) return notImplemented(c);
+      const body = await readBody(c, SetLinkedCommandRequest);
+      if (!body.ok) return body.response;
+      let agents: AgentSetupStatus[];
+      try {
+        agents = await agentSetup.list();
+      } catch (error) {
+        return refusal(c, error, COULD_NOT_SAVE_LINKED_COMMAND);
+      }
+      const agent = agents.find((candidate) => candidate.agentId === agentId);
+      if (agent === undefined) return apiError(c, 404, 'not_found', NO_SUCH_AGENT);
+      if (agent.supportsLinkedCommand !== true) return apiError(c, 400, 'invalid_request', `${agent.displayName} can't be linked to a command you manage yourself.`);
+      const resolved = resolveLinkedCommand(body.value, process.env);
+      if (!resolved.ok) return apiError(c, 400, 'invalid_request', resolved.reason);
+      try {
+        agentLinkedCommands.set(agentId, body.value);
+        log.info('agent linked command saved', { agentId });
+        return c.body(null, 204);
+      } catch (error) {
+        return refusal(c, error, COULD_NOT_SAVE_LINKED_COMMAND);
+      }
+    },
+  );
+
+  // `DELETE` → 204, sent `Cache-Control: no-store` (epic 12, entry 12): clears the agent's linked command;
+  // idempotent. The next chat start resolves the managed install again.
+  app.delete(API_ROUTES.agentLinkedCommand, async (c) => {
+    noStore(c);
+    const agentId = agentIdOf(c);
+    if (agentId === undefined) return apiError(c, 404, 'not_found', NO_SUCH_AGENT);
+    if (agentLinkedCommands === undefined) return notImplemented(c);
+    try {
+      const agents = await agentSetup.list();
+      if (!agents.some((candidate) => candidate.agentId === agentId)) return apiError(c, 404, 'not_found', NO_SUCH_AGENT);
+      agentLinkedCommands.set(agentId, null);
+      log.info('agent linked command removed', { agentId });
+      return c.body(null, 204);
+    } catch (error) {
+      return refusal(c, error, COULD_NOT_REMOVE_LINKED_COMMAND);
     }
   });
 }

@@ -272,6 +272,17 @@ export const API_ROUTES = {
    * `DELETE` → 204 removes it (idempotent).
    */
   agentApiKey: `${API_BASE}/agents/:agentId/api-key`,
+  /**
+   * `PUT SetLinkedCommandRequest` → 204, sent `Cache-Control: no-store` (epic 12, entry 12; its `env` can carry
+   * secret-like values, as `agentApiKey` does): links the agent to a command line the user already installs and
+   * manages, in place of Ogden Agents' own managed install. Codex and Grok only
+   * (`AgentSetupStatus.supportsLinkedCommand`). The command (and `cwd`, when given) must be an absolute path, or a
+   * bare command name found on `PATH`: a relative path is refused, since neither the save-time check nor a chat's
+   * start has anything meaningful to resolve one against. 400 `invalid_request` when it can't be resolved to a
+   * runnable file, or `cwd` doesn't exist or isn't absolute; nothing is persisted then. `DELETE` → 204, `no-store`,
+   * clears it (idempotent); the next chat start resolves the managed install again.
+   */
+  agentLinkedCommand: `${API_BASE}/agents/:agentId/linked-command`,
   /** `GET` → `OnboardingState`; `PATCH OnboardingState` → `OnboardingState` (9.5): whether Welcome is done. */
   onboarding: `${API_BASE}/onboarding`,
   /**

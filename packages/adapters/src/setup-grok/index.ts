@@ -93,12 +93,14 @@ export function createGrokSetup(options: GrokSetupOptions): GrokSetup {
     agentId: GROK_AGENT_ID,
     displayName: GROK,
     apiKeyOnly: true,
+    // A command line the user already installs and manages may run in place of this install (epic 12, entry 12).
+    supportsLinkedCommand: true,
     apiKey: createGrokApiKey({ ...options.apiKey, onDiagnostic: diagnostic }),
 
     // Always signed out as an account: only a token (core's rule) makes it ready.
     async status(): Promise<AgentPortStatus> {
       const found = installedGrok(options.dataDir, options.install?.pins);
-      const common = { agentId: GROK_AGENT_ID, displayName: GROK, apiKeyOnly: true as const, apiKeyName: GROK_KEY_NAME, notices: [GROK_NO_SIGN_IN_NOTICE], installNote: GROK_INSTALL_NOTE };
+      const common = { agentId: GROK_AGENT_ID, displayName: GROK, apiKeyOnly: true as const, supportsLinkedCommand: true as const, apiKeyName: GROK_KEY_NAME, notices: [GROK_NO_SIGN_IN_NOTICE], installNote: GROK_INSTALL_NOTE };
       if (found === undefined) return { ...common, install: 'not_installed', version: null, auth: 'needs_sign_in', subscription: 'signed_out' };
       return { ...common, install: 'installed', version: found.version, auth: 'needs_sign_in', subscription: 'signed_out' };
     },

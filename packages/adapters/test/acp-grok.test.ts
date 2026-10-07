@@ -138,6 +138,40 @@ describe("Grok's chat port (epic 12 entry 7)", () => {
     expect(await say(session, events, 'permission rm -rf build')).toBe('Denied rm -rf build. chose=reject_once');
   });
 
+  it('with a linked command (epic 12 entry 12), spawns it instead of the managed install, with identical cards and modes', async () => {
+    const diagnostics: Array<[string, Record<string, unknown> | undefined]> = [];
+    const linked = createGrokAgent({
+      dataDir: tempDir(), // nothing installed here: the managed path would refuse `notSetUp`
+      linkedCommand: () => ({ command: `"${process.execPath}" "${FAKE_GROK}"` }),
+      onDiagnostic: (message, fields) => diagnostics.push([message, fields]),
+    });
+    const asked: AgentPermissionRequest[] = [];
+    const session = await linked.startSession({
+      cwd: tempDir(),
+      env: envOf({ XAI_API_KEY: KEY }),
+      onPermissionRequest: async (request) => {
+        asked.push(request);
+        return { outcome: 'allow_once' };
+      },
+      protectedPaths: PROTECTED_PATHS,
+      permissionMode: 'ask',
+    });
+    sessions.push(session);
+    const events: AgentEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    expect(await say(session, events, 'permission npm test')).toBe('Ran npm test. chose=allow_once');
+    expect(asked).toHaveLength(1);
+    expect(session.permissionModes).toEqual(['ask', 'skip_all']);
+    expect(diagnostics.some(([, fields]) => fields?.linked === true)).toBe(true);
+  });
+
+  it('a bad linked command refuses the start in plain words, never falling back to the managed install (no SHA-256 to re-check)', async () => {
+    const agent = createGrokAgent({ dataDir: tempDir(), linkedCommand: () => ({ command: '/no/such/grok' }) });
+    const failure = await agent.startSession({ cwd: tempDir(), env: envOf({ XAI_API_KEY: KEY }), permissionMode: 'ask' }).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: 'agent_unavailable' });
+    expect(String((failure as Error).message)).toContain("couldn't find");
+  });
+
   it("a project's own allow rules never loosen Ask: the explicit Ask reaches Grok on a start and on every reopen, and the card is still asked", async () => {
     const cwd = tempDir();
     mkdirSync(join(cwd, '.claude'));

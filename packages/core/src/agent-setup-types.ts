@@ -165,6 +165,15 @@ export interface AgentSetupOptions {
   now?: () => number;
   /** Minimum time between two install progress events. Default `PROGRESS_INTERVAL_MS` (`toolchain.ts`). */
   progressIntervalMs?: number;
+  /**
+   * Whether the agent has a linked command set (epic 12, entry 12), from
+   * `core.agentLinkedCommands`: when true, {@link AgentSetup.readiness}'s
+   * `agent_not_installed` gate, and the same install gate inside `withApiKey`
+   * (whether a saved key flips `auth` to `signed_in` at all), are both
+   * bypassed, so a chat can start on the linked command with a saved key even
+   * if Ogden Agents' own copy was never installed. Absent: never bypassed.
+   */
+  isLinked?: (agentId: string) => boolean;
 }
 
 /** A saved API key, in memory only. `unchecked`: the provider couldn't be asked when it was saved (not kept across a restart). */

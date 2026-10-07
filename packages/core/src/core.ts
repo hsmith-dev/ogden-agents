@@ -25,6 +25,7 @@ import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
 import { createAgentModels, type AgentModels } from './agent-models.js';
+import { createAgentLinkedCommands, type AgentLinkedCommands } from './agent-linked-commands.js';
 import { createInstallSettings, type InstallSettings } from './install-settings.js';
 import { createPaneStore, type PaneStore } from './pane-store.js';
 import { createTerminalsSettings, type TerminalsSettingsStore } from './terminals-settings.js';
@@ -61,6 +62,13 @@ export interface Core {
   readonly installSettings: InstallSettings;
   /** Each agent's default model and last model list, install-wide (story 11). */
   readonly agentModels: AgentModels;
+  /**
+   * Each agent's linked command, install-wide (epic 12, entry 12): a user's
+   * own command line in place of Ogden Agents' managed install, for Codex
+   * and Grok. Stores and retrieves the already-validated raw spec only; the
+   * fs resolution lives in `packages/adapters` (AD-1).
+   */
+  readonly agentLinkedCommands: AgentLinkedCommands;
   /**
    * What each unattended build session's agent starts with (story 5.2): the
    * builds use-cases register it, the chat reads it. In memory only.
@@ -182,6 +190,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
         });
   const installSettings = createInstallSettings({ db, events, entities });
   const agentModels = createAgentModels({ db, events });
+  const agentLinkedCommands = createAgentLinkedCommands({ db, events });
   const permissions = createPermissions({
     db,
     events,
@@ -208,6 +217,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     bmadSetup,
     installSettings,
     agentModels,
+    agentLinkedCommands,
     buildSessions: createBuildSessions(),
     buildSettings: createBuildSettings({ db, events, entities }),
     paneStore: createPaneStore({ db }),

@@ -239,6 +239,13 @@
       "when": 1791338057662,
       "tag": "0033_global_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1791362042333,
+      "tag": "0034_closed_omega_flight",
+      "breakpoints": true
     }
   ]
 }

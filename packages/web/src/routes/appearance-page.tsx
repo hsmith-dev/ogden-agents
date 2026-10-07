@@ -7,6 +7,7 @@ import { useDeveloperModeSave } from '@/appearance/developer-mode';
 import { AppShortcutSetting } from '@/appearance/app-shortcut-setting';
 import type { Density, ThemePreference } from '@/appearance/appearance';
 import { WorkspaceHeader } from '@/shell/workspace-header';
+import { ReplayTourSetting } from '@/tour/replay-tour-setting';
 import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
 import { PageBody, PageSection } from '@/ui/page';
@@ -116,6 +117,7 @@ export function AppearancePage() {
             />
           </Field>
           <AppShortcutSetting />
+          <ReplayTourSetting />
         </PageSection>
       </PageBody>
     </>

@@ -84,7 +84,18 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   const codex =
     options.codex === false || (options.codex === undefined && !CODEX_SHIPPED && hooks.codexServer === undefined && hooks.codexInstall === undefined)
       ? []
-      : [codexWiring({ dataDir, given: options.codex, serverScript: hooks.codexServer, install: hooks.codexInstall === undefined ? undefined : { pins: hooks.codexInstall.pins, ...(hooks.codexInstall.npmCli === undefined ? {} : { npmCli: hooks.codexInstall.npmCli }) }, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+      : [codexWiring({
+            dataDir,
+            given: options.codex,
+            serverScript: hooks.codexServer,
+            // The npm that launched Ogden Agents, or (desktop) the shell's bundled npm, read here before any
+            // child environment drops npm_* (story 9.3; Claude Code's own wiring above) — without this, Codex's
+            // install can only find npm beside this Node or on PATH, which fails on a machine with no system Node.
+            install: {
+              launcherNpm: process.env.npm_execpath,
+              ...(hooks.codexInstall === undefined ? {} : { pins: hooks.codexInstall.pins, ...(hooks.codexInstall.npmCli === undefined ? {} : { npmCli: hooks.codexInstall.npmCli }) }),
+            },
+            onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of codex) checkAgentWiring(wiring);
   // Grok (epic 12 entry 4): the same, in its own folder's switch.
   const grok =
@@ -94,11 +105,15 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
             dataDir,
             given: options.grok,
             serverScript: hooks.grokServer,
-            // A fixture install never runs its unpacked binary: the token probe is a stub there.
-            install:
-              hooks.grokInstall === undefined
-                ? undefined
-                : { pins: hooks.grokInstall.pins, tokenProbe: async () => true, ...(hooks.grokInstall.npmCli === undefined ? {} : { npmCli: hooks.grokInstall.npmCli }), ...(hooks.grokInstall.binarySha256 === undefined ? {} : { binarySha256: hooks.grokInstall.binarySha256 }) },
+            // `launcherNpm` as Codex's install gets it above (missing here was the actual bug: Grok's install,
+            // like Codex's, could otherwise only find npm beside this Node or on PATH). A fixture install never
+            // runs its unpacked binary: the token probe is a stub there, never in a real (shipped) install.
+            install: {
+              launcherNpm: process.env.npm_execpath,
+              ...(hooks.grokInstall === undefined
+                ? {}
+                : { pins: hooks.grokInstall.pins, tokenProbe: async () => true, ...(hooks.grokInstall.npmCli === undefined ? {} : { npmCli: hooks.grokInstall.npmCli }), ...(hooks.grokInstall.binarySha256 === undefined ? {} : { binarySha256: hooks.grokInstall.binarySha256 }) }),
+            },
             onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of grok) checkAgentWiring(wiring);
   // The Local model's endpoints (epic 14 story 14.3), over the keychain below; a chat asks for its target at each start.

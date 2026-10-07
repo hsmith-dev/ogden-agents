@@ -202,6 +202,10 @@ export const API_ERROR_CODES = [
   'dispatch_refused',
   /** Orchestration (15.9): the user answered a question the manager is not asking (409). Nothing was stored. */
   'no_question',
+  /** CAP-25: a dev tool's install was confirmed but it has no known command for this computer's OS (409). Nothing was run. */
+  'no_install_command',
+  /** CAP-25: a dev tool's real install command failed (409). The message is its plain reason, never the raw installer output. */
+  'install_failed',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

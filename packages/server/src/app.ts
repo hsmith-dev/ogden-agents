@@ -30,6 +30,7 @@ import {
   type PlanningUseCases,
   type Toolchain,
   type AgentModels,
+  type DevTools,
 } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
@@ -58,6 +59,7 @@ import { registerLocalEndpointRoutes } from './local-endpoint-routes.js';
 import { registerLocalEndpointModelsRoute } from './local-endpoint-models-route.js';
 import { registerLocalEndpointUseRoutes, type EndpointPresetData } from './local-endpoint-use-routes.js';
 import { registerRunSettingsRoutes } from './run-settings-routes.js';
+import { registerDevToolsRoutes } from './dev-tools-routes.js';
 import { registerUpdateRoutes } from './update-routes.js';
 import type { UpdateCheck } from './update-check.js';
 import type { ShellMode } from './shell-mode.js';
@@ -156,6 +158,8 @@ export interface AppOptions {
   builds?: BuildsUseCases;
   /** The install's run limits and a project's build settings (story 5.8). */
   buildSettings?: BuildSettings;
+  /** Generic developer CLI tools: the catalog, confirmed real installs, and each project's unattended-build allowlist (CAP-25); without it those routes answer 501. */
+  devTools?: DevTools;
   /** Notification settings and webhooks (story 11.4). */
   notifications?: Notifications;
   /** The Local model's endpoints (epic 14 story 14.3); without it those routes answer 501. */
@@ -224,6 +228,7 @@ export function createApp({
   retrospectives,
   builds,
   buildSettings,
+  devTools,
   notifications,
   localEndpoints,
   localModels,
@@ -357,6 +362,7 @@ export function createApp({
   registerTerminalsSettingsRoutes(app, { terminalsSettings, installSettings, log });
   // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
   registerRunSettingsRoutes(app, { buildSettings, builds, notifications, log });
+  registerDevToolsRoutes(app, { devTools, log });
   // The Local model's endpoints (epic 14 story 14.3): app-wide, behind the gate, never a piece's guard; a key never leaves.
   registerLocalEndpointRoutes(app, { localEndpoints, log });
   registerLocalEndpointUseRoutes(app, { localModels, presets: endpointPresets ?? [], log });

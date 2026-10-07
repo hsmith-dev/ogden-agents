@@ -395,6 +395,30 @@ export const API_ROUTES = {
    */
   workspaceBmadScriptTrust: `${API_BASE}/workspaces/:wsId/bmad/script-trust`,
   /**
+   * `GET` → `DevToolsResponse` (CAP-25): the install-wide dev tool catalog
+   * (a seed list plus any the user named), each resolved for this computer.
+   * `POST AddDevToolRequest` → 201 `DevToolsResponse`: names a tool Ogden
+   * doesn't ship; a duplicate id is refused.
+   */
+  devTools: `${API_BASE}/dev-tools`,
+  /** `DELETE` → 204 (CAP-25): removes a tool the user named (never a seed one). */
+  devTool: `${API_BASE}/dev-tools/:toolId`,
+  /**
+   * `POST InstallDevToolRequest` → `DevToolStatus` (CAP-25): runs the
+   * tool's own real install command, only on `{confirm: true}`. A refused
+   * confirmation never reaches this route; a failed install answers 409
+   * with a plain reason and leaves the tool not installed.
+   */
+  devToolInstall: `${API_BASE}/dev-tools/:toolId/install`,
+  /**
+   * `GET` → `DevToolsAllowlistResponse` (CAP-25): every installed tool and
+   * whether this project has allowed it for unattended builds (deny by
+   * default). `PUT SetDevToolAllowedRequest` on `.../dev-tools-allowlist/:toolId`
+   * → `DevToolsAllowlistResponse`: grants or revokes one tool's allowance.
+   */
+  workspaceDevToolsAllowlist: `${API_BASE}/workspaces/:wsId/dev-tools-allowlist`,
+  workspaceDevToolAllow: `${API_BASE}/workspaces/:wsId/dev-tools-allowlist/:toolId`,
+  /**
    * `GET ?path=<repo-relative path>` → `DocumentResponse` (story 4.7): a
    * Markdown document a planning session wrote, read-only, at most
    * `MAX_DOCUMENT_BYTES` (longer is cut, `truncated: true`). Only a `.md`

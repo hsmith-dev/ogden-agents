@@ -590,6 +590,13 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.serverQuit}`,
   `GET ${API_ROUTES.toolchain}`,
   `POST ${API_ROUTES.uvInstall}`,
+  // Generic developer CLI tools (CAP-25): behind the gate; not a BMad piece.
+  `GET ${API_ROUTES.devTools}`,
+  `POST ${API_ROUTES.devTools}`,
+  `DELETE ${API_ROUTES.devTool}`,
+  `POST ${API_ROUTES.devToolInstall}`,
+  `GET ${API_ROUTES.workspaceDevToolsAllowlist}`,
+  `PUT ${API_ROUTES.workspaceDevToolAllow}`,
   `GET ${API_ROUTES.workspaces}`,
   `POST ${API_ROUTES.workspaces}`,
   `GET ${API_ROUTES.chatAgents}`,

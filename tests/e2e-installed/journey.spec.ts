@@ -88,7 +88,8 @@ test('the epic 1 journey on the installed package', async ({ page, context }) =>
 
   await test.step('5. open Settings > Tools: the status is shown, nothing is downloaded', async () => {
     await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('menuitem', { name: 'Tools' }).click();
+    // Exact: "Developer tools" (CAP-25) is a separate menu item whose name also contains "tools".
+    await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
     await expect(page).toHaveURL(/\/settings\/tools$/);
     await expect(page.getByRole('heading', { name: 'Tools', level: 1 })).toBeVisible();
     const status = page.getByTestId('uv-status');

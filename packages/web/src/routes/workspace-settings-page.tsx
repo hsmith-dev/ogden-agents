@@ -21,6 +21,7 @@ import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
 import { Text } from '@/ui/typography';
 import { deleteHistory, fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
 import { BmadMethodSection } from '@/workspaces/bmad-method-section';
+import { DevToolsAllowlistSection } from '@/workspaces/dev-tools-allowlist-section';
 import { OrchestrationSection } from '@/workspaces/orchestration-section';
 import { useBmadRepoNoteSlot, useNewProjectsDefaultSlot } from '@/workspaces/bmad-settings-slots';
 import { createLatestGate, updateCautionLevel, updateDefaultAgent, updateDefaultPermissionMode, updateProjectDefaultModel, usePermissionRules, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
@@ -66,6 +67,7 @@ export function WorkspaceSettingsPage() {
             <BmadSection wsId={wsId} />
             <OrchestrationSection wsId={wsId} />
             <BuildLimitSection wsId={wsId} />
+            <DevToolsAllowSection wsId={wsId} />
             <AlwaysAllowRulesSection wsId={wsId} name={workspaceName(workspace.data)} />
             <DeleteHistorySection wsId={wsId} name={workspaceName(workspace.data)} />
           </>
@@ -80,6 +82,12 @@ export function WorkspaceSettingsPage() {
 function BuildLimitSection({ wsId }: { wsId: string }) {
   const settings = useWorkspaceSettings(wsId);
   return settings.data?.bmadPieces.includes('builds') === true ? <ProjectBuildLimit wsId={wsId} /> : null;
+}
+
+/** The dev tools unattended-build allowlist (CAP-25): only where Unattended builds is on (deny by default otherwise has nothing to show). */
+function DevToolsAllowSection({ wsId }: { wsId: string }) {
+  const settings = useWorkspaceSettings(wsId);
+  return settings.data?.bmadPieces.includes('builds') === true ? <DevToolsAllowlistSection wsId={wsId} /> : null;
 }
 
 function BmadSection({ wsId }: { wsId: string }) {

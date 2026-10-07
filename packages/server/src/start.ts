@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
@@ -198,6 +198,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
       // A project's default agent (epic 6, entry 6) is one this server registers: Claude Code and any extra agent.
       isAgentRegistered: registeredAgent(options, hooks),
+      // Generic developer CLI tools (CAP-25): the real adapter, or a test's own.
+      devToolsPort: options.devToolsPort ?? createDevToolsAdapter(),
       agentConfigFolders: () => agentConfigFolders(descriptors.current),
       agentProjectFiles: () => agentProjectFiles(descriptors.current),
       projectFilesFingerprint,
@@ -475,6 +477,7 @@ async function listenAndAnnounce({
     retrospectives,
     builds,
     buildSettings: core.buildSettings,
+    devTools: core.devTools,
     notifications,
     ...endpointApi,
     bmadSource,

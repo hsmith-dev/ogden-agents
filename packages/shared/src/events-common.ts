@@ -17,6 +17,12 @@ export const SERVER_STREAM = 'server';
 export const TOOLCHAIN_STREAM = 'toolchain';
 
 /**
+ * The stream of generic developer CLI tool events (install-level:
+ * `workspaceId: null`; CAP-25). Never carries an installer's raw output.
+ */
+export const DEV_TOOLS_STREAM = 'dev-tools';
+
+/**
  * The stream of agent install and sign-in events (install-level:
  * `workspaceId: null`; onboarding, epic 9). They never carry a sign-in URL,
  * a launch code or a key (AD-15, AD-16): the sign-in URL travels only in a

@@ -115,6 +115,31 @@ describe('starting a build (story 5.2)', () => {
     expect(await codeOf(h.builds.start(h.wsId, { ref: '1.1' }))).toBe('run_active');
     expect((await h.builds.runOfSession(h.wsId, session.id)).id).toBe(run.id);
   });
+
+  it("denies a generic dev tool's path in the sandbox until this project explicitly allows it (CAP-25, deny by default)", async () => {
+    const calls: unknown[] = [];
+    const h = await harness({
+      devTools: {
+        deniedReadPathsFor: async (workspaceId) => {
+          calls.push(workspaceId);
+          return ['/usr/local/bin/gcloud'];
+        },
+      },
+    });
+    const { session } = await h.builds.start(h.wsId, { ref: '1.1' });
+    const setup = unattendedOf(h.core.buildSessions.get(session.id));
+    // The lookup is scoped to this project, and its path joins the credential-folder denials already there.
+    expect(calls).toEqual([h.wsId]);
+    expect(setup.sandbox.deniedReads).toContain('/usr/local/bin/gcloud');
+    expect(setup.sandbox.deniedReads).toContain(realpathSync.native(h.dataDir));
+  });
+
+  it('never denies anything extra when no dev tools dependency is wired (default behavior unchanged)', async () => {
+    const h = await harness();
+    const { session } = await h.builds.start(h.wsId, { ref: '1.1' });
+    const setup = unattendedOf(h.core.buildSessions.get(session.id));
+    expect(setup.sandbox.deniedReads).toEqual([realpathSync.native(h.dataDir)]);
+  });
 });
 
 describe("a build's outcome when its turn ends (story 5.2)", () => {

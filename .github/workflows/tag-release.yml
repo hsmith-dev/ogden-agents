@@ -1,0 +1,125 @@
+name: Tag release
+
+# Cuts a release when the version lands on main (see RELEASING.md, "Releasing by version bump").
+# Every push to `main` that touches `package.json` reads the root version; if `v<version>` is not a
+# tag yet, this creates the tag on that commit and starts the Release workflow on it, which does
+# everything else (CI, the assets, the desktop apps, npm when it is on, the GitHub Release). A push
+# whose version is already tagged does nothing, so a release is never cut twice and a tag is never
+# moved. Nothing here publishes anything: it only names the commit.
+#
+# Before tagging it checks the same things the Release guard checks (one version in every package
+# manifest, a CHANGELOG.md section for a stable version), so a bad bump fails here with the tag
+# never created, instead of leaving a tag whose release failed.
+#
+# The tag is pushed with the repository token, which GitHub never lets start another workflow on
+# its own; the Release workflow is therefore started explicitly (`gh workflow run`) on the tag,
+# which the token is allowed to do. No stored credential is involved. The Release workflow treats
+# any run on a tag as a real release, and a run on a branch as a dry run.
+#
+# `workflow_dispatch` runs the same check by hand for main's current version (for example to cut
+# the first release after this workflow was added).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - package.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag the version on main and start the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      # Push the tag.
+      contents: write
+      # Start the Release workflow on it.
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # One version everywhere, as the Release guard requires (tests/packaging.test.ts and
+      # tests/desktop-config.test.ts keep them equal).
+      - name: Read the version and check it is the same in every package
+        id: version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error title=Not a version::package.json's version '$version' is not a semantic version. Nothing was tagged."
+            exit 1
+          fi
+          for file in packages/server/package.json packages/web/package.json packages/desktop/package.json packages/desktop/src-tauri/tauri.conf.json; do
+            other="$(node -p "require('./$file').version")"
+            if [ "$other" != "$version" ]; then
+              echo "::error title=Versions differ::$file says $other but package.json says $version. Set one version everywhere (RELEASING.md). Nothing was tagged."
+              exit 1
+            fi
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "main is at $version"
+
+      # A stable version with no CHANGELOG.md section would fail in the Release assets job; find
+      # that out before the tag exists.
+      - name: The changelog has notes for this version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/release-notes.mjs "$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null
+
+      - name: Is the version tagged already?
+        id: existing
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$TAG exists already: nothing to do. Bump the version to release again." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "$TAG does not exist yet"
+          fi
+
+      - name: Create the tag on this commit
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+          echo "Tagged $GITHUB_SHA as $TAG"
+
+      - name: Start the Release workflow on the tag
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh workflow run release.yml --ref "$TAG"
+          # Find the run it started, so the summary links to it.
+          run_url=""
+          for attempt in 1 2 3 4 5 6; do
+            run_url="$(gh run list --workflow release.yml --branch "$TAG" --limit 1 --json url --jq '.[0].url // empty')"
+            if [ -n "$run_url" ]; then break; fi
+            sleep 5
+          done
+          {
+            echo "## Release $TAG started"
+            echo
+            echo "Tagged \`$GITHUB_SHA\` as \`$TAG\` and started the Release workflow on it."
+            if [ -n "$run_url" ]; then echo "Follow it at $run_url."; else echo "Follow it under Actions, Release."; fi
+          } >> "$GITHUB_STEP_SUMMARY"

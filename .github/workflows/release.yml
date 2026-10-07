@@ -23,8 +23,11 @@ name: Release
 # published half-attached. Apple and Windows code signing are slots that turn on when their secrets
 # are in the environment. See RELEASING.md, "The desktop app".
 #
-# `workflow_dispatch` is a dry run: it builds every release asset and keeps them
-# as workflow artifacts, and creates no release, tag or npm publish.
+# A run on a tag is a release, however it was started: a pushed tag, or the Tag
+# release workflow (tag-release.yml) starting this one on the tag it just created
+# from main's version. `workflow_dispatch` on a branch is a dry run: it builds
+# every release asset and keeps them as workflow artifacts, and creates no
+# release, tag or npm publish.
 #
 # The trusted publisher on npmjs.com names this repository, this file
 # (`release.yml`) and the environment `npm-release`; renaming the file or the
@@ -33,7 +36,8 @@ name: Release
 on:
   push:
     tags: ['v*.*.*']
-  # Dry run: builds the release assets as workflow artifacts; no release, no npm.
+  # On a branch, a dry run: builds the release assets as workflow artifacts; no
+  # release, no npm. On a tag, a release (how tag-release.yml starts one).
   workflow_dispatch:
 
 permissions:
@@ -104,7 +108,7 @@ jobs:
     name: CI
     needs: guard
     # Not on a dry run: it only builds the assets.
-    if: github.event_name == 'push'
+    if: github.ref_type == 'tag'
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
@@ -340,7 +344,7 @@ jobs:
     # Opt-in: only when the repository variable NPM_PUBLISH is `true`, so a tag
     # never names the `npm-release` environment unless npm publishing is set up
     # (RELEASING.md). Skipped, the GitHub Release is still created.
-    if: ${{ github.event_name == 'push' && vars.NPM_PUBLISH == 'true' }}
+    if: ${{ github.ref_type == 'tag' && vars.NPM_PUBLISH == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: npm-release
@@ -441,7 +445,7 @@ jobs:
     name: Create the GitHub Release
     needs: [guard, assets, desktop-assets, publish, verify]
     # The desktop files are part of the release (story 13.9): never published half-attached.
-    if: ${{ !cancelled() && github.event_name == 'push' && needs.assets.result == 'success' && needs.desktop-assets.result == 'success' && (vars.NPM_PUBLISH != 'true' || needs.verify.result == 'success') }}
+    if: ${{ !cancelled() && github.ref_type == 'tag' && needs.assets.result == 'success' && needs.desktop-assets.result == 'success' && (vars.NPM_PUBLISH != 'true' || needs.verify.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -2,7 +2,8 @@
  * The release workflow's desktop part, checked on the file (story 13.9, AD-23): the user's updater
  * key and the code-signing secrets exist only in the `desktop-release` environment's job, the
  * unsigned path names no environment and no secret, the GitHub Release waits for the desktop files,
- * the npm publish job is untouched, and nothing here can create a tag. The behaviour is checked by
+ * the npm publish job is untouched, and nothing here can create a tag (tag-release.yml does that, checked
+ * in tests/tag-release-workflow.test.ts). The behaviour is checked by
  * the release dry run and the first real release.
  */
 import { readFileSync } from 'node:fs';
@@ -62,9 +63,15 @@ describe('release.yml, desktop jobs', () => {
     expect(text).toContain('gh release create desktop-channel-next --target "$GITHUB_SHA" --prerelease');
   });
 
-  it('a dry run (workflow_dispatch) builds the desktop files and creates no release', () => {
+  it('a dry run (workflow_dispatch on a branch) builds the desktop files and creates no release; a run on a tag releases', () => {
     expect(Object.keys(workflow.on)).toContain('workflow_dispatch');
-    expect(jobs['github-release'].if).toContain("github.event_name == 'push'");
-    expect(jobs['desktop-assets'].if).not.toContain("github.event_name == 'push'");
+    // The gate is the ref, not the event, so tag-release.yml can start a release on the tag it made
+    // (the repository token's tag push never starts a workflow by itself).
+    for (const name of ['ci', 'publish', 'github-release']) {
+      expect(jobs[name].if, name).toContain("github.ref_type == 'tag'");
+      expect(jobs[name].if, name).not.toContain('event_name');
+    }
+    expect(jobs['desktop-assets'].if).not.toContain('ref_type');
+    expect(jobs['desktop-assets'].if).not.toContain('event_name');
   });
 });

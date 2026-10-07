@@ -21,7 +21,13 @@
  *   `<repo>/.claude/skills/`, and from each other skills folder of an agent
  *   the project uses (`skillFolders`, epic 6 entry 8: `.agents/skills` for
  *   Antigravity), file by file into a staging folder beside its target,
- *   renamed into place; an existing skill folder is never touched. Then it runs the verified `bmad/scripts/setup.py`
+ *   renamed into place; an existing skill folder is never touched. The same
+ *   step also writes Ogden Agents' own bundled sample skills (story 18,
+ *   CAP-18; `sample-skills.ts`) into the same targets, through the same
+ *   never-overwrite rule — the only difference is their `SKILL.md` text is
+ *   an inlined constant, not a file copied from a verified download, since
+ *   the packaged tarball ships no loose `SKILL.md` anywhere (story 4.14's
+ *   packaging guard). Then it runs the verified `bmad/scripts/setup.py`
  *   (`--list-config-questions`, then setup, answering any question with its
  *   default through a file in the work folder, never the repo) with
  *   `--skill` the verified copy's `bmad` folder and no `--root`, so the
@@ -68,6 +74,7 @@ import {
   type BmadSetupStep,
 } from '@ogden-agents/shared';
 import { ScriptRunError, type UvScriptRunner } from '../toolchain-uv/script-runner.js';
+import { SAMPLE_SKILLS, type BundledSampleSkill } from './sample-skills.js';
 import { MAX_SKILL_FILE_BYTES, readHead, SKILL_FOLDERS } from './skills.js';
 
 export interface BmadSetupOptions {
@@ -77,6 +84,13 @@ export interface BmadSetupOptions {
   workDir: string;
   /** The server's one pinned BMad Method source (story 4.14): downloaded on Set up, the only place scripts and skills come from. */
   source: Pick<BmadSourcePort, 'status' | 'download' | 'file'>;
+  /**
+   * Ogden Agents' own bundled sample skills (story 18, CAP-18), written
+   * alongside the verified pinned copy's. The shipped set by default;
+   * overridable so a test can isolate itself from the shipped content, the
+   * way `catalog.ts`'s `labels` and `verifier` already are.
+   */
+  sampleSkills?: readonly BundledSampleSkill[];
 }
 
 /** The folder BMad Method's setup creates at a repo's root. */
@@ -155,6 +169,31 @@ async function copyTree(from: string, to: string): Promise<void> {
     if (entry.isDirectory()) await copyTree(source, target);
     // Never overwrite: the staging folder is new, so anything there is a race and refuses.
     else if (entry.isFile()) await copyFile(source, target, constants.COPYFILE_EXCL);
+  }
+}
+
+/**
+ * Writes `skill`'s `SKILL.md` at `folder/<name>/SKILL.md`, staged beside it
+ * then renamed in, the same way `copyTree`'s callers stage a copied skill;
+ * does nothing when something is already at that name (a project's own
+ * skill, or a sample a previous run already wrote — never touched, AC3).
+ */
+async function writeSampleSkillInto(folder: string, skill: BundledSampleSkill): Promise<void> {
+  const target = join(folder, skill.name);
+  if ((await entryAt(target)) !== undefined) return;
+  const staging = join(folder, `.${skill.name}.ogden-setup-${randomBytes(6).toString('hex')}`);
+  try {
+    await mkdir(staging);
+    await writeFile(join(staging, 'SKILL.md'), skill.content, { encoding: 'utf8', mode: 0o644, flag: 'wx' });
+    // Checked again just before: a name that appeared meanwhile is never replaced.
+    if ((await entryAt(target)) !== undefined) {
+      await rm(staging, { recursive: true, force: true });
+      return;
+    }
+    await rename(staging, target);
+  } catch (error) {
+    await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
   }
 }
 
@@ -348,7 +387,7 @@ export function skillTargets(skillFolders: readonly string[] = []): (readonly st
   return targets;
 }
 
-export function createBmadSetup({ runner, workDir, source }: BmadSetupOptions): BmadSetup {
+export function createBmadSetup({ runner, workDir, source, sampleSkills = SAMPLE_SKILLS }: BmadSetupOptions): BmadSetup {
   /** The status from the files alone (S2): no process, no network. */
   const setupStatus = async (repoPath: string): Promise<BmadSetupStatus> => {
     const pinned = source.status().version;
@@ -451,6 +490,28 @@ export function createBmadSetup({ runner, workDir, source }: BmadSetupOptions): 
     }
   };
 
+  /**
+   * Writes each bundled sample skill (story 18, CAP-18) into every target
+   * skills folder, the same shape as {@link copySkills}/{@link
+   * copySkillsInto}: `.claude/skills` first, then each other agent's; with
+   * `upgrade`, a sample the project has in another skills folder is not
+   * added to `.claude/skills` either (entry 4.11's rule, applied the same
+   * way). An existing name — the project's own skill, or a sample a
+   * previous run already wrote — is never touched (AC3).
+   */
+  const writeSampleSkills = async (repoPath: string, targets: readonly (readonly string[])[], upgrade: boolean): Promise<void> => {
+    for (const target of targets) {
+      const folder = join(repoPath, ...target);
+      const leaveElsewhere = upgrade && target === SKILLS_PATH;
+      for (const skill of sampleSkills) {
+        const result = join(folder, skill.name);
+        if ((await entryAt(result)) !== undefined) continue;
+        if (leaveElsewhere && (await elsewhere(repoPath, skill.name))) continue;
+        await writeSampleSkillInto(folder, skill);
+      }
+    }
+  };
+
   /** Writes the default answer of each question into a file in the work folder; `undefined` when there are none. */
   const writeDefaults = async (questions: unknown): Promise<string | undefined> => {
     if (!Array.isArray(questions) || questions.length === 0) return undefined;
@@ -508,6 +569,8 @@ export function createBmadSetup({ runner, workDir, source }: BmadSetupOptions): 
 
         step('copying_skills');
         await copySkills(repoPath, skillsRoot, targets, upgrade);
+        // Ogden Agents' own bundled sample skills (story 18): same targets, same never-overwrite rule.
+        await writeSampleSkills(repoPath, targets, upgrade);
 
         step('writing_config');
         // `--skill` is the verified copy's `bmad`, with no `--root`: nothing the repo holds is the payload or a module record.

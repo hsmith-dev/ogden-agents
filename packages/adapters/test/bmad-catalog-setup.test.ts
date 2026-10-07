@@ -42,7 +42,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createPlainRepo, PLAIN_BMOD_OWN_SKILL } from '../../../tests/fixtures/bmad-plain/plain-repos.js';
 import { createFakeBmadRepo, type FakeBmadRepo } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { MAX_UPGRADE_BMAD_ENTRIES, strictOutputFolder, tomlString } from '../src/bmad-catalog/setup.js';
-import { createBmadCatalog, createMemoryBmadSource, createUvScriptRunner, MEMORY_BMAD_SOURCE_VERSION, uvEnvironment, type UvScriptRunner } from '../src/index.js';
+import {
+  createBmadCatalog,
+  createMemoryBmadSource,
+  createUvScriptRunner,
+  MEMORY_BMAD_SOURCE_VERSION,
+  uvEnvironment,
+  type BundledSampleSkill,
+  type UvScriptRunner,
+} from '../src/index.js';
 
 const FAKE_UV = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-uv.mjs');
 const PINNED = MEMORY_BMAD_SOURCE_VERSION;
@@ -98,8 +106,14 @@ interface Logged {
   answers: string | null;
 }
 
-/** The real adapter on the fake uv and a memory source of a verified copy, with `env` added to the runs' environment. */
-function adapter(env: Record<string, string> = {}, options: { uvMissing?: boolean; downloadFails?: boolean } = {}) {
+/**
+ * The real adapter on the fake uv and a memory source of a verified copy,
+ * with `env` added to the runs' environment. `sampleSkills` defaults to none
+ * (story 18): this file's pre-existing assertions expect only the verified
+ * copy's skills, so the bundled samples (tested on their own below) stay out
+ * unless a test passes a small fixture of its own.
+ */
+function adapter(env: Record<string, string> = {}, options: { uvMissing?: boolean; downloadFails?: boolean; sampleSkills?: readonly BundledSampleSkill[] } = {}) {
   const skills = verifiedCopy();
   const script = join(skills, 'bmad', 'scripts', 'setup.py');
   const workDir = tempFolder('ogden-agents-uv-work-');
@@ -110,7 +124,7 @@ function adapter(env: Record<string, string> = {}, options: { uvMissing?: boolea
   });
   runners.push(runner);
   const source = createMemoryBmadSource({ files: { 'bmad/scripts/setup.py': script }, ...(options.downloadFails === true ? { failWith: 'offline' as const } : {}) });
-  const catalog = createBmadCatalog({ runner, workDir, source });
+  const catalog = createBmadCatalog({ runner, workDir, source, sampleSkills: options.sampleSkills ?? [] });
   const runs = (): Logged[] => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Logged) : []);
   return { catalog, source, skills, workDir, runs, script };
 }
@@ -297,6 +311,91 @@ describe("bmad-catalog setup into each agent's skills folder (epic 6 entry 8)", 
     expect(readdirSync(join(created.path, '.agents', 'skills')).sort()).toEqual(['bmad', 'bmad-spec', 'bmod-method']);
   });
 });
+
+/**
+ * Ogden Agents' own bundled sample skills (story 18, CAP-18): `setup()`
+ * writes them alongside the verified pinned copy's, through the exact same
+ * never-overwrite rule `copySkillsInto` already applies there — these tests
+ * use a two-skill fixture instead of the real shipped `SAMPLE_SKILLS`, the
+ * way `bmad-catalog-catalog.test.ts` isolates itself from the shipped
+ * `skill-labels.json` by passing its own small `labels` map.
+ */
+describe('bmad-catalog bundled sample skills (story 18, CAP-18)', () => {
+  const samples: readonly BundledSampleSkill[] = [
+    { name: 'sample-one', content: '---\nname: sample-one\ndescription: First sample.\n---\n\nFirst sample body.\n' },
+    { name: 'sample-two', content: '---\nname: sample-two\ndescription: Second sample.\n---\n\nSecond sample body.\n' },
+  ];
+
+  it('writes every bundled sample into .claude/skills alongside the verified copy, discoverable the same way (AC1, AC2)', async () => {
+    const { catalog } = adapter({}, { sampleSkills: samples });
+    const r = repo();
+    // Nothing is there, and nothing is discovered, before setup runs.
+    expect(await catalog.skills(r.path)).toEqual([]);
+    await catalog.setup(r.path, () => {});
+    const skillsFolder = join(r.path, '.claude', 'skills');
+    expect(readdirSync(skillsFolder).sort()).toEqual(['bmad', 'bmad-spec', 'bmod-method', 'sample-one', 'sample-two']);
+    expect(readFileSync(join(skillsFolder, 'sample-one', 'SKILL.md'), 'utf8')).toBe(samples[0]!.content);
+    expect(readFileSync(join(skillsFolder, 'sample-two', 'SKILL.md'), 'utf8')).toBe(samples[1]!.content);
+    // Discovered through the ordinary, unchanged scan — no special case for a bundled sample.
+    const found = (await catalog.skills(r.path)).map((skill) => skill.name).sort();
+    expect(found).toContain('sample-one');
+    expect(found).toContain('sample-two');
+    expect(stagingLeft(skillsFolder)).toEqual([]);
+  });
+
+  it('never overwrites a project skill of the same name as a bundled sample (AC3)', async () => {
+    const { catalog } = adapter({}, { sampleSkills: samples });
+    const r = repo({ '.claude/skills/sample-one/SKILL.md': 'my own feature skill\n' });
+    await catalog.setup(r.path, () => {});
+    expect(readFileSync(join(r.path, '.claude', 'skills', 'sample-one', 'SKILL.md'), 'utf8')).toBe('my own feature skill\n');
+    // The other sample, with no name clash, is still added.
+    expect(existsSync(join(r.path, '.claude', 'skills', 'sample-two', 'SKILL.md'))).toBe(true);
+  });
+
+  it('a second setup never rewrites a sample it already wrote (upgrade keeps it as it is)', async () => {
+    const { catalog } = adapter({}, { sampleSkills: samples });
+    const r = plainBmodRepo();
+    await catalog.setup(r.path, () => {}, { upgrade: true });
+    const file = join(r.path, '.claude', 'skills', 'sample-one', 'SKILL.md');
+    writeFileSync(file, 'edited after the first setup\n');
+    await catalog.setup(r.path, () => {}, { upgrade: true });
+    expect(readFileSync(file, 'utf8')).toBe('edited after the first setup\n');
+  });
+
+  it("writes every bundled sample into another agent's skills folder too, leaving the project's own there untouched (epic 6 entry 8)", async () => {
+    const { catalog } = adapter({}, { sampleSkills: samples });
+    const r = repo({ '.agents/skills/sample-one/SKILL.md': 'my own feature skill\n' });
+    await catalog.setup(r.path, () => {}, { skillFolders: ['.agents/skills'] });
+    expect(readFileSync(join(r.path, '.agents', 'skills', 'sample-one', 'SKILL.md'), 'utf8')).toBe('my own feature skill\n');
+    expect(readFileSync(join(r.path, '.agents', 'skills', 'sample-two', 'SKILL.md'), 'utf8')).toBe(samples[1]!.content);
+    expect(readFileSync(join(r.path, '.claude', 'skills', 'sample-one', 'SKILL.md'), 'utf8')).toBe(samples[0]!.content);
+  });
+
+  it('on an upgrade, a sample the project already has in another skills folder is not duplicated into .claude/skills (entry 4.11 rule, applied the same way)', async () => {
+    const { catalog } = adapter({}, { sampleSkills: samples });
+    const r = plainBmodRepo({ '.agents/skills/sample-one/SKILL.md': 'my own feature skill\n' });
+    await catalog.setup(r.path, () => {}, { upgrade: true, skillFolders: ['.agents/skills'] });
+    expect(existsSync(join(r.path, '.claude', 'skills', 'sample-one'))).toBe(false);
+    expect(readFileSync(join(r.path, '.agents', 'skills', 'sample-one', 'SKILL.md'), 'utf8')).toBe('my own feature skill\n');
+    // No name clash for the other sample: it lands in both.
+    expect(existsSync(join(r.path, '.claude', 'skills', 'sample-two'))).toBe(true);
+    expect(existsSync(join(r.path, '.agents', 'skills', 'sample-two'))).toBe(true);
+  });
+
+  it('a repo setup never ran on has no sample skill on disk or in the catalog, even with every piece off (AC4)', async () => {
+    const { catalog } = adapter({}, { sampleSkills: samples });
+    const r = repo();
+    expect(existsSync(join(r.path, '.claude', 'skills'))).toBe(false);
+    expect(await catalog.skills(r.path)).toEqual([]);
+  });
+});
+
+/** A standalone already-set-up 'bmod' repo (as the upgrade `describe`'s own local `plain('bmod', ...)` builds one), for tests outside that block that also need `{ upgrade: true }`'s fixture. */
+function plainBmodRepo(files: Record<string, string> = {}) {
+  const created = createPlainRepo('bmod', files);
+  cleanups.push(() => created.remove());
+  return created;
+}
 
 describe('bmad-catalog setup status from files (story 4.3, S2)', () => {
   it('no _bmad is not_set_up; a linked _bmad is unusable; neither runs anything', async () => {

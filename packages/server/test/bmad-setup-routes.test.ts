@@ -34,7 +34,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createBmadCatalog, createMemoryBmadCatalog, createUpstreamBmadSource } from '@ogden-agents/adapters';
+import { createBmadCatalog, createMemoryBmadCatalog, createUpstreamBmadSource, SAMPLE_SKILLS } from '@ogden-agents/adapters';
 import {
   API_ROUTES,
   ApiErrorBody,
@@ -46,9 +46,12 @@ import {
   BMAD_SETUP_STEPS,
   BmadSetupStartedResponse,
   BmadSetupStatusResponse,
+  CatalogResponse,
+  SessionResponse,
   WorkspaceResponse,
   type BmadPiece,
   type CoreEvent,
+  type SessionId,
 } from '@ogden-agents/shared';
 import { BmadSetupError } from '@ogden-agents/core';
 import { describe, expect, it } from 'vitest';
@@ -81,6 +84,12 @@ const setupEvents = (server: TestServer, wsId: string): CoreEvent[] =>
 
 const ended = (server: TestServer, wsId: string) => () =>
   setupEvents(server, wsId).some((event) => event.type === 'bmad.setup_completed' || event.type === 'bmad.setup_failed');
+
+/** Every user message a session sent, in order (story 18's AC2 check: a planning session's first message). */
+const userMessagesOf = (server: TestServer, sessionId: SessionId) =>
+  server.core.events
+    .readAfter(0)
+    .flatMap((event) => (event.streamId === sessionId && event.type === 'session.message_completed' && event.payload.role === 'user' ? [event.payload.content] : []));
 
 describe('BMad Method setup routes (story 4.3, memory catalog)', () => {
   it('POST starts a setup whose events arrive in order, then GET answers current; a second POST after it is refused', async () => {
@@ -308,7 +317,7 @@ async function setUpThrough(server: TestServer, repoPath: string) {
   const setup = apiPath(API_ROUTES.workspaceBmadSetup, { wsId: workspace.id });
   expect((await request(server, tab, 'POST', setup)).status).toBe(202);
   await waitFor(ended(server, workspace.id), 'the setup to end', 60_000);
-  return { tab, setup, events: setupEvents(server, workspace.id) };
+  return { tab, setup, workspace, events: setupEvents(server, workspace.id) };
 }
 
 /** Every file and folder below `root`, relative, sorted. */
@@ -333,6 +342,31 @@ describe.skipIf(realUvMissing())('BMad Method setup through real uv and the veri
     expect(readdirSync(join(repo.path, '.claude', 'skills')).filter((name) => name.includes('ogden-setup'))).toEqual([]);
     const status = BmadSetupStatusResponse.parse(await (await request(server, tab, 'GET', setup)).json()).setup;
     expect(status.state).toBe('current');
+  }, 120_000);
+
+  it("writes Ogden Agents' own bundled sample skills (story 18, CAP-18) alongside the pinned ones, through this same real Set up, and one starts a planning session exactly as any other listed skill does (AC1, AC2)", async () => {
+    const { server } = await realUvServer();
+    const repo = emptyRepo();
+    const { tab, workspace } = await setUpThrough(server, repo.path);
+    expect(SAMPLE_SKILLS.length).toBeGreaterThanOrEqual(2);
+    for (const skill of SAMPLE_SKILLS) {
+      expect(existsSync(join(repo.path, '.claude', 'skills', skill.name, 'SKILL.md')), skill.name).toBe(true);
+    }
+
+    const listed = await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceCatalog, { wsId: workspace.id }));
+    expect(listed.status).toBe(200);
+    const names = CatalogResponse.parse(await listed.json()).skills.map((skill) => skill.name);
+    for (const skill of SAMPLE_SKILLS) expect(names, skill.name).toContain(skill.name);
+
+    // No special-casing anywhere: the same POST a user-authored skill would use, naming a bundled sample instead.
+    const sample = SAMPLE_SKILLS[0]!;
+    const started = await request(server, tab, 'POST', apiPath(API_ROUTES.workspacePlanningSessions, { wsId: workspace.id }), { skill: sample.name });
+    expect(started.status).toBe(201);
+    const { session } = SessionResponse.parse(await started.json());
+    expect(session.kind).toBe('planning');
+    expect(session.workspaceId).toBe(workspace.id);
+    expect(userMessagesOf(server, session.id)).toEqual([`/${sample.name}`]);
+    await server.close();
   }, 120_000);
 
   it('runs nothing inside the repo: its own bmad scripts, sitecustomize, .venv, .python-version, pyproject.toml and uv.toml leave no marker', async () => {

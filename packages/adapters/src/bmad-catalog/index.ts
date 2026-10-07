@@ -32,6 +32,7 @@ import { createBmadSetup, type BmadSetupOptions } from './setup.js';
 import { scanSkills } from './skills.js';
 import { createSkillVerifier, type VerifiedSource } from './verified.js';
 
+export { SAMPLE_SKILLS, type BundledSampleSkill } from './sample-skills.js';
 export type { BmadSetupOptions } from './setup.js';
 export type { VerifiedSource } from './verified.js';
 export { createScriptsSnapshotter, SNAPSHOT_CONFIG_UTILS, type ScriptsSnapshot, type SnapshotScripts } from './scripts-snapshot.js';

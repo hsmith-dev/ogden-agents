@@ -125,13 +125,26 @@ unknown = "Whether 6.8 (Antigravity, dropped on a no-go) already placed skills i
 references = ["_bmad-output/initiative-ogden-agents/epic-every-agent/tickets.toml"]
 
 [[entry]]
+id = 12
+type = "story"
+title = "Link an existing Codex or Grok CLI instead of Ogden's managed install"
+description = "Extends CAP-16 (user direction 2026-10-07): for any ACP agent (Codex and Grok first), Settings lets a user supply the command (and optional working directory/environment) of an agent CLI they already installed and manage themselves, instead of Ogden downloading and running its own pinned copy. A linked agent authenticates exactly as Ogden's managed install of that same agent would (Codex and Grok stay API-key only); permission cards, modes and the event log all work unchanged, since this only changes which process gets spawned, never the ACP session machinery. Ogden's sha256 pin-and-verify check (agent-matrix.md) never applies to a linked command -- that binary is the user's own responsibility, the same position Claude Code's own pre-existing CLI is already in. Switching an agent from linked back to Ogden-managed (or vice-versa) is per-agent and takes effect on the next chat start, not mid-session."
+verify = "With a fake Codex (or Grok) binary at a chosen path, linking its command in Settings starts a chat through that exact binary instead of Ogden's managed install; a bad or missing command is refused in plain words before a chat can start; a linked agent's API key flow, permission cards and modes behave identically to the managed install's fakes; switching back to Ogden-managed takes effect on the next chat start."
+covers = ["CAP-16"]
+after = [6, 8]
+hitl = false
+risk = "medium"
+unknown = "Whether the same linked-command UI and validation generalize cleanly to agents beyond Codex/Grok (Claude Code already has its own detected-CLI path; Antigravity's install flow may differ) -- scope this story to Codex and Grok, note the generalization as a follow-up."
+references = ["packages/adapters/src/setup-codex/", "packages/adapters/src/setup-grok/", "_bmad-output/initiative-ogden-agents/spec-ogden-agents/spec-ogden-agents.md"]
+
+[[entry]]
 id = 10
 type = "story"
 title = "Refactor sweep"
 description = "Cleans up code across the epic (only the entries built, after a no-go too), scoped when it starts from the build records and the review findings deferred during the epic, with no behaviour change. It also runs the provenance check, keeps the deferred-work.md Open items index current, splits any file the epic grew past 600 lines, and removes the spikes' probe if anything of it remains."
 verify = "All tests pass and no behaviour changes."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 12]
 hitl = false
 risk = "low"
 references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]

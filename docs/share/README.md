@@ -44,7 +44,7 @@ pnpm start
 
 Welcome helps set up an agent in Ogden's data folder. If the browser does not open, use the printed one-time link within 60 seconds. Stop the app with **Quit Ogden Agents** in the sidebar.
 
-Once the release is published and verified, use `npx ogden-agents@1.0.0`, the release's start scripts or a desktop download. See [the main README](../../README.md) for installation instructions.
+Once the release is published and verified, use `npx ogden-agents@0.1.0`, the release's start scripts or a desktop download. See [the main README](../../README.md) for installation instructions.
 
 ## Support and custom work
 

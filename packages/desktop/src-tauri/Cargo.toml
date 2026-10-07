@@ -1,6 +1,6 @@
 [package]
 name = "ogden-agents-desktop"
-version = "1.0.0"
+version = "0.1.0"
 description = "Ogden Agents as a desktop app: a Tauri shell around the local server on a bundled Node."
 edition = "2021"
 rust-version = "1.90"

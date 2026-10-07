@@ -3,6 +3,7 @@ import { DeveloperModeSync } from '@/appearance/developer-mode';
 import { useEventStream } from '@/events/event-stream';
 import { AttentionNotifier } from '@/notifications/attention-notifier';
 import { SidebarInset, SidebarProvider } from '@/ui/sidebar';
+import { TourController } from '@/tour/tour-controller';
 import { AppShortcutOffer } from './app-shortcut-offer';
 import { LiveAnnouncer } from './live-announcer';
 import { OpenOgdenAgents } from './open-ogden-agents';
@@ -39,6 +40,8 @@ export function AppShell() {
           <AppShortcutOffer />
           <Outlet />
         </SidebarInset>
+        {/* The guided tour (backlog story 19): arms on Welcome's first finish and services Settings' Replay; portals its own overlay. */}
+        <TourController />
       </SidebarProvider>
     </SidebarDataProvider>
   );

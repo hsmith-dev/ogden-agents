@@ -1,6 +1,6 @@
 # Releasing
 
-Ogden Agents ships as one npm package, `ogden-agents`. Releases are published only by GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)) when a version tag is pushed. Nobody publishes from their own machine, and no npm token is stored anywhere: the workflow authenticates to npm through [trusted publishing](https://docs.npmjs.com/trusted-publishers) (GitHub OIDC).
+Ogden Agents ships as one npm package, `ogden-agents`. Releases are published only by GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)) for a version tag. The tag is made for you when a version bump reaches `main` ([`.github/workflows/tag-release.yml`](.github/workflows/tag-release.yml); see [Releasing by version bump](#releasing-by-version-bump)), or by hand. Nobody publishes from their own machine, and no npm token is stored anywhere: the workflow authenticates to npm through [trusted publishing](https://docs.npmjs.com/trusted-publishers) (GitHub OIDC).
 
 ## v1 release checklist
 
@@ -11,10 +11,22 @@ The historical version checklists below remain as live-test procedures and relea
 3. Set `1.0.0` in the root, server, web and desktop package manifests and `packages/desktop/src-tauri/tauri.conf.json`; add a `1.0.0` changelog section. Packaging tests enforce matching versions.
 4. Run `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm run pack`, `pnpm smoke` and `pnpm e2e:installed`. Validate the desktop pipeline as appropriate to unsigned release artifacts. Check that the tarball contains the intended app and license.
 5. Verify the repository and npm package ownership/visibility, `NPM_PUBLISH=true`, protected `npm-release` environment and npm trusted publisher configured exactly as described in the historical first-release setup below. Publishing remains GitHub Actions only.
-6. Merge verified changes to `main`. Optionally run the release workflow dry run, then tag a commit on `main`'s first-parent history `v1.0.0` and push it. Do not reuse an existing npm version from a different commit.
+6. Merge verified changes to `main`. Optionally run the release workflow dry run first. The merge that brings `1.0.0` to `main` is tagged `v1.0.0` by the Tag release workflow, which starts the release (or tag a commit on `main`'s first-parent history `v1.0.0` by hand and push it). Do not reuse an existing npm version from a different commit.
 7. Watch CI, assets, npm publish, provenance and clean registry installations through completion. Confirm npm's `latest` tag resolves to `1.0.0` and GitHub release assets are complete. Only then update release status to published.
 
 Do not check off a live test without its recorded result. Any remaining external setup or unverified behavior must remain explicit in the readiness report rather than being described as complete.
+
+## Releasing by version bump
+
+A release is cut by setting the version. Put the new version in the root, server, web and desktop `package.json` and in `packages/desktop/src-tauri/tauri.conf.json`, add its section to `CHANGELOG.md`, and merge that to `main` (a feature's pull request can carry its own bump). The **Tag release** workflow ([`.github/workflows/tag-release.yml`](.github/workflows/tag-release.yml)) runs on every push to `main` that touches `package.json`:
+
+1. It reads the root version and checks it is the same in every manifest and that `scripts/release-notes.mjs` finds notes for it (a stable version needs its own `CHANGELOG.md` section). A bad bump fails here, with no tag made.
+2. If `v<version>` is already a tag, it stops: a release is never cut twice, and a tag is never moved. Pushes to `main` that don't change the version do nothing.
+3. Otherwise it creates the annotated tag `v<version>` on that commit and starts the **Release** workflow on the tag, which runs the guard, CI, the assets, the desktop apps, npm (when `NPM_PUBLISH` is `true`; the `npm-release` environment's reviewer still approves it) and the GitHub Release, exactly as for a tag pushed by hand.
+
+The tag is pushed with the repository's own token, which GitHub never lets start another workflow by itself, so the Tag release workflow starts the Release workflow explicitly (`gh workflow run release.yml --ref v<version>`). No stored credential is involved; the workflow has write access to tags and to starting workflows, and nothing else. A prerelease version (`1.1.0-rc.1`) is tagged the same way and goes to the `next` dist-tag.
+
+**Actions → Tag release → Run workflow** runs the same check by hand for `main`'s current version, for example to release a version that was on `main` before this workflow existed. To release by hand instead, push the tag yourself: the Tag release workflow then finds it and does nothing.
 
 ## What the release workflow does
 
@@ -32,7 +44,7 @@ On a pushed tag `vX.Y.Z`:
 
 ### Dry run
 
-**Actions → Release → Run workflow** (`workflow_dispatch`, or `gh workflow run release.yml --ref <branch>`) runs the guard (versions agree; the tag checks are skipped) and the asset build, and keeps everything as the `release-assets` artifact. It skips CI, publishes nothing and creates no release or tag. Download the artifact to look at the assets and the notes.
+**Actions → Release → Run workflow** on a **branch** (`workflow_dispatch`, or `gh workflow run release.yml --ref <branch>`) runs the guard (versions agree; the tag checks are skipped) and the asset build, and keeps everything as the `release-assets` artifact. It skips CI, publishes nothing and creates no release or tag. Download the artifact to look at the assets and the notes. Run on a **tag** (`--ref v1.2.3`), the same workflow is a real release: that is how the Tag release workflow starts one.
 
 ## The desktop app
 
@@ -108,7 +120,7 @@ A failed publish publishes nothing, since `npm publish` is all or nothing. A fai
 
 `0.2.0` is the first real release on npm: `0.0.0` was a name reservation, and it holds the `latest` dist-tag until `0.2.0` ships. `0.2.0` is epic 2 (chat and workspaces) and epic 9 (first-run onboarding, stories 9.1 to 9.7). Epic 3 (the terminal) is not in it: the release is cut before any epic 3 story merges. `0.1.0` was never published (its CHANGELOG entry says so).
 
-It goes out in two steps, both by tag: `0.2.0-rc.1` to the `next` dist-tag, checked live with a real Claude Code, then `0.2.0` to `latest`. Every step here is done by the repository owner, by hand; nothing in the repository merges, tags or publishes by itself. Steps 2 and 3 are one-time setup.
+It goes out in two steps, both by tag: `0.2.0-rc.1` to the `next` dist-tag, checked live with a real Claude Code, then `0.2.0` to `latest`. Every step here was done by the repository owner, by hand; at the time nothing in the repository merged, tagged or published by itself (today the Tag release workflow tags a version bump on `main`; see [Releasing by version bump](#releasing-by-version-bump)). Steps 2 and 3 are one-time setup.
 
 ### 1. Merge the stack to `main`
 

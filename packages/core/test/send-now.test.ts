@@ -166,6 +166,31 @@ describe('send now or wait', () => {
     await chat.close();
   });
 
+  it('records the injection boundary before output emitted synchronously with its acknowledgment', async () => {
+    const core = openTestCore();
+    const agent = handAgent({ steer: 'manual' });
+    const { chat, workspace, session } = setUp(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'first');
+    await settle();
+    agent.emit({ type: 'message_chunk', text: 'Holding' });
+    const urgent = chat.sendMessage(workspace.id, session.id, 'use the other file', { delivery: 'now' });
+    await settle();
+    // The acknowledgment and following output arrive in one synchronous I/O callback.
+    agent.answerSteer('injected');
+    agent.emit({ type: 'message_chunk', text: 'Steered: use the other file.' });
+    agent.end();
+    await chat.settled();
+    const messages = eventsOf(core, session.id).flatMap((event) => event.type === 'session.message_completed' ? [event.payload] : []);
+    expect(messages.map((message) => [message.role, message.content])).toEqual([
+      ['user', 'first'], ['agent', 'Holding'], ['user', 'use the other file'], ['agent', 'Steered: use the other file.'],
+    ]);
+    expect(messages[2]).toMatchObject({ messageId: urgent.messageId, delivery: 'injected' });
+    expect(agent.cancels()).toBe(0);
+    expect(typesOf(core, session.id)).not.toContain('session.turn_interrupted');
+    expect(stateOf(core, session.id)).toBe('idle');
+    await chat.close();
+  });
+
   it('puts a message into the running turn when the agent can take it: no stop, the reply so far is closed, the turn goes on', async () => {
     const core = openTestCore();
     const agent = handAgent({ steer: 'inject' });

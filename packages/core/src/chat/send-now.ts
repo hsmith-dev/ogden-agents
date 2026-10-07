@@ -75,8 +75,11 @@ export function createSendNow(ctx: ChatContext, deps: Turns & Pick<Replies, 'fin
     if (turn.stopping) return;
     const entry = live.get(sessionId);
     item.sending = true;
+    const before = turn.steering;
     const attempt = (async () => {
       try {
+        // Serialize transcript boundaries for multiple messages sent right away.
+        await before;
         const started = entry === undefined ? undefined : await entry.agent.catch(() => undefined);
         // Stopped, taken by the next turn, or removed meanwhile: nothing more to do here.
         if (ctx.closing || busy.get(sessionId) !== turn || turn.failed || turn.stopping || !turn.queue.includes(item)) return;
@@ -91,6 +94,7 @@ export function createSendNow(ctx: ChatContext, deps: Turns & Pick<Replies, 'fin
           interrupt(sessionId, turn, item);
           return;
         }
+        entry!.steeringEvents = [];
         let outcome: 'injected' | 'no_turn' | 'refused' | 'unanswered';
         try {
           outcome = (await Promise.race([started.steer(item.text), timeout(), entry!.gone.then(() => undefined)])) ?? 'unanswered';
@@ -115,10 +119,12 @@ export function createSendNow(ctx: ChatContext, deps: Turns & Pick<Replies, 'fin
         if (outcome === 'no_turn' || outcome === 'unanswered') return;
         interrupt(sessionId, turn, item);
       } finally {
+        const held = entry?.steeringEvents;
+        if (entry !== undefined) entry.steeringEvents = undefined;
+        if (held !== undefined && !ctx.closing && live.get(sessionId) === entry) for (const apply of held) apply();
         item.sending = false;
       }
     })().catch((error: unknown) => internalError(sessionId, error));
-    const before = turn.steering;
     turn.steering = before === undefined ? attempt : Promise.all([before, attempt]).then(() => undefined);
   };
 

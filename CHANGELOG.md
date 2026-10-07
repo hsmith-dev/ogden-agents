@@ -2,7 +2,7 @@
 
 Every release of the `ogden-agents` npm package. Versions follow [semantic versioning](https://semver.org/); before 1.0.0, a minor version may change behavior. How a release is made is in [RELEASING.md](RELEASING.md).
 
-## 0.1.0 — every agent, unattended builds and a palette of your own
+## 1.0.0 — every agent, unattended builds and a palette of your own
 
 The first published release, cut through the release workflow described in [RELEASING.md](RELEASING.md). CI runs today's checks with fake agents; real-provider and real-OS live checks (real Claude Code/Antigravity/Codex/Grok sign-ins, real Windows/macOS/Linux machines, real Ollama/LM Studio) are tracked as outstanding evidence in [docs/v1-readiness.md](docs/v1-readiness.md) rather than claimed here.
 
@@ -68,7 +68,7 @@ Published first as `0.3.0-rc.1` on the `next` dist-tag (`npx ogden-agents@next`)
 
 ## 0.2.0 — chat and workspaces
 
-The first real release on npm (`0.0.0` was a name reservation), published first as `0.2.0-rc.1` on the `next` dist-tag (`npx ogden-agents@next`), then as `0.2.0`. It includes everything listed under 0.0.1, which was never published. Ogden Agents now runs Claude Code: chat with it in your projects, answer its permission requests, and pick up where you left off after a restart. Run it with `npx ogden-agents` (Node 24 or later on macOS, Windows or Linux).
+The first real release on npm (`0.0.0` was a name reservation), published first as `0.2.0-rc.1` on the `next` dist-tag (`npx ogden-agents@next`), then as `0.2.0`. It includes everything listed under 0.1.0, which was never published. Ogden Agents now runs Claude Code: chat with it in your projects, answer its permission requests, and pick up where you left off after a restart. Run it with `npx ogden-agents` (Node 24 or later on macOS, Windows or Linux).
 
 - **Workspaces.** Add a project by browsing to its folder, or start a new project folder, and switch between projects from the sidebar header. Each project has its list of chats with **New chat**, and a settings page where you can delete its history (refused while an agent is working or waiting in it).
 - **Chats with Claude Code.** Replies stream in as the agent writes them. A message sent while the agent works is shown as **Queued** and sent after the reply; **Stop** ends a turn, and whatever was queued comes back to the composer. The agent's reads, edits and commands show as tool-call rows, grouped in Comfortable density, with the diff of each edit. An error shows its reason with **Try again**, and an agent that has gone quiet gets a check-in line with Stop. Long chats open at their latest page, with **Show earlier** and **Jump to latest**.
@@ -76,7 +76,7 @@ The first real release on npm (`0.0.0` was a name reservation), published first 
 - **Permission cards and caution levels.** Nothing the agent asks for runs until you answer its card: **Allow once**, **Always allow** (for that command prefix or path, in that project), or **Deny** with an optional reason, which goes to the agent. Each project has a caution level (**Ask every time**, the default; **Ask for commands**; or **Ask only for risky actions**) and a list of its Always allow rules, each with Remove.
 - **Status sidebar and Needs you.** The sidebar shows every project's chats with their live state (working, waiting, idle, error), and **Needs you** lists every request waiting on you, in any project, with a count in the tab title and screen reader announcements.
 - **App shortcut.** With per-tab sign-in, a bookmark can't reopen the app, so Ogden Agents can add a shortcut to your OS app menu (offered on first run, and in Settings > Appearance) that opens a fresh, signed-in tab.
-- **Per-tab token hardening.** API and WebSocket access use only the per-tab bearer token described under 0.0.1, never a cookie, so other web servers on your computer never receive anything they could replay. Event subscriptions are windowed per project, so a page load no longer replays the whole history.
+- **Per-tab token hardening.** API and WebSocket access use only the per-tab bearer token described under 0.1.0, never a cookie, so other web servers on your computer never receive anything they could replay. Event subscriptions are windowed per project, so a page load no longer replays the whole history.
 - **Sign in with your Claude subscription.** Settings > Agents has a Claude Code card that signs you in to your Claude subscription from the browser, with no terminal.
 - **Or use an API key.** **Use an API key instead** checks an Anthropic API key and keeps it in your OS keychain; it is used only while no subscription is signed in, and never shown again (just its last four characters) until **Remove key**. When Claude Code's sign-in check is slow or fails, the last sign-in state it confirmed in the past 5 minutes is used; with none, the key stays out of use.
 - **Install Claude Code from the UI.** The package doesn't bundle Claude Code. The Claude Code card detects it and, with **Install**, installs a pinned, integrity-checked copy into Ogden Agents' data folder, with progress on the card.
@@ -84,7 +84,7 @@ The first real release on npm (`0.0.0` was a name reservation), published first 
 - **Welcome on first run.** A first launch opens Welcome: set up Claude Code (install it, sign in or use an API key; it moves on by itself once ready), add your first project, and take or decline the app shortcut once, ending in that project's chats. **Skip for now** ends it for good, and Settings > Welcome brings it back. A data folder that already has projects skips it.
 - **Reliability fixes.** Stopping a sign-in, an agent or the server ends its whole process tree the same way on every OS, with no stray console message on Windows; saving or removing an API key twice at once can't leave the wrong one in use; an answer to the shortcut offer that fails to send is retried; and signing in again resends only the chat it was started from, once.
 
-## 0.0.1 — first build (not published)
+## 0.1.0 — first build (not published)
 
 Never published to npm: everything below first ships in 0.2.0. It was the foundation, not yet a working agent UI: it starts, signs you in and shows the app shell, but runs no agents.
 

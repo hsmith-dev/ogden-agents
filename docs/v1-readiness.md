@@ -1,6 +1,6 @@
 # Ogden Agents v1 readiness
 
-This is the release handoff for the `ogden-agents` npm app, not the separate Python/React `ogden-aiagents` repository. The source contains the v1 feature implementation. A plan marked `built` or `in-review` is implementation evidence, not proof of a published release or a successful live-provider check. npm `0.1.0` publication remains pending until the release workflow and registry verification succeed.
+This is the release handoff for the `ogden-agents` npm app, not the separate Python/React `ogden-aiagents` repository. The source contains the v1 feature implementation. A plan marked `built` or `in-review` is implementation evidence, not proof of a published release or a successful live-provider check. npm `1.0.0` publication remains pending until the release workflow and registry verification succeed.
 
 ## Feature coverage
 
@@ -56,13 +56,13 @@ The detailed procedures and known behavior choices remain in [RELEASING.md](../R
 - [x] Implement Ogden, Forest and Ember presets and custom paired light/dark themes with contrast validation and JSON import/export, using shared UI tokens.
 - [x] Document HarrisonSmith.AI services and optional Venmo support with free MIT framing.
 - [x] Resolve release defects and update their deferred-work evidence.
-- [x] Synchronize all release versions to `0.1.0` and add matching changelog notes.
+- [x] Synchronize all release versions to `1.0.0` and add matching changelog notes.
 - [x] Run typecheck, unit/integration tests, browser tests, pack, installed-package smoke and installed browser tests against the exact tarball.
 - [x] Record local installed-package evidence, with unverified provider/platform capabilities disabled or plainly disclosed.
 - [x] Review all product READMEs and sharing/release documentation against final behavior. Existing screenshots illustrate the default UI; new themes are covered by browser screenshots.
 - [ ] Verify GitHub visibility, npm trusted publisher, `NPM_PUBLISH=true` and the `npm-release` environment.
-- [ ] Merge verified release changes to `main`, tag its first-parent commit `v0.1.0` and push the tag.
-- [ ] Observe the release workflow through npm publish, registry/provenance checks and fresh registry installation checks; confirm `latest` points at `0.1.0` before declaring publication complete.
+- [ ] Merge verified release changes to `main`, tag its first-parent commit `v1.0.0` and push the tag.
+- [ ] Observe the release workflow through npm publish, registry/provenance checks and fresh registry installation checks; confirm `latest` points at `1.0.0` before declaring publication complete.
 
 ## Project and support
 
@@ -72,7 +72,7 @@ Ogden Agents is free and [MIT licensed](../LICENSE). Provider accounts and API/m
 
 ## Automated verification, 2026-10-06
 
-On macOS with Node 26, full typecheck and provenance validation passed. The final unit/integration suite passed 4,574 tests across 363 files (8 skipped). The exact `ogden-agents-0.1.0.tgz` passed clean installed launch/authentication/stream/Quit smoke checks. Theme persistence, contrast rejection, reset and 390px layout passed in a real browser. The focused independent security review found no unresolved issues after MCP secret masking and save-time header validation fixes. The complete browser suite passed 191 tests. All 54 installed-package browser journeys passed against the exact tarball. These tests exercise the real application with controlled/fake provider adapters; they do not establish live provider behavior.
+On macOS with Node 26, full typecheck and provenance validation passed. The final unit/integration suite passed 4,574 tests across 363 files (8 skipped). The exact `ogden-agents-1.0.0.tgz` passed clean installed launch/authentication/stream/Quit smoke checks. Theme persistence, contrast rejection, reset and 390px layout passed in a real browser. The focused independent security review found no unresolved issues after MCP secret masking and save-time header validation fixes. The complete browser suite passed 191 tests. All 54 installed-package browser journeys passed against the exact tarball. These tests exercise the real application with controlled/fake provider adapters; they do not establish live provider behavior.
 
 GitHub publishing configuration is ready: public repository, `NPM_PUBLISH=true`, reviewer-protected `npm-release` environment and `v*.*.*` deployment tag policy. npm Trusted Publisher must match owner `hsmith-dev`, repository `ogden-agents`, workflow `release.yml`, environment `npm-release`. It cannot be verified with the current unauthenticated local npm session. Registry publication is pending.
 

@@ -4,15 +4,15 @@ Ogden Agents ships as one npm package, `ogden-agents`. Releases are published on
 
 ## v1 release checklist
 
-The historical version checklists below remain as live-test procedures and release history. The current target is **0.1.0**; their old version numbers are not the version to publish. [docs/v1-readiness.md](docs/v1-readiness.md) maps implemented epics to outstanding evidence. App code signing, notarization and production updater signing are excluded from this release request; keep unsigned opening instructions and do not advertise signed updates as configured.
+The historical version checklists below remain as live-test procedures and release history. The current target is **1.0.0**; their old version numbers are not the version to publish. [docs/v1-readiness.md](docs/v1-readiness.md) maps implemented epics to outstanding evidence. App code signing, notarization and production updater signing are excluded from this release request; keep unsigned opening instructions and do not advertise signed updates as configured.
 
 1. Reconcile the inherited changes, finish the feature and appearance work, and resolve release defects. Check all user-facing README and sharing-kit statements against the resulting app.
 2. Record real OS/provider evidence using the procedures below. Leave Codex unattended builds disabled until its sandbox is verified; Grok and Antigravity builds require the user to watch. Fake-agent tests do not establish real-provider behavior.
-3. Set `0.1.0` in the root, server, web and desktop package manifests and `packages/desktop/src-tauri/tauri.conf.json`; add a `0.1.0` changelog section. Packaging tests enforce matching versions.
+3. Set `1.0.0` in the root, server, web and desktop package manifests and `packages/desktop/src-tauri/tauri.conf.json`; add a `1.0.0` changelog section. Packaging tests enforce matching versions.
 4. Run `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm run pack`, `pnpm smoke` and `pnpm e2e:installed`. Validate the desktop pipeline as appropriate to unsigned release artifacts. Check that the tarball contains the intended app and license.
 5. Verify the repository and npm package ownership/visibility, `NPM_PUBLISH=true`, protected `npm-release` environment and npm trusted publisher configured exactly as described in the historical first-release setup below. Publishing remains GitHub Actions only.
-6. Merge verified changes to `main`. Optionally run the release workflow dry run, then tag a commit on `main`'s first-parent history `v0.1.0` and push it. Do not reuse an existing npm version from a different commit.
-7. Watch CI, assets, npm publish, provenance and clean registry installations through completion. Confirm npm's `latest` tag resolves to `0.1.0` and GitHub release assets are complete. Only then update release status to published.
+6. Merge verified changes to `main`. Optionally run the release workflow dry run, then tag a commit on `main`'s first-parent history `v1.0.0` and push it. Do not reuse an existing npm version from a different commit.
+7. Watch CI, assets, npm publish, provenance and clean registry installations through completion. Confirm npm's `latest` tag resolves to `1.0.0` and GitHub release assets are complete. Only then update release status to published.
 
 Do not check off a live test without its recorded result. Any remaining external setup or unverified behavior must remain explicit in the readiness report rather than being described as complete.
 
@@ -106,7 +106,7 @@ A failed publish publishes nothing, since `npm publish` is all or nothing. A fai
 
 ## First release (0.2.0) checklist
 
-`0.2.0` is the first real release on npm: `0.0.0` was a name reservation, and it holds the `latest` dist-tag until `0.2.0` ships. `0.2.0` is epic 2 (chat and workspaces) and epic 9 (first-run onboarding, stories 9.1 to 9.7). Epic 3 (the terminal) is not in it: the release is cut before any epic 3 story merges. `0.0.1` was never published (its CHANGELOG entry says so).
+`0.2.0` is the first real release on npm: `0.0.0` was a name reservation, and it holds the `latest` dist-tag until `0.2.0` ships. `0.2.0` is epic 2 (chat and workspaces) and epic 9 (first-run onboarding, stories 9.1 to 9.7). Epic 3 (the terminal) is not in it: the release is cut before any epic 3 story merges. `0.1.0` was never published (its CHANGELOG entry says so).
 
 It goes out in two steps, both by tag: `0.2.0-rc.1` to the `next` dist-tag, checked live with a real Claude Code, then `0.2.0` to `latest`. Every step here is done by the repository owner, by hand; nothing in the repository merges, tags or publishes by itself. Steps 2 and 3 are one-time setup.
 

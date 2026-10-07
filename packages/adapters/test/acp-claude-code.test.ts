@@ -70,6 +70,54 @@ const until = async (predicate: () => boolean, what: string, timeoutMs = 5000) =
   }
 };
 
+describe('global MCP session propagation', () => {
+  it('preserves ordinary config while masking bare authorization and URL credentials', async () => {
+    const diagnostics: string[] = [];
+    const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null, onDiagnostic: (message, fields) => diagnostics.push(`${message} ${JSON.stringify(fields)}`) });
+    const mcpServers = [
+      { name: 'local', command: 'node', args: [], env: [{ name: 'DEBUG', value: '1' }, { name: 'MODE', value: 'verbose' }, { name: 'SHORT_KEY', value: 'ab' }] },
+      { name: 'remote', type: 'http' as const, url: 'https://private-user:private%20password@example.com/mcp?token=query%20token&mode=verbose', headers: [{ name: 'Authorization', value: 'Bearer private-value' }, { name: 'X-Mode', value: 'verbose' }, { name: 'Proxy-Authorization', value: `Basic ${Buffer.from('basic-user:basic-password').toString('base64')}` }] },
+    ];
+    const session = await agent.startSession({ cwd: tempDir(), env: baseEnv(), mcpServers });
+    sessions.push(session);
+    const events: AgentEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    await session.prompt('session-start');
+    const reply = JSON.parse(events.flatMap((event) => event.type === 'message_chunk' ? [event.text] : []).join(''));
+    expect(reply.mcpServers[0]).toEqual(mcpServers[0]);
+    expect(reply.mcpServers[1].headers[1]).toEqual({ name: 'X-Mode', value: 'verbose' });
+    events.length = 0;
+    await session.prompt('review-echo DEBUG=1 verbose ab private-value private-user private password private%20password query token query%20token basic-user basic-password');
+    const text = events.flatMap((event) => event.type === 'message_chunk' ? [event.text] : []).join('');
+    expect(text).toContain('DEBUG=1 verbose ab');
+    for (const value of ['private-value', 'private-user', 'private password', 'private%20password', 'query token', 'query%20token', 'basic-user', 'basic-password']) {
+      expect(text).not.toContain(value);
+      expect(diagnostics.join('\n')).not.toContain(value);
+    }
+    expect(text).toContain(MASKED);
+  });
+  it('refuses unsupported authorization credentials before spawning an agent', async () => {
+    const diagnostics: string[] = [];
+    const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null, onDiagnostic: (message) => diagnostics.push(message) });
+    await expect(agent.startSession({ cwd: tempDir(), env: baseEnv(), mcpServers: [{ name: 'remote', type: 'http', url: 'https://example.com/mcp', headers: [{ name: 'Authorization', value: 'Digest secret-value' }] }] })).rejects.toThrow('must use Bearer or Basic');
+    expect(diagnostics).toEqual([]);
+  });
+  it.each(['new', 'resume', 'load'] as const)('sends validated servers when opening via %s without logging their values', async (mode) => {
+    const diagnostics: string[] = [];
+    const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null, onDiagnostic: (message, fields) => diagnostics.push(`${message} ${JSON.stringify(fields)}`) });
+    const mcpServers = [{ name: 'local', command: 'node', args: ['tools.mjs'], env: [{ name: 'ACCESS_TOKEN', value: 'mcp-private-value' }] }];
+    const input = { cwd: tempDir(), env: baseEnv({ FAKE_ACP_RESUME: mode }), mcpServers };
+    const session = mode === 'new' ? await agent.startSession(input) : (await agent.reopenSession({ ...input, agentSessionId: 'earlier' })).session;
+    sessions.push(session);
+    const events: AgentEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    await session.prompt('session-start');
+    const reply = JSON.parse(events.flatMap((event) => event.type === 'message_chunk' ? [event.text] : []).join(''));
+    expect(reply.mcpServers).toEqual([{ ...mcpServers[0], env: [{ name: 'ACCESS_TOKEN', value: MASKED }] }]);
+    expect(diagnostics.join('\n')).not.toContain('mcp-private-value');
+  });
+});
+
 describe('acp-claude-code over ACP', () => {
   it('initializes, opens a session and streams a prompt reply: working, chunks, idle', async () => {
     const { agent, session, events } = await startFake();

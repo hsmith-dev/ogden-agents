@@ -1,0 +1,31 @@
+import { expect, test } from '@playwright/test';
+import { openConnected } from './tab.js';
+
+test('custom light and dark themes persist, stay readable on mobile, and reset', async ({ page }) => {
+  await openConnected(page, '/settings/appearance');
+  await page.getByRole('radio', { name: 'Light', exact: true }).click();
+  await page.getByText('Build your own theme', { exact: true }).click();
+  await page.getByLabel('Light background', { exact: true }).fill('#ffffff');
+  await page.getByLabel('Light foreground', { exact: true }).fill('#141715');
+  await page.getByLabel('Light accent', { exact: true }).fill('#2f4fd8');
+  await page.getByLabel('Dark background', { exact: true }).fill('#0f1210');
+  await page.getByLabel('Dark foreground', { exact: true }).fill('#e6eae6');
+  await page.getByLabel('Dark accent', { exact: true }).fill('#8198ff');
+  await page.getByRole('button', { name: 'Apply theme' }).click();
+  const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  await expect.poll(background).toBe('rgb(255, 255, 255)');
+  await page.reload();
+  await expect.poll(background).toBe('rgb(255, 255, 255)');
+  await page.getByRole('radio', { name: 'Dark', exact: true }).click();
+  await expect.poll(background).toBe('rgb(15, 18, 16)');
+  await page.screenshot({ path: test.info().outputPath('custom-theme-dark-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByText('Build your own theme', { exact: true }).click();
+  await page.screenshot({ path: test.info().outputPath('custom-theme-dark-mobile.png'), fullPage: true });
+  await page.getByLabel('Light foreground', { exact: true }).fill('#ffffff');
+  await page.getByRole('button', { name: 'Apply theme' }).click();
+  await expect(page.getByRole('alert')).toContainText('4.5:1');
+  await page.getByRole('button', { name: 'Reset palette' }).click();
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--background'))).toBe('');
+});

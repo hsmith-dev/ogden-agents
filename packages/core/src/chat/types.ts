@@ -64,7 +64,7 @@ export interface ChatOptions {
    */
   events?: Pick<EventLog, 'subscribe' | 'lastSeq'>;
   /** Developer mode, which gates Skip all. Without it, Developer mode reads off. */
-  installSettings?: Pick<InstallSettings, 'developerMode'>;
+  installSettings?: Pick<InstallSettings, 'developerMode' | 'globalMcpServers' | 'globalSkills'>;
   /**
    * Each agent's install-wide default model and last model list (story 11).
    * Without it, new chats start on the project's default or the agent's own

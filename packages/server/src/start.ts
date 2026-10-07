@@ -27,6 +27,7 @@ import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERR
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
+import { supportsUnattendedBuild } from './build-agent-sandbox.js';
 import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
 import { SHIPPED_ORCHESTRATION } from './orchestration-routes.js';
 import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey } from './auth.js';
@@ -379,7 +380,7 @@ async function listenAndAnnounce({
   // Inside the desktop app (story 13.11) there is no shortcut to offer: the app is the shortcut.
   const shell = options.shell === undefined ? shellModeOf() : options.shell;
   // Unattended builds (story 5.2, `start-builds.ts`): git, the sandbox check and the build runner.
-  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks, vcs, registeredAgents: (agentId) => agents.get(agentId) !== undefined, unattendedAgents: (agentId) => unwrapped.get(agentId)?.unattendedBuild !== false, describeAgent: (agentId) => agents.describe(agentId), attendedOnlyReason: (agentId) => unwrapped.get(agentId)?.attendedOnlyReason });
+  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks, vcs, registeredAgents: (agentId) => agents.get(agentId) !== undefined, unattendedAgents: (agentId) => supportsUnattendedBuild(unwrapped.get(agentId)), describeAgent: (agentId) => agents.describe(agentId), attendedOnlyReason: (agentId) => unwrapped.get(agentId)?.attendedOnlyReason });
   // Worktrees no run needs any more (a removal that failed, a start cut off) go before builds are served (story 5.5).
   await builds.sweep();
   // Queued runs a stopped server left start where the limits allow (story 5.8).

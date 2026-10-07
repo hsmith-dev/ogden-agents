@@ -1,3 +1,5 @@
+import type { GlobalMcpServer } from '@ogden-agents/shared';
+
 /**
  * Masking the agent's secrets in what it prints (AD-16): the values of the
  * secret-looking variables Ogden Agents gave the agent's process never reach
@@ -18,6 +20,48 @@ export function secretValues(env: Readonly<Record<string, string | undefined>>):
   const values = new Set<string>();
   for (const [name, value] of Object.entries(env)) {
     if (value !== undefined && value.length >= MIN_SECRET_LENGTH && SECRET_ENV_NAME.test(name)) values.add(value);
+  }
+  return [...values].sort((a, b) => b.length - a.length);
+}
+
+/** MCP uses the same variable rules; explicit credentials also mask their bare components. */
+export function mcpSecretValues(servers: readonly GlobalMcpServer[]): string[] {
+  const values = new Set<string>();
+  const credential = (value: string) => { if (value !== '') values.add(value); };
+  for (const server of servers) {
+    if ('command' in server) {
+      for (const pair of server.env) for (const value of secretValues({ [pair.name]: pair.value })) values.add(value);
+      continue;
+    }
+    for (const pair of server.headers) {
+      for (const value of secretValues({ [pair.name]: pair.value })) values.add(value);
+      if (/^(?:proxy-)?authorization$/i.test(pair.name)) {
+        credential(pair.value);
+        const auth = /^(Bearer|Basic)\s+(.+)$/i.exec(pair.value.trim());
+        if (auth === null && pair.value.trim() !== '') throw new Error('MCP authorization headers must use Bearer or Basic credentials.');
+        if (auth !== null) {
+          credential(auth[2]!);
+          if (auth[1]!.toLowerCase() === 'basic') {
+            const decoded = Buffer.from(auth[2]!, 'base64').toString('utf8');
+            credential(decoded);
+            const colon = decoded.indexOf(':');
+            if (colon !== -1) { credential(decoded.slice(0, colon)); credential(decoded.slice(colon + 1)); }
+          }
+        }
+      }
+    }
+    const url = new URL(server.url);
+    for (const value of [url.username, url.password]) {
+      credential(value);
+      try { credential(decodeURIComponent(value)); } catch { /* The encoded value remains masked. */ }
+    }
+    for (const [name, value] of url.searchParams) {
+      if (SECRET_ENV_NAME.test(name) || /AUTH|CREDENTIAL|SIGNATURE|^sig$/i.test(name)) {
+        credential(value);
+        credential(encodeURIComponent(value));
+        credential(new URLSearchParams({ value }).toString().slice('value='.length));
+      }
+    }
   }
   return [...values].sort((a, b) => b.length - a.length);
 }

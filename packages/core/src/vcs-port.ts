@@ -66,6 +66,8 @@ export interface VcsPort {
    * isn't a repository, `HEAD` is detached, or the branch has no commit.
    */
   head(repoPath: string): Promise<VcsHead | undefined>;
+  /** Whether the exact repo-relative path is a regular blob (never a symlink or tree) at the given commit. */
+  regularFileAtRevision(repoPath: string, revision: string, path: string): Promise<boolean>;
   /** The repository's top-level folder (real path) containing `repoPath`, or `undefined` when it is in none. */
   topLevel(repoPath: string): Promise<string | undefined>;
   /** The commit `branch` points at, or `undefined` when there is no such branch. */

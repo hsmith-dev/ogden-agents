@@ -1,3 +1,4 @@
+import { PaletteBuilder } from '@/appearance/palette-builder';
 import { Desktop, Moon, Sun } from '@phosphor-icons/react';
 import { useAppearance } from '@/appearance/appearance-provider';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent } from '@/ui/alert-dialog';
@@ -51,6 +52,7 @@ export function AppearancePage() {
               </ToggleGroupItem>
             </ToggleGroup>
           </Field>
+          <PaletteBuilder />
           <Field id="density" control="group" label="Density" description="Compact fits more on the screen. Nothing moves; rows and text get smaller.">
             <ToggleGroup
               type="single"

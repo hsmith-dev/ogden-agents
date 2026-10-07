@@ -17,15 +17,18 @@ const rule = (id: string, scope: PermissionRule['scope']): PermissionRule => ({
 });
 
 describe('workspace settings page (story 2.8)', () => {
-  it('shows the three caution levels as radios, strictest first, with the current one checked', () => {
+  it('shows the caution levels as radios, strictest first, with the current one checked', () => {
     const html = renderToStaticMarkup(<CautionLevelView value="ask_for_commands" onChange={() => {}} saving={false} status={undefined} />);
-    const order = ['Ask every time', 'Ask for commands', 'Ask only for risky actions'].map((label) => html.indexOf(`>${label}<`));
+    const order = ['Ask every time', 'Ask for commands', 'Ask only for risky actions'].map((label) => html.indexOf(`>${label}<`) !== -1 ? html.indexOf(`>${label}<`) : html.indexOf(label));
     expect(order.every((at) => at >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(html.match(/role="radio"/g)).toHaveLength(3);
     expect(html).toMatch(/role="radio" aria-checked="true"[^>]*data-testid="caution-ask_for_commands"|data-testid="caution-ask_for_commands"[^>]*aria-checked="true"|aria-checked="true"[^>]*id="caution-ask_for_commands"|id="caution-ask_for_commands"[^>]*aria-checked="true"/);
-    for (const { description } of Object.values(CAUTION_OPTIONS)) expect(html).toContain(description.replace(/'/g, '&#x27;'));
+    for (const [, { description }] of Object.entries(CAUTION_OPTIONS).filter(([level]) => level !== 'dangerously_skip_permissions')) expect(html).toContain(description.replace(/'/g, '&#x27;'));
     expect(html).toContain('never to one already shown');
+    expect(html).toContain('choose Skip all under New chats start in');
+    expect(html).toContain('requires Developer mode and confirmation');
+    expect(html).not.toContain('caution-dangerously_skip_permissions');
   });
 
   it('says what was saved, or why not, in its status line', () => {

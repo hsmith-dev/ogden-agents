@@ -215,3 +215,15 @@ export const PlanningIdea = z
  */
 export const StartPlanningRequest = z.object({ skill: SkillName, idea: PlanningIdea.optional() });
 export type StartPlanningRequest = z.infer<typeof StartPlanningRequest>;
+
+export const GlobalSkill = z.object({
+  name: SkillName,
+  content: z.string().trim().min(1).max(262144),
+  group: z.string().trim().min(1).max(128).nullable().optional(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+export type GlobalSkill = z.infer<typeof GlobalSkill>;
+
+export const GlobalSkillsResponse = z.object({ skills: z.array(GlobalSkill) });
+export type GlobalSkillsResponse = z.infer<typeof GlobalSkillsResponse>;

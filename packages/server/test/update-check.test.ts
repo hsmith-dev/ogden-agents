@@ -49,6 +49,8 @@ const bump = (version: string, by = 1): string => {
 };
 /** A version above the one under test, a stable one. */
 const NEWER = bump(VERSION);
+const RUNNING_PREVIEW = VERSION.includes('-');
+const RUNNING_GITHUB_URL = RUNNING_PREVIEW ? GITHUB_NEXT_URL : GITHUB_LATEST_URL;
 
 const putEnabled = (tab: { headers: Record<string, string> }, enabled: boolean) => ({ method: 'PUT', body: JSON.stringify({ enabled }), headers: { ...tab.headers, 'content-type': 'application/json' } });
 
@@ -65,8 +67,8 @@ describe('the update notice', () => {
     const tab = await signIn(server);
     await waitFor(() => world.calls.length >= 2, 'the start check');
     await waitFor(async () => (await noticeOf(server, tab.headers)).lastCheckedAt !== null, 'the check to finish');
-    // This test build is a preview version, so GitHub is asked for the newest few releases.
-    expect([...world.urls()].sort()).toEqual([DIST_TAGS_URL, GITHUB_NEXT_URL].sort());
+    // The running build chooses preview releases or releases/latest from its version.
+    expect([...world.urls()].sort()).toEqual([DIST_TAGS_URL, RUNNING_GITHUB_URL].sort());
     for (const call of world.calls) {
       expect(new URL(call.url).search).toBe(call.url === GITHUB_NEXT_URL ? '?per_page=5' : '');
       expect(Object.keys(call.init).sort()).toEqual(['headers', 'redirect', 'signal']);
@@ -75,7 +77,7 @@ describe('the update notice', () => {
     const npmCall = world.calls.find((call) => call.url === DIST_TAGS_URL)!;
     expect(npmCall.init.headers).toEqual({ accept: 'application/json' });
     // GitHub's own headers: no authorization, no cookie, and nothing about this install (no version, no id).
-    const githubHeaders = world.calls.find((call) => call.url === GITHUB_NEXT_URL)!.init.headers;
+    const githubHeaders = world.calls.find((call) => call.url === RUNNING_GITHUB_URL)!.init.headers;
     expect(Object.keys(githubHeaders).map((name) => name.toLowerCase()).sort()).toEqual(['accept', 'user-agent', 'x-github-api-version']);
     expect(JSON.stringify(githubHeaders)).not.toContain(VERSION);
     const notice = await noticeOf(server, tab.headers);
@@ -92,11 +94,11 @@ describe('the update notice', () => {
     const server = await startTestServer({ launcherEntry: GITHUB_LAUNCHER, updates: { fetch: world.fetch } });
     const tab = await signIn(server);
     await waitFor(async () => (await noticeOf(server, tab.headers)).lastCheckedAt !== null, 'the check to finish');
-    expect(world.urls()).toEqual([GITHUB_NEXT_URL]);
+    expect(world.urls()).toEqual([RUNNING_GITHUB_URL]);
     const notice = await noticeOf(server, tab.headers);
     expect(notice.installMethod).toBe('github');
     expect(notice.sources).toEqual(['github-releases']);
-    expect(notice.available).toEqual({ version: NEWER, tag: 'next', source: 'github-releases' });
+    expect(notice.available).toEqual({ version: NEWER, tag: RUNNING_PREVIEW ? 'next' : 'latest', source: 'github-releases' });
   });
 
   it('a stable install asks releases/latest and is never offered a prerelease', () => {

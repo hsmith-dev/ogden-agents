@@ -28,7 +28,7 @@ import type { StartOptions } from '../src/start-types.js';
 import type { AntigravityPorts } from '../src/antigravity-wiring.js';
 import type { CodexPorts } from '../src/codex-wiring.js';
 import type { GrokPorts } from '../src/grok-wiring.js';
-import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_WAITING_PLAN, FAKE_BUILD_REPO_FILES } from '../../../tests/fixtures/fake-bmad-repo.js';
+import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_WAITING_PLAN, FAKE_BUILD_REPO_FILES, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
 import { removeAfterTest, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -329,6 +329,44 @@ describe.each(ROWS)('every agent that builds: $id', { timeout: 90_000 }, (row) =
     expect((await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.runStop, { wsId: s.wsId, runId: run.id }))).status).toBe(200);
     await waitFor(async () => !alive(agentPid) && !alive(childPid), 'the agent and its child to be gone', 10_000);
     expect(RunResponse.parse(await (await request(s.server, s.tab, 'GET', apiPath(API_ROUTES.workspaceRun, { wsId: s.wsId, runId: run.id }))).json()).run.outcome).toBe('stopped');
+  });
+
+  it.each(['missing', 'untracked', 'staged', 'committed-symlink'])('refuses a %s skill before enqueueing or creating a session', async (kind) => {
+    if (row.skillFolder === null) return;
+    const s = await setup(row, { skill: false });
+    s.server.core.buildSettings.setWorkspaceSettings(s.wsId, { maxConcurrentRuns: 1 });
+    const existing = s.server.core.entities.createSession({ workspaceId: s.wsId, kind: 'build', agentId: row.id });
+    s.server.core.entities.createRun({ sessionId: existing.id, ticketRef: '9.9', agent: row.id, sandbox: 'attended' });
+    const relative = `${row.skillFolder}/bmad-build-auto/SKILL.md`;
+    if (kind !== 'missing') {
+      const folder = join(s.repo.path, row.skillFolder, 'bmad-build-auto');
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, 'SKILL.md'), '# Build\n');
+      if (kind === 'staged') fixtureGit(s.repo.path, 'add', relative);
+      if (kind === 'committed-symlink') {
+        const blob = fixtureGit(s.repo.path, 'rev-parse', `HEAD:${FAKE_BUILD_PLAN}`).trim();
+        fixtureGit(s.repo.path, 'update-index', '--add', '--cacheinfo', `120000,${blob},${relative}`);
+        fixtureGit(s.repo.path, 'commit', '--quiet', '--no-verify', '-m', 'symlink skill');
+      }
+    }
+    const body = await s.refusal(await s.build({ mode: 'attended' }));
+    expect(body).toMatchObject({ status: 409, code: 'plan_uncommitted' });
+    expect(body.message).toContain('bmad-build-auto');
+    expect(s.server.core.entities.listSessions(s.wsId).map((each) => each.id)).toEqual([existing.id]);
+    expect(s.server.core.entities.activeRunForTicket(s.wsId, '1.1')).toBeUndefined();
+  });
+
+  it('accepts a queued build only with its regular skill committed', async () => {
+    if (row.skillFolder === null) return;
+    const s = await setup(row);
+    s.server.core.buildSettings.setWorkspaceSettings(s.wsId, { maxConcurrentRuns: 1 });
+    const existing = s.server.core.entities.createSession({ workspaceId: s.wsId, kind: 'build', agentId: row.id });
+    s.server.core.entities.createRun({ sessionId: existing.id, ticketRef: '9.9', agent: row.id, sandbox: 'attended' });
+    const reply = await s.build({ mode: 'attended' });
+    expect(reply.status).toBe(201);
+    const { run } = BuildResponse.parse(await reply.json());
+    expect(run.queuePosition).toBe(1);
+    expect(run.worktreePath).toBeNull();
   });
 
   it('a build whose skill is not in the project is refused naming it, unless it is the default agent', async () => {

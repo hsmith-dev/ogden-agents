@@ -153,6 +153,8 @@ export interface BuildsDeps {
   /** The project's default chat agent, for the build default's fallback (epic 17); `undefined` when none is set. */
   projectDefaultAgent?: (workspaceId: WorkspaceId) => BuildAgent | undefined;
   skillReach?: (agent: BuildAgent, worktreePath: string) => string | undefined;
+  /** Pre-enqueue validation against the checkout's committed revision, before any run/session exists. */
+  committedSkillReach?: (agent: BuildAgent, repoPath: string, revision: string) => Promise<string | undefined>;
   chat: Pick<Chat, 'createChatSession' | 'sendMessage' | 'releaseAgent' | 'chatAgents'>;
   buildSessions: BuildSessions;
   /** Ogden Agents' data folder: worktrees go in `<dataDir>/w/`. */

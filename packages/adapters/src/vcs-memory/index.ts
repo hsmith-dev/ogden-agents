@@ -82,6 +82,11 @@ export function createMemoryVcs(): MemoryVcs {
       calls.push('check');
       return vcs.gitCheck;
     },
+    async regularFileAtRevision(repoPath, revision, path) {
+      calls.push(`regularFileAtRevision ${repoPath} ${revision} ${path}`);
+      // This fake has no committed file tree; callers that need one supply that evidence explicitly.
+      return false;
+    },
     async isAncestor(repoPath, revision) {
       calls.push(`isAncestor ${repoPath} ${revision}`);
       const state = repo(repoPath);

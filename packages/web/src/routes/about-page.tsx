@@ -127,6 +127,27 @@ export function AboutPage() {
             </>
           )}
         </PageSection>
+        <PageSection aria-label="Credits and Support">
+          <Text variant="heading">Built by Harrison Smith</Text>
+          <Text as="p" variant="body" tone="muted">
+            Ogden Agents is free and open source under the MIT license. Built by HSmithDev LLC with AI tools.
+          </Text>
+          <Text as="p" variant="body">
+            Have something you want to build? I help businesses turn ideas into useful apps and AI workflows.
+          </Text>
+          <div className="flex flex-wrap gap-3">
+            <Button asChild>
+              <a href="https://harrisonsmith.ai" target="_blank" rel="noopener noreferrer">Work with Harrison</a>
+            </Button>
+            <Button asChild variant="outline">
+              <a href="https://venmo.com/u/harrismith" target="_blank" rel="noopener noreferrer">Buy me a coffee</a>
+            </Button>
+            <Button asChild variant="link">
+              <a href="https://github.com/hsmith-dev/ogden-agents" target="_blank" rel="noopener noreferrer">View source</a>
+            </Button>
+          </div>
+          <Text variant="caption">Coffee is optional support through Venmo. Every app feature is available without a payment.</Text>
+        </PageSection>
       </PageBody>
     </>
   );

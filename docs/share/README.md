@@ -6,69 +6,49 @@ This folder is for sharing Ogden Agents with coworkers. Read this page first; th
 
 ## What it is
 
-Ogden Agents is a local app you open in your browser. It wraps coding agents (Claude Code today, Google's Antigravity as a second choice) in a chat window, so people who do not live in a terminal can still have an agent work on a folder of code or documents.
+Ogden Agents is a free, MIT-licensed local app for working with AI coding agents across projects. It opens in your browser or the desktop shell. It runs on your computer, with no Ogden cloud account.
 
-- **Local.** It runs on your computer and talks only to your own browser. There is no Ogden server and no account with us.
-- **Many projects, many chats.** Add any folder as a project. Each project has its own chats, and one sidebar shows which chats are working, waiting for you or idle, across every project.
-- **You stay in charge.** The agent asks before it runs a command or edits a file. You answer with a card: Allow once, Always allow, or Deny.
-- **BMad Method is optional, per project.** BMad Method is a structured way to go from an idea to a spec, tickets and reviewed work. A project can turn on Planning and a Board for it, or stay a plain set of chats.
-- **Your own agent, your own account.** Ogden never sees your Claude or Google login. It uses the agent's own sign-in, or an API key kept in your operating system's keychain.
-
-Codex and Grok are planned (see "Not yet"), not available.
+Claude Code and Antigravity can use their own account sign-in or an API key. Codex uses an OpenAI API key; Grok uses an xAI API token. A local model uses your configured OpenAI-compatible endpoint and needs no provider account. Messages and files reach the provider or endpoint you choose.
 
 ## Who it is for
 
-- People who want an AI coding agent but do not want to learn a terminal.
-- Teams where some people use the terminal and some do not, and want the same tool and the same safety rules.
-- Anyone running several projects with an agent at once who wants one place to see what needs an answer.
+People who want coding agents without living in a terminal, and developers who need one place to coordinate projects, chats and work that needs their answer. Each installation is for one person on one computer.
 
-It is not for running an agent on a shared server or giving other people access to your machine: it is one person on one computer by design.
+## What is implemented
 
-## What is in this build
+- Persistent chats, formatted replies, tool calls, permission cards, models, drafts, queued messages and a cross-project Needs you view.
+- A preview you can edit before continuing a conversation with another agent.
+- Optional BMad Planning, a live ticket Board, Retrospectives and lessons for later builds.
+- Ticket builds in separate worktrees, verification results, review and approval before merging. Claude Code can build unattended with a supported sandbox; Codex, Grok and Antigravity currently build with you watching. Local model builds are not offered.
+- Manager/worker orchestration with approval per instruction by default, dispatch limits, activity records and Stop.
+- Ogden, Forest and Ember appearance presets, custom paired light/dark themes with contrast validation and JSON import/export, density controls and responsive layout.
+- Native terminal tabs and splits in Developer mode.
+- Desktop packaging and double-click start scripts for macOS, Windows and Linux.
 
-This is the build under review in pull request #101 (version 0.5.0-rc.1 plus the feedback round after it). It is not a published release. Facts below come from `CHANGELOG.md` and the tests.
+## Release status and limits
 
-- Chats with Claude Code, with replies shown as formatted Markdown, tool calls with diffs, queued messages, and chats that survive a restart.
-- A second agent, Antigravity, installed and signed into from Settings > Agents, with its own permission cards. Each chat keeps the agent it started with.
-- Continue a chat with another agent, for example when a usage limit is hit. You see and can edit exactly what will be sent first.
-- Permission cards, per-project caution levels, three permission modes per chat (Ask, Auto, Skip all), and protected files that always ask.
-- Chat names you can change, a draft that is kept per chat, a model picker per chat, and a choice between "wait until the agent finishes" and "send right away".
-- Desktop notifications with a sound when something needs you.
-- Per project: BMad Method with Planning (idea to spec to tickets, in chat) and a Board (tickets by status, live). Both are off by default.
-- A first-run Welcome that installs and signs into the agent for you.
-- Light and dark themes, and a layout that works on a phone-width window.
+Implementation is ahead of the old sharing-kit screenshots. This page describes the source tree, and does not claim that npm v1 has been published. [v1 readiness](../v1-readiness.md) lists automated and live evidence still required. App signing is outside this release's scope; unsigned-app opening instructions are in the [main README](../../README.md#download).
 
-## What is not there yet
-
-Honest list, from the planning files in `_bmad-output/` and the settings page:
-
-- **Unattended builds** (agents building tickets on their own in sandboxed worktrees, then waiting for your approval) are in progress and not in this build. The switch in project settings is greyed out as "Coming soon". See `security-and-privacy.md` for the safety rules they must meet first.
-- **Retrospectives** are not in this build ("Coming soon" in settings).
-- **Codex and Grok** are not supported. Spikes to see whether they can be driven are open pull requests, not shipped work.
-- **Antigravity is chat only.** Builds with it are not planned for the first version.
-- **No npm release yet.** The package name exists on npm only as an empty placeholder (version 0.0.0), so `npx ogden-agents` does not run the app today. It will once a version is published.
-- **No signed desktop installer.** Double-click start scripts exist in an open pull request (#105) and need the published package; a desktop app is planned separately.
-- **The repository is private today**, so a coworker needs access to it to run the app from source. The project is MIT licensed and moving to open source.
-- **Developer extras not built:** reviewing diffs in the app and a VS Code extension are candidate ideas only.
-- **Verified on CI for macOS, Windows and Linux**, but this kit's screenshots and demo notes were made on macOS.
+Codex unattended builds remain disabled until its sandbox passes real-machine checks. Grok and Antigravity builds require you to watch. A full editor-style diff browser and a VS Code extension remain v2 candidates. External security auditing has not been completed.
 
 ## How to run it today
 
-You need Node.js 24 or later and pnpm 12, and access to the repository.
+From a checkout, install Node.js 24 or later and pnpm 12:
 
 ```sh
 git clone https://github.com/hsmith-dev/ogden-agents.git
 cd ogden-agents
-git checkout preview/feedback      # the build described above
-pnpm install
-pnpm start                         # builds, starts the server on 127.0.0.1, opens your browser
+pnpm install --frozen-lockfile
+pnpm start
 ```
 
-The first launch opens Welcome. It installs Claude Code into Ogden's own data folder and signs you in with your Claude subscription (or an Anthropic API key). Nothing is installed globally.
+Welcome helps set up an agent in Ogden's data folder. If the browser does not open, use the printed one-time link within 60 seconds. Stop the app with **Quit Ogden Agents** in the sidebar.
 
-If the browser does not open, the terminal prints a one-time link; open it within 60 seconds. To stop the app, use **Quit Ogden Agents** at the bottom of the sidebar.
+Once the release is published and verified, use `npx ogden-agents@1.0.0`, the release's start scripts or a desktop download. See [the main README](../../README.md) for installation instructions.
 
-When the package is published, the one-command route will be `npx ogden-agents`, and the double-click start scripts from #105 will wrap it.
+## Support and custom work
+
+Ogden is free to use, with no donation required. For AI workflows, custom software and integrations for your business, visit [HarrisonSmith.AI](https://harrisonsmith.ai). To support Harrison's open-source work, [buy a coffee on Venmo](https://venmo.com/u/harrismith).
 
 ## Try it safely
 

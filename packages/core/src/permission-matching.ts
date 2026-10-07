@@ -169,6 +169,9 @@ export function ruleMatches(
  * still answer them).
  */
 export function cautionAllows(level: CautionLevel, kind: ToolKind, pathsInside: boolean): boolean {
+  // The legacy no-prompts alias is accepted only by settings, where it
+  // becomes the confirmed Skip all default. It never authorizes a request.
+  if (level === 'dangerously_skip_permissions') return false;
   if (pathsInside !== true) return false;
   switch (level) {
     case 'ask_for_commands':

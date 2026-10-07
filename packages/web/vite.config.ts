@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
@@ -22,7 +23,13 @@ export function bootScript(): string {
     __LAUNCH_CODE_FRAGMENT_PARAM__: LAUNCH_CODE_FRAGMENT_PARAM,
     __TAB_EXCHANGE_PATH__: API_ROUTES.tabExchange,
   };
-  let script = source;
+  // Share the exact validator/token generator with React. This standalone
+  // browser module has no imports; Node 24 strips its types for a classic
+  // script, keeping boot synchronous and independent of the app bundle.
+  const paletteSource = readFileSync(fileURLToPath(new URL('./src/appearance/palette.ts', import.meta.url)), 'utf8');
+  if (/^import\s/m.test(paletteSource)) throw new Error('The boot palette runtime must remain dependency-free');
+  const paletteRuntime = stripTypeScriptTypes(paletteSource.replace(/^export /gm, ''));
+  let script = source.replace('__PALETTE_RUNTIME__', paletteRuntime);
   for (const [name, value] of Object.entries(values)) script = script.replaceAll(name, JSON.stringify(value));
   const left = /__[A-Z_]+__/.exec(script);
   if (left !== null) throw new Error(`boot/boot.js: ${left[0]} has no value`);

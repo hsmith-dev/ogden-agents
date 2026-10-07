@@ -511,3 +511,26 @@ export const UpdateQueuedMessageRequest = z
   .object({ content: MessageText.optional(), position: z.number().int().min(0).optional() })
   .refine((input) => input.content !== undefined || input.position !== undefined, 'Choose what to change.');
 export type UpdateQueuedMessageRequest = z.infer<typeof UpdateQueuedMessageRequest>;
+
+
+/** ACP session servers: stdio, HTTP and SSE; ACP channel servers need a host implementation. */
+const McpName = z.string().trim().min(1).max(128);
+const McpPair = z.object({ name: z.string().min(1).max(256), value: z.string().max(16384) }).strict();
+const McpUrl = z.url().refine((value) => ['http:', 'https:'].includes(new URL(value).protocol), 'Use an HTTP or HTTPS URL.');
+export const GlobalMcpServer = z.union([
+  z.object({ name: McpName, command: z.string().trim().min(1).max(4096), args: z.array(z.string().max(16384)).max(128).default([]), env: z.array(McpPair.extend({ name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'Use a valid environment variable name.') })).max(128).default([]) }).strict(),
+  z.object({ name: McpName, type: z.enum(['http', 'sse']), url: McpUrl, headers: z.array(McpPair.extend({ name: z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, 'Use a valid HTTP header name.'), value: z.string().max(16384).refine((value) => !/[\r\n]/.test(value), 'Header values cannot contain line breaks.') })).max(128).default([]) }).strict(),
+ ]).superRefine((server, context) => {
+  if ('command' in server) return;
+  server.headers.forEach((header, index) => {
+    if (/^(?:proxy-)?authorization$/i.test(header.name) && header.value.trim() !== '' && !/^(Bearer|Basic)\s+(.+)$/i.test(header.value.trim())) {
+      context.addIssue({ code: 'custom', path: ['headers', index, 'value'], message: 'MCP authorization headers must use Bearer or Basic credentials.' });
+    }
+  });
+});
+export type GlobalMcpServer = z.infer<typeof GlobalMcpServer>;
+export const GlobalMcpServers = z.array(GlobalMcpServer).max(64).refine((servers) => new Set(servers.map((server) => server.name)).size === servers.length, 'MCP server names must be unique.');
+export const GlobalMcpServersResponse = z.object({ servers: GlobalMcpServers });
+export type GlobalMcpServersResponse = z.infer<typeof GlobalMcpServersResponse>;
+export const SetGlobalMcpServersRequest = GlobalMcpServersResponse;
+export type SetGlobalMcpServersRequest = z.infer<typeof SetGlobalMcpServersRequest>;

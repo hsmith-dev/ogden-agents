@@ -303,6 +303,9 @@ export const API_ROUTES = {
    * chat to Ask in the same transaction.
    */
   developerMode: `${API_BASE}/settings/developer-mode`,
+  globalMcpServers: `${API_BASE}/settings/global-mcp-servers`,
+  globalSkills: `${API_BASE}/settings/global-skills`,
+  globalSkill: `${API_BASE}/settings/global-skills/:name`,
   /**
    * `GET` → `ChatSettingsResponse`; `PUT SetChatSettingsRequest` →
    * `ChatSettingsResponse` (send now or wait): the app-wide choice of what a

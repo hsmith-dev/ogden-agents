@@ -59,6 +59,22 @@ function setup() {
 }
 
 describe('vcs-git (story 5.2)', () => {
+  it('accepts only a regular file at the exact commit, never uncommitted files, trees, or symlink blobs', async () => {
+    const { repo, vcs, head } = setup();
+    expect(await vcs.regularFileAtRevision(repo, head, 'README.md')).toBe(true);
+    expect(await vcs.regularFileAtRevision(repo, head, 'src')).toBe(false);
+    expect(await vcs.regularFileAtRevision(repo, head, '*.md')).toBe(false);
+    writeFileSync(join(repo, 'new.md'), '# Not committed');
+    git(repo, 'add', 'new.md');
+    expect(await vcs.regularFileAtRevision(repo, head, 'new.md')).toBe(false);
+    // A symlink-mode blob directly in git's index works even on Windows without symlink privileges.
+    git(repo, 'update-index', '--add', '--cacheinfo', `120000,${git(repo, 'rev-parse', 'HEAD:README.md').trim()},link.md`);
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'new files');
+    const revision = git(repo, 'rev-parse', 'HEAD').trim();
+    expect(await vcs.regularFileAtRevision(repo, revision, 'new.md')).toBe(true);
+    expect(await vcs.regularFileAtRevision(repo, revision, 'link.md')).toBe(false);
+    expect(await vcs.regularFileAtRevision(repo, head, 'new.md')).toBe(false);
+  });
   it("reads the checked-out branch and its commit; nothing for a detached HEAD, an empty repo or a folder that isn't one", async () => {
     const { repo, vcs, head } = setup();
     expect(await vcs.head(repo)).toEqual({ branch: 'main', revision: head });

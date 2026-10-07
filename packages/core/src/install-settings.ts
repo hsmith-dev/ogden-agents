@@ -6,10 +6,10 @@
  * Each change appends `settings.developer_mode_changed` (install-level), which
  * every tab follows.
  */
-import { DEFAULT_WHILE_WORKING, SETTINGS_STREAM, WhileWorking as WhileWorkingSchema, type Session, type WhileWorking } from '@ogden-agents/shared';
+import { GlobalMcpServers, GlobalSkill, SkillName, type GlobalMcpServer, DEFAULT_WHILE_WORKING, SETTINGS_STREAM, WhileWorking as WhileWorkingSchema, type Session, type WhileWorking } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
 import type { Database } from './db/database.js';
-import { chatSettings, installSettings } from './db/schema.js';
+import { chatSettings, installSettings, globalSkills } from './db/schema.js';
 import type { Entities } from './entities.js';
 import { ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
@@ -34,6 +34,10 @@ export interface DeveloperModeChange {
 export interface InstallSettings {
   /** Whether Developer mode is on (off until the user turns it on). */
   developerMode(): boolean;
+  globalSkills(): GlobalSkill[];
+  setGlobalSkill(skill: unknown): void;
+  deleteGlobalSkill(name: string): void;
+
   /** Whether Developer mode was ever turned on or off on this install (its row exists). */
   developerModeEverSet(): boolean;
   /**
@@ -55,6 +59,10 @@ export interface InstallSettings {
    * `ValidationError` for anything but `wait` or `now`.
    */
   setWhileWorking(value: WhileWorking): { whileWorking: WhileWorking; changed: boolean };
+  /** The global MCP servers. */
+  globalMcpServers(): GlobalMcpServer[];
+  /** Sets the global MCP servers. */
+  setGlobalMcpServers(servers: unknown[]): void;
 }
 
 export interface InstallSettingsOptions {
@@ -88,6 +96,26 @@ export function createInstallSettings({ db, events, entities }: InstallSettingsO
         events.append({ type: 'settings.while_working_changed', workspaceId: null, streamId: SETTINGS_STREAM, payload: { whileWorking, previous } });
         return { whileWorking, changed: true };
       });
+    },
+
+    globalSkills: () => orm.select().from(globalSkills).orderBy(globalSkills.name).all().map((skill) => GlobalSkill.parse(skill)),
+    setGlobalSkill: (skill) => {
+      const parsed = GlobalSkill.safeParse(skill);
+      if (!parsed.success) throw new ValidationError('The skill is invalid.', parsed.error.issues);
+      const previous = orm.select().from(globalSkills).where(eq(globalSkills.name, parsed.data.name)).get();
+      const value = { ...parsed.data, createdAt: previous?.createdAt ?? new Date().toISOString(), updatedAt: new Date().toISOString() };
+      orm.insert(globalSkills).values(value).onConflictDoUpdate({ target: globalSkills.name, set: value }).run();
+    },
+    deleteGlobalSkill: (name) => {
+      const parsed = SkillName.safeParse(name);
+      if (!parsed.success) throw new ValidationError('The skill name is invalid.', parsed.error.issues);
+      orm.delete(globalSkills).where(eq(globalSkills.name, parsed.data)).run();
+    },
+    globalMcpServers: () => GlobalMcpServers.parse(orm.select({ servers: installSettings.globalMcpServers }).from(installSettings).where(eq(installSettings.id, ROW_ID)).get()?.servers ?? []),
+    setGlobalMcpServers: (servers) => {
+      const parsed = GlobalMcpServers.safeParse(servers);
+      if (!parsed.success) throw new ValidationError('The MCP servers are invalid.', parsed.error.issues);
+      orm.insert(installSettings).values({ id: ROW_ID, globalMcpServers: parsed.data }).onConflictDoUpdate({ target: installSettings.id, set: { globalMcpServers: parsed.data } }).run();
     },
 
     developerModeEverSet: () => orm.select({ id: installSettings.id }).from(installSettings).where(eq(installSettings.id, ROW_ID)).get() !== undefined,

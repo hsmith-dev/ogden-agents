@@ -57,7 +57,7 @@ export type ToolCallStatus = z.infer<typeof ToolCallStatus>;
  * time (the default for new projects), Ask for commands, Ask only for risky
  * actions. Changing it applies only to requests not yet shown.
  */
-export const CAUTION_LEVELS = ['ask_every_time', 'ask_for_commands', 'ask_risky_only'] as const;
+export const CAUTION_LEVELS = ['ask_every_time', 'ask_for_commands', 'ask_risky_only', 'dangerously_skip_permissions'] as const;
 export const CautionLevel = z.enum(CAUTION_LEVELS);
 export type CautionLevel = z.infer<typeof CautionLevel>;
 export const DEFAULT_CAUTION_LEVEL: CautionLevel = 'ask_every_time';

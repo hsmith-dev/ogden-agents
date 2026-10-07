@@ -65,8 +65,8 @@ Open the **Board** tab. (screenshots/09-board-light-desktop.png) Say: "Tickets b
 **12:00 Switching agents (1.5 minutes, optional).**
 Open the chat header menu and choose **Continue with another agent** (needs a second agent installed). Read the preview aloud and point out the provider name. Cancel. Say: "This is exactly what would be sent, and I can edit it first."
 
-**13:30 What is not built (1 minute).**
-Open BMad settings again. Point at "Coming soon" beside Unattended builds and Retrospectives. Say: "Agents building tickets on their own is in progress and has to pass its safety rules first. It is not in this build."
+**13:30 From planning to reviewed work (1 minute).**
+Open BMad settings again. Show Unattended builds and Retrospectives. Say: "Tickets can build in separate worktrees, then wait for verification and my approval before merging. Claude Code can run unattended where a supported sandbox is available; Codex, Grok and Antigravity currently need me watching. Retrospectives help carry lessons into the next build." Do not start a build unless the scratch project and agent are prepared. Explain that npm v1 publication and real-machine evidence remain tracked in [v1 readiness](../v1-readiness.md).
 
 **14:15 Questions (45 seconds).**
 

@@ -273,6 +273,7 @@ export const bmadModulesSeen = sqliteTable(
 export const installSettings = sqliteTable('install_settings', {
   id: integer('id').primaryKey(),
   developerMode: integer('developer_mode', { mode: 'boolean' }).notNull().default(false),
+  globalMcpServers: text('global_mcp_servers', { mode: 'json' }).$type<unknown[]>().notNull().default([]),
 });
 
 /**
@@ -466,3 +467,14 @@ export const orchestrationSteps = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.runId, t.stepId] })],
 );
+
+/**
+ * Global skills (Shared Skills) available across all workspaces.
+ */
+export const globalSkills = sqliteTable('global_skills', {
+  name: text('name').primaryKey(),
+  content: text('content').notNull(),
+  group: text('group'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});

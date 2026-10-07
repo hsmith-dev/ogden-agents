@@ -297,6 +297,15 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
 
     head,
 
+    async regularFileAtRevision(repoPath, revision, path) {
+      checkRelative(path);
+      // Literal pathspec: skill names and folders must never act as git glob patterns.
+      const result = await run(checkPath(repoPath), ['ls-tree', '-z', checkRevision(revision), '--', `:(literal)${path}`]);
+      if (result.code !== 0) return false;
+      const records = result.stdout.split('\0').filter(Boolean);
+      return records.length === 1 && /^(100644|100755) blob [0-9a-f]+\t/.test(records[0]!) && records[0]!.split('\t').slice(1).join('\t') === path;
+    },
+
     async isAncestor(repoPath, revision) {
       const result = await run(checkPath(repoPath), ['merge-base', '--is-ancestor', checkRevision(revision), 'HEAD']);
       return result.code === 0;

@@ -1,3 +1,4 @@
+import { GlobalMcpServersResponse, type GlobalMcpServer } from '@ogden-agents/shared';
 import {
   API_ROUTES,
   apiPath,
@@ -171,4 +172,20 @@ export async function cancelSession(wsId: string, sesId: string, auth: Pick<TabA
 /** `DELETE /api/v1/workspaces/:wsId/permission-rules/:ruleId`: undoes an always-allow rule. */
 export async function removePermissionRule(wsId: string, ruleId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<void> {
   await callNoContent(auth, apiPath(API_ROUTES.permissionRule, { wsId, ruleId }), { method: 'DELETE' }, "The rule couldn't be undone");
+}
+
+
+export async function fetchGlobalMcpServers(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<GlobalMcpServer[]> {
+  const json = await call(auth, API_ROUTES.globalMcpServers, {}, "Ogden Agents couldn't load global MCP servers");
+  return GlobalMcpServersResponse.parse(json).servers;
+}
+
+export async function setGlobalMcpServers(servers: unknown[], auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<GlobalMcpServer[]> {
+  const json = await call(
+    auth,
+    API_ROUTES.globalMcpServers,
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ servers }) },
+    "Ogden Agents couldn't save global MCP servers",
+  );
+  return GlobalMcpServersResponse.parse(json).servers;
 }

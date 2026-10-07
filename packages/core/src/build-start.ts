@@ -55,6 +55,9 @@ export function createStarter(ctx: BuildCtx) {
     const head = await vcs.head(repoPath);
     if (head === undefined) throw new BuildRefusedError('vcs_unavailable', VCS_UNAVAILABLE_MESSAGE);
     await requirePlanCommitted(repoPath, ticket.plan);
+    // A queued run must already have its agent's build skill committed; dispatch rechecks the actual worktree.
+    const noSkill = runnerFor(agent) !== runner ? await deps.committedSkillReach?.(agent, repoPath, head.revision) : undefined;
+    if (noSkill !== undefined) throw new BuildRefusedError('plan_uncommitted', noSkill);
     // The guards once more, right before anything is written: a piece turned off meanwhile writes nothing.
     await guarded(workspaceId);
     return { ticket, head, sandboxKind, attended, latest };

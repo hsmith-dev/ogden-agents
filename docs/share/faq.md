@@ -2,20 +2,22 @@
 
 ## What does it cost?
 
-Ogden Agents itself is free and MIT licensed. The cost is the agent you connect: a Claude subscription or Anthropic API usage for Claude Code, and a Google account or Gemini API key for Antigravity. Ogden has no billing of its own. Check the provider's current prices and plan limits.
+Ogden Agents itself is free and MIT licensed. The cost is the agent you connect: a Claude subscription or Anthropic API usage for Claude Code, a Google account or Gemini API key for Antigravity, an OpenAI API key for Codex, or an xAI API token for Grok. A local model uses the endpoint you configure. Ogden has no billing of its own. Check the provider's current prices and plan limits.
 
 ## Which accounts do I need?
 
 At least one of:
 
 - A **Claude** account on a plan that includes Claude Code, or an **Anthropic API key**. Ogden signs you in from the browser, or keeps the key in your OS keychain.
-- Optionally, a **Google** account or **Gemini API key** for Antigravity.
+- A **Google** account or **Gemini API key** for Antigravity.
+- An **OpenAI API key** for Codex, or an **xAI API token** for Grok.
+- A running **local model endpoint**, with no provider account required.
 
 You do not need an account with Ogden or us. BMad Method needs none either, but its setup downloads files from GitHub.
 
 ## Do I need to know the terminal?
 
-To run it today from source, yes: `git`, Node.js and `pnpm start`. Once it is published to npm it is `npx ogden-agents`, and double-click scripts are in an open pull request. After it starts, everything is in the browser. See [README.md](README.md).
+To run it today from source, yes: `git`, Node.js and `pnpm start`. Once it is published to npm it is `npx ogden-agents`, and the implemented double-click scripts wrap that command. Desktop builds bundle their runtime. After it starts, everything is in the browser. See [README.md](README.md).
 
 ## Windows, Mac or Linux?
 
@@ -27,11 +29,11 @@ All three are supported and tested in CI (macOS, Windows, Linux; Node 24 and 26)
 
 ## Does it work offline?
 
-The app itself runs offline, since it is local. The agents do not: Claude Code and Antigravity need internet to reach their providers. Setting up BMad Method, installing an agent and checking an API key also need the network. An offline attempt gives a plain error.
+The app itself runs offline, since it is local. The agents do not: hosted agents need internet to reach their providers. A local model can run offline after setup if its endpoint and tools stay on your computer. Setting up BMad Method, installing an agent and checking an API key also need the network. An offline attempt gives a plain error.
 
 ## Is my code sent to Ogden?
 
-No. There is no Ogden server. Your code goes only where the agent you chose sends it (Anthropic or Google), as it would in a terminal. See [security-and-privacy.md](security-and-privacy.md).
+No. There is no Ogden server. Your code goes only where the agent you chose sends it (Anthropic, Google, OpenAI, xAI, or your configured model endpoint), as it would in a terminal. See [security-and-privacy.md](security-and-privacy.md).
 
 ## What is the Antigravity terms caveat?
 
@@ -39,7 +41,7 @@ Google's Antigravity terms say that using it through apps Google does not make c
 
 ## What about xAI (Grok) and Codex?
 
-Neither is supported yet. They are planned for a later release, and spikes on driving them are in open pull requests. We have not checked xAI's or OpenAI's terms for use through third-party apps, so we cannot make a claim either way. Check them before the day any of these ships, in the same way as for Antigravity.
+Both are implemented for chat and attended ticket builds. Codex uses an OpenAI API key only; ChatGPT account sign-in is not offered. Grok uses an xAI API token only and requires a trusted project. Codex unattended builds remain disabled pending real sandbox verification. Grok builds require you to watch.
 
 ## Will it change my files?
 
@@ -55,8 +57,12 @@ Not yet. It is a pre-release build. Try it on scratch projects first. Check the 
 
 ## Is unattended building available?
 
-No. Agents building tickets on their own are in progress and not in this build.
+Yes, for Claude Code where a supported sandbox is available, with separate worktrees, verification and your approval before merging. Codex, Grok and Antigravity builds currently require you to watch. Local model builds are not offered. See [v1 readiness](../v1-readiness.md) for the real-machine checks still needed.
 
 ## Where do I report problems?
 
 In the GitHub repository's issues once you have access, or to the person who shared this with you.
+
+## Can I hire the creator or support the project?
+
+Visit [HarrisonSmith.AI](https://harrisonsmith.ai) for custom apps, AI workflows and integrations. You can also [buy Harrison a coffee on Venmo](https://venmo.com/u/harrismith). Ogden remains free and MIT licensed; neither service purchases nor donations are required.

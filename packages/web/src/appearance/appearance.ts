@@ -1,3 +1,4 @@
+import { applyPalette, PALETTES, parseCustomPalette, type CustomPalette, type PalettePreference } from './palette';
 import { APPEARANCE_STORAGE_KEY as APPEARANCE_KEY } from '@ogden-agents/shared';
 
 /**
@@ -11,6 +12,8 @@ export type Density = 'comfortable' | 'compact';
 
 export interface Appearance {
   theme: ThemePreference;
+  palette?: PalettePreference;
+  customPalette?: CustomPalette;
   density: Density;
   developerMode: boolean;
   /** xterm's screen-reader mode in the terminal panel (story 3.6; user decision: a switch, off by default). */
@@ -30,7 +33,11 @@ export function parseAppearance(raw: string | null): Appearance {
   } catch {
     // Corrupt value: use the defaults.
   }
+  const customPalette = parseCustomPalette(saved.customPalette);
+  const palette = PALETTES.includes(saved.palette as PalettePreference) && (saved.palette !== 'custom' || customPalette !== undefined) ? saved.palette as PalettePreference : 'default';
   return {
+    ...(palette === 'default' ? {} : { palette }),
+    ...(customPalette === undefined ? {} : { customPalette }),
     theme: saved.theme === 'light' || saved.theme === 'dark' ? saved.theme : 'system',
     density: saved.density === 'compact' ? 'compact' : 'comfortable',
     developerMode: saved.developerMode === true,
@@ -58,6 +65,7 @@ export function saveAppearance(appearance: Appearance, storage: Pick<Storage, 's
 export function applyAppearance(appearance: Appearance, root: HTMLElement = document.documentElement): void {
   if (appearance.theme === 'system') root.removeAttribute('data-theme');
   else root.setAttribute('data-theme', appearance.theme);
+  applyPalette(root, appearance.palette, appearance.customPalette, appearance.theme === 'dark' || (appearance.theme === 'system' && typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches));
   if (appearance.density === 'compact') root.setAttribute('data-density', 'compact');
   else root.removeAttribute('data-density');
   if (appearance.developerMode) root.setAttribute('data-developer', 'true');

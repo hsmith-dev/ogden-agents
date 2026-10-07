@@ -89,7 +89,7 @@ function BmadSection({ wsId }: { wsId: string }) {
 }
 
 /** The caution ladder in the user's words (EXPERIENCE.md Caution level), strictest first. */
-export const CAUTION_OPTIONS: Record<CautionLevel, { label: string; description: string }> = {
+export const CAUTION_OPTIONS: Record<CautionLevel, { label: React.ReactNode; description: string }> = {
   ask_every_time: { label: 'Ask every time', description: 'Every request from the agent waits for your answer.' },
   ask_for_commands: {
     label: 'Ask for commands',
@@ -98,6 +98,10 @@ export const CAUTION_OPTIONS: Record<CautionLevel, { label: string; description:
   ask_risky_only: {
     label: 'Ask only for risky actions',
     description: 'Also edits files inside this project without asking. Commands, deleting, moving, the web and anything outside it ask.',
+  },
+  dangerously_skip_permissions: {
+    label: 'Run without permission prompts',
+    description: 'Use Skip all under New chats start in. It requires Developer mode and confirmation.',
   },
 };
 
@@ -119,17 +123,20 @@ export function CautionLevelView({ value, onChange, saving, status }: CautionLev
           aria-label="Caution level"
           aria-describedby="caution-level-description"
           data-testid="caution-level"
-          value={value}
+          value={value === 'dangerously_skip_permissions' ? 'ask_risky_only' : value}
           disabled={saving}
           onValueChange={(next) => {
-            if ((CAUTION_LEVELS as readonly string[]).includes(next) && next !== value) onChange(next as CautionLevel);
+            if ((CAUTION_LEVELS as readonly string[]).includes(next) && next !== 'dangerously_skip_permissions' && next !== value) {
+              onChange(next as CautionLevel);
+            }
           }}
         >
-          {CAUTION_LEVELS.map((level) => (
+          {CAUTION_LEVELS.filter((level) => level !== 'dangerously_skip_permissions').map((level) => (
             <RadioGroupOption key={level} id={`caution-${level}`} value={level} data-testid={`caution-${level}`} {...CAUTION_OPTIONS[level]} />
           ))}
         </RadioGroup>
       )}
+      <Text variant="caption">To run without permission prompts, choose Skip all under New chats start in. It requires Developer mode and confirmation.</Text>
       <Text variant="caption" role="status" data-testid="caution-status">
         {status?.kind === 'saved' ? status.text : ''}
       </Text>

@@ -84,11 +84,14 @@ export function createBuildsWiring({
     const described = describeAgent(agent);
     // An agent with no descriptor cannot be known to find the skill: refused, never assumed.
     if (described === undefined) return `That agent can't find the ${BUILD_AUTO_SKILL} skill in this project.`;
-    const file = join(worktree, ...described.skillsFolder.split('/'), BUILD_AUTO_SKILL, 'SKILL.md');
-    // A regular file that is the project's own: never a link (the agent would read what it points at).
-    let present = false;
+    const parts = [...described.skillsFolder.split('/'), BUILD_AUTO_SKILL, 'SKILL.md'];
+    // Every ancestor must be a real folder too, not just the final file.
+    let present = true;
     try {
-      present = lstatSync(file).isFile();
+      for (let i = 1; i <= parts.length; i++) {
+        const entry = lstatSync(join(worktree, ...parts.slice(0, i)));
+        if (i === parts.length ? !entry.isFile() : !entry.isDirectory()) present = false;
+      }
     } catch {
       present = false;
     }
@@ -96,6 +99,14 @@ export function createBuildsWiring({
   };
   return createBuilds({
     skillReach,
+    committedSkillReach: async (agent, repoPath, revision) => {
+      const noSkill = skillReach(agent, repoPath);
+      if (noSkill !== undefined) return noSkill;
+      const described = describeAgent(agent)!;
+      const path = `${described.skillsFolder}/${BUILD_AUTO_SKILL}/SKILL.md`;
+      if (await vcs.regularFileAtRevision(repoPath, revision, path)) return undefined;
+      return `${described.displayName} can't find the committed ${BUILD_AUTO_SKILL} skill in this project (${described.skillsFolder}). Add the BMad skills for ${described.displayName} and commit them, then build again.`;
+    },
     // The project's default chat agent, for the default build agent's fallback (epic 17).
     projectDefaultAgent: (workspaceId) => core.permissions.getSettings(workspaceId).defaultAgentId,
     settings: core.buildSettings,

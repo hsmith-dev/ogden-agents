@@ -19,6 +19,10 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     applyAppearance(appearance);
+    const query = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const refresh = () => applyAppearance(appearance);
+    query?.addEventListener('change', refresh);
+    return () => query?.removeEventListener('change', refresh);
   }, [appearance]);
 
   const update = useCallback((change: Partial<Appearance>) => {

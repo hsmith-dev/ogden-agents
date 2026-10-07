@@ -1,3 +1,4 @@
+import { GlobalMcpServers } from '@ogden-agents/shared';
 /**
  * The shared ACP client (epic 6 entry 4, E6-R3; moved out of
  * `acp-claude-code`, story 2.2): implements core's `AgentPort` for any agent
@@ -67,7 +68,7 @@ import { killProcessTree } from '../process-tree.js';
 import { withTimeout } from '../with-timeout.js';
 import { prepareBuildStart } from './build-start.js';
 import { buildFixedStart, checkFixedModeWiring, startFixedMode, type FixedModeStart } from './fixed-mode.js';
-import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
+import { createStreamMasker, maskSecrets, mcpSecretValues, secretValues } from './mask.js';
 import { agentWords, modelOptionOf, modelsOf } from './models.js';
 import { answerPermissionRequest, type Diagnostic, type PermissionCallback } from './permission-request.js';
 import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch, type AcpLaunchInput } from './quirks.js';
@@ -183,9 +184,12 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
       attended?: true | undefined;
       model?: string | undefined;
       permissionMode?: PermissionMode | undefined;
+      mcpServers?: unknown[];
     },
     opening: Opening,
   ) => {
+    const servers = GlobalMcpServers.parse(input.mcpServers ?? []);
+    const mcpSecrets = mcpSecretValues(servers);
     // Fail closed, before anything is spawned (a quirk that throws must not leave a process behind): see `prepareBuildStart`.
     const buildStart = prepareBuildStart(descriptor.displayName, quirks, input.sandbox, reasons);
     const startModel = descriptor.models?.list.some((each) => each.id === input.model) === true ? input.model : undefined;
@@ -202,7 +206,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
         reasons,
         cwd: input.cwd,
         env: input.env,
-        secrets,
+        secrets: [...secrets, ...mcpSecrets],
         diagnostic,
         startTimeoutMs,
         onPermissionRequest: input.onPermissionRequest,
@@ -214,6 +218,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
         fixed,
         askingModeIds: [...quirks.askingModeIds, ...(buildStart?.modeIds ?? [])],
         buildModeIds: buildStart?.modeIds,
+        mcpServers: servers,
       },
       opening,
     );
@@ -277,6 +282,8 @@ interface StartContext {
   attended: boolean;
   /** The static-list model the process was started on (story 11), if any. */
   startModel: string | undefined;
+  /** The list of MCP servers (2.9) */
+  mcpServers?: unknown[];
   /** The chat's mode at start: given at start to an agent that fixes it (`startOptions`). */
   permissionMode: PermissionMode;
   /** The fixed-mode start, computed before the process was spawned. */
@@ -294,7 +301,7 @@ function killTree(child: ChildProcessWithoutNullStreams): void {
 
 async function startOnChild(
   child: ChildProcessWithoutNullStreams,
-  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, attended, startModel, fixed, askingModeIds, buildModeIds }: StartContext,
+  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, attended, startModel, fixed, askingModeIds, buildModeIds, mcpServers }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
   const { couldNotStart: COULD_NOT_START, stopped: STOPPED, failed: FAILED } = reasons;
@@ -356,7 +363,7 @@ async function startOnChild(
       try {
         listener(event);
       } catch (error) {
-        diagnostic('an agent event listener failed', { reason: String(error) });
+        diagnostic('an agent event listener failed', { reason: mask(String(error)) });
       }
     }
   };
@@ -547,14 +554,14 @@ async function startOnChild(
       };
       if (
         capabilities?.sessionCapabilities?.resume != null &&
-        (await attempt('session/resume', () => connection.agent.request('session/resume', { sessionId, cwd, mcpServers: [], ...sessionMeta })))
+        (await attempt('session/resume', () => connection.agent.request('session/resume', { sessionId, cwd, mcpServers: GlobalMcpServers.parse(mcpServers ?? []), ...sessionMeta })))
       ) {
         return 'resumed';
       }
       if (capabilities?.loadSession === true) {
         replaying = true;
         try {
-          if (await attempt('session/load', () => connection.agent.request('session/load', { sessionId, cwd, mcpServers: [], ...sessionMeta }))) return 'loaded';
+          if (await attempt('session/load', () => connection.agent.request('session/load', { sessionId, cwd, mcpServers: GlobalMcpServers.parse(mcpServers ?? []), ...sessionMeta }))) return 'loaded';
         } finally {
           replaying = false;
         }
@@ -583,7 +590,7 @@ async function startOnChild(
         const reopened = await reopen(initialized, opening.agentSessionId);
         if (reopened !== undefined) return { initialized, sessionId: opening.agentSessionId, restored: reopened };
       }
-      const created = await connection.agent.request('session/new', { cwd, mcpServers: [], ...sessionMeta });
+      const created = await connection.agent.request('session/new', { cwd, mcpServers: GlobalMcpServers.parse(mcpServers ?? []), ...sessionMeta }) as acp.NewSessionResponse;
       modes = created.modes ?? undefined;
       noteConfig(created.configOptions);
       return { initialized, sessionId: created.sessionId, restored: 'new' as const };

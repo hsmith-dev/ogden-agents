@@ -36,6 +36,13 @@ const toolsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/tools-page'), 'ToolsPage'),
 });
 
+
+const mcpSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/mcp',
+  component: lazyRouteComponent(() => import('./routes/mcp-settings-page'), 'McpSettingsPage'),
+});
+
 const agentsSettingsRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: '/agents',
@@ -173,7 +180,7 @@ const routeTree = rootRoute.addChildren([
   workspaceOrchestrateRoute,
   workspaceTerminalsRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

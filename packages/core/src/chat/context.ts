@@ -15,6 +15,7 @@ import { createDecliningPermissions, type Permissions } from '../permissions.js'
 import type { SessionEvents } from '../session-events.js';
 import { clampCheckInDelay, DEFAULT_CHECK_IN_MS, PERMISSION_MODE_TIMEOUT_MS, STOP_GRACE_MS } from './constants.js';
 import type { ChatOptions, Live, Terminal, Timer, Turn } from './types.js';
+import type { InstallSettings } from '../install-settings.js';
 
 // One monotonic factory for the process, as before the split: message ids and `preq_` ids share it.
 const nextUlid = monotonicFactory();
@@ -87,6 +88,7 @@ export interface ChatContext {
   /** The protected paths agents are told to keep guarded in Auto: core's, plus the registered agents' own config folders (epic 12, 12.3). */
   readonly protectedPaths: () => ProtectedPaths;
   readonly getSession: (workspaceId: WorkspaceId, sessionId: SessionId) => Session;
+  readonly installSettings?: Pick<InstallSettings, 'developerMode' | 'globalMcpServers' | 'globalSkills'>;
 }
 
 export function createChatContext(options: ChatOptions): ChatContext {
@@ -201,5 +203,6 @@ export function createChatContext(options: ChatOptions): ChatContext {
     projectTrusted,
     protectedPaths,
     getSession,
+    installSettings: options.installSettings,
   };
 }

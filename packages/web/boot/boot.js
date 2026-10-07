@@ -20,12 +20,17 @@
  * packages/shared, so the app and this script agree on them.
  */
 (function () {
+  __PALETTE_RUNTIME__
   var root = document.documentElement;
   try {
     var saved = JSON.parse(localStorage.getItem(__APPEARANCE_STORAGE_KEY__) || '{}');
     if (saved.theme === 'light' || saved.theme === 'dark') root.setAttribute('data-theme', saved.theme);
     if (saved.density === 'compact') root.setAttribute('data-density', 'compact');
     if (saved.developerMode === true) root.setAttribute('data-developer', 'true');
+    var custom = parseCustomPalette(saved.customPalette);
+    var palette = PALETTES.indexOf(saved.palette) === -1 || (saved.palette === 'custom' && !custom) ? 'default' : saved.palette;
+    var dark = saved.theme === 'dark' || (saved.theme !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    applyPalette(root, palette, custom, Boolean(dark));
   } catch (e) {
     // No saved appearance: follow the system theme, Comfortable density.
   }

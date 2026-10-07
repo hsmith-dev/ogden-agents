@@ -225,6 +225,20 @@
       "when": 1791283874275,
       "tag": "0031_build_default_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1791338057661,
+      "tag": "0032_sudden_imperial_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1791338057662,
+      "tag": "0033_global_skills",
+      "breakpoints": true
     }
   ]
 }

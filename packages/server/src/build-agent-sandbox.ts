@@ -5,7 +5,12 @@
  * the user watching, whatever this computer's sandbox is. Never a guess that
  * it can. Every other agent gets the computer's answer.
  */
-import type { SandboxPort } from '@ogden-agents/core';
+import type { AgentPort, SandboxPort } from '@ogden-agents/core';
+
+/** Unattended support is explicit; missing ports and undeclared capabilities fail closed. */
+export function supportsUnattendedBuild(agent: Pick<AgentPort, 'unattendedBuild'> | undefined): boolean {
+  return agent?.unattendedBuild === true;
+}
 
 /** Why an agent that cannot take the build's sandbox here is refused an unattended build (plain words, no dashes). */
 export const AGENT_ATTENDED_ONLY_REASON = "This agent can't build unattended on this computer yet. It can build with you watching.";

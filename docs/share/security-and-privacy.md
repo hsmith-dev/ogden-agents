@@ -2,7 +2,7 @@
 
 For a coworker who wants to know what this app can do to their computer and their data. Every claim names the file or decision it comes from, so you can check it. Anything we could not verify is in the last section.
 
-**Status.** Pre-release build (version 0.5.0-rc.1 plus review changes). One user on one computer is the design. It has not had an outside security audit.
+**Status.** v1 release preparation; publication and live evidence are tracked in [v1 readiness](../v1-readiness.md). One user on one computer is the design. It has not had an outside security audit.
 
 ## The short version
 
@@ -11,7 +11,7 @@ For a coworker who wants to know what this app can do to their computer and thei
 - We found no telemetry or analytics code (method below).
 - Your Claude or Google login stays with the agent. API keys go in the operating system keychain.
 - The agent asks before it runs commands or edits sensitive files, and you can see what is sent to which company.
-- Agents building tickets on their own (unattended builds) are not in this build; their sandbox rules are still being built.
+- Ticket builds use separate worktrees and require verification and your approval before merging. Unattended availability depends on the agent and sandbox; see section 8.
 
 ## 1. Where it runs
 
@@ -37,11 +37,12 @@ We searched the source (`packages/*/src`, `bin/`) for telemetry, analytics, Sent
 | GitHub (`codeload.github.com`) | Only when you click Set up, Update or Download BMad Method. Downloads a pinned version and checks its hash. Never at startup. | `packages/adapters/src/bmad-source/archive.ts`, AD-13 |
 | `api.anthropic.com` | Only when you save an Anthropic API key, to check it | `packages/adapters/src/setup-claude-code/api-key.ts` |
 | `generativelanguage.googleapis.com` | Only when you save a Gemini API key, to check it | `packages/adapters/src/setup-antigravity/api-key.ts` |
+| `api.openai.com` and `api.x.ai` | When you save the corresponding Codex key or Grok token, to check it. Provider responses still need the real-key checks in `RELEASING.md`. | `packages/adapters/src/setup-codex/api-key.ts`, `packages/adapters/src/setup-grok/api-key.ts` |
 | The server you set up for the Local model (a model on this computer, or any OpenAI compatible address) | Only to the address you added, and only when you press Detect, Test connection or Show models, or when a Local model chat starts or is working. Detect looks only at `127.0.0.1` and `localhost` on two usual ports. Another host is called only after you confirmed it, redirects are refused and the key goes only to that address. | `packages/adapters/src/local-model-openai/`, `packages/core/src/local-endpoints.ts` |
 | GitHub (`github.com`, the releases of OpenCode and, on Windows, ripgrep) | Only when you click Install on the Local model. Pinned versions, checked against pinned SHA-256 hashes. Nothing installs globally. | `packages/adapters/src/setup-local/` |
-| Agent and tool downloads (Claude Code through npm, Antigravity's pinned archive, uv) | Only when you click Install. Checked against pinned SHA-256 hashes. Nothing installs globally. | `CHANGELOG.md` 0.1.0, 0.2.0, 0.5.0 |
+| Agent and tool downloads (Claude Code, Codex and Grok through their setup paths, Antigravity's pinned archive, uv) | Only when you click Install. Checked against pinned SHA-256 hashes. Nothing installs globally. | `CHANGELOG.md` 0.1.0, 0.2.0, 0.5.0 |
 
-The agents themselves talk to their own providers (Anthropic, Google) as they do when you run them in a terminal. Ogden adds nothing to that traffic.
+The agents themselves talk to their own providers (Anthropic, Google, OpenAI, xAI or your configured endpoint) as they do when you run them in a terminal. Ogden adds nothing to that traffic.
 
 ## 4. Where data and keys live
 
@@ -71,22 +72,22 @@ Source: AD-22 notes (stories 4.2 and 4.13), AD-13.
 
 ## 7. What is sent to which company
 
-- Your messages and the files an agent reads go to that agent's provider, exactly as when you use the agent in a terminal: Anthropic for Claude Code, Google for Antigravity.
+- Your messages and the files an agent reads go to that agent's provider, exactly as when you use the agent in a terminal: Anthropic for Claude Code, Google for Antigravity, OpenAI for Codex, xAI for Grok, or the endpoint you configure for a local model.
 - **Continue with another agent** sends the chat's summary to the other provider. Before anything is sent, Ogden shows the summary, names the provider ("This sends this chat's conversation to <provider>") and lets you edit it. Ogden builds the summary itself with no model involved (the goal, the files changed, what was done and the latest messages), with keys and tokens masked. Source: `packages/web/src/chat/handoff-dialog.tsx`, `CHANGELOG.md` Unreleased.
 - **The Local model's harness connects only to the server you set up.** For a server on this computer, Ogden Agents and the harness send nothing off it, but two things can still reach further: a command or web fetch the model asks for and you approve (it asks first every time), and the server itself, which may forward your messages elsewhere (a cloud model, a tunnel or a proxy); Ogden Agents cannot see that. The harness it runs through (OpenCode) has its updates, model catalog download, sharing, language server downloads, plugins and project config switched off, runs with an empty home folder and its own folders in your data folder, and cannot start without those settings. For another host, the card says in plain words that your messages, the files the model reads and your project's text go there, and warns when the address uses plain http. Source: `packages/adapters/src/acp-opencode/`, spike 14.1.
 - Desktop notifications are produced locally by your browser.
 - Antigravity's terms: Google's terms say using Antigravity through apps Google does not make can get your Antigravity and Gemini CLI accounts suspended. Ogden shows this before you sign in. Using it is a choice for you to make with your own account (AD-16).
 
-## 8. Unattended builds: in progress
+## 8. Ticket builds and unattended limits
 
-Not in this build. The rules they must follow are written in AD-17 and are not yet all enforced in shipped code:
+Ticket builds are implemented. Their policy is described by AD-17, the build plans and `RELEASING.md`:
 
 - Each run gets its own git worktree in the data folder, not inside your repo.
-- A sandbox is required: the agent's native sandbox, else Docker if installed, else the run is refused.
+- Claude Code unattended builds require a supported sandbox; without one the run is refused. Docker is detected but is not an implemented build sandbox.
 - A maximum run time, verification after the run, and merging only through your approval. Nothing is force-merged.
 - Agents whose settings bypass their own approvals may run only inside a sandbox Ogden started.
 
-Work on this is in open pull requests (not merged), so treat it as in progress.
+Codex, Grok and Antigravity currently build with you watching, through permission cards. Codex unattended builds are disabled (`CODEX_UNATTENDED_VERIFIED=false`) pending real-machine sandbox checks. Grok and Antigravity unattended paths are not offered. Local model builds are not offered. Remaining safety limitations, including symlink races and process-group escape concerns, are recorded in `_bmad-output/initiative-ogden-agents/deferred-work.md`; automated fake-agent checks do not prove a real provider's sandbox.
 
 ## What we could not verify
 
@@ -94,4 +95,4 @@ Work on this is in open pull requests (not merged), so treat it as in progress.
 - The exact hosts of the uv and Antigravity downloads are in pinned data files we did not enumerate here.
 - We did not independently test the OS keychain on Windows and Linux for this kit; CI covers the three systems for the app overall.
 - Antigravity's current account terms may have changed since the in-app warning was written.
-- No external security review has been done, and the repository is private today, so nobody outside the team has read the code.
+- No external security review has been completed. Repository visibility does not establish that an independent audit has taken place.

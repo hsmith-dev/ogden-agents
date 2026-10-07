@@ -154,6 +154,8 @@ describe('vcs-memory (story 5.3): every VcsPort method', () => {
     const repo = '/repo';
     const head = (await port.head(repo))!;
     expect(head.branch).toBe('main');
+    // With no committed file tree supplied, the fake must not invent skill evidence.
+    expect(await port.regularFileAtRevision(repo, head.revision, 'SKILL.md')).toBe(false);
     expect(await port.topLevel(repo)).toBe(repo);
     const worktree = '/data/w/abcdefgh';
     const branch = 'ogden/abcdefgh/1.1-x';

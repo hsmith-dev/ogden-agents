@@ -1,3 +1,4 @@
+
 /**
  * Install-wide settings the server enforces (permission modes): Developer
  * mode. `GET` and `PUT` under `/api/v1/settings/developer-mode`, behind the
@@ -7,7 +8,7 @@
  * routes answer 501 and read no body.
  */
 import { CoreError, type InstallSettings, type NewProjectDefaultsStore, type Panes } from '@ogden-agents/core';
-import { API_ROUTES, ChatSettingsResponse, DeveloperModeResponse, SetChatSettingsRequest, SetDeveloperModeRequest } from '@ogden-agents/shared';
+import { GlobalSkill, GlobalSkillsResponse, SkillName, API_ROUTES, ChatSettingsResponse, DeveloperModeResponse, SetChatSettingsRequest, SetDeveloperModeRequest, GlobalMcpServersResponse, SetGlobalMcpServersRequest } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { apiError, notImplemented } from './errors.js';
@@ -17,8 +18,9 @@ import { readBody } from './request-input.js';
 /** Largest Developer mode body read (`{"developerMode":false}`). */
 const MAX_BODY_BYTES = 1024;
 
+
 export interface SettingsRoutesOptions {
-  installSettings?: Pick<InstallSettings, 'developerMode' | 'developerModeEverSet' | 'setDeveloperMode' | 'whileWorking' | 'setWhileWorking'> | undefined;
+  installSettings?: Pick<InstallSettings, 'developerMode' | 'developerModeEverSet' | 'setDeveloperMode' | 'whileWorking' | 'setWhileWorking' | 'globalMcpServers' | 'setGlobalMcpServers' | 'globalSkills' | 'setGlobalSkill' | 'deleteGlobalSkill'> | undefined;
   /** The app-wide default for new projects: a Skip all default goes back to Ask when Developer mode is turned off. */
   newProjectDefaults?: Pick<NewProjectDefaultsStore, 'dropSkipAll'> | undefined;
   /** Terminal panes (epic 16, story 16.9): turning Developer mode off asks what to do with running ones. */
@@ -32,8 +34,43 @@ export function registerSettingsRoutes(app: Hono, { installSettings, newProjectD
     app.put(API_ROUTES.developerMode, notImplemented);
     app.get(API_ROUTES.chatSettings, notImplemented);
     app.put(API_ROUTES.chatSettings, notImplemented);
+    app.get(API_ROUTES.globalMcpServers, notImplemented);
+    app.put(API_ROUTES.globalMcpServers, notImplemented);
+    app.get(API_ROUTES.globalSkills, notImplemented);
+    app.put(API_ROUTES.globalSkill, notImplemented);
+    app.delete(API_ROUTES.globalSkill, notImplemented);
     return;
   }
+  app.get(API_ROUTES.globalSkills, (c) => c.json(GlobalSkillsResponse.parse({ skills: installSettings.globalSkills() })));
+  app.put(API_ROUTES.globalSkill, bodyLimit({ maxSize: 1024 * 1024, onError: (c) => apiError(c, 413, 'invalid_request', 'The request is too large.') }), async (c) => {
+    const body = await readBody(c, GlobalSkill);
+    if (!body.ok) return body.response;
+    if (body.value.name !== c.req.param('name')) return apiError(c, 400, 'invalid_request', 'The skill name must match the URL.');
+    try { installSettings.setGlobalSkill(body.value); return c.json({}); }
+    catch (error) { log.error('saving global skill failed', { code: error instanceof CoreError ? error.code : 'unexpected' }); return apiError(c, 500, 'internal_error', 'The skill could not be saved.'); }
+  });
+  app.delete(API_ROUTES.globalSkill, (c) => {
+    const name = SkillName.safeParse(c.req.param('name'));
+    if (!name.success) return apiError(c, 400, 'invalid_request', 'The skill name is invalid.');
+    try { installSettings.deleteGlobalSkill(name.data); return c.json({}); }
+    catch (error) { log.error('deleting global skill failed', { code: error instanceof CoreError ? error.code : 'unexpected' }); return apiError(c, 500, 'internal_error', 'The skill could not be deleted.'); }
+  });
+  app.get(API_ROUTES.globalMcpServers, (c) => c.json(GlobalMcpServersResponse.parse({ servers: installSettings.globalMcpServers() })));
+  app.put(
+    API_ROUTES.globalMcpServers,
+    bodyLimit({ maxSize: 1024 * 1024, onError: (c) => apiError(c, 413, 'invalid_request', 'The request is too large.') }),
+    async (c) => {
+      const body = await readBody(c, SetGlobalMcpServersRequest);
+      if (!body.ok) return body.response;
+      try {
+        installSettings.setGlobalMcpServers(body.value.servers);
+        return c.json(GlobalMcpServersResponse.parse({ servers: body.value.servers }));
+      } catch (error) {
+        log.error('saving global MCP servers failed', { code: error instanceof CoreError ? error.code : 'unexpected' });
+        return apiError(c, 500, 'internal_error', "Ogden Agents couldn't save global MCP servers. Try again.");
+      }
+    },
+  );
   // Send now or wait: what a message sent while the agent works does, app-wide.
   app.get(API_ROUTES.chatSettings, (c) => c.json(ChatSettingsResponse.parse({ whileWorking: installSettings.whileWorking() })));
   app.put(

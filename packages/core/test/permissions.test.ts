@@ -597,6 +597,7 @@ describe('caution level (story 2.8)', () => {
     ask_every_time: [],
     ask_for_commands: ['read', 'search', 'think'],
     ask_risky_only: ['read', 'search', 'think', 'edit'],
+    dangerously_skip_permissions: [],
   };
 
   it('is a pure table: only the ladder kinds, only with paths inside, never execute or an unknown level', () => {
@@ -607,7 +608,9 @@ describe('caution level (story 2.8)', () => {
       }
     }
     for (const kind of ['execute', 'delete', 'move', 'fetch', 'switch_mode', 'other'] as const) {
-      for (const level of CAUTION_LEVELS) expect(cautionAllows(level, kind, true), `${level} ${kind}`).toBe(false);
+      for (const level of CAUTION_LEVELS) {
+        expect(cautionAllows(level, kind, true), `${level} ${kind}`).toBe(false);
+      }
     }
     expect(cautionAllows('ask_everything' as CautionLevel, 'read', true)).toBe(false);
     expect(cautionAllows('ask_risky_only', 'unknown' as ToolKind, true)).toBe(false);

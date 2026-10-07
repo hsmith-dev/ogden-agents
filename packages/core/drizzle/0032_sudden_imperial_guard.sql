@@ -1,0 +1,1 @@
+ALTER TABLE `install_settings` ADD `global_mcp_servers` text DEFAULT '[]' NOT NULL;

@@ -29,6 +29,7 @@ const CAUTION_WORDS: Record<CautionLevel, string> = {
   ask_every_time: 'Ask every time',
   ask_for_commands: 'Ask for commands',
   ask_risky_only: 'Ask only for risky actions',
+  dangerously_skip_permissions: 'DANGEROUS: Don\'t ask, just build',
 };
 
 /** The command it would run, or else the tool call's own title. */

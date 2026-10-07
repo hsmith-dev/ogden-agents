@@ -177,6 +177,7 @@ export function fakeVcs() {
   };
   const vcs: VcsPort = {
     check: async () => state.git,
+    regularFileAtRevision: async () => false,
     isAncestor: async () => state.ancestor,
     async importObjects(_repo, branch, base) {
       state.imports.push([branch, base]);

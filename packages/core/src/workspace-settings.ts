@@ -275,7 +275,9 @@ export function readCautionLevel(orm: Orm, workspaceId: string): CautionLevel | 
   const row = orm.select({ cautionLevel: workspaces.cautionLevel }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
   if (row === undefined) return undefined;
   const parsed = CautionLevelSchema.safeParse(row.cautionLevel);
-  return parsed.success ? parsed.data : DEFAULT_CAUTION_LEVEL;
+  // Legacy broad caution never bypasses permission cards. The user can
+  // explicitly confirm Skip all through the established Developer workflow.
+  return parsed.success ? (parsed.data === 'dangerously_skip_permissions' ? 'ask_risky_only' : parsed.data) : DEFAULT_CAUTION_LEVEL;
 }
 
 export interface WorkspaceSettingsOptions {
@@ -367,6 +369,13 @@ export function createWorkspaceSettings({
         const parsed = PermissionModeSchema.safeParse(input.defaultPermissionMode);
         if (!parsed.success) throw new ValidationError('Choose Ask, Auto or Skip all.', [{ path: ['defaultPermissionMode'], message: 'unknown mode' }]);
         permissionMode = parsed.data;
+      }
+      // Backward compatibility for the old broad caution setting: no prompts
+      // belongs to Skip all, with its Developer/confirmation/reset lifecycle.
+      if (cautionLevel === 'dangerously_skip_permissions') {
+        if (permissionMode !== undefined && permissionMode !== 'skip_all') throw new ValidationError('Choose Skip all to run without permission prompts.', [{ path: ['defaultPermissionMode'], message: 'conflicts with legacy no-prompts choice' }]);
+        cautionLevel = 'ask_risky_only';
+        permissionMode = 'skip_all';
       }
       // Per agent (story 11): its default model in this project, or null to use the install's. Agents left out keep theirs.
       let modelChanges: Record<AgentId, string | null> | undefined;

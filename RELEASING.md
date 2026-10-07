@@ -2,6 +2,20 @@
 
 Ogden Agents ships as one npm package, `ogden-agents`. Releases are published only by GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)) when a version tag is pushed. Nobody publishes from their own machine, and no npm token is stored anywhere: the workflow authenticates to npm through [trusted publishing](https://docs.npmjs.com/trusted-publishers) (GitHub OIDC).
 
+## v1 release checklist
+
+The historical version checklists below remain as live-test procedures and release history. The current target is **1.0.0**; their old version numbers are not the version to publish. [docs/v1-readiness.md](docs/v1-readiness.md) maps implemented epics to outstanding evidence. App code signing, notarization and production updater signing are excluded from this release request; keep unsigned opening instructions and do not advertise signed updates as configured.
+
+1. Reconcile the inherited changes, finish the feature and appearance work, and resolve release defects. Check all user-facing README and sharing-kit statements against the resulting app.
+2. Record real OS/provider evidence using the procedures below. Leave Codex unattended builds disabled until its sandbox is verified; Grok and Antigravity builds require the user to watch. Fake-agent tests do not establish real-provider behavior.
+3. Set `1.0.0` in the root, server, web and desktop package manifests and `packages/desktop/src-tauri/tauri.conf.json`; add a `1.0.0` changelog section. Packaging tests enforce matching versions.
+4. Run `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm run pack`, `pnpm smoke` and `pnpm e2e:installed`. Validate the desktop pipeline as appropriate to unsigned release artifacts. Check that the tarball contains the intended app and license.
+5. Verify the repository and npm package ownership/visibility, `NPM_PUBLISH=true`, protected `npm-release` environment and npm trusted publisher configured exactly as described in the historical first-release setup below. Publishing remains GitHub Actions only.
+6. Merge verified changes to `main`. Optionally run the release workflow dry run, then tag a commit on `main`'s first-parent history `v1.0.0` and push it. Do not reuse an existing npm version from a different commit.
+7. Watch CI, assets, npm publish, provenance and clean registry installations through completion. Confirm npm's `latest` tag resolves to `1.0.0` and GitHub release assets are complete. Only then update release status to published.
+
+Do not check off a live test without its recorded result. Any remaining external setup or unverified behavior must remain explicit in the readiness report rather than being described as complete.
+
 ## What the release workflow does
 
 Every version tag creates a **GitHub Release**, with or without npm. Publishing to npm is a separate path that is **opt-in**: it runs only when the repository variable `NPM_PUBLISH` is `true` (Settings → Secrets and variables → Actions → Variables). Without it, the `Publish to npm` job (and the registry checks after it) is skipped, so a tag never names the `npm-release` environment unless you set npm up; this also means that **once you want npm releases, set `NPM_PUBLISH=true` first** (step 3 below).

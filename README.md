@@ -8,12 +8,30 @@ Ogden Agents is a local app, opened in your browser, for working with several AI
 
 ## Status
 
-Early development, and honest about it:
+The v1 release is being finalized. Implementation and release evidence are tracked in [docs/v1-readiness.md](docs/v1-readiness.md).
 
-- **There is no npm release yet.** The `ogden-agents` name on npm is only a placeholder, so `npx ogden-agents` does not give you the app today. Run it from a checkout (see [Requirements](#requirements) and [Run](#run)), or with the start scripts below once a release exists.
-- **GitHub Releases come when a version tag exists.** Until then there is no release to download. Releases will be listed on the [releases page](https://github.com/hsmith-dev/ogden-agents/releases); how they are made is in [RELEASING.md](RELEASING.md).
+- **v1 publication is pending.** This checkout does not establish that `ogden-agents@1.0.0` is available on npm. Until the release workflow publishes and verifies it, run from a checkout (see [Run](#run)).
+- Downloads are listed on the [releases page](https://github.com/hsmith-dev/ogden-agents/releases). Only files attached to an actual release are available; the release process is in [RELEASING.md](RELEASING.md#v1-release-checklist).
 - It has not had an outside security audit. One user on one computer is the design.
 - Release notes are in [CHANGELOG.md](CHANGELOG.md).
+
+## What you can do
+
+- Work across projects with persistent chats, permission cards, model choices and a preview before handing a conversation to another agent.
+- Use Claude Code, Antigravity, Codex, Grok or a local model. Capabilities and sign-in methods differ by agent; see the table below.
+- Turn on BMad Planning, the live ticket Board and Retrospectives separately for each project.
+- Build tickets in separate worktrees, inspect verification results and approve a merge. Claude Code supports unattended builds where a supported sandbox is available. Codex currently requires you to watch because its unattended sandbox verification is pending; Grok and Antigravity builds also require you to watch. Local model builds are not offered.
+- Coordinate a manager and workers from Orchestrate, with approval per instruction by default, recorded activity and Stop. Automatic dispatch has limits and agent-specific eligibility.
+- Choose Ogden, Forest or Ember appearance presets, or build a custom theme with paired light/dark colors, contrast validation and JSON import/export.
+- Use native terminal tabs and splits in Developer mode, or the optional desktop shell.
+
+The code for these features is present; [v1 readiness](docs/v1-readiness.md) distinguishes automated checks from remaining real-provider and operating-system evidence.
+
+## Built by HarrisonSmith.AI
+
+Ogden Agents is free, open-source software under the [MIT license](LICENSE). Provider subscriptions and API usage are your own costs. You can use the app without paying or donating.
+
+Need an AI workflow, a custom app or an integration built for your business? Visit [HarrisonSmith.AI](https://harrisonsmith.ai) to work with HSmithDev LLC. If Ogden helps you, you can also [buy Harrison a coffee on Venmo](https://venmo.com/u/harrismith). Support is optional.
 
 ## Requirements
 
@@ -41,7 +59,7 @@ Each release also has `SHA256SUMS-desktop.txt`, the checksum of every desktop fi
 
 **Linux.** Download the `.AppImage`, make it executable (right-click, Properties, Permissions, Allow executing as a program; or `chmod +x Ogden-Agents_*.AppImage`), then double-click it. Nothing is installed: it is one file you can keep anywhere your user can write, which is also what lets it update itself. An AppImage needs FUSE 2: on Ubuntu 22.04 and Debian it is already there, on Ubuntu 24.04 install `libfuse2t64`, on Fedora `fuse-libs`; without it run the file with `--appimage-extract-and-run` after its name. It needs a desktop with the WebKitGTK 4.1 library (Ubuntu 22.04 or Debian 12 and newer have it). If the window stays blank on Wayland or with some graphics drivers, start it as `GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 ./Ogden-Agents_*.AppImage`. Inside a container or a restricted desktop, the sandbox setting is a browser matter: if the window never opens there, add `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` only as a last resort. The `.deb` (`sudo apt install ./Ogden-Agents_*.deb`) installs through the package manager and is updated by downloading the newest `.deb`. Saved API keys go to your desktop's Secret Service (GNOME Keyring, KWallet) when there is one; with none, Ogden says so and does not save the key anywhere else.
 
-The app checks for a newer version each time it starts, downloads it in the background and shows **Restart to update**. It never restarts while an agent is working. Quitting the app stops Ogden Agents and the agents it started. (An install by `.deb` does not update itself.) The npm route above still works, and both share the same data and projects.
+With the desktop updater configured for the release, the app checks for a newer version each time it starts, downloads it in the background and shows **Restart to update**. Without that separate updater setup, download a new installer manually. It never restarts while an agent is working. Quitting the app stops Ogden Agents and the agents it started. (An install by `.deb` does not update itself.) The npm route above still works, and both share the same data and projects.
 
 ## Start Ogden
 
@@ -89,6 +107,16 @@ Each chat uses one coding agent: Claude Code, Google's Antigravity, OpenAI's Cod
 
 Skip all is behind Developer mode.
 
+### Shared tools and instructions
+
+Settings > MCP Servers lets you configure tools for all projects. Add a local command server or an HTTP/SSE server; advanced JSON uses the ACP format. Changes apply when an agent session next starts. Only configure servers you trust: local servers run commands with your user account, and remote servers receive the requests and credentials you configure. MCP configuration, including environment values and headers, is stored in the local SQLite database; unlike provider API keys, these values are not kept in the OS keychain. Credentials are masked in chat streams and logs.
+
+The same settings page has **Shared skills**: save a name and reusable instructions, then write `/skill-name your request` in any chat. A matching shared skill takes precedence over the agent's own slash command. Instructions still use the chat's existing permission mode.
+
+### Appearance
+
+Settings > Appearance keeps the same layout and typography across Light, Dark and System modes. Choose Ogden, Forest or Ember colors, or build separate custom light/dark palettes for background, text and accent. Ogden validates text and accent contrast before applying a custom palette. Import/export JSON to share it, or reset to the default. Preferences stay in this browser and apply before first paint.
+
 ### Terminals (Developer mode)
 
 With Developer mode on, each project has a **Terminals** tab: a workspace of real terminals, in tabs and splits, for people who already use the agents' own command line programs. It is off for everyone else and never needed (the chat does the same work with cards). Open a plain shell, or start Claude Code, Codex, Grok, Antigravity or Copilot (Gemini only if you already have it). Ogden Agents only looks for these programs, with their `--version`, when you open the page or press **Detect**; it never installs one, and you sign in inside each program yourself: Ogden Agents never sees or keeps that sign in. A terminal gets a small, secret free environment (your proxy settings and SSH keys only if you turn them on in Settings > Terminals), and a project can have 8 terminals open at once, Ogden Agents 16. Each terminal shows a guess of what it is doing (working, idle, may need you, ended), a guess from what it prints, never a promise. Turn on **Notify me** for a terminal, or for a whole program in Settings > Terminals, to get the same sound or notice as chats when it may need you; it shows the project and the terminal's name, never what it printed. Your layout, names and opt ins are kept across a restart (what a terminal printed never is); after a restart each terminal shows as stopped with **Start**, and the programs end when Ogden Agents stops. Copilot is offered for your own interactive use only. Turning Developer mode off with terminals running asks whether to stop them or keep them running until Ogden Agents stops.
@@ -100,7 +128,7 @@ pnpm install
 pnpm start            # builds, starts the server on 127.0.0.1, opens the browser
 ```
 
-The page shows the connection state and lists logged events (currently one `server.started` per server start). Events persist across restarts, and a reloaded or reconnected page catches up from the last event it saw.
+The app opens your projects, chats and settings. The sidebar shows working chats and requests that need your answer. Chats and logged events persist across restarts, and a reconnected page catches up on events it missed.
 
 Ogden Agents keeps its SQLite database (`ogden-agents.db`), logs (`logs/server.log`), port file (`server.json`) and launcher token (`launcher.token`) in your OS per-user data folder under `ogden-agents/` (for example `~/Library/Application Support/ogden-agents` on macOS). Set `OGDEN_AGENTS_DATA_DIR` to use another folder. Nothing is written into your repos.
 

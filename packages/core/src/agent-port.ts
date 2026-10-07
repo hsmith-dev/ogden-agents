@@ -121,6 +121,7 @@ export interface ProtectedPaths {
 }
 
 export interface StartAgentSession {
+  mcpServers?: unknown[];
   /** The folder the agent works in: the workspace's repo root. */
   cwd: string;
   /**

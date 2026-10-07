@@ -7,6 +7,9 @@
 import { expect, test } from '@playwright/test';
 import { makeDataDir, removeDataDir, startServer, type RunningServer } from '../support.js';
 import { openConnected } from './tab.js';
+import { readFileSync } from 'node:fs';
+
+const VERSION = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 
 /** Npm's registry with one newer stable version than whatever this build is; GitHub Releases (also asked, story 13.14) has no release. */
 function newerRegistry(version: string) {
@@ -32,7 +35,8 @@ test('the banner names the newer version, Dismiss keeps it hidden after a reload
     await expect(banner).toContainText('Ogden 99.0.0 is available.');
     await expect(banner).toContainText('npx ogden-agents@latest');
     await expect(page.getByTestId('update-status')).toHaveAttribute('role', 'status');
-    expect(registry.requests.sort()).toEqual(['https://api.github.com/repos/hsmith-dev/ogden-agents/releases?per_page=5', 'https://registry.npmjs.org/-/package/ogden-agents/dist-tags']);
+    const githubUrl = VERSION.includes('-') ? 'https://api.github.com/repos/hsmith-dev/ogden-agents/releases?per_page=5' : 'https://api.github.com/repos/hsmith-dev/ogden-agents/releases/latest';
+    expect(registry.requests.sort()).toEqual([githubUrl, 'https://registry.npmjs.org/-/package/ogden-agents/dist-tags']);
 
     await banner.getByRole('button', { name: 'Dismiss the notice about Ogden 99.0.0' }).click();
     await expect(banner).toHaveCount(0);

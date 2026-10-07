@@ -147,6 +147,14 @@ describe('the update model', () => {
 });
 
 describe('Settings, About', () => {
+  it('offers custom development and optional support with source access', () => {
+    render(wrap(<AboutPage />));
+    expect(screen.getByRole('link', { name: 'Work with Harrison' }).getAttribute('href')).toBe('https://harrisonsmith.ai');
+    expect(screen.getByRole('link', { name: 'Buy me a coffee' }).getAttribute('href')).toBe('https://venmo.com/u/harrismith');
+    expect(screen.getByRole('link', { name: 'View source' }).getAttribute('href')).toBe('https://github.com/hsmith-dev/ogden-agents');
+    expect(screen.getByText(/Every app feature is available without a payment/)).toBeDefined();
+  });
+
   it('shows the version, the channel and when it last checked', async () => {
     state.notice = { ...base, current: '0.5.0-rc.1', channel: 'preview', lastCheckedAt: '2026-10-04T12:00:00.000Z' };
     render(wrap(<AboutPage />));

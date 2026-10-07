@@ -2,6 +2,19 @@
 
 Every release of the `ogden-agents` npm package. Versions follow [semantic versioning](https://semver.org/); before 1.0.0, a minor version may change behavior. How a release is made is in [RELEASING.md](RELEASING.md).
 
+## 1.0.0 — the complete local workspace
+
+Prepared for the first stable release; publication is verified through the release workflow.
+
+- Work across projects with Claude Code, Antigravity, API-key Codex/Grok and local models. Persistent chats, permission cards and handoffs keep you in control.
+- Plan with optional BMad, track tickets on the Board, build in worktrees, inspect verification and approve merges. Claude Code supports sandboxed unattended builds; Codex remains attended until verified, and Grok/Antigravity are attended only.
+- Coordinate manager/worker instructions, finished-epic retrospectives and lessons, build queues and notifications. Developer mode adds native terminal tabs and splits.
+- Choose Ogden, Forest or Ember palettes, or build separate custom light/dark palettes with contrast checks, reset and JSON import/export. Saved palettes apply before first paint.
+- Configure shared MCP servers and reusable skills through Settings, with validated storage and explicit skill invocation in chats.
+- Find custom software and AI workflow services at HarrisonSmith.AI, or optionally support this free MIT project with a coffee through Venmo.
+- Corrected the README and sharing kit to match the implementation, and recorded remaining real-machine evidence in docs/v1-readiness.md. Desktop installers remain unsigned.
+
+
 ## Unreleased
 
 - **Build with Codex, Grok or Antigravity, not only Claude Code.** When more than one agent can build, **Build this story** asks which, and each agent says in plain words how it would build here and why: **Builds on its own, and you review the result**, **Builds with you watching**, or **Not ready**. Your choice applies to that run. A project has a **Default build agent** in its Workspace settings (Automatic uses the project's default chat agent when it can build, else Claude Code), used when you pick none and by **Build all ready**. Every build keeps the same rules whatever the agent: Ogden Agents answers or you answer each request, files only inside the build's own copy, protected files never, no network for its commands, and a build that cannot be contained is refused, never run loose. **Codex** (your OpenAI API key) builds with you watching for now: its own sandbox has to be checked on a real computer before it can build on its own (RELEASING.md lists the checks). **Grok** (your xAI token) and **Antigravity** build with you watching only; Ogden Agents never uses Antigravity's modes that approve for you. An agent that hits a rejected key, an expired sign in or its usage limit ends the run blocked in its own words, with **Retry**, and after a usage limit **Build again with** another agent (a fresh copy). Nothing retries by itself, and no token or cost is stored. GitHub Copilot CLI is not part of this: GitHub's terms don't allow driving it in the background, so it stays an interactive terminal. Note: a project with no default build agent whose default chat agent is Codex, Grok or Antigravity now offers that agent first when you press Build.

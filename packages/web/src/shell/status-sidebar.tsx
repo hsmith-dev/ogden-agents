@@ -24,6 +24,7 @@ import {
   useSidebar,
 } from '@/ui/sidebar';
 import { Skeleton } from '@/ui/skeleton';
+import { Text } from '@/ui/typography';
 import { STATE_WORDS } from '@/ui/state-glyph';
 import { AddProjectDialog } from '@/workspaces/add-project-dialog';
 import { NeedsYouGroup } from './needs-you-group';
@@ -247,6 +248,9 @@ function StatusSidebarBody() {
         <NewTabButton />
         <QuitButton />
         <ServerStatus />
+        <Text variant="caption" className="px-2 group-data-[collapsible=icon]:hidden">
+          Built by <a href="https://harrisonsmith.ai" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">HarrisonSmith.AI</a>
+        </Text>
       </SidebarFooter>
     </>
   );
@@ -383,6 +387,12 @@ function SettingsMenu() {
             </Link>
           </DropdownMenuItem>
         ) : null}
+        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
+          <Link to={'/settings/mcp' as '/settings/tools'}>
+            <Wrench aria-hidden />
+            MCP Servers
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
           <Link to="/settings/tools">
             <Wrench aria-hidden />

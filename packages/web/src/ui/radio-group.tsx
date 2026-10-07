@@ -8,7 +8,7 @@ export function RadioGroup({ className, ...props }: ComponentProps<typeof RadioG
 }
 
 export interface RadioGroupOptionProps extends Omit<ComponentProps<typeof RadioGroupPrimitive.Item>, 'children'> {
-  label: string;
+  label: ReactNode;
   description?: ReactNode;
 }
 

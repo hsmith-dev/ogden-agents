@@ -100,6 +100,7 @@ export function createAgents(
       ...(startModel === null ? {} : { model: startModel }),
       ...(unattended === undefined ? {} : { sandbox: unattended.sandbox }),
       ...(build?.attended === true ? { attended: true as const } : {}),
+      mcpServers: ctx.installSettings?.globalMcpServers() ?? [],
     };
     const previous = storedAgentSessionId(session.id);
     // A chat that reached an agent before, and has none now, reopens that agent's session (2.7).
@@ -204,7 +205,10 @@ export function createAgents(
    * says which.
    */
   const promptFor = (sessionId: SessionId, entry: Live, messageId: string, text: string): { prompt: string; primed: boolean; handoff: boolean } => {
-    if (text.trimStart().startsWith('/')) return { prompt: text, primed: false, handoff: false };
+    const invocation = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text.trimStart());
+    const skill = invocation === null ? undefined : ctx.installSettings?.globalSkills().find((item) => item.name === invocation[1]);
+    if (skill !== undefined) text = `Run the shared skill ${skill.name}.\n\n${skill.content}\n\nUser input:\n${invocation?.[2] ?? ''}`;
+    if (skill === undefined && text.trimStart().startsWith('/')) return { prompt: text, primed: false, handoff: false };
     const brief = pendingBrief(sessionId);
     const told = brief === undefined ? text : `${brief}\n${PRIME_NEW_MESSAGE}\n${text}`;
     if (!entry.prime) return { prompt: told, primed: false, handoff: brief !== undefined };

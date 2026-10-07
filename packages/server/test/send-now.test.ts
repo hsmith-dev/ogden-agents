@@ -34,9 +34,9 @@ function request(server: TestServer, tab: SignedIn, method: string, path: string
   });
 }
 
-async function setUp() {
+async function setUp(adapterPath = FAKE_AGENT) {
   const lines: string[] = [];
-  const server = await startTestServer({ claudeAdapterPath: FAKE_AGENT, lines });
+  const server = await startTestServer({ claudeAdapterPath: adapterPath, lines });
   const tab = await signIn(server);
   const repo = removeAfterTest(mkdtempSync(join(tmpdir(), 'ogden-agents-repo-')));
   const wsId = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo })).json()).workspace.id;
@@ -74,6 +74,28 @@ describe('send now or wait (routes)', () => {
       'the cancel count',
       15_000,
     );
+  });
+
+  it('keeps replies and the injected message ordered when ACP acknowledgment and next output share one write', async () => {
+    const adapterPath = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'steering-batch-agent.mjs');
+    const { server, sesId, send, lines } = await setUp(adapterPath);
+    server.core.installSettings.setGlobalMcpServers([{ name: 'local', command: 'node', env: [{ name: 'ACCESS_TOKEN', value: 'batch-private-token' }] }]);
+    expect((await send('hold')).status).toBe(202);
+    await holding(server, sesId);
+    const now = await send('use batch-private-token', 'now');
+    expect(now.status).toBe(202);
+    const { messageId } = SendMessageResponse.parse(await now.json());
+    await waitFor(() => stateOf(server, sesId) === 'idle', 'the batched turn to end', 15_000);
+    const events = eventsOf(server, sesId);
+    const completed = events.flatMap((event) => event.type === 'session.message_completed' ? [event.payload] : []);
+    expect(completed.map((message) => [message.role, message.content])).toEqual([
+      ['user', 'hold'], ['agent', 'Holding'], ['user', 'use batch-private-token'], ['agent', 'Steered: use [redacted].'],
+    ]);
+    expect(completed[2]).toMatchObject({ messageId, delivery: 'injected' });
+    expect(events.some((event) => event.type === 'session.turn_interrupted')).toBe(false);
+    expect(lines.join('\n')).not.toContain('batch-private-token');
+    expect((await send('cancels')).status).toBe(202);
+    await waitFor(() => eventsOf(server, sesId).some((event) => event.type === 'session.message_completed' && event.payload.role === 'agent' && event.payload.content === 'cancels=0'), 'no cancellation', 15_000);
   });
 
   it('refuses to send right away while a card waits (409 answer_first), recording nothing', async () => {

@@ -351,6 +351,8 @@ export interface Live {
   reply: { messageId: string; text: string } | undefined;
   /** Reply text received but not yet appended as a delta (coalesced). */
   pendingDelta: string;
+  /** Agent events held until steering acknowledgment records the transcript boundary. */
+  steeringEvents?: Array<() => void> | undefined;
   /** Running while deltas are held back: at most one append per `DELTA_INTERVAL_MS`. */
   deltaTimer: Timer | undefined;
   /** The tool calls of the current turn, by id; cleared when the turn ends (2.3 F7). */

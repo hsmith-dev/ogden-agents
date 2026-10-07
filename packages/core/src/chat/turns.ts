@@ -94,6 +94,17 @@ export function createTurns(
   /** Applies one adapter event to the session (AD-4, AD-5). */
   const apply = (sessionId: SessionId, entry: Live, event: AgentEvent) => {
     if (ctx.closing) return;
+    // A provider may send acknowledgment and subsequent output in the same I/O read.
+    // Keep the output behind the injected user message, including its idle signal.
+    if (entry.steeringEvents !== undefined && event.type === 'state' && event.state === 'error' && event.fatal === true) {
+      const held = entry.steeringEvents;
+      entry.steeringEvents = undefined;
+      for (const applyHeld of held) applyHeld();
+    }
+    if (entry.steeringEvents !== undefined) {
+      entry.steeringEvents.push(() => apply(sessionId, entry, event));
+      return;
+    }
     try {
       armQuiet(sessionId);
       // Held-back reply text goes before any other event of the session.
@@ -220,6 +231,8 @@ export function createTurns(
         turn.prompting = false;
       });
       if (result === undefined) return;
+      // Steering may still be recording its boundary while the prompt already finished.
+      await turn.steering;
       if (primed) {
         // Primed once: the agent has the transcript now, and its session is the chat's (2.7 F4).
         entry.prime = false;

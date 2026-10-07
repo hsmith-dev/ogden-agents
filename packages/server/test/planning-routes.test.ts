@@ -39,7 +39,7 @@
  *   and the store is never called.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -982,7 +982,7 @@ describe('document cards over REST (story 4.7)', () => {
 });
 
 describe.skipIf(uvMissing)('changing a status through real uv and the verified pinned tickets.py (story 4.10)', () => {
-  it('PUT 1.2 ready-for-dev writes the plan, the tree shows it Ready and a ticket.changed arrives within 3 s; done writes nothing; a blocked reason stays one quoted value', async () => {
+  it('PUT 1.2 ready-for-dev writes the plan, the tree shows it Ready and a ticket.changed arrives within 3 s of the write; done writes nothing; a blocked reason stays one quoted value', async () => {
     const uvCache = mkdtempSync(join(tmpdir(), 'ogden-agents-uv-cache-'));
     removeAfterTest(uvCache);
     const repo = fixtureRepo(true);
@@ -1042,19 +1042,27 @@ describe.skipIf(uvMissing)('changing a status through real uv and the verified p
       const text = await ready.text();
       expect(ready.status, text).toBe(200);
       expect(MarkTicketResponse.parse(JSON.parse(text))).toEqual({ ref: '1.2', status: 'ready-for-dev' });
+      const requestLatency = Date.now() - startedAt;
+      // Entry 4.8's SLO begins at the plan's status write, not before the PUT's
+      // find/expected-status checks and Python process startup. Measure the file's
+      // actual write time against the event's append time: starting at the HTTP
+      // response would omit watcher work that already happened before it returned.
+      const plan = readdirSync(join(repoPath, '_bmad-output'), { recursive: true, encoding: 'utf8' })
+        .map((path) => join(repoPath, '_bmad-output', path))
+        .find((path) => path.endsWith('.md') && readFileSync(path, 'utf8').includes('title: "Build the second thing"'));
+      expect(plan).toBeDefined();
+      const writtenAt = Math.floor(statSync(plan!).mtimeMs);
       await waitFor(() => changedSince(seq).includes('1.2'), 'ticket.changed for 1.2', 15_000);
-      const latency = Date.now() - startedAt;
-      expect(latency, `latency ${latency} ms`).toBeLessThan(3000);
+      const changed = server.core.events.readAfter(seq).find((event) => event.type === 'ticket.changed' && event.payload.ref === '1.2')!;
+      const latency = Date.parse(changed.at) - writtenAt;
+      expect(latency, 'ticket.changed must follow the persisted plan write').toBeGreaterThanOrEqual(0);
+      expect(latency, `write-to-event latency ${latency} ms (PUT ${requestLatency} ms)`).toBeLessThan(3000);
       const tree = TicketsResponse.parse(await (await request(server, tab, 'GET', paths(workspace.id).tickets)).json());
       const row = tree.tickets.find((each) => each.ref === '1.2')!;
       expect(boardColumnOf(row)).toBe('ready');
       const one = TicketResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceTicket, { wsId: workspace.id, ref: '1.2' }))).json()).ticket;
       expect(one.hasPlan).toBe(true);
       // The plan `tickets.py mark` created for the planned entry.
-      const plan = readdirSync(join(repoPath, '_bmad-output'), { recursive: true, encoding: 'utf8' })
-        .map((path) => join(repoPath, '_bmad-output', path))
-        .find((path) => path.endsWith('.md') && readFileSync(path, 'utf8').includes('title: "Build the second thing"'));
-      expect(plan).toBeDefined();
       const planOf = (): string => readFileSync(plan!, 'utf8');
       expect(planOf()).toMatch(/^status: ready-for-dev$/m);
 

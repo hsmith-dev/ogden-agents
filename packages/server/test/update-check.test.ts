@@ -221,7 +221,7 @@ describe('the update notice', () => {
     const files = Array.from({ length: 12 }, (_, index) => ({ name: `file-${index}.zip`, url: `https://api.github.com/repos/hsmith-dev/ogden-agents/releases/assets/${index}`, size: 1, padding: 'p'.repeat(1500) }));
     const big = release(NEWER, { assets: files });
     expect(JSON.stringify(big).length).toBeGreaterThan(MAX_BODY_BYTES);
-    const check = wireUpdateCheck({ fetch: registry({ github: big }).fetch }, { dataDir: tempDataDir(), version: '0.4.0', installMethod: 'github', events: { append: () => undefined } as never, log: { info() {}, warn() {}, error() {} } }, {});
+    const check = wireUpdateCheck({ fetch: registry({ github: big }).fetch }, { dataDir: tempDataDir(), version: '0.0.1', installMethod: 'github', events: { append: () => undefined } as never, log: { info() {}, warn() {}, error() {} } }, {});
     expect((await check.checkNow()).outcome).toBe('newer');
   });
 

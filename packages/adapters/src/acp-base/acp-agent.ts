@@ -130,7 +130,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
 
   /** Spawns the agent in `cwd` with core's environment (AD-16), in its own process group. */
   const spawnAgent = (launchInput: AcpLaunchInput, model: string | undefined, buildEnv: Readonly<Record<string, string>> = {}) => {
-    const { cwd, env } = launchInput;
+    const { env } = launchInput;
     let launch: AcpLaunch;
     try {
       launch = quirks.launch(launchInput);
@@ -138,6 +138,8 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
       if (error instanceof AgentError) throw error;
       throw new AgentError('agent_unavailable', reasons.couldNotStart, { details: { reason: maskSecrets(String(error), secretValues(env)) }, cause: error });
     }
+    // A linked command's own working directory (epic 12 entry 12) wins over the chat's own `cwd`.
+    const cwd = launch.cwd ?? launchInput.cwd;
     // Exactly core's environment, plus what the launch adds (AD-16).
     // An unattended build start's own variables (epic 17) win over core's: nothing else sets the agent's mode.
     const childEnv: Record<string, string> = { ...launch.addEnv, ...env, ...buildEnv };

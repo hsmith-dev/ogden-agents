@@ -35,6 +35,12 @@ export interface AcpLaunch {
    * own variables always win: a launch can add, never drop or change one.
    */
   addEnv?: Readonly<Record<string, string>> | undefined;
+  /**
+   * The folder to run in, in place of the chat's own `cwd` (a linked
+   * command's own working directory, epic 12 entry 12). Absent: the chat's
+   * `cwd` (`AcpLaunchInput.cwd`) is used, as before.
+   */
+  cwd?: string | undefined;
   /** What the "starting" log line says about it (paths, never the environment). */
   logFields?: Record<string, unknown> | undefined;
 }

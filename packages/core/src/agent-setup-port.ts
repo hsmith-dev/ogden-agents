@@ -81,6 +81,13 @@ export interface AgentSetupPort {
    * core's words about its keychain never tell the user to sign in with an account.
    */
   readonly apiKeyOnly?: boolean;
+  /**
+   * `true` for an agent that may be linked to a command line the user
+   * already installs and manages themselves, in place of Ogden Agents' own
+   * managed install (epic 12, entry 12: Codex and Grok only). Set by the
+   * port's own `status()` too, exactly like `apiKeyOnly`; never computed by core.
+   */
+  readonly supportsLinkedCommand?: boolean;
   /** Whether the agent is installed and signed in. Never throws for a missing agent: that is `not_installed`. */
   status(): Promise<AgentPortStatus>;
   /** Installs the agent, reporting each step. Rejects with plain words when it fails; nothing half-installed stays. */

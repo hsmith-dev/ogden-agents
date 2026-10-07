@@ -1,0 +1,1 @@
+ALTER TABLE `agent_settings` ADD `linked_command` text;

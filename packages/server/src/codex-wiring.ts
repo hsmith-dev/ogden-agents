@@ -8,6 +8,7 @@
  */
 import { CODEX_DESCRIPTOR, createCodexAgent, createCodexSetup, type CodexSetupOptions } from '@ogden-agents/adapters';
 import type { AgentPort, AgentSetupPort } from '@ogden-agents/core';
+import type { LinkedCommandSpec } from '@ogden-agents/shared';
 import type { AgentWiring } from './agent-wiring.js';
 import { testApiKeyCheck } from './test-hooks.js';
 
@@ -24,6 +25,8 @@ export function codexWiring(input: {
   given?: CodexPorts | undefined;
   /** Codex's install pins and npm, from the test hook (a local fixture lock); absent as shipped. */
   install?: CodexSetupOptions['install'];
+  /** A user's own command line in place of the managed install (epic 12, entry 12), read fresh at every chat start. */
+  linkedCommand?: (() => LinkedCommandSpec | undefined) | undefined;
   /** Protocol notes for the log; never the environment, stderr or the agent's messages. */
   onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
 }): AgentWiring {
@@ -33,6 +36,7 @@ export function codexWiring(input: {
     agent: input.given?.agent ?? createCodexAgent({
         dataDir: input.dataDir,
         ...(input.serverScript === undefined ? {} : { server: () => ({ command: process.execPath, args: [input.serverScript!] }) }),
+        ...(input.linkedCommand === undefined ? {} : { linkedCommand: input.linkedCommand }),
         onDiagnostic: input.onDiagnostic,
       }),
     setup:

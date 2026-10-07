@@ -32,7 +32,9 @@
  *   downloaded (`config.ts`).
  */
 import { AgentError, type AgentPort } from '@ogden-agents/core';
+import type { LinkedCommandSpec } from '@ogden-agents/shared';
 import { acpReasons, createAcpAgent, type AcpAgentQuirks } from '../acp-base/acp-agent.js';
+import { resolveLinkedCommand } from '../acp-base/linked-command.js';
 import type { AcpToolInputPaths } from '../acp-base/tool-paths.js';
 import { CODEX_DESCRIPTOR } from '../setup-codex/descriptor.js';
 import { installedCodex } from '../setup-codex/install.js';
@@ -62,6 +64,14 @@ export interface CodexAgentOptions {
    */
   server?: (() => CodexServerCommand | undefined) | undefined;
   /**
+   * A user's own command line to run in place of the managed install (epic
+   * 12, entry 12), read fresh at every chat start; `undefined` from it (or
+   * absent) uses the managed install as before. Resolved to an absolute,
+   * runnable path through `resolveLinkedCommand`; a refusal fails the start
+   * as `agent_unavailable`, never falling back to the managed install.
+   */
+  linkedCommand?: (() => LinkedCommandSpec | undefined) | undefined;
+  /**
    * Whether an unattended build may start Codex with its own sandbox (epic 17). Default
    * {@link CODEX_UNATTENDED_VERIFIED}: off until the user's live checks (RELEASING.md) show the
    * sandbox keeps the protected paths and lets a commit through; a test turns it on.
@@ -88,14 +98,8 @@ export function createCodexAgent(options: CodexAgentOptions): AgentPort {
   const reasons = acpReasons(CODEX_DESCRIPTOR.displayName, { apiKeyOnly: true });
   const quirks: AcpAgentQuirks = {
     launch({ env }) {
-      let server: CodexServerCommand | undefined;
-      if (options.server !== undefined) server = options.server();
-      else {
-        const installed = installedCodex(options.dataDir);
-        if (installed !== undefined) server = { command: process.execPath, args: [installed.path] };
-      }
-      if (server === undefined) throw new AgentError('agent_unavailable', reasons.notSetUp);
-      // Without its own home Codex would use `~/.codex`: keep the key in a file there and download plugins. Never started so.
+      // Without its own home Codex would use `~/.codex`: keep the key in a file there and download plugins.
+      // Never started so, whichever binary is spawned.
       const home = env[CODEX_HOME_ENV];
       if (home === undefined || home === '') throw new AgentError('agent_unavailable', reasons.couldNotStart);
       try {
@@ -104,6 +108,27 @@ export function createCodexAgent(options: CodexAgentOptions): AgentPort {
         // Without its config Codex would keep the key in a file and download plugins: not started.
         throw new AgentError('agent_unavailable', reasons.couldNotStart);
       }
+      // A linked command (epic 12, entry 12) bypasses the managed install's pin/npm/sha256 path entirely.
+      const linked = options.linkedCommand?.();
+      if (linked !== undefined) {
+        const resolved = resolveLinkedCommand(linked, env);
+        if (!resolved.ok) throw new AgentError('agent_unavailable', resolved.reason);
+        return {
+          command: resolved.resolved.command,
+          args: [...resolved.resolved.args],
+          // Ask first still applies; the linked command's own env may override it (the user's own choice).
+          addEnv: { [CODEX_INITIAL_MODE_ENV]: CODEX_MODE_IDS.ask, ...resolved.resolved.env },
+          ...(resolved.resolved.cwd === undefined ? {} : { cwd: resolved.resolved.cwd }),
+          logFields: { server: resolved.resolved.command, linked: true },
+        };
+      }
+      let server: CodexServerCommand | undefined;
+      if (options.server !== undefined) server = options.server();
+      else {
+        const installed = installedCodex(options.dataDir);
+        if (installed !== undefined) server = { command: process.execPath, args: [installed.path] };
+      }
+      if (server === undefined) throw new AgentError('agent_unavailable', reasons.notSetUp);
       return {
         command: server.command,
         args: [...server.args],

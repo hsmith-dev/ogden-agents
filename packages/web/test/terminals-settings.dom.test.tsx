@@ -74,7 +74,9 @@ describe('the Terminals settings page', () => {
 
   it('shows everything off, and each switch saves only its own setting', async () => {
     await mount(<TerminalsSettingsPage />);
-    expect((screen.getByTestId('terminals-proxies') as HTMLElement).getAttribute('aria-checked')).toBe('false');
+    // The settings query can still be in flight after mount's fixed settle, especially under
+    // CI load (seen as a Windows flake): wait for the element instead of assuming it is there.
+    expect((await screen.findByTestId('terminals-proxies')).getAttribute('aria-checked')).toBe('false');
     expect((screen.getByTestId('terminals-ssh') as HTMLElement).getAttribute('aria-checked')).toBe('false');
     fireEvent.click(screen.getByTestId('terminals-proxies'));
     await settle();
@@ -86,7 +88,7 @@ describe('the Terminals settings page', () => {
 
   it('notifications are per program, and a program\'s own arguments are saved when the field is left', async () => {
     await mount(<TerminalsSettingsPage />);
-    fireEvent.click(screen.getByTestId('terminals-notify-codex'));
+    fireEvent.click(await screen.findByTestId('terminals-notify-codex'));
     await settle();
     expect(JSON.parse(fake.requests.filter((r) => r.method === 'PUT').at(-1)!.body!)).toEqual({ notifyLaunchers: ['codex'] });
     const field = screen.getByTestId('terminals-args-claude-code') as HTMLInputElement;
@@ -98,7 +100,7 @@ describe('the Terminals settings page', () => {
 
   it('says what the limits are and how the chat\'s own terminal relates', async () => {
     await mount(<TerminalsSettingsPage />);
-    expect(screen.getByTestId('terminals-limits').textContent).toBe('A project can have 8 terminals open at once, and Ogden Agents 16.');
+    expect((await screen.findByTestId('terminals-limits')).textContent).toBe('A project can have 8 terminals open at once, and Ogden Agents 16.');
     expect(screen.getByTestId('terminals-chat-note').textContent).toContain('Use the chat\'s Terminal switch');
   });
 });

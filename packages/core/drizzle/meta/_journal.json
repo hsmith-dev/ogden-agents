@@ -246,6 +246,13 @@
       "when": 1791365532026,
       "tag": "0034_hot_talon",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1791379546202,
+      "tag": "0035_icy_abomination",
+      "breakpoints": true
     }
   ]
 }

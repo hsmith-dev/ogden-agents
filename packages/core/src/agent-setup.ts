@@ -219,8 +219,10 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
         ? { saved: false, fromEnvironment: true }
         : { saved: true, lastFour: key.value.slice(-4), ...(key.unchecked ? { unchecked: true } : {}) };
     const subscription = subscriptionFor(port.agentId);
-    // A sign-in under way keeps its own state; the key takes over again if it doesn't finish.
-    if (status.install !== 'installed' || status.auth === 'signing_in') return { ...status, apiKey };
+    // A sign-in under way keeps its own state; the key takes over again if it doesn't finish. A linked command
+    // (epic 12, entry 12) bypasses this gate exactly as `readiness()`'s does: a saved key works the same whether
+    // Ogden's own copy was ever installed or not.
+    if ((status.install !== 'installed' && options.isLinked?.(port.agentId) !== true) || status.auth === 'signing_in') return { ...status, apiKey };
     if (subscription === 'signed_out') {
       const { reason: _reason, ...rest } = status;
       return { ...rest, auth: 'signed_in', method: 'api_key', apiKey };
@@ -380,7 +382,8 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       const shownState = { install: status.install, auth: status.auth };
       // A status the port couldn't give is "can't tell": it never refuses a chat.
       if (reading.unread) return shownState;
-      if (status.install !== 'installed') return { ...shownState, blocked: 'agent_not_installed' };
+      // A linked command (epic 12, entry 12) bypasses the install gate: a chat may start on it even without Ogden's own install.
+      if (status.install !== 'installed' && options.isLinked?.(agentId) !== true) return { ...shownState, blocked: 'agent_not_installed' };
       if (status.auth === 'signed_in') return shownState;
       // Only a sign-out the agent confirmed refuses a chat: "can't tell" never does.
       return subscriptionFor(agentId) === 'signed_out' ? { ...shownState, blocked: 'agent_signed_out' } : shownState;

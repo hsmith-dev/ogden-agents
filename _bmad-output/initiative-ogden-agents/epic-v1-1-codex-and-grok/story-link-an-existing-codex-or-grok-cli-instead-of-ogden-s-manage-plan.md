@@ -3,13 +3,14 @@ title: 'Link an existing Codex or Grok CLI instead of Ogden''s managed install (
 type: 'feature'
 ticket: '12'
 created: '2026-10-07'
-status: 'ready-for-dev'
+status: 'built'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
+review: 'quick'
+review_source: 'pinned'
 lenses_ran: []
-review_loop_iteration: 0
+review_loop_iteration: 1
+baseline_revision: '27f28fe1a0503d929f42db63f33e77608dc56c59'
 context:
   - '{project-root}/AGENTS.md'
 ---
@@ -26,7 +27,7 @@ context:
 - The user types one command line (e.g. `codex-acp` or `/usr/local/bin/grok agent --no-leader stdio`); it is split into a program and arguments (quote-aware tokenizer), never run through a shell. The raw spec (command line, cwd, env) is stored as typed; resolution (PATH search, existence, executable-bit) runs fresh at save time (for immediate refusal) and again at every chat start (defense in depth, same pattern as Grok's existing per-launch SHA-256 re-check) — never cached as a resolved path, so edits and removals outside Ogden are always re-checked.
 - `AgentSetupPort` gains a static `supportsLinkedCommand?: boolean` (`true` for Codex and Grok only, per the ticket's own scope note); core and `AgentSetupStatus` carry it exactly like `apiKeyOnly` already is (set by the port's own `status()`, never computed by core).
 - The actual linked value (`linkedCommand` on `AgentSetupStatus`) is **not** threaded through `agent-setup.ts`'s stateful install/sign-in cache (too much surface for this ticket's scope); instead the route merges `core.agentLinkedCommands.get(agentId)` onto every `AgentSetupStatus` it already returns (`GET /agents`, install, sign-out, and the two new routes). `core.agentLinkedCommands` is a small new core module mirroring `agent-models.ts` exactly (same table, same event-log pattern).
-- `AgentSetup.readiness()`'s install gate (`agent_not_installed`) is bypassed when `options.isLinked?.(agentId)` is true (wired from `core.agentLinkedCommands`), so a chat can start on a linked command even if Ogden's own copy was never installed — this is the one change inside `agent-setup.ts`, two lines.
+- `AgentSetup.readiness()`'s install gate (`agent_not_installed`) is bypassed when `options.isLinked?.(agentId)` is true (wired from `core.agentLinkedCommands`), so a chat can start on a linked command even if Ogden's own copy was never installed. (Amended 2026-10-07, Quick review finding 1: `withApiKey` has its own, earlier install gate that decides whether a saved key flips `auth` to `signed_in` at all — without the same `isLinked` bypass there, a linked-but-never-installed agent with a real key still reads `needs_sign_in` and `readiness()` then blocks it as `agent_signed_out`, so "authentication works exactly the same" would not hold for the ticket's main scenario. Both gates take the same bypass: three lines inside `agent-setup.ts`, not two.)
 - Validation (does the command resolve to a runnable file, does cwd exist) is fs work, so it stays in `packages/adapters` (`acp-base/linked-command.ts`, exported from the adapters package index) and is called directly by the server route before persisting — never imported by `packages/core` (AD-1: core may only depend on `@ogden-agents/shared`).
 - `AcpLaunch` gains an optional `cwd`; `acp-agent.ts`'s `spawnAgent` uses `launch.cwd ?? launchInput.cwd`. `AcpLaunch.addEnv` already carries extra env and core's own environment already wins over it (AD-16 unchanged): the linked command's own `env` is merged into `addEnv`.
 - Switching only takes effect on the next chat start: already true for free, because `quirks.launch()` (and therefore the new linked-command check) runs fresh on every `open()`, never cached across chats.
@@ -80,14 +81,14 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/shared/src/setup.ts`, `api.ts` -- add `LinkedCommandSpec`, `AgentSetupStatus` fields, the route -- the wire contract everything else builds on
-- [ ] `packages/core/src/agent-linked-commands.ts`, `db/schema.ts`, migration, `core.ts`, `agent-setup-types.ts`, `agent-setup.ts` -- persistence + readiness bypass
-- [ ] `packages/adapters/src/acp-base/linked-command.ts`, `quirks.ts`, `acp-agent.ts` -- resolution + `cwd` plumbing, agent-neutral
-- [ ] `packages/adapters/src/acp-codex/codex-agent.ts`, `acp-grok/grok-agent.ts`, `setup-codex/index.ts`, `setup-grok/index.ts`, `adapters/src/index.ts` -- wire linking into both agents' launch and status
-- [ ] `packages/server/src/codex-wiring.ts`, `grok-wiring.ts`, `start-agents.ts`, `agent-setup-routes.ts`, `app.ts`, `start.ts` -- route + wiring
-- [ ] `packages/web/src/agents/agent-setup-api.ts`, `agent-card.tsx` -- Settings UI control
-- [ ] `agent-matrix.md` -- document the option
-- [ ] Unit/route/adapter tests per the I/O Matrix, plus e2e
+- [x] `packages/shared/src/setup.ts`, `api.ts` -- add `LinkedCommandSpec`, `AgentSetupStatus` fields, the route -- the wire contract everything else builds on
+- [x] `packages/core/src/agent-linked-commands.ts`, `db/schema.ts`, migration, `core.ts`, `agent-setup-types.ts`, `agent-setup.ts` -- persistence + readiness bypass
+- [x] `packages/adapters/src/acp-base/linked-command.ts`, `quirks.ts`, `acp-agent.ts` -- resolution + `cwd` plumbing, agent-neutral
+- [x] `packages/adapters/src/acp-codex/codex-agent.ts`, `acp-grok/grok-agent.ts`, `setup-codex/index.ts`, `setup-grok/index.ts`, `adapters/src/index.ts` -- wire linking into both agents' launch and status
+- [x] `packages/server/src/codex-wiring.ts`, `grok-wiring.ts`, `start-agents.ts`, `agent-setup-routes.ts`, `app.ts`, `start.ts` -- route + wiring
+- [x] `packages/web/src/agents/agent-setup-api.ts`, `agent-card.tsx` -- Settings UI control
+- [x] `agent-matrix.md` -- document the option
+- [x] Unit/route/adapter tests per the I/O Matrix, plus e2e -- all done (see Implementation Notes)
 
 **Acceptance Criteria:**
 - Given a fake Codex (or Grok) binary at a chosen path, when its command is linked in Settings, then the next chat with that agent spawns that exact binary (not the managed install), with identical permission cards, modes and API-key behavior to the managed install's own fakes.
@@ -97,9 +98,49 @@ context:
 
 ## Implementation Notes
 
+Implemented exactly per the Code Map, with two deliberate, documented choices beyond what the frozen text spells out:
+
+- **`withApiKey` left untouched (as the Decisions note requires).** For an API-key-only agent (Codex, Grok) that is linked but never Ogden-installed, `agent-setup.ts`'s `withApiKey` still only flips `auth` to `signed_in` once `status.install === 'installed'` (pre-existing rule, unrelated to this ticket). So a linked-but-uninstalled agent with a real key still reports `auth: needs_sign_in` / `subscription: unknown`, and `readiness()` can still refuse it with `blocked: 'agent_signed_out'` after the `agent_not_installed` bypass. This matches the acceptance criterion's literal wording ("not blocked as `agent_not_installed`") and the "two lines only" scope note, but means "link without ever installing" only reaches a running chat when the port's own `status()` independently reports `auth: 'signed_in'` (as a real adapter's port does once it has ever been installed and signed in before, or as the server-route test's fake port does directly). Flagged here rather than silently special-cased.
+- **PUT/DELETE `linked-command` return 204** (mirroring `agentApiKey` exactly, per the Code Map), not an `AgentSetupStatus` body -- the frozen I/O matrix explicitly allows "204 (or current `AgentSetupStatus` on the list)" for PUT and requires 204 for DELETE. `withLinkedCommand` is applied to `GET /agents`, install and sign-out instead; the web's `useLinkedCommand`/`useAgentActions` pattern already refetches the list right after.
+- `AgentSetupPort.supportsLinkedCommand` is declared both as a static field on the port object and inside its `status()`'s `common` object, exactly mirroring `apiKeyOnly`'s existing duplication in `setup-codex`/`setup-grok`.
+- DELETE `linked-command` 404s for an unknown agent id (an `agentSetup.list()` lookup), for consistency with every other agent route here, even though the frozen matrix's "204, idempotent" note doesn't mention that case explicitly.
+
+**Tests added:** `packages/adapters/test/linked-command.test.ts` (21 cases: `splitCommandLine` quoting/escaping, `resolveLinkedCommand`'s absolute/relative/bare-name/Windows-extension/`cwd`/`env` paths, all via injected `isExecutable`/`isDirectory`, no real fs); `packages/core/test/agent-linked-commands.test.ts` (11 cases: get/set/clear, change detection, event payloads, cross-agent isolation, persistence across reopen, a damaged stored value); one new case in `packages/core/test/agent-setup.test.ts` (the `isLinked` readiness bypass, scoped to one agent); a new `describe` block in `packages/server/test/agent-setup-routes.test.ts` (6 cases: a real server links Codex to `tests/fixtures/fake-codex.mjs` and a `whoami` round-trip proves the exact linked binary runs instead of the managed install, plus the validation refusals, unsupported-agent refusal, 404s and idempotent clear); `gate.test.ts`'s route allowlist updated. No changes needed to `acp-codex.test.ts`/`acp-grok.test.ts`/`agent-card.dom.test.tsx` were made -- existing suites there passed unchanged, so no new assertions were added to them; a reviewer wanting direct coverage of the codex/grok `launch()` linked branch or the `LinkedCommandSection` UI states should add it there.
+
+**Not done:** `tests/e2e/codex-setup.spec.ts`/`grok-setup.spec.ts` were not extended with a Playwright linking flow (`pnpm e2e`'s "new Playwright linking flow" in Verification is therefore not yet satisfied). Everything else in Verification passes: `pnpm typecheck` (full monorepo) and `pnpm vitest run` (full repo, 4615 passed / 8 skipped / 0 failed, including `tests/architecture.test.ts`) are clean; the drizzle migration (`packages/core/drizzle/0034_closed_omega_flight.sql`) is generated and committed.
+
+**Follow-up pass (same ticket, closing the gaps the implementer flagged):**
+
+- Added the missing Playwright linking flow to both `tests/e2e/codex-setup.spec.ts` and `tests/e2e/grok-setup.spec.ts`: a new test in each gives `startServer` only the fixture `setup` port (not `agent`), so the real `createCodexAgent`/`createGrokAgent` is built by `codexWiring`/`grokWiring` and genuinely reads `core.agentLinkedCommands`. It drives Settings end to end: a bad path is refused with `agent-linked-command-error` containing "couldn't find" and nothing changes; linking `"${process.execPath}" "${FAKE_CODEX|FAKE_GROK}"` flips the card to "Using your own Codex/Grok install" with the command shown and the Install button gone (`{ exact: true }`, since "install" is also a substring of "Use Ogden Agents' install instead"); clearing it reverts to "Not installed" with the link button back. Confirms the I/O matrix's "Link a runnable command" and "Clear a linked command" rows end to end, in a real browser against the real server wiring.
+- Added direct adapter-level coverage the implementer flagged as missing: `packages/adapters/test/acp-codex.test.ts` and `acp-grok.test.ts` each gained two cases -- a linked command (pointed at the fake fixture, with nothing installed in `dataDir`) serves an identical permission card (Allow once) and identical `permissionModes`, with `logFields.linked === true` on the diagnostic; and a bad linked command fails the start as `agent_unavailable` with a "couldn't find" reason, confirming the managed-install path (and, for Grok, the SHA-256 re-check) is never reached. This directly covers the I/O matrix's "API key / permission cards / modes with a linked command" row, which the route-level `whoami` test alone did not exercise.
+- Added `packages/web/test/agent-card.dom.test.tsx` coverage for `LinkedCommandSection`'s three states (not offered when `supportsLinkedCommand` is absent; the closed ghost button and open field when not linked; the linked state's command text and "Use Ogden Agents' install instead", wired to `actions.remove`) and the `agent-linked-command-error` line. One finding from writing these: the "Using your own … install" label and the hidden Install button are shown only via `InstallState`'s early return, i.e. only while `agent.install !== 'installed'` -- an agent Ogden already installed and then also links keeps showing its normal installed/key UI instead. Functionally this is harmless (the adapter's `launch()` picks the linked command regardless of the port's reported `install` state), and the ticket's own scenario is linking an agent never installed through Ogden, so this is left as a known, minor display gap rather than restructuring `AgentCard`'s top-level branch for it.
+- Re-ran the full suite after these additions: `pnpm typecheck` clean; `pnpm vitest run` 4624 passed / 8 skipped (365 files, up from 4615); `pnpm e2e` 193 passed (chromium); `pnpm run pack && pnpm smoke` clean.
+
+**Review loop 1 (Quick lens, 2026-10-07):** 4 findings, all verified real; triage and the frozen-block amendment are in Plan Change Log and Review Triage Log above. Fixes applied directly (no separate re-derivation round, given their scope):
+- Finding 1 (high, the frozen block's own correction): `withApiKey` (`packages/core/src/agent-setup.ts`) now also takes the `isLinked` bypass, so a linked, never-installed agent's saved key reaches `signed_in`/ready, not just past the `agent_not_installed` check. New test in `packages/core/test/agent-setup.test.ts`.
+- Finding 2 (medium, patch): `resolveLinkedCommand` (`packages/adapters/src/acp-base/linked-command.ts`) now refuses a relative command or `cwd` outright, in plain words, instead of silently resolving it against the Ogden server's own process working directory (which neither real caller ever supplied anyway). `resolveProgram` dropped its unused `base` parameter; `ResolveLinkedCommandOptions.cwd` is gone. Four tests in `packages/adapters/test/linked-command.test.ts` rewritten from "resolves relative against base" to "refuses relative".
+- Finding 3 (low, patch): the new `PUT`/`DELETE /agents/:agentId/linked-command` routes now call `noStore(c)` (including their `notImplemented` fallbacks), matching every other mutating, secret-adjacent route in `agent-setup-routes.ts`; doc comments in `api.ts` and the route file updated to say so.
+- Finding 4 (low, patch): the default `isExecutable` (`runnableFile`) now takes the resolved `windows` flag as a parameter instead of re-reading `process.platform` itself, so `options.platform` actually drives every platform-sensitive branch, not just most of them.
+
+Full suite re-run after the patches: `pnpm typecheck` clean; `pnpm vitest run` 4626 passed / 8 skipped (365 files); `pnpm e2e` 193 passed (chromium).
+
 ## Plan Change Log
 
+- Finding: Quick review, 2026-10-07 — `readiness()`'s `isLinked` bypass only skips the `agent_not_installed` block; `withApiKey` (the function that flips `auth` to `signed_in` from a saved key) has its own, earlier gate (`if (status.install !== 'installed' ...) return { ...status, apiKey }`, never touching `auth`) that the frozen Decisions never named, so a linked-but-never-Ogden-installed agent with a real saved key still reports `auth: 'needs_sign_in'` and `readiness()` falls through to `blocked: 'agent_signed_out'`. The root cause is the frozen "two lines only" scoping of the `agent-setup.ts` change, written by this same autonomous run with no separate human in the loop; per the intent that authentication "works exactly the same as it does for Ogden's managed install" (Intent, Decisions), there is exactly one sensible resolution, so it is applied directly rather than parked as an open question: amended below to extend `isLinked` into `withApiKey` too, now three lines, not two.
+  - Amended: the frozen Decisions bullet "`AgentSetup.readiness()`'s install gate... this is the one change inside `agent-setup.ts`, two lines" now also names `withApiKey`'s own install gate.
+  - Known-bad state avoided: a linked Codex/Grok agent with a saved, valid key could never start a chat (`blocked: 'agent_signed_out'`), defeating the ticket's main scenario (link without ever running Ogden's own install).
+  - KEEP: everything else in Implementation Notes and Design Notes stands; only `agent-setup.ts`'s `withApiKey` gains the same `isLinked` check `readiness()` already has, plus a regression test proving a linked, never-installed, keyed agent reaches `signed_in`/ready.
+
 ## Review Triage Log
+
+Quick lens (`quick`, pinned), review_loop_iteration 1. 4 findings, all verified real.
+
+| # | Verdict | Route | Evidence |
+|---|---|---|---|
+| 1 | high | bad_plan (handled as the frozen block's own correction; see Plan Change Log) | Confirmed by reading `agent-setup.ts`'s `withApiKey` (line ~223: `if (status.install !== 'installed' \|\| status.auth === 'signing_in') return { ...status, apiKey };`, an early return that never sets `auth: 'signed_in'`) against `readiness()`'s bypass (line ~383) and both real ports' `status()` (`setup-codex/index.ts`, `setup-grok/index.ts`: `subscription: 'signed_out'` unconditionally when `not_installed`). A linked, never-installed agent with a real saved key is blocked `agent_signed_out`, not ready — the finding's claim holds exactly as described. |
+| 2 | medium | patch | Confirmed: `resolveLinkedCommand`'s `base = options.cwd ?? process.cwd()`, and neither real caller (`agent-setup-routes.ts`'s PUT handler, `codex-agent.ts`/`grok-agent.ts`'s `launch()`) ever supplies `options.cwd`, so a relative command or `cwd` resolves against the Ogden server process's own working directory, not anything the user chose. Fix: refuse a relative command or `cwd` explicitly with a plain reason, rather than silently resolving against a meaningless base — trivial, no new public surface. |
+| 3 | low | patch | Confirmed: every other mutating, secret-adjacent route in `agent-setup-routes.ts` (`PUT`/`DELETE agentApiKey`, `POST agentSignIn`, `POST agentSignInCode`) calls `noStore(c)`; the new `PUT`/`DELETE agentLinkedCommand` handlers do not, despite `LinkedCommandSpec.env` being able to carry secret-like values and the Code Map's own instruction to mirror `agentApiKey` exactly. Fix: add `noStore(c)` to both handlers. |
+| 4 | low | patch | Confirmed: `runnableFile` (the default `isExecutable`) hardcodes `process.platform !== 'win32'` instead of the `windows` flag `resolveLinkedCommand` derives from `options.platform`; unreachable with today's real callers (none pass `options.platform`), but a latent inconsistency in a function documented as driven by that option. Fix: thread `windows` into the default `isExecutable` instead of re-deriving it from the live `process.platform`. |
 
 ## Design Notes
 

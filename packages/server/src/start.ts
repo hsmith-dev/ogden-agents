@@ -484,6 +484,7 @@ async function listenAndAnnounce({
     // Setup also places the skills in each other agent's folder the project uses (epic 6 entry 8).
     bmadSetup: withAgentSkillFolders(core.bmadSetup, { core, agents }),
     agentSetup,
+    agentLinkedCommands: core.agentLinkedCommands,
     onboarding,
     newProjectDefaults,
     installSettings: core.installSettings,

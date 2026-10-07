@@ -121,6 +121,41 @@ describe("Codex's chat port (epic 12 entry 5)", () => {
     expect(replyText(events)).toBe('Denied rm -rf build. chose=decline');
   });
 
+  it('with a linked command (epic 12 entry 12), spawns it instead of the managed install, with identical cards and modes', async () => {
+    const diagnostics: Array<[string, Record<string, unknown> | undefined]> = [];
+    const linked = createCodexAgent({
+      dataDir: tempDir(), // nothing installed here: the managed path would refuse `notSetUp`
+      linkedCommand: () => ({ command: `"${process.execPath}" "${FAKE_CODEX}"` }),
+      onDiagnostic: (message, fields) => diagnostics.push([message, fields]),
+    });
+    const asked: AgentPermissionRequest[] = [];
+    const session = await linked.startSession({
+      cwd: tempDir(),
+      env: envOf({ CODEX_API_KEY: KEY }),
+      onPermissionRequest: async (request) => {
+        asked.push(request);
+        return { outcome: 'allow_once' };
+      },
+      protectedPaths: PROTECTED_PATHS,
+    });
+    sessions.push(session);
+    const events: AgentEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    // Identical cards and modes to the managed install's: a shell command waits for its card, Allow once answers it.
+    await session.prompt('permission npm test');
+    expect(asked[0]).toMatchObject({ kind: 'execute', command: 'npm test' });
+    expect(replyText(events)).toBe('Ran npm test. chose=allow_once');
+    expect(session.permissionModes).toEqual(['ask', 'skip_all']);
+    expect(diagnostics.some(([, fields]) => fields?.linked === true)).toBe(true);
+  });
+
+  it('a bad linked command refuses the start in plain words, never falling back to the managed install', async () => {
+    const agent = createCodexAgent({ dataDir: tempDir(), linkedCommand: () => ({ command: '/no/such/codex-acp' }) });
+    const failure = await agent.startSession({ cwd: tempDir(), env: envOf({ CODEX_API_KEY: KEY }) }).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: 'agent_unavailable' });
+    expect(String((failure as Error).message)).toContain("couldn't find");
+  });
+
   it('takes Deny from the only reject option there is when there is no decline (a file change)', async () => {
     const { session, events } = await start({ env: { FAKE_ACP_REJECT_OPTIONS: 'cancel:No and tell Codex what to do differently' }, decide: async () => ({ outcome: 'deny' }) });
     await session.prompt('permission npm test');

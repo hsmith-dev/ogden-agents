@@ -287,6 +287,14 @@ export const agentSettings = sqliteTable('agent_settings', {
   agentId: text('agent_id').$type<AgentId>().primaryKey(),
   defaultModel: text('default_model'),
   models: text('models').notNull().default('[]'),
+  /**
+   * The agent's linked command (epic 12, entry 12): a user's own command
+   * line in place of Ogden Agents' managed install, as JSON
+   * (`LinkedCommandSpec`), stored exactly as typed. `NULL` for none; agents
+   * other than Codex and Grok never have one. Read only through
+   * `agent-linked-commands.ts`, so a damaged value reads as none.
+   */
+  linkedCommand: text('linked_command', { mode: 'json' }),
 });
 
 /**

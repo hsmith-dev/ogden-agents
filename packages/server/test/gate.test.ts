@@ -638,6 +638,8 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.agentSignInCode}`,
   `PUT ${API_ROUTES.agentApiKey}`,
   `DELETE ${API_ROUTES.agentApiKey}`,
+  `PUT ${API_ROUTES.agentLinkedCommand}`,
+  `DELETE ${API_ROUTES.agentLinkedCommand}`,
   `GET ${API_ROUTES.onboarding}`,
   `PATCH ${API_ROUTES.onboarding}`,
   `GET ${API_ROUTES.bmadPieces}`,

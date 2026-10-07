@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const actions = { uninstall: vi.fn(), signOut: vi.fn(), busy: undefined as 'uninstall' | 'sign_out' | undefined, error: undefined as string | undefined };
 const signIn = { start: vi.fn(), cancel: vi.fn(), sendCode: vi.fn(), link: undefined, code: undefined, busy: false, error: undefined };
+const linkedCommand = { save: vi.fn(async () => true), remove: vi.fn(), busy: false, error: undefined as string | undefined };
 
 vi.mock('../src/agents/agent-setup-api', async (importActual) => ({
   ...(await importActual<typeof import('../src/agents/agent-setup-api')>()),
@@ -19,6 +20,7 @@ vi.mock('../src/agents/agent-setup-api', async (importActual) => ({
   useSignIn: () => signIn,
   useInstall: () => ({ start: vi.fn(), busy: false, error: undefined }),
   useApiKey: () => ({ save: vi.fn(), remove: vi.fn(), busy: false, error: undefined }),
+  useLinkedCommand: () => linkedCommand,
 }));
 
 const { AgentCard } = await import('../src/agents/agent-card');
@@ -26,6 +28,8 @@ const { AgentCard } = await import('../src/agents/agent-card');
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  linkedCommand.busy = false;
+  linkedCommand.error = undefined;
 });
 
 const card = (agent: Partial<AgentSetupStatus>) =>
@@ -144,5 +148,44 @@ describe('Grok, an xAI API access token only agent (user decision, 2026-10-05)',
     expect(screen.getByTestId('agent-api-key-saved').textContent).toBe('xAI API access token saved …2468');
     expect(screen.getByRole('button', { name: 'Remove token' })).toBeTruthy();
     expect(screen.getByTestId('agent-notice').textContent).toBe(NOTICE);
+  });
+});
+
+describe('a linked command (epic 12, entry 12)', () => {
+  const codex: Partial<AgentSetupStatus> = { agentId: 'codex', displayName: 'Codex', provider: 'OpenAI', version: '2.1.1', apiKeyOnly: true, supportsLinkedCommand: true, apiKey: { saved: false } };
+
+  it('is not offered for an agent that does not support it', () => {
+    card({ install: 'not_installed', version: null });
+    expect(screen.queryByTestId('agent-linked-command')).toBeNull();
+  });
+
+  it('offers to link a command instead of installing, in every install state', () => {
+    card({ ...codex, install: 'not_installed', version: null, apiKey: undefined });
+    expect(screen.getByRole('button', { name: 'Link a command you already manage' })).toBeTruthy();
+    expect(screen.queryByLabelText('Command to run')).toBeNull();
+  });
+
+  it('opens a field for the command and saves it', () => {
+    card(codex);
+    fireEvent.click(screen.getByRole('button', { name: 'Link a command you already manage' }));
+    const field = screen.getByLabelText('Command to run');
+    fireEvent.change(field, { target: { value: 'codex-acp' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(linkedCommand.save).toHaveBeenCalledWith({ command: 'codex-acp' });
+  });
+
+  it('once linked, shows the command and offers to use the managed install again', () => {
+    card({ ...codex, install: 'not_installed', version: null, apiKey: undefined, linkedCommand: { command: 'codex-acp' } });
+    expect(screen.getByTestId('agent-state').textContent).toBe('Using your own Codex install');
+    expect(screen.getByTestId('agent-linked-command-saved').textContent).toContain('codex-acp');
+    expect(screen.queryByRole('button', { name: 'Link a command you already manage' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: "Use Ogden Agents' install instead" }));
+    expect(linkedCommand.remove).toHaveBeenCalledOnce();
+  });
+
+  it('shows the last request error in plain words', () => {
+    linkedCommand.error = "Ogden Agents couldn't find \"x\" to run.";
+    card(codex);
+    expect(screen.getByTestId('agent-linked-command-error').textContent).toBe("Ogden Agents couldn't find \"x\" to run.");
   });
 });

@@ -1,4 +1,4 @@
-import { AgentSetupStatus, AgentsResponse, API_ROUTES, apiPath, SignInResponse } from '@ogden-agents/shared';
+import { AgentSetupStatus, AgentsResponse, API_ROUTES, apiPath, type LinkedCommandSpec, SignInResponse } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 import { call, callNoContent, postJson, type Auth } from '@/api/http';
@@ -71,6 +71,19 @@ export const saveApiKey = (agentId: string, apiKey: string, auth: Auth = tabAuth
 /** `DELETE /api/v1/agents/:agentId/api-key`: removes the key from the keychain. */
 export const removeApiKey = (agentId: string, auth: Auth = tabAuth, keyName = 'API key') =>
   callNoContent(auth, apiPath(API_ROUTES.agentApiKey, { agentId }), { method: 'DELETE' }, `Ogden Agents couldn't remove the ${keyName}`);
+
+/** `PUT /api/v1/agents/:agentId/linked-command` (epic 12, entry 12): links the agent to a command line it resolves now. */
+export const saveLinkedCommand = (agentId: string, command: LinkedCommandSpec, auth: Auth = tabAuth) =>
+  callNoContent(
+    auth,
+    apiPath(API_ROUTES.agentLinkedCommand, { agentId }),
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(command) },
+    "Ogden Agents couldn't save that command",
+  );
+
+/** `DELETE /api/v1/agents/:agentId/linked-command`: clears the agent's linked command. */
+export const clearLinkedCommand = (agentId: string, auth: Auth = tabAuth) =>
+  callNoContent(auth, apiPath(API_ROUTES.agentLinkedCommand, { agentId }), { method: 'DELETE' }, "Ogden Agents couldn't remove that command");
 
 /** The seq of the newest `agent.*` event received, or 0. */
 function lastAgentSeq(events: readonly { seq: number; type: string }[]): number {
@@ -231,6 +244,57 @@ export function useApiKey(agentId: string, auth: Auth = tabAuth, keyName = 'API 
       (caught: unknown) => {
         setBusy(false);
         setError(caught instanceof Error ? caught.message : `Ogden Agents couldn't remove the ${keyName}. Try again.`);
+        refresh();
+      },
+    );
+  };
+
+  return { save, remove, busy, error };
+}
+
+export interface LinkedCommandActions {
+  /** Links the agent to `command`; resolves `true` once it was saved. The caller clears its fields either way. */
+  save(command: LinkedCommandSpec): Promise<boolean>;
+  remove(): void;
+  /** Whether a request is running. */
+  busy: boolean;
+  /** Plain words for the last request that failed (never the command line itself unless it is the problem). */
+  error: string | undefined;
+}
+
+/** Linking and unlinking an agent's own command (epic 12, entry 12), for Settings: Agents. */
+export function useLinkedCommand(agentId: string, auth: Auth = tabAuth): LinkedCommandActions {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+
+  const save = async (command: LinkedCommandSpec) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await saveLinkedCommand(agentId, command, auth);
+      return true;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Ogden Agents couldn't save that command. Try again.");
+      return false;
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  };
+
+  const remove = () => {
+    setBusy(true);
+    setError(undefined);
+    clearLinkedCommand(agentId, auth).then(
+      () => {
+        setBusy(false);
+        refresh();
+      },
+      (caught: unknown) => {
+        setBusy(false);
+        setError(caught instanceof Error ? caught.message : "Ogden Agents couldn't remove that command. Try again.");
         refresh();
       },
     );

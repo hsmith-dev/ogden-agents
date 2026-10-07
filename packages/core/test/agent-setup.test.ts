@@ -962,6 +962,44 @@ describe('uninstall and sign-out (epic 6 entry 7)', () => {
     expect(await setup.readiness('antigravity', 0)).toMatchObject({ blocked: 'agent_not_installed' });
   });
 
+  it("a linked command (epic 12, entry 12) bypasses the install gate for that agent only, once it isn't installed", async () => {
+    const core = openTestCore();
+    const { port } = removablePort();
+    const linked = new Set<string>();
+    const setup = createAgentSetup(core.events, [port], { isLinked: (agentId) => linked.has(agentId) });
+    await setup.uninstall('antigravity');
+    expect(await setup.readiness('antigravity', 0)).toMatchObject({ install: 'not_installed', blocked: 'agent_not_installed' });
+    linked.add('antigravity');
+    const ready = await setup.readiness('antigravity', 0);
+    expect(ready).toMatchObject({ install: 'not_installed' });
+    expect(ready.blocked).toBeUndefined();
+    // Linking a different agent never bypasses this one's gate.
+    linked.delete('antigravity');
+    linked.add('some-other-agent');
+    expect(await setup.readiness('antigravity', 0)).toMatchObject({ blocked: 'agent_not_installed' });
+  });
+
+  it('a linked, never-installed, keyed agent reaches signed_in and ready (Quick review finding 1, 2026-10-07)', async () => {
+    const core = openTestCore();
+    const secrets = memoryStore();
+    const apiKey: AgentApiKeySupport = { envName: 'FAKE_API_KEY', check: () => undefined, verify: async () => 'ok' };
+    const { port } = fakePort({
+      apiKey,
+      status: async (): Promise<AgentPortStatus> => ({ agentId: 'claude-code', displayName: 'Claude Code', install: 'not_installed', version: null, auth: 'needs_sign_in', subscription: 'signed_out' }),
+    });
+    const linked = new Set<string>();
+    const setup = createAgentSetup(core.events, [port], { secrets: secrets.store, isLinked: (agentId) => linked.has(agentId) });
+    await setup.setApiKey('claude-code', 'sk-ant-00000000000000000000');
+    // Not linked: a key saved for a never-installed agent still cannot start a chat.
+    expect(await setup.readiness('claude-code', 0)).toMatchObject({ blocked: 'agent_not_installed' });
+    // Linked: the same install gate inside `withApiKey` is bypassed too, so the key takes over and the chat is ready.
+    linked.add('claude-code');
+    const [status] = await setup.list();
+    expect(status).toMatchObject({ install: 'not_installed', auth: 'signed_in', method: 'api_key' });
+    const ready = await setup.readiness('claude-code', 0);
+    expect(ready.blocked).toBeUndefined();
+  });
+
   it('a port that cannot uninstall now is agent_busy with its plain words; one without uninstall is refused', async () => {
     const core = openTestCore();
     const { port } = removablePort({

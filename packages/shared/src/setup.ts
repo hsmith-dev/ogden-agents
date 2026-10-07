@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FirstProjectChoice } from './bmad.js';
-import { AgentAuthMethodKind, AgentAuthState, AgentId } from './events.js';
+import { AgentAuthMethodKind, AgentAuthState, AgentId } from './events-common.js';
 
 /**
  * The onboarding and app-shortcut REST contract (story 2.3 contracts; filled
@@ -92,8 +92,67 @@ export const AgentSetupStatus = z.object({
   signInNote: z.string().min(1).optional(),
   /** The step under way and how far it is (0 to 100, or `null` when it can't tell), while `install` is `installing` (9.3). */
   progress: z.object({ step: z.string().min(1), percent: z.number().min(0).max(100).nullable() }).optional(),
+  /**
+   * `true` for an agent that may be linked to a command line the user already
+   * installs and manages themselves, in place of Ogden Agents' own managed
+   * install (epic 12, entry 12: Codex and Grok only). Set by the port's own
+   * `status()`, never computed by core.
+   */
+  supportsLinkedCommand: z.boolean().optional(),
+  /**
+   * The command this agent is linked to, when one is set (epic 12, entry
+   * 12): the server route merges it in from `core.agentLinkedCommands`, so it
+   * is never part of what a port's own `status()` reports.
+   */
+  linkedCommand: z.lazy(() => LinkedCommandSpec).optional(),
 });
 export type AgentSetupStatus = z.infer<typeof AgentSetupStatus>;
+
+/** The longest a linked command's command line may be, as typed. */
+export const MAX_LINKED_COMMAND_LENGTH = 4000;
+/** The longest a linked command's working directory may be, as typed. */
+export const MAX_LINKED_COMMAND_CWD_LENGTH = 4000;
+/** An environment variable's name: letters, digits and underscores, never starting with a digit. */
+export const LINKED_COMMAND_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** The most environment variables a linked command may add. */
+export const MAX_LINKED_COMMAND_ENV_VARS = 32;
+/** The longest one of a linked command's environment values may be. */
+export const MAX_LINKED_COMMAND_ENV_VALUE_LENGTH = 4000;
+
+/**
+ * A user's own command for Ogden Agents to run in place of its managed
+ * install (epic 12, entry 12; CAP-16 amended 2026-10-07): the command line as
+ * typed, split into a program and its arguments only at resolve time and
+ * never run through a shell (`resolveLinkedCommand`, `packages/adapters`'
+ * `acp-base/linked-command.ts`), an optional working directory, and optional
+ * extra environment variables. Stored exactly as typed; resolved to an
+ * absolute, runnable path afresh at save time (an immediate refusal) and
+ * again at every chat start (defense in depth), never cached as a resolved
+ * path.
+ */
+export const LinkedCommandSpec = z.object({
+  /** The command line, e.g. `codex-acp` or `/usr/local/bin/grok agent --no-leader stdio`. */
+  command: z
+    .string()
+    .trim()
+    .min(1, 'Type the command to run.')
+    .max(MAX_LINKED_COMMAND_LENGTH, 'That command is too long.'),
+  /** The folder it runs in; absent uses the chat's own working directory. */
+  cwd: z.string().trim().min(1, "That folder path can't be blank.").max(MAX_LINKED_COMMAND_CWD_LENGTH, 'That folder path is too long.').optional(),
+  /** Extra environment variables it starts with; core's own environment still wins (AD-16). */
+  env: z
+    .record(z.string().regex(LINKED_COMMAND_ENV_NAME_PATTERN, 'expected a plain environment variable name'), z.string().max(MAX_LINKED_COMMAND_ENV_VALUE_LENGTH, 'That value is too long.'))
+    .refine((value) => Object.keys(value).length <= MAX_LINKED_COMMAND_ENV_VARS, `At most ${MAX_LINKED_COMMAND_ENV_VARS} environment variables.`)
+    .optional(),
+});
+export type LinkedCommandSpec = z.infer<typeof LinkedCommandSpec>;
+
+/**
+ * `PUT /api/v1/agents/:agentId/linked-command` (epic 12, entry 12): the
+ * command line to link, replacing one already set.
+ */
+export const SetLinkedCommandRequest = LinkedCommandSpec;
+export type SetLinkedCommandRequest = z.infer<typeof SetLinkedCommandRequest>;
 
 /**
  * The one word an agent's key goes by in plain sentences: "key" for an API key, the last word of its own name for it

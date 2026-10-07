@@ -20,4 +20,5 @@ export {
   type AcpStartOptions,
 } from './acp-agent.js';
 export { createStreamMasker, maskSecrets, MASKED, secretValues, SECRET_ENV_NAME } from './mask.js';
+export { resolveLinkedCommand, splitCommandLine, type LinkedCommandResolution, type ResolvedLinkedCommand, type ResolveLinkedCommandOptions } from './linked-command.js';
 export { commandOf, toolCallPaths, type AcpToolInputPaths } from './tool-paths.js';

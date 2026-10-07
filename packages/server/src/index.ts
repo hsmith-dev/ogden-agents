@@ -30,6 +30,7 @@ export {
 } from './launcher-token.js';
 // Toolchain types for callers that stub the uv install (tests).
 export { ToolchainError, type DetectedToolStatus, type ToolchainPort, type ToolProgress } from '@ogden-agents/core';
+export { DevToolsError, type DevTools, type DevToolDescriptor, type DevToolDetection, type DevToolRunResult, type DevToolsPort } from '@ogden-agents/core';
 // Agent port types for callers that stub the agent (tests).
 export { AgentError, type AgentEvent, type AgentPort, type AgentSession } from '@ogden-agents/core';
 // Setup, secret and shortcut port types for callers that stub them (tests; story 2.3).

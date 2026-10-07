@@ -137,7 +137,7 @@ export function createBuildContext(deps: BuildsDeps) {
    * `objects/info` or another ref. Its git writes objects to the store and
    * reads the repo's as an alternate (`env`).
    */
-  const sandboxFor = async (kind: string, worktreePath: string, branch: string, runShort: string): Promise<{ sandbox: AgentSandbox; gitWritable: string[]; env: Record<string, string> }> => {
+  const sandboxFor = async (workspaceId: WorkspaceId, kind: string, worktreePath: string, branch: string, runShort: string): Promise<{ sandbox: AgentSandbox; gitWritable: string[]; env: Record<string, string> }> => {
     // Only the run's own branch's ref and reflog folders (`ogden/<run8>/`), never the user's refs.
     const git = await vcs.worktreeGitPaths(worktreePath, branch);
     let store: string;
@@ -158,7 +158,10 @@ export function createBuildContext(deps: BuildsDeps) {
       ...PROTECTED_PATHS.files.map((file) => join(worktreePath, file)),
     ];
     const home = deps.homeDir;
-    const deniedReads = [paths.realpath(dataDir) ?? dataDir, ...(home === undefined ? [] : credentialReadFences(home, (path) => paths.realpath(path)))];
+    // Generic dev tools (CAP-25, deny by default): every installed tool this project has not explicitly
+    // allowed for unattended builds is denied here, the same way a credential folder is. No dep wired: nothing extra denied.
+    const devToolPaths = (await deps.devTools?.deniedReadPathsFor(workspaceId)) ?? [];
+    const deniedReads = [paths.realpath(dataDir) ?? dataDir, ...(home === undefined ? [] : credentialReadFences(home, (path) => paths.realpath(path))), ...devToolPaths];
     return { sandbox: { kind, writableRoots: [worktreePath, ...gitWritable], deniedPaths, deniedReads, allowedReads: [worktreePath, store] }, gitWritable, env };
   };
 
@@ -170,8 +173,8 @@ export function createBuildContext(deps: BuildsDeps) {
   };
 
   /** The session setup of a sandboxed run: its sandbox, its object store's environment and core's permission policy. */
-  const unattendedSetup = async (kind: string, worktreePath: string, branch: string, runShort: string): Promise<BuildSessionSetup> => {
-    const { sandbox: contained, gitWritable, env } = await sandboxFor(kind, worktreePath, branch, runShort);
+  const unattendedSetup = async (workspaceId: WorkspaceId, kind: string, worktreePath: string, branch: string, runShort: string): Promise<BuildSessionSetup> => {
+    const { sandbox: contained, gitWritable, env } = await sandboxFor(workspaceId, kind, worktreePath, branch, runShort);
     const scope = { worktree: worktreePath, gitWritable, protectedPaths: PROTECTED_PATHS };
     return { cwd: worktreePath, sandbox: contained, env, decide: (request) => decideBuildPermission(request, scope, paths) };
   };

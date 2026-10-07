@@ -18,6 +18,7 @@ import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust
 import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
 import { createBuildSessions, type BuildSessions } from './build-sessions.js';
 import { createBuildSettings, type BuildSettings } from './build-settings.js';
+import { createDevTools, type DevTools, type DevToolsPort } from './dev-tools.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
 import type { SecretStorePort } from './secret-store-port.js';
@@ -30,6 +31,13 @@ import { createPaneStore, type PaneStore } from './pane-store.js';
 import { createTerminalsSettings, type TerminalsSettingsStore } from './terminals-settings.js';
 import { createPermissions, type Permissions } from './permissions.js';
 import { createSessionEvents, type SessionEvents } from './session-events.js';
+
+/** No tool, ever (AD-1): the default when no server wiring names a real adapter (tests, an install that opts out). */
+const NOOP_DEV_TOOLS_PORT: DevToolsPort = {
+  seedCatalog: () => [],
+  detect: async () => ({ installed: false }),
+  run: async () => ({ ok: false, reason: 'Dev tools are not available on this install.' }),
+};
 
 /**
  * Core as the server wires it: the event log, the session-event helper, the
@@ -72,6 +80,8 @@ export interface Core {
   readonly terminalsSettings: TerminalsSettingsStore;
   /** Unattended builds' limits and a project's build settings (story 5.8). */
   readonly buildSettings: BuildSettings;
+  /** Generic developer CLI tools: the catalog, confirmed real installs, and each project's unattended-build allowlist (CAP-25). */
+  readonly devTools: DevTools;
   /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
   readonly createNotifications: (ports: NotificationsPorts) => Notifications;
   /**
@@ -133,6 +143,13 @@ export type OpenCoreOptions = OpenDatabaseOptions &
     isAgentRegistered?: (agentId: AgentId) => boolean;
     /** The registered agents' own config folders, which join the protected paths (epic 12, 12.3). Read at each call, as `isAgentRegistered`. */
     agentConfigFolders?: () => readonly string[];
+    /**
+     * Generic developer CLI tools' seed catalog and OS mechanics (CAP-25):
+     * the server wires the real adapter; a test's own replaces it. Default:
+     * an empty catalog that detects and installs nothing (core names no
+     * tool, AD-1).
+     */
+    devToolsPort?: DevToolsPort;
     /**
      * The repo-relative files the registered agents that need project trust
      * run (their descriptors' `projectFiles`, epic 12, 12.3); the trust is
@@ -210,6 +227,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     agentModels,
     buildSessions: createBuildSessions(),
     buildSettings: createBuildSettings({ db, events, entities }),
+    devTools: createDevTools({ db, events, entities, port: options.devToolsPort ?? NOOP_DEV_TOOLS_PORT }),
     paneStore: createPaneStore({ db }),
     terminalsSettings: createTerminalsSettings({ db, events }),
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),

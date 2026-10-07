@@ -78,6 +78,9 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `PUT ${API_ROUTES.workspacePaneLayout}`,
   `PATCH ${API_ROUTES.workspacePane}`,
   `POST ${API_ROUTES.workspacePaneRestart}`,
+  // Generic developer CLI tools (CAP-25): not a BMad piece, served whole, behind the gate only.
+  `GET ${API_ROUTES.workspaceDevToolsAllowlist}`,
+  `PUT ${API_ROUTES.workspaceDevToolAllow}`,
 ];
 
 /** The BMad-named routes that serve projects with BMad off (story 10.2) or the whole install (story 4.14): never guarded, by design. */

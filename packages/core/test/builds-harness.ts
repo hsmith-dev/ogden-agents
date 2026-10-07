@@ -277,7 +277,22 @@ export interface Harness {
   endTurn(sessionId: SessionId, state?: 'idle' | 'error'): Promise<void>;
 }
 
-export async function harness({ pieces = ['board', 'builds'] as const, trusted = true, freeBytes, runner = testRunner, ticketList }: { pieces?: readonly string[]; trusted?: boolean; freeBytes?: (dir: string) => number | undefined; runner?: BuildRunnerPort; ticketList?: readonly Ticket[] } = {}): Promise<Harness> {
+export async function harness({
+  pieces = ['board', 'builds'] as const,
+  trusted = true,
+  freeBytes,
+  runner = testRunner,
+  ticketList,
+  devTools,
+}: {
+  pieces?: readonly string[];
+  trusted?: boolean;
+  freeBytes?: (dir: string) => number | undefined;
+  runner?: BuildRunnerPort;
+  ticketList?: readonly Ticket[];
+  /** The generic dev tools' sandbox-gate lookup (CAP-25). Default: nothing denied. */
+  devTools?: { deniedReadPathsFor: (workspaceId: WorkspaceId) => Promise<string[]> };
+} = {}): Promise<Harness> {
   const dataDir = tempDir('ogden-agents-builds-data-');
   const repo = tempDir('ogden-agents-builds-repo-');
   const fingerprints = new Map<string, string>();
@@ -308,6 +323,7 @@ export async function harness({ pieces = ['board', 'builds'] as const, trusted =
   core.buildSettings.setWorkspaceSettings(workspace.id, { testCommand: 'run-tests' });
   const builds = createBuilds({
     settings: core.buildSettings,
+    ...(devTools === undefined ? {} : { devTools }),
     commandEnv: () => ({ PATH: '/bin' }),
     setTimer: (run, ms) => {
       const timer = { ms, run, cancelled: false };

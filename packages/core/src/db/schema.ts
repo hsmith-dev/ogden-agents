@@ -328,6 +328,40 @@ export const workspaceBuildSettings = sqliteTable('workspace_build_settings', {
 });
 
 /**
+ * Install-wide dev tools the user named (CAP-25): generic developer CLI
+ * tools Ogden doesn't ship in its own seed catalog. A row per custom tool;
+ * `executable` and `installCommand` are for this computer's OS only (the
+ * one Ogden is running on). Removing a tool also removes its allowances
+ * (`devToolsUnattendedAllow`), handled by the use-case, not a DB cascade
+ * (that table has no foreign key to this one: a seed tool's id has no row
+ * here at all).
+ */
+export const devToolsCustom = sqliteTable('dev_tools_custom', {
+  id: text('id').primaryKey(),
+  label: text('label').notNull(),
+  executable: text('executable').notNull(),
+  installCommand: text('install_command').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+/**
+ * A project's unattended-build allowance per dev tool (CAP-25, deny by
+ * default): a row exists only while the user has explicitly allowed that
+ * tool for that project; revoking it deletes the row, so absence is always
+ * "not allowed", never a stale `false`.
+ */
+export const devToolsUnattendedAllow = sqliteTable(
+  'dev_tools_unattended_allow',
+  {
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    toolId: text('tool_id').notNull(),
+  },
+  (t) => [uniqueIndex('dev_tools_unattended_allow_unique').on(t.workspaceId, t.toolId)],
+);
+
+/**
  * A project's terminal panes (epic 16, story 16.7): what a pane IS, never what
  * it printed: its id, launcher, name and when it was made. The program's
  * output and the arguments the user typed are not kept. After a restart each

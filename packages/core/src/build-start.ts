@@ -122,7 +122,7 @@ export function createStarter(ctx: BuildCtx) {
       if (noSkill !== undefined) throw new BuildRefusedError('plan_uncommitted', noSkill);
       for (const folder of PRECREATED_FOLDERS) mkdirSync(join(real, folder), { recursive: true });
       // An attended run has no sandbox, so no object store: the user answers every card. A sandboxed run's git writes its own store.
-      const setup = attended ? ({ attended: true, cwd: real } as const) : await unattendedSetup(sandboxKind, real, branch, runShort);
+      const setup = attended ? ({ attended: true, cwd: real } as const) : await unattendedSetup(workspaceId, sandboxKind, real, branch, runShort);
       const deadline = deadlineFromNow();
       if (queued === undefined) {
         session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: agent });
@@ -198,7 +198,7 @@ export function createStarter(ctx: BuildCtx) {
       // The server restarted since the pause (or the run was stopped): the setup is rebuilt from the run, so the next prompt starts a fresh agent there.
       const short = runShortOf(run);
       if (short === undefined) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
-      buildSessions.set(run.sessionId, attended ? { attended: true, cwd: run.worktreePath } : await unattendedSetup(sandboxKind, run.worktreePath, run.branch, short));
+      buildSessions.set(run.sessionId, attended ? { attended: true, cwd: run.worktreePath } : await unattendedSetup(workspaceId, sandboxKind, run.worktreePath, run.branch, short));
     }
   };
 

@@ -56,6 +56,13 @@ const buildsSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/builds-settings-page'), 'BuildsSettingsPage'),
 });
 
+/** Generic developer CLI tools: detect, confirmed install, and each project's unattended-build allowlist (CAP-25). */
+const devToolsSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/dev-tools',
+  component: lazyRouteComponent(() => import('./routes/dev-tools-settings-page'), 'DevToolsSettingsPage'),
+});
+
 /** Desktop notifications and the sound for when a chat needs you (backlog story 8). */
 const notificationsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -180,7 +187,7 @@ const routeTree = rootRoute.addChildren([
   workspaceOrchestrateRoute,
   workspaceTerminalsRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, devToolsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

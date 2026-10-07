@@ -110,6 +110,8 @@ export function createBuildsWiring({
     // The project's default chat agent, for the default build agent's fallback (epic 17).
     projectDefaultAgent: (workspaceId) => core.permissions.getSettings(workspaceId).defaultAgentId,
     settings: core.buildSettings,
+    // The sandbox's deny-by-default lookup for generic dev tools (CAP-25).
+    devTools: core.devTools,
     // The re-run of a project's tests gets the agents' allowlist and never an API key (AD-16).
     commandEnv: () => withoutAgentKeys(agentEnvironment()),
     bmad: core.bmad,

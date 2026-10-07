@@ -64,7 +64,8 @@ test('Install in Settings > Tools downloads with progress and ends ready, with n
     // Reached from the sidebar's Settings menu.
     const sidebar = page.locator('aside[data-slot="sidebar"]');
     await sidebar.getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('menuitem', { name: 'Tools' }).click();
+    // Exact: "Developer tools" (CAP-25) is a separate menu item whose name also contains "tools".
+    await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
     await expect(page).toHaveURL(/\/settings\/tools$/);
     await expect(page.getByRole('heading', { name: 'Tools', level: 1 })).toBeVisible();
 

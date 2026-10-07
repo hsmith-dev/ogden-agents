@@ -137,6 +137,13 @@ import {
   ToolchainInstallStartedEvent,
   ToolchainInstallStartedInput,
 } from './events-install.js';
+import {
+  DevToolsCatalogChangedEvent,
+  DevToolsCatalogChangedInput,
+  DevToolsCatalogChangeReason,
+  WorkspaceDevToolUnattendedAllowChangedEvent,
+  WorkspaceDevToolUnattendedAllowChangedInput,
+} from './events-dev-tools.js';
 import { ApiErrorCode } from './errors.js';
 import { PermissionRuleId, RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
@@ -217,6 +224,9 @@ export {
   AgentUninstalledEvent,
   AgentAuthChangedEvent,
 } from './events-install.js';
+
+// Generic developer CLI tool events (CAP-25).
+export { DevToolsCatalogChangedEvent, DevToolsCatalogChangeReason, WorkspaceDevToolUnattendedAllowChangedEvent } from './events-dev-tools.js';
 
 // ---------------------------------------------------------------------------
 // Event types. Each is defined once without the core-assigned fields (what a
@@ -407,6 +417,8 @@ export const CoreEvent = z.discriminatedUnion('type', [
   AgentInstallFailedEvent,
   AgentUninstalledEvent,
   AgentAuthChangedEvent,
+  DevToolsCatalogChangedEvent,
+  WorkspaceDevToolUnattendedAllowChangedEvent,
   SettingsDeveloperModeChangedEvent,
   SettingsAgentDefaultModelChangedEvent,
   SettingsWhileWorkingChangedEvent,
@@ -477,6 +489,8 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   AgentInstallFailedInput,
   AgentUninstalledInput,
   AgentAuthChangedInput,
+  DevToolsCatalogChangedInput,
+  WorkspaceDevToolUnattendedAllowChangedInput,
   SettingsDeveloperModeChangedInput,
   SettingsAgentDefaultModelChangedInput,
   SettingsWhileWorkingChangedInput,

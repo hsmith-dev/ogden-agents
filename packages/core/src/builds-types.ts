@@ -8,6 +8,7 @@ import { type PathNormalizer } from './build-permission-policy.js';
 import type { BuildRunnerPort } from './build-runner-port.js';
 import type { BuildSessions } from './build-sessions.js';
 import type { Chat } from './chat/types.js';
+import type { DevTools } from './dev-tools.js';
 import type { Entities } from './entities.js';
 import { NotFoundError, NotImplementedError } from './errors.js';
 import type { EventLog } from './event-log.js';
@@ -156,6 +157,12 @@ export interface BuildsDeps {
   /** Pre-enqueue validation against the checkout's committed revision, before any run/session exists. */
   committedSkillReach?: (agent: BuildAgent, repoPath: string, revision: string) => Promise<string | undefined>;
   chat: Pick<Chat, 'createChatSession' | 'sendMessage' | 'releaseAgent' | 'chatAgents'>;
+  /**
+   * The generic dev tools' unattended allowlist (CAP-25, deny by default):
+   * `sandboxFor` adds every not-yet-allowed installed tool's path to the
+   * run's `deniedReads`. Default: nothing denied (no dev tools feature wired).
+   */
+  devTools?: Pick<DevTools, 'deniedReadPathsFor'>;
   buildSessions: BuildSessions;
   /** Ogden Agents' data folder: worktrees go in `<dataDir>/w/`. */
   dataDir: string;

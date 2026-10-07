@@ -28,6 +28,7 @@ export * from './orchestration-build-review.js';
 export * from './terminal.js';
 export * from './updates.js';
 export * from './toolchain.js';
+export * from './dev-tools.js';
 export * from './build-runs.js';
 export * from './build-settings.js';
 export * from './build-verification.js';

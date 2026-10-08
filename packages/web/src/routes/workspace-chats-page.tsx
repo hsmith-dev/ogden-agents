@@ -1,5 +1,5 @@
 import { ChatCircle, GearSix, House } from '@phosphor-icons/react';
-import type { Session } from '@ogden-agents/shared';
+import type { RemoteMachineId, Session } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
@@ -10,6 +10,7 @@ import { Composer } from '@/chat/composer';
 import { StartChatActions, useStartChat } from '@/chat/start-chat';
 import { newChatDraftKey } from '@/chat/drafts';
 import { agentAvailability, projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
+import { MachinePicker } from '@/remote-machines/machine-picker';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { EmptyState, PageBody } from '@/ui/page';
@@ -49,6 +50,8 @@ function ChatsPage({ wsId }: { wsId: string }) {
   const queryClient = useQueryClient();
   const settings = useWorkspaceSettings(wsId);
   const [pickedAgent, setPickedAgent] = useState<string | undefined>(undefined);
+  // The machine a new chat runs on (CAP-24, epic 19 story 19.7): Local until the user picks a confirmed one; never persisted beyond this page.
+  const [pickedMachine, setPickedMachine] = useState<RemoteMachineId | null>(null);
   const settingsKnown = settings.data !== undefined || settings.isError;
   const projectDefault = chatAgents.data === undefined || !settingsKnown ? undefined : projectDefaultAgent(chatAgents.data, settings.data?.defaultAgentId);
   const agentId = pickedAgent ?? projectDefault;
@@ -86,7 +89,7 @@ function ChatsPage({ wsId }: { wsId: string }) {
       setCreateError(blocked.description);
       return;
     }
-    start(agentId);
+    start(agentId, pickedMachine);
   };
 
   return (
@@ -95,7 +98,13 @@ function ChatsPage({ wsId }: { wsId: string }) {
         {missing ? null : (
           <div className="ml-auto flex items-center gap-2">
             {/* With chats listed, the agent New chat starts with sits beside it (epic 6, entry 6). */}
-            {chatAgents.data === undefined || agentId === undefined || listEmpty ? null : <AgentPicker agents={chatAgents.data.agents} value={agentId} onChange={onPick} />}
+            {chatAgents.data === undefined || agentId === undefined || listEmpty ? null : (
+              <>
+                <AgentPicker agents={chatAgents.data.agents} value={agentId} onChange={onPick} />
+                {/* The machine it runs on (CAP-24, epic 19 story 19.7), beside the agent it runs with. */}
+                <MachinePicker value={pickedMachine} onChange={setPickedMachine} />
+              </>
+            )}
             <Button variant="ghost" size="icon" asChild>
               <Link to="/w/$wsId/settings" params={{ wsId }} aria-label="Workspace settings" data-testid="workspace-settings-link">
                 <GearSix aria-hidden />
@@ -212,7 +221,7 @@ function ChatsPage({ wsId }: { wsId: string }) {
                   describedBy={blocked === undefined ? undefined : 'agent-unavailable'}
                   draftKey={newChatDraftKey(wsId)}
                   onSend={async (text) => {
-                    const session = firstChat.current ?? (await createChatSession(wsId, undefined, agentId));
+                    const session = firstChat.current ?? (await createChatSession(wsId, undefined, agentId, undefined, pickedMachine));
                     firstChat.current = session;
                     setFirstChatId(session.id);
                     await sendMessage(wsId, session.id, text);

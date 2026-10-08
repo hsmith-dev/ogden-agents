@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { BmadPieceSet } from './bmad.js';
 import { AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MAX_HANDOFF_BRIEF_CHARS, MessageId, PermissionDecision, WhileWorking } from './events.js';
 import { AgentModel, DefaultModeNotice, ModelId, PermissionMode, Session, Workspace } from './entities.js';
-import { PermissionRuleId, WorkspaceId } from './ids.js';
+import { PermissionRuleId, RemoteMachineId, WorkspaceId } from './ids.js';
 import { OrchestrationMode } from './orchestration-run.js';
 import { AgentInstallState } from './setup.js';
 import { TeamRoster } from './team.js';
@@ -45,6 +45,13 @@ export const CreateSessionRequest = z.object({
    * project's default for the agent, else the install's, else `null`.
    */
   model: ModelId.nullable().optional(),
+  /**
+   * The remote machine this chat runs its agent on (CAP-24, epic 19 story
+   * 19.7): one of the install's confirmed machines, or `null`/omitted for a
+   * local chat (exactly as before this story). Whether the machine actually
+   * exists and is reachable is checked when the chat's agent starts, not here.
+   */
+  machineId: RemoteMachineId.nullable().optional(),
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
 

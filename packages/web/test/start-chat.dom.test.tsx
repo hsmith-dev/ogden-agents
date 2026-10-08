@@ -86,7 +86,7 @@ describe('Start a chat', () => {
     fireEvent.click(button);
     fireEvent.click(button);
     expect(createChatSession).toHaveBeenCalledTimes(1);
-    expect(createChatSession).toHaveBeenCalledWith('ws_a', undefined, 'fake-agent');
+    expect(createChatSession).toHaveBeenCalledWith('ws_a', undefined, 'fake-agent', undefined, undefined);
     expect(button.getAttribute('aria-busy')).toBe('true');
     expect(screen.getByRole('status').textContent).toBe('Starting a chat');
     await act(async () => resolve(session('fake-agent')));
@@ -130,7 +130,7 @@ describe('Use another agent', () => {
     const options = screen.getAllByTestId('start-chat-option');
     expect(options.map((option) => option.textContent)).toEqual(['Fake AgentInstalled, signed in', `Third Agent${SIGNED_OUT_REASON}`]);
     fireEvent.click(options[0]!);
-    await vi.waitFor(() => expect(createChatSession).toHaveBeenCalledWith('ws_a', undefined, 'fake-agent'));
+    await vi.waitFor(() => expect(createChatSession).toHaveBeenCalledWith('ws_a', undefined, 'fake-agent', undefined, undefined));
     expect(await screen.findByTestId('chat-open')).toBeTruthy();
   });
 

@@ -127,7 +127,9 @@ export function createBuilds(deps: BuildsDeps, testHooks?: BuildsTestHooks): Bui
       // Each agent builds through its own runner (epic 17): one with none is refused.
       const agent = parsed.data.agent ?? defaultAgentFor(workspaceId);
       if (runnerFor(agent) === undefined) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
-      return inDispatch(() => serializedByRepo(repoPath, () => startLocked(workspaceId, repoPath, ref, agent, parsed.data.mode)));
+      // The machine this build runs on (CAP-24, epic 19 story 19.7), reaching `startLocked` for the first time
+      // from a real route: `null`/omitted is a local build, exactly as before this story.
+      return inDispatch(() => serializedByRepo(repoPath, () => startLocked(workspaceId, repoPath, ref, agent, parsed.data.mode, undefined, parsed.data.machineId ?? null)));
     },
 
     async startAll(workspaceId, request) {

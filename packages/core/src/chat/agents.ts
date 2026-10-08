@@ -7,7 +7,7 @@
 import { projectNotTrustedReason, redactSecrets, type Session, type SessionId, type Workspace } from '@ogden-agents/shared';
 import { AgentError, type AgentEvent, type AgentPermissionRequest, type AgentRestored, type AgentSession } from '../agent-port.js';
 import { PRIME_NEW_MESSAGE, primedPrompt } from '../resume-prime.js';
-import { AGENT_SESSION_REF, AGENT_STARTING_NOTICE_MS, HANDOFF_PENDING_REF } from './constants.js';
+import { AGENT_SESSION_REF, AGENT_STARTING_NOTICE_MS, HANDOFF_PENDING_REF, REMOTE_CHAT_CWD } from './constants.js';
 import type { ChatContext } from './context.js';
 import type { Models } from './model.js';
 import type { ModeApplier } from './permission-mode.js';
@@ -90,9 +90,15 @@ export function createAgents(
     // An agent that takes its model only at start gets the chat's in its start (story 11); one told live starts on its own choice.
     const startModel = takesModelAtStart(agentId) ? startModelFor(session.id, agentId) : null;
     entry.appliedModel = startModel;
-    // The real-cased path: the case-folded key is for uniqueness only (AD-2).
+    // A plain chat targeting a remote machine (CAP-24, epic 19 story 19.7): `session.machineId`, set only at the
+    // chat's creation, never changed. `build` sessions never set it (a build's own remote dispatch is `Run.machineId`,
+    // reaching the agent through `build.remote` below instead); the two mechanisms never overlap on one session.
+    const machineId = session.machineId ?? null;
+    // The real-cased path: the case-folded key is for uniqueness only (AD-2). A remote chat has no pushed worktree
+    // the way a build does (CAP-24's non-goals rule out provisioning anything on the remote), so it runs in
+    // `REMOTE_CHAT_CWD` -- the machine's own home directory -- never `workspace.realPath`, which names nothing there.
     const input = {
-      cwd: build?.cwd ?? workspace.realPath ?? workspace.path,
+      cwd: machineId !== null ? REMOTE_CHAT_CWD : build?.cwd ?? workspace.realPath ?? workspace.path,
       env: { ...agentEnv(session.id), ...unattended?.env },
       onPermissionRequest,
       permissionMode: startMode,
@@ -116,9 +122,17 @@ export function createAgents(
       if (session.kind === 'build' && build === undefined) {
         throw new AgentError('agent_unavailable', `${agent.displayName} can't run this build any more. Build the ticket again from the board.`);
       }
+      // A remote chat (CAP-24, epic 19 story 19.7) opens a fresh connection every time its agent (re)starts --
+      // never reused across restarts -- fail closed with `agent_unavailable` when this install never wired the
+      // capability at all (every existing test harness and installation that doesn't wire CAP-24, no ripple).
+      let withRemote = input;
+      if (machineId !== null) {
+        if (ctx.options.remote === undefined) throw new AgentError('agent_unavailable', `${agent.displayName} can't run on a remote machine: remote execution isn't set up.`);
+        withRemote = { ...input, remote: await ctx.options.remote.connect(machineId) };
+      }
       return previous === undefined
-        ? agent.startSession(input).then((started) => ({ session: started, restored: undefined }))
-        : agent.reopenSession({ ...input, agentSessionId: previous });
+        ? agent.startSession(withRemote).then((started) => ({ session: started, restored: undefined }))
+        : agent.reopenSession({ ...withRemote, agentSessionId: previous });
     };
     const dropped = droppedAgents.get(session.id);
     const opening = dropped === undefined ? begin() : dropped.then(begin);

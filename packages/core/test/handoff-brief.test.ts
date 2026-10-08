@@ -15,7 +15,7 @@ const created = (agentId?: string): CoreEvent =>
   ({
     ...base(),
     type: 'session.created',
-    payload: { session: { id: 'ses_1', workspaceId: 'ws_1', kind: 'chat', state: 'idle', driver: 'ui', permissionMode: 'ask', ...(agentId === undefined ? {} : { agentId }), title: null, adapterRefs: {}, createdAt: at, updatedAt: at } },
+    payload: { session: { id: 'ses_1', workspaceId: 'ws_1', kind: 'chat', state: 'idle', driver: 'ui', permissionMode: 'ask', machineId: null, ...(agentId === undefined ? {} : { agentId }), title: null, adapterRefs: {}, createdAt: at, updatedAt: at } },
   }) as CoreEvent;
 const message = (role: 'user' | 'agent', content: string, origin?: 'deny_reason'): CoreEvent =>
   ({ ...base(), type: 'session.message_completed', payload: { messageId: `msg_${seq}`, role, content, ...(origin === undefined ? {} : { origin }) } }) as CoreEvent;

@@ -90,10 +90,11 @@ describe('upgrading a 0.2.0 data folder (story 10.7)', () => {
       expect(event).toEqual({ id: row.id, seq: row.seq, workspaceId: row.workspace_id, streamId: row.stream_id, type: row.type, at: row.at, payload: JSON.parse(row.payload) });
       const parsed = CoreEvent.safeParse(event);
       expect(parsed.success, `${row.type} #${row.seq}: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
-      // Parsing drops nothing: the payload reads back as stored. The one field it adds is a
-      // 0.2.0 session's permission mode, read as Ask (permission modes: old history reads as Ask).
+      // Parsing drops nothing: the payload reads back as stored. The fields it adds are a
+      // 0.2.0 session's permission mode, read as Ask (permission modes: old history reads as Ask),
+      // and its remote target, read as local (CAP-24, epic 19 story 19.7: old history ran nowhere else).
       const stored = JSON.parse(row.payload) as { session?: Record<string, unknown> };
-      const expected = row.type === 'session.created' ? { ...stored, session: { ...stored.session, permissionMode: 'ask' } } : stored;
+      const expected = row.type === 'session.created' ? { ...stored, session: { ...stored.session, permissionMode: 'ask', machineId: null } } : stored;
       expect(parsed.data?.payload).toEqual(expected);
     }
     // The 0.2.0 event types the fixture covers.

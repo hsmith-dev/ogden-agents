@@ -66,6 +66,8 @@ describe('a remote attended build, full round trip (CAP-24, epic 19 story 19.6)'
     expect(fake.connects).toEqual([machineId, machineId]);
     expect(fake.closes).toEqual([1]);
     const setup = h.core.buildSessions.get(session.id)!;
+    // `cwd` here is the shell's own navigation target (relative to the machine's login directory): the ACP agent
+    // is told a different, always-safe `.` once it's actually there (`acp-base/acp-agent.ts`'s own concern).
     expect(setup).toMatchObject({ attended: true, cwd: `.ogden-agents/remote-runs/${run.id}` });
     expect('remote' in setup && setup.remote !== undefined).toBe(true);
     expect(h.sent).toHaveLength(1);

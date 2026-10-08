@@ -3,6 +3,7 @@ import { AgentId } from './events-common.js';
 import { BuildAgent, BuildMode, RunQueueEntry } from './build-runs.js';
 import { VerificationResult } from './build-verification.js';
 import { Run, RunOutcome, Session } from './entities.js';
+import { RemoteMachineId } from './ids.js';
 import { TICKET_REF_PATTERN } from './planning-board.js';
 
 /**
@@ -50,6 +51,14 @@ export const StartBuildRequest = z
     /** `attended` (5.6): the user watching, every tool call a permission card, no sandbox. Default `unattended`, which needs one. */
     mode: BuildMode.default('unattended'),
     all: z.literal(true, { error: BUILD_TARGET_MESSAGE }).optional(),
+    /**
+     * The remote machine this build runs on (CAP-24, epic 19 story 19.7):
+     * one of the install's confirmed machines, attended only (19.6's scope
+     * decision). `null`/omitted is a local build, exactly as before this
+     * story. Whether the machine actually exists and is reachable now is
+     * checked when the build starts (`validateStart`), not here.
+     */
+    machineId: RemoteMachineId.nullable().optional(),
   })
   .strict()
   .refine((request) => (request.ref === undefined) !== (request.all === undefined), BUILD_TARGET_MESSAGE);
@@ -188,6 +197,14 @@ export const REVIEW_NO_FINDINGS_TEXT = 'The review recorded no findings.';
 export const REVIEW_SHOW_CHANGES_LABEL = (count: number) => `Show the code changes (${count} ${count === 1 ? 'file' : 'files'})`;
 export const REJECT_NOTE_LABEL = 'A note for the next try (optional)';
 export const RUN_ACTIVE_MESSAGE = 'This ticket is already being built.';
+/**
+ * A remote machine was named for an unattended build (CAP-24, epic 19 story
+ * 19.6, the scope decision): not supported yet. Lives here, not only in
+ * core's `build-names.ts` (which re-exports it unchanged), so the web
+ * layer's `MachinePicker` (story 19.7) can show the exact same words for the
+ * universal unattended+remote disablement without depending on core.
+ */
+export const UNATTENDED_REMOTE_MESSAGE = "Unattended builds on a remote machine aren't supported yet. Build with you watching instead.";
 export const SANDBOX_UNAVAILABLE_MESSAGE = "Unattended builds need a sandbox, and this computer doesn't have one Ogden Agents can use, so nothing was started.";
 export const CHECKOUT_DIRTY_MESSAGE = 'Your project has uncommitted changes outside the BMad output folder and AGENTS.md. Commit or stash them, then approve again.';
 export const MERGE_CONFLICT_MESSAGE = "The build's changes conflict with your project, so nothing was merged. The run needs a rebase.";

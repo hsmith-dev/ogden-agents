@@ -27,6 +27,7 @@ import {
   SandboxStatusResponse,
   SessionRunResponse,
   type CoreEvent,
+  type RemoteMachineId,
   type Run,
 } from '@ogden-agents/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -47,9 +48,10 @@ import { useEventStream, useSessionEvents } from '@/events/event-stream';
  * worktree and `build` session. `mode: 'attended'` (story 5.6, the Build
  * dialog's Build with me watching) builds with every tool call a card.
  */
-export async function startBuild(wsId: string, ref: string, mode: BuildMode = 'unattended', auth: Auth = tabAuth, agent?: string): Promise<BuildResponse> {
+export async function startBuild(wsId: string, ref: string, mode: BuildMode = 'unattended', auth: Auth = tabAuth, agent?: string, machineId?: RemoteMachineId | null): Promise<BuildResponse> {
   // `agent` is the picker's choice for this run (epic 17); none: the project's default build agent.
-  const body = { ref, ...(mode === 'attended' ? { mode } : {}), ...(agent === undefined ? {} : { agent }) };
+  // `machineId` (CAP-24, epic 19 story 19.7): the machine this build runs on, attended only; omitted or `null` is local.
+  const body = { ref, ...(mode === 'attended' ? { mode } : {}), ...(agent === undefined ? {} : { agent }), ...(machineId === undefined || machineId === null ? {} : { machineId }) };
   const json = await call(auth, apiPath(API_ROUTES.workspaceBuilds, { wsId }), postJson(body), BUILD_FAILED);
   return BuildResponse.parse(json);
 }

@@ -1,4 +1,5 @@
 /** The chat use-case's exported constants (moved from `chat.ts`, story 3.11). */
+import { REMOTE_LAUNCH_CWD } from '../remote-worktree-sync.js';
 
 /** The reason on sessions the server moved to `idle` because it stopped or restarted under them (AD-3). */
 export const RESTARTED_REASON = 'Ogden Agents was restarted';
@@ -112,3 +113,17 @@ export const PERMISSION_MODE_TIMEOUT_MS = 5_000;
  * one (Antigravity takes about 17 s on Windows) shows as starting.
  */
 export const AGENT_STARTING_NOTICE_MS = 3_000;
+
+/**
+ * The folder a remote chat's agent runs in (CAP-24, epic 19 story 19.7):
+ * `REMOTE_LAUNCH_CWD` (`.`, `remote-worktree-sync.ts`) -- the same constant
+ * an attended remote build uses (story 19.6), for the same reason (see its
+ * own doc comment: never a relative path an agent could re-join onto an
+ * already-correct location). A plain chat has no pushed worktree the way a
+ * build does -- CAP-24's non-goals rule out provisioning anything on the
+ * remote machine -- so this story's own design call is to run it in the one
+ * folder every confirmed machine is guaranteed to have: the remote user's
+ * own home directory (the login directory a fresh SSH session starts in),
+ * never a path Ogden Agents invented or assumed exists.
+ */
+export const REMOTE_CHAT_CWD = REMOTE_LAUNCH_CWD;

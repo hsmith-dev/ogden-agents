@@ -34,6 +34,8 @@ const state = vi.hoisted(() => ({
   patches: [] as unknown[],
   settings: { maxConcurrentRuns: 2, testCommand: null, defaultBuildAgentId: null } as unknown,
   tickets: undefined as unknown,
+  /** Confirmed remote machines (CAP-24, epic 19 story 19.7): empty by default, exactly as before this story. */
+  machines: [] as unknown[],
 }));
 
 vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [], caughtUp: true }) }));
@@ -56,6 +58,7 @@ vi.mock('@/auth/tab-token', () => ({
       if (method === 'GET' && path.endsWith('/build-agents')) return answer(state.agents);
       if (method === 'GET' && path.includes('/build-sandbox')) return answer({ status: path.includes('agent=codex') ? CODEX_ONLY : READY });
       if (method === 'GET' && path.endsWith('/build-settings')) return answer({ settings: state.settings });
+      if (method === 'GET' && path.endsWith(API_ROUTES.remoteMachines)) return answer({ machines: state.machines });
       if (method === 'PATCH' && path.endsWith('/build-settings')) {
         const body = JSON.parse(String(init.body)) as Partial<WorkspaceBuildSettings>;
         state.patches.push(body);
@@ -107,12 +110,25 @@ const TWO: BuildAgentsResponse = {
   ],
 };
 
+const CONFIRMED_MACHINE = {
+  id: 'mach_01J9Z3K4M5N6P7Q8R9S0T1V2W6',
+  host: 'bench.local',
+  port: 22,
+  username: 'ada',
+  label: 'Build bench',
+  hostKeyFingerprint: 'fp-fake',
+  publicKey: 'ssh-ed25519 FAKE test', // secret-scan:allow: an obviously-fake, in-memory test double
+  hostKeyConfirmed: true,
+  createdAt: '2026-10-06T00:00:00.000Z',
+};
+
 beforeEach(() => {
   state.calls.length = 0;
   state.bodies.length = 0;
   state.patches.length = 0;
   state.settings = { maxConcurrentRuns: 2, testCommand: null, defaultBuildAgentId: null };
   state.agents = TWO;
+  state.machines = [];
 });
 afterEach(() => cleanup());
 
@@ -181,6 +197,38 @@ describe('the Build picker (epic 17)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Build this story 1.1' }));
     await settle();
     await settle();
+    expect(state.bodies).toEqual([{ ref: '1.1' }]);
+  });
+
+  it('with only one agent but a confirmed remote machine (CAP-24, epic 19 story 19.7), Build still opens the dialog, offering Local', async () => {
+    state.agents = { defaultAgentId: 'claude-code', agents: [TWO.agents[0], TWO.agents[2]] };
+    state.machines = [CONFIRMED_MACHINE];
+    mount(<BoardTickets wsId={WS} builds={{ onStarted: () => {} }} />);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Build this story 1.1' }));
+    await settle();
+    await settle();
+    // Nothing started yet: a machine must always be reachable from one click, never only from the paths
+    // (want of a sandbox, more than one agent) that happened to already open the dialog before this story.
+    expect(state.bodies).toEqual([]);
+    expect(screen.getByTestId('build-machine-picker')).toBeTruthy();
+    expect(screen.getByTestId('build-machine-local').getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByTestId(`build-machine-${CONFIRMED_MACHINE.id}`).closest('[data-slot="radio-group-option"]')?.textContent).toContain('Build bench');
+    // Local, unchosen, still starts the same unattended run as before this story.
+    fireEvent.click(screen.getByTestId('build-dialog-start'));
+    await settle();
+    expect(state.bodies).toEqual([{ ref: '1.1' }]);
+  });
+
+  it('with no confirmed remote machine (unconfirmed ones don’t count) and one agent, Build still goes straight on', async () => {
+    state.agents = { defaultAgentId: 'claude-code', agents: [TWO.agents[0], TWO.agents[2]] };
+    state.machines = [{ ...CONFIRMED_MACHINE, hostKeyConfirmed: false }];
+    mount(<BoardTickets wsId={WS} builds={{ onStarted: () => {} }} />);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Build this story 1.1' }));
+    await settle();
+    await settle();
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(state.bodies).toEqual([{ ref: '1.1' }]);
   });
 });

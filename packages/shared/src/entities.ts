@@ -142,6 +142,8 @@ export const Session = z.object({
    * `session.model_changed` event.
    */
   model: ModelId.optional(),
+  /** The remote machine this chat runs its agent on (CAP-24, epic 19 story 19.7), set at creation, never changed. `null` for a local chat, and in sessions from before it. */
+  machineId: RemoteMachineId.nullable().default(null),
   /** The user's name for the chat (backlog story 12); `null` until they give one. */
   title: z.string().nullable(),
   /**

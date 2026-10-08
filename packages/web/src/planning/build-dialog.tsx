@@ -20,6 +20,8 @@ import {
   OTHER_AGENT_DISABLED_TEXT,
   SANDBOX_CHOICE_LABELS,
   SANDBOX_CHOICES,
+  UNATTENDED_REMOTE_MESSAGE,
+  type RemoteMachineId,
   type SandboxChoice,
   type SandboxProbe,
   type SandboxStatus,
@@ -27,6 +29,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import type { RefObject } from 'react';
+import { useRemoteMachines } from '@/remote-machines/remote-machines-api';
 import { Button } from '@/ui/button';
 import { Dialog, DialogContent } from '@/ui/dialog';
 import { Notice } from '@/ui/notice';
@@ -113,6 +116,30 @@ function AgentPicker({ agents, selected, onSelect, groupRef }: { agents: readonl
   );
 }
 
+/**
+ * The machine this build runs on (CAP-24, epic 19 story 19.7): Local, plus
+ * every *confirmed* machine (`useRemoteMachines`), a `RadioGroup` matching
+ * this dialog's own attended/unattended and sandbox-choice sections. With no
+ * confirmed machine there is nothing to choose beside Local, so the section
+ * renders nothing.
+ */
+function MachineChoice({ machines, selected, onSelect }: { machines: readonly { id: RemoteMachineId; label: string; username: string; host: string }[]; selected: RemoteMachineId | null; onSelect: (id: RemoteMachineId | null) => void }) {
+  if (machines.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1" data-testid="build-machine-picker">
+      <Text variant="label" id="build-machine-label">
+        Run on
+      </Text>
+      <RadioGroup value={selected ?? 'local-machine'} onValueChange={(value) => onSelect(value === 'local-machine' ? null : (value as RemoteMachineId))} aria-labelledby="build-machine-label">
+        <RadioGroupOption id="build-machine-local" value="local-machine" label="Local" description="This computer." data-testid="build-machine-local" />
+        {machines.map((machine) => (
+          <RadioGroupOption key={machine.id} id={`build-machine-${machine.id}`} value={machine.id} label={machine.label} description={`${machine.username}@${machine.host}`} data-testid={`build-machine-${machine.id}`} />
+        ))}
+      </RadioGroup>
+    </div>
+  );
+}
+
 export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = false, picker = false }: BuildDialogProps) {
   // Which agents can build here and how (epic 17). A failed read shows no picker: the dialog is as it was, for the default agent.
   const agentsQuery = useQuery({ queryKey: ['build-agents', wsId], queryFn: () => fetchBuildAgents(wsId), retry: false, staleTime: 0, gcTime: 0 });
@@ -138,12 +165,17 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = fal
   const ready = status?.available === true;
   const choices: readonly SandboxChoice[] = ready ? (confirm || picker ? ['attended'] : []) : status === undefined || status.choices.length === 0 ? SANDBOX_CHOICES : status.choices;
   const dockerReady = status?.probes.some((probe) => probe.kind === 'docker' && probe.state === 'detected') === true;
+  // The machine this build runs on (CAP-24, epic 19 story 19.7): `null` is local, as before this story.
+  const machinesQuery = useRemoteMachines();
+  const confirmedMachines = (machinesQuery.data ?? []).filter((machine) => machine.hostKeyConfirmed);
+  const [machineId, setMachineId] = useState<RemoteMachineId | null>(null);
 
   const begin = (mode: 'attended' | 'unattended') => {
     if (starting) return;
     setStarting(true);
     setFailure(undefined);
-    startBuild(wsId, ticketRef, mode, undefined, agentId).then(
+    // Attended only (19.6's scope decision): a remote machine never reaches an unattended start, even if somehow asked for one.
+    startBuild(wsId, ticketRef, mode, undefined, agentId, mode === 'attended' ? machineId : null).then(
       ({ session, run }) => {
         setStarting(false);
         onStarted(session.id, run.id);
@@ -156,6 +188,8 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = fal
     );
   };
   const startable = ready && (confirm || picker);
+  // Unattended + remote is never submittable (19.6's own refusal, kept out of the UI entirely, never silently local instead).
+  const unattendedBlockedByRemote = startable && machineId !== null;
   const buildAttended = () => begin('attended');
 
   const choice = (id: SandboxChoice) => {
@@ -221,6 +255,7 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = fal
           </Text>
         ) : null}
         {usable.length >= 2 && agentId !== undefined ? <AgentPicker agents={agents} selected={agentId} onSelect={setChosen} groupRef={groupRef} /> : null}
+        <MachineChoice machines={confirmedMachines} selected={machineId} onSelect={setMachineId} />
         {sandbox.isPending || agentsQuery.isPending ? (
           <Skeleton className="h-10 w-full" />
         ) : status === undefined ? (
@@ -247,9 +282,23 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted, confirm = fal
         )}
         {ready && !confirm && !picker ? <Text variant="body" data-testid="build-dialog-ready">{BUILD_DIALOG_READY_TEXT}</Text> : null}
         {startable ? (
-          <Button type="button" variant="primary" aria-disabled={starting || undefined} onClick={() => begin('unattended')} data-testid="build-dialog-start">
-            {BUILD_DIALOG_CONFIRM_BUTTON}
-          </Button>
+          <div className="flex flex-col gap-1">
+            <Button
+              type="button"
+              variant="primary"
+              aria-disabled={starting || unattendedBlockedByRemote || undefined}
+              onClick={() => (unattendedBlockedByRemote ? undefined : begin('unattended'))}
+              data-testid="build-dialog-start"
+            >
+              {BUILD_DIALOG_CONFIRM_BUTTON}
+            </Button>
+            {/* Unattended + remote (19.6's scope decision): shown unavailable, never silently local instead; the exact same words as the refusal itself. */}
+            {unattendedBlockedByRemote ? (
+              <Text variant="caption" data-testid="build-dialog-unattended-remote-blocked">
+                {UNATTENDED_REMOTE_MESSAGE}
+              </Text>
+            ) : null}
+          </div>
         ) : null}
         <ul className="m-0 flex list-none flex-col gap-3 p-0" aria-label="Choices" data-testid="build-dialog-choices">
           {choices.map(choice)}

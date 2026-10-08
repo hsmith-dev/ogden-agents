@@ -173,6 +173,9 @@ export function createStarter(ctx: BuildCtx) {
       // An attended run has no sandbox, so no object store: the user answers every card. A sandboxed run's git writes its own store.
       // A remote attended run (CAP-24, epic 19 story 19.6) pushes the worktree right after it is created, and its agent
       // runs over one long-lived connection handed to the chat layer, in the remote's own directory, never the local one.
+      // `cwd` here is the real navigation target the remote shell's own `cd` needs (relative to the machine's login
+      // directory, `remote-worktree-sync.ts`'s own `push`); the ACP agent is told a different, always-safe `cwd`
+      // (`REMOTE_LAUNCH_CWD`) once it's actually there -- `acp-base/acp-agent.ts`'s own concern, story 19.7's fix.
       const setup =
         machineId !== null
           ? await (async () => {

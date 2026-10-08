@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
-import { createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type VcsPort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
+import { createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsPort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import { createPerAgentSandbox } from './build-agent-sandbox.js';
 import type { Logger } from './log.js';
 import { agentEnvironment, withoutAgentKeys } from './start-env.js';
@@ -43,12 +43,15 @@ export function createBuildsWiring({
   source,
   hooks,
   vcs: sharedVcs,
+  remote,
   registeredAgents,
   unattendedAgents,
   describeAgent,
   attendedOnlyReason,
 }: {
   vcs?: VcsPort;
+  /** The real remote-build capability (CAP-24, epic 19 story 19.7), shared with the chat it is also given. Absent: every test and installation that doesn't wire CAP-24 (no ripple). */
+  remote?: BuildsDeps['remote'];
   options: StartOptions;
   core: Core;
   dataDir: string;
@@ -123,6 +126,7 @@ export function createBuildsWiring({
     runAwareTickets,
     vcs,
     sandbox,
+    remote,
     runner: options.buildRunner ?? createAcpBuildRunner(),
     // The other agents that can build (epic 17); a test's own list replaces them.
     runners: (options.buildRunners ?? [createCodexBuildRunner(), createGrokBuildRunner(), createAntigravityBuildRunner()]).filter((each) => registeredAgents(each.agent)),

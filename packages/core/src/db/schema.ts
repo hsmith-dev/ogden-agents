@@ -149,6 +149,8 @@ export const sessions = sqliteTable(
      * for the agent's own choice (and on rows from before it existed).
      */
     model: text('model'),
+    /** The remote machine this chat runs its agent on (CAP-24, epic 19 story 19.7), set at creation, never changed; `NULL` for a local chat. */
+    machineId: text('machine_id').$type<RemoteMachineId>(),
     /** The user's name for the chat (backlog story 12); `NULL` until they give one. */
     title: text('title'),
     /** The name core gave the chat (the planning action's label, or its first message), set once; `NULL` until then. */

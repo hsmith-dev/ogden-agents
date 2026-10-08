@@ -12,7 +12,9 @@ import {
   createDataDir,
   createNewProjectDefaults,
   createOnboarding,
+  createRemoteWorktreeSync,
   clampCheckInDelay,
+  openRemoteConnection,
   RESTARTED_REASON,
   createToolchain,
   ensureDataDir,
@@ -23,7 +25,7 @@ import {
   type AgentPort,
   type Core,
 } from '@ogden-agents/core';
-import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERRUPTED, SERVER_STREAM, type AgentId, type LocalEndpointId, type Session } from '@ogden-agents/shared';
+import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERRUPTED, SERVER_STREAM, type AgentId, type LocalEndpointId, type RemoteMachineId, type Session } from '@ogden-agents/shared';
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
@@ -296,8 +298,19 @@ async function listenAndAnnounce({
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
   // Every agent is wired before the stored sessions are settled, as before story 6.9's split: a wiring error leaves the database untouched.
-  const { endpointApi, localModelPort, claudeSetup, secrets, remoteMachines, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
+  const { endpointApi, localModelPort, claudeSetup, secrets, remoteHosts, remoteMachines, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
   const { localEndpoints, localModels } = endpointApi;
+  // One git for builds and for Save the lessons (epic 7); built here (moved up from beside Plan and Board, story 19.7)
+  // so the real remote capability below can share it, before `createChat` runs.
+  const vcs = createServerVcs(options, dataDir);
+  // CAP-24, epic 19 story 19.7: the one real `remote` capability, over the already-resolved `RemoteHostPort`,
+  // `secrets` and `RemoteMachines` wiring above -- shared by chats and builds alike, never a second, differently
+  // faked instance of either. `.sync` (push/pull/remove a run's worktree) is `createBuildsWiring`'s own concern;
+  // a plain chat only ever needs `.connect` (`ChatOptions.remote`, `chat/agents.ts`).
+  const remote = {
+    sync: createRemoteWorktreeSync({ vcs, hosts: remoteHosts, secrets, machines: remoteMachines }),
+    connect: (machineId: RemoteMachineId) => openRemoteConnection(machineId, { hosts: remoteHosts, secrets, machines: remoteMachines }),
+  };
   descriptors.current = wirings.map((wiring) => wiring.descriptor);
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
@@ -359,11 +372,11 @@ async function listenAndAnnounce({
     onToolCallCompleted: (sessionId, toolCallId, diffs) => planningDocuments.toolCallCompleted(sessionId, toolCallId, diffs),
     // Unattended build sessions (story 5.2): their worktree, sandbox and permission policy, registered by the builds use-cases.
     buildSessions: core.buildSessions,
+    // A plain chat's remote target (CAP-24, epic 19 story 19.7): `Session.machineId`, opened fresh at each agent start.
+    remote,
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
-  // One git for builds and for Save the lessons (epic 7).
-  const vcs = createServerVcs(options, dataDir);
   const { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
     vcs,
     options,
@@ -382,7 +395,7 @@ async function listenAndAnnounce({
   // Inside the desktop app (story 13.11) there is no shortcut to offer: the app is the shortcut.
   const shell = options.shell === undefined ? shellModeOf() : options.shell;
   // Unattended builds (story 5.2, `start-builds.ts`): git, the sandbox check and the build runner.
-  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks, vcs, registeredAgents: (agentId) => agents.get(agentId) !== undefined, unattendedAgents: (agentId) => supportsUnattendedBuild(unwrapped.get(agentId)), describeAgent: (agentId) => agents.describe(agentId), attendedOnlyReason: (agentId) => unwrapped.get(agentId)?.attendedOnlyReason });
+  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks, vcs, remote, registeredAgents: (agentId) => agents.get(agentId) !== undefined, unattendedAgents: (agentId) => supportsUnattendedBuild(unwrapped.get(agentId)), describeAgent: (agentId) => agents.describe(agentId), attendedOnlyReason: (agentId) => unwrapped.get(agentId)?.attendedOnlyReason });
   // Worktrees no run needs any more (a removal that failed, a start cut off) go before builds are served (story 5.5).
   await builds.sweep();
   // Queued runs a stopped server left start where the limits allow (story 5.8).

@@ -42,7 +42,6 @@ import { GlobalMcpServers } from '@ogden-agents/shared';
  * whose descriptor `needsProjectTrust` is refused by core
  * (`ChatOptions.projectTrusted`) before this client is asked to start it.
  */
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir } from 'node:os';
 import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
@@ -63,58 +62,26 @@ import {
   type AgentToolCallDiff,
   type ProtectedPaths,
   type RemoteHostConnection,
+  REMOTE_LAUNCH_CWD,
 } from '@ogden-agents/core';
 import type { PermissionMode } from '@ogden-agents/shared';
-import { killProcessTree } from '../process-tree.js';
 import { withTimeout } from '../with-timeout.js';
 import { prepareBuildStart } from './build-start.js';
 import { buildFixedStart, checkFixedModeWiring, startFixedMode, type FixedModeStart } from './fixed-mode.js';
-import { createStreamMasker, maskSecrets, mcpSecretValues, secretValues } from './mask.js';
+import { createStreamMasker, maskSecrets, mcpSecretValues } from './mask.js';
 import { agentWords, modelOptionOf, modelsOf } from './models.js';
 import { answerPermissionRequest, type Diagnostic, type PermissionCallback } from './permission-request.js';
-import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch, type AcpLaunchInput } from './quirks.js';
-import { buildRemoteCommand, remoteProcessOf, type AcpProcess } from './remote-launch.js';
+import { spawnAcpProcess, trackAcpProcess, type AcpProcess } from './process-launch.js';
+import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunchInput } from './quirks.js';
+import { errorText, isAuthRequired, STEER_METHOD, steeringAdvertised, type Opening, type StartContext } from './session-context.js';
 
 export { acpAsksLessThanAsk, acpModeOf, acpReasons, slashSkillInvocation } from './quirks.js';
 export type { AcpAgentOptions, AcpAgentQuirks, AcpAuthChoice, AcpBuildSessionQuirk, AcpBuildStart, AcpLaunch, AcpLaunchInput, AcpStartOptions } from './quirks.js';
-
-/** The ACP steering extension request (claude-agent-acp 0.84): a user message into the running turn. */
-const STEER_METHOD = '_session/steering';
-
-/** Whether the agent advertised the steering extension (`InitializeResponse._meta.steering.supported`). */
-function steeringAdvertised(init: acp.InitializeResponse): boolean {
-  const steering: unknown = (init._meta as Record<string, unknown> | null | undefined)?.steering;
-  return typeof steering === 'object' && steering !== null && (steering as { supported?: unknown }).supported === true;
-}
 
 /** How long the agent may take to start and answer `initialize` and `session/new`. */
 export const START_TIMEOUT_MS = 60_000;
 /** How long `close` waits, after ending the agent's stdin, for it to exit before killing its process tree. */
 export const EXIT_GRACE_MS = 2_000;
-/** How much of the agent's stderr is kept in memory (masked) for a failure shown to the user. */
-const OUTPUT_TAIL_CHARS = 2_000;
-
-/** ACP's `-32000`: the agent needs the user to sign in again (9.4). */
-function isAuthRequired(error: unknown): boolean {
-  return error instanceof acp.RequestError && error.code === -32000;
-}
-
-/**
- * The agent's own words for a failed request, for its descriptor's
- * usage-limit patterns (handoff): the error's message and its data, as text.
- * Read in memory only, never logged or shown.
- */
-function errorText(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const data = error instanceof acp.RequestError ? error.data : undefined;
-  let extra = '';
-  try {
-    extra = data === undefined ? '' : typeof data === 'string' ? data : JSON.stringify(data);
-  } catch {
-    // Data that can't be read adds nothing.
-  }
-  return `${error.message}\n${extra}`;
-}
 
 /** An `AgentPort` for the ACP agent `descriptor` describes. */
 export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuirks, options: AcpAgentOptions = {}): AgentPort {
@@ -130,67 +97,11 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
   const reasons = acpReasons(descriptor.displayName, { apiKeyOnly: descriptor.signInMethods.length > 0 && descriptor.signInMethods.every((method) => method.kind === 'api_key'), keyName: apiKeyMethod(descriptor)?.apiKey.label });
   checkFixedModeWiring(descriptor, quirks);
 
-  /**
-   * Spawns the agent in `cwd` with core's environment (AD-16): locally, in
-   * its own process group, or (`remote` given, CAP-24 story 19.5) over an
-   * already-open SSH connection, from the exact same `AcpLaunch` the quirk
-   * returns either way -- the quirk never knows which.
-   */
-  const spawnAgent = async (
-    launchInput: AcpLaunchInput,
-    model: string | undefined,
-    buildEnv: Readonly<Record<string, string>> = {},
-    remote: RemoteHostConnection | undefined = undefined,
-  ): Promise<{ child: AcpProcess; secrets: readonly string[] }> => {
-    const { env } = launchInput;
-    let launch: AcpLaunch;
-    try {
-      launch = quirks.launch(launchInput);
-    } catch (error) {
-      if (error instanceof AgentError) throw error;
-      throw new AgentError('agent_unavailable', reasons.couldNotStart, { details: { reason: maskSecrets(String(error), secretValues(env)) }, cause: error });
-    }
-    // A linked command's own working directory (epic 12 entry 12) wins over the chat's own `cwd`.
-    const cwd = launch.cwd ?? launchInput.cwd;
-    // Exactly core's environment, plus what the launch adds (AD-16).
-    // An unattended build start's own variables (epic 17) win over core's: nothing else sets the agent's mode.
-    const childEnv: Record<string, string> = { ...launch.addEnv, ...env, ...buildEnv };
-    // A static-list agent takes the chat's model at start (story 11): only a model it lists.
-    const staticModels = descriptor.models;
-    const args = [...launch.args];
-    if (staticModels !== undefined && model !== undefined && staticModels.list.some((each) => each.id === model)) {
-      if (staticModels.apply.kind === 'env') childEnv[staticModels.apply.name] = model;
-      else args.push(staticModels.apply.flag, model);
-    }
-    diagnostic(`starting the ${descriptor.displayName} adapter`, launch.logFields);
-
-    if (remote !== undefined) {
-      const command = buildRemoteCommand({ cwd, command: launch.command, args });
-      try {
-        // `childEnv` (secrets included) travels only through `exec`'s own `env` option, never in `command` itself (AD-16).
-        const channel = await remote.exec(command, { env: childEnv });
-        return { child: remoteProcessOf(channel), secrets: secretValues(childEnv) };
-      } catch (error) {
-        if (error instanceof AgentError) throw error;
-        throw new AgentError('agent_unavailable', reasons.couldNotStart, { details: { reason: maskSecrets(String(error), secretValues(childEnv)) }, cause: error });
-      }
-    }
-
-    let child: ChildProcessWithoutNullStreams;
-    try {
-      child = spawn(launch.command, args, {
-        cwd,
-        env: childEnv,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-        // Its own process group, so the whole tree can be stopped (see `localProcessOf`'s `kill`).
-        detached: process.platform !== 'win32',
-      });
-    } catch (error) {
-      throw new AgentError('agent_unavailable', reasons.couldNotStart, { details: { reason: String(error) }, cause: error });
-    }
-    return { child: localProcessOf(child), secrets: secretValues(childEnv) };
-  };
+  // Spawns the agent in `cwd` with core's environment (AD-16): locally, or (`remote` given, CAP-24 story 19.5) over
+  // an already-open SSH connection (`spawnAcpProcess`, moved out to `process-launch.ts` by story 19.7's refactor
+  // sweep; zero behavior change, only parameterized instead of closing over this function's own locals).
+  const spawnAgent = (launchInput: AcpLaunchInput, model: string | undefined, buildEnv: Readonly<Record<string, string>> = {}, remote: RemoteHostConnection | undefined = undefined) =>
+    spawnAcpProcess(launchInput, model, buildEnv, remote, { quirks, displayName: descriptor.displayName, couldNotStart: reasons.couldNotStart, models: descriptor.models, diagnostic });
 
   const startFixedModeSafely = (permissionMode: PermissionMode, protectedPaths: ProtectedPaths | undefined): FixedModeStart | undefined => {
     try {
@@ -226,13 +137,20 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     // Fail closed: a fixed-mode start has no place for the sandbox, so a build session never runs without it (story 5.2, epic 12).
     if (input.sandbox !== undefined && fixed !== undefined && buildStart === undefined) throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);
     const { child, secrets } = await spawnAgent({ cwd: input.cwd, env: input.env, permissionMode, protectedPaths: input.protectedPaths }, startModel, buildStart?.addEnv, input.remote);
+    // The ACP agent's own `cwd` (the protocol field, and `answerPermissionRequest`'s): `input.cwd` is the real
+    // navigation target the remote shell's `cd` already spent getting there (`spawnAgent`'s own concern, just
+    // above) -- a relative path meaningless to the agent itself, and silently re-joinable into a doubly-nested,
+    // nonexistent subdirectory by any agent that treats a reported `cwd` as a base to resolve paths against.
+    // Once remote, the agent is always told `REMOTE_LAUNCH_CWD` ("you're already there") instead; locally, `cwd`
+    // is already the real, absolute path, unchanged.
+    const reportedCwd = input.remote === undefined ? input.cwd : REMOTE_LAUNCH_CWD;
     return startOnChild(
       child,
       {
         descriptor,
         quirks,
         reasons,
-        cwd: input.cwd,
+        cwd: reportedCwd,
         env: input.env,
         secrets: [...secrets, ...mcpSecrets],
         diagnostic,
@@ -288,62 +206,6 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
   };
 }
 
-/** What the agent is started for: a new session, a session it had before, or only to ask what it offers (`initialize`). */
-type Opening = { kind: 'new' } | { kind: 'reopen'; agentSessionId: string } | { kind: 'probe' };
-
-interface StartContext {
-  descriptor: AgentDescriptor;
-  quirks: AcpAgentQuirks;
-  reasons: ReturnType<typeof acpReasons>;
-  cwd: string;
-  /** Core's environment for the agent, for the `authMethod` quirk only. */
-  env: Readonly<Record<string, string>>;
-  secrets: readonly string[];
-  diagnostic: Diagnostic;
-  startTimeoutMs: number;
-  onPermissionRequest: PermissionCallback | undefined;
-  /** Kept guarded for the session's life, through the agent's `sessionMeta` quirk (Auto only). */
-  protectedPaths: ProtectedPaths | undefined;
-  /** An unattended build session's sandbox (story 5.2), in the same `sessionMeta` quirk. */
-  sandbox: AgentSandbox | undefined;
-  /** An attended build session (story 5.6): the agent's own policy tier keeps the user's settings from skipping a card. */
-  attended: boolean;
-  /** The static-list model the process was started on (story 11), if any. */
-  startModel: string | undefined;
-  /** The list of MCP servers (2.9) */
-  mcpServers?: unknown[];
-  /** The chat's mode at start: given at start to an agent that fixes it (`startOptions`). */
-  permissionMode: PermissionMode;
-  /** The fixed-mode start, computed before the process was spawned. */
-  fixed: FixedModeStart | undefined;
-  /** The session modes that ask as much as Ask (an unattended build's own start adds its modes). */
-  askingModeIds: readonly string[];
-  /** An unattended build start's own session modes (epic 17): the session must open in one and may never leave it. */
-  buildModeIds: readonly string[] | undefined;
-}
-
-/**
- * Wraps a real local child process as an {@link AcpProcess}: its streams and
- * `once('error'|'exit', …)` pass straight through (the same structural shape
- * they already are), and `kill()` is today's `killProcessTree(child.pid)` --
- * its whole process group on POSIX, its tree on Windows.
- */
-function localProcessOf(child: ChildProcessWithoutNullStreams): AcpProcess {
-  function once(event: 'error', listener: (error: Error) => void): void;
-  function once(event: 'exit', listener: (code: number | null, signal: string | null) => void): void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the standard overload-implementation idiom: only the two signatures above are ever exposed to a caller.
-  function once(event: 'error' | 'exit', listener: (...args: any[]) => void): void {
-    child.once(event, listener);
-  }
-  return {
-    stdin: child.stdin,
-    stdout: child.stdout,
-    stderr: child.stderr,
-    once,
-    kill: () => killProcessTree(child.pid),
-  };
-}
-
 async function startOnChild(
   child: AcpProcess,
   { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, attended, startModel, fixed, askingModeIds, buildModeIds, mcpServers }: StartContext,
@@ -365,7 +227,6 @@ async function startOnChild(
   let replaying = false;
   let state: 'idle' | 'working' | 'error' = 'idle';
   let closing = false;
-  let exited = false;
   let fatalReported = false;
   let agentSessionId: string | undefined;
   /** The session's modes as the agent last said (`session/new`, `resume`, `load`, then `current_mode_update`); `undefined` when it lists none. */
@@ -436,22 +297,6 @@ async function startOnChild(
     flushReply();
     state = 'error';
     emit({ type: 'state', state: 'error', reason, fatal: true, ...(code === undefined ? {} : { code }) });
-  };
-
-  // The agent's stderr is its own log and may echo anything: it is never
-  // logged, only counted, and a short masked tail is kept for the user.
-  let stderrBytes = 0;
-  let stderrTail = '';
-  child.stderr.on('data', (chunk: Buffer) => {
-    stderrBytes += chunk.length;
-    stderrTail = (stderrTail + chunk.toString('utf8')).slice(-OUTPUT_TAIL_CHARS * 2);
-  });
-  const output = () => {
-    const tail = mask(stderrTail).slice(-OUTPUT_TAIL_CHARS);
-    return tail === '' ? undefined : tail;
-  };
-  const noteStderr = () => {
-    if (stderrBytes > 0) diagnostic('the agent wrote to stderr', { bytes: stderrBytes });
   };
 
   let rejectGone!: (error: AgentError) => void;
@@ -535,43 +380,15 @@ async function startOnChild(
     .onRequest('session/request_permission', ({ params }) => answerPermissionRequest(params, { cwd, quirks, mask, diagnostic, onPermissionRequest }))
     .connect(stream);
 
-  const exitedPromise = new Promise<void>((resolve) => {
-    child.once('error', (error) => {
-      diagnostic('the agent process failed', { reason: mask(String(error)) });
-      exited = true;
-      rejectGone(new AgentError('agent_unavailable', COULD_NOT_START, { details: { reason: mask(String(error)) }, cause: error, output: output() }));
-      connection.close(error);
-      reportGone(COULD_NOT_START);
-      resolve();
-    });
-    child.once('exit', (code, signal) => {
-      exited = true;
-      // The remote exit path's own sentinel (CAP-24, epic 19 story 19.6; `remote-launch.ts`'s doc comment): a real local
-      // child's signal is never this exact string, so only a dropped SSH connection takes this branch.
-      const connectionLost = signal === 'connection_lost';
-      if (!closing) {
-        diagnostic('the agent process exited', { code, signal });
-        noteStderr();
-        // Anything it started goes with it.
-        child.kill();
-      }
-      rejectGone(new AgentError(connectionLost ? 'connection_lost' : 'agent_failed', connectionLost ? CONNECTION_LOST : STOPPED, { details: { code, signal }, output: output() }));
-      connection.close(new Error('the agent process exited'));
-      reportGone(connectionLost ? CONNECTION_LOST : STOPPED, connectionLost ? 'connection_lost' : undefined);
-      resolve();
-    });
-  });
-
-  /** Ends stdin, gives the agent {@link EXIT_GRACE_MS} to exit, then stops its whole tree. */
-  const kill = async () => {
-    if (!exited) {
-      child.stdin.end();
-      await Promise.race([exitedPromise, new Promise((resolve) => setTimeout(resolve, EXIT_GRACE_MS))]);
-    }
-    child.kill();
-    if (!exited) await Promise.race([exitedPromise, new Promise((resolve) => setTimeout(resolve, EXIT_GRACE_MS))]);
-    noteStderr();
-  };
+  // The small kill/exit plumbing (stderr, `'error'`/`'exit'` handling, `kill()`): `trackAcpProcess`, moved out to
+  // `process-launch.ts` by story 19.7's refactor sweep, zero behavior change (the exact code that was inline here,
+  // only parameterized instead of closing over this function's own locals).
+  const proc = trackAcpProcess(
+    child,
+    { couldNotStart: COULD_NOT_START, stopped: STOPPED, connectionLost: CONNECTION_LOST },
+    { diagnostic, mask, rejectGone, reportGone, closeConnection: (error) => connection.close(error), isClosing: () => closing },
+    EXIT_GRACE_MS,
+  );
 
   let init: acp.InitializeResponse;
   let restored: AgentRestored = 'new';
@@ -659,19 +476,19 @@ async function startOnChild(
   } catch (error) {
     closing = true;
     connection.close();
-    await kill();
+    await proc.kill();
     if (error instanceof AgentError) throw error;
     throw new AgentError(isAuthRequired(error) ? 'auth_required' : 'agent_unavailable', plainReason(error, COULD_NOT_START), {
       details: { reason: mask(error instanceof Error ? error.message : String(error)) },
       cause: error,
-      output: output(),
+      output: proc.output(),
     });
   }
   if (opening.kind === 'probe' || agentSessionId === undefined) {
     // Only `initialize` was wanted: stop the agent again.
     closing = true;
     connection.close();
-    await kill();
+    await proc.kill();
     return { init, session: undefined, restored };
   }
   const sessionId = agentSessionId;
@@ -680,7 +497,7 @@ async function startOnChild(
   let closed: Promise<void> | undefined;
   /** Puts the running session on `model`, or back on the one it started on (`null`), through its model config option. */
   const setModel = async (model: string | null): Promise<void> => {
-    if (exited || closing) throw new AgentError('agent_failed', STOPPED);
+    if (proc.exited || closing) throw new AgentError('agent_failed', STOPPED);
     const option = modelOptionOf(config);
     if (option === undefined) throw new AgentError('agent_failed', reasons.noSuchModel);
     const target = model ?? initialModel;
@@ -731,7 +548,7 @@ async function startOnChild(
     },
 
     async setPermissionMode(mode) {
-      if (exited || closing) throw new AgentError('agent_failed', STOPPED);
+      if (proc.exited || closing) throw new AgentError('agent_failed', STOPPED);
       if (modes === undefined) {
         if (mode === 'ask') return;
         throw new AgentError('agent_failed', reasons.noSuchMode);
@@ -765,7 +582,7 @@ async function startOnChild(
     },
 
     async prompt(text) {
-      if (exited || closing) throw new AgentError('agent_failed', STOPPED);
+      if (proc.exited || closing) throw new AgentError('agent_failed', STOPPED);
       setState('working');
       try {
         const response = await Promise.race([
@@ -776,7 +593,7 @@ async function startOnChild(
         return { stopReason: response.stopReason };
       } catch (error) {
         // A closed connection means the process went away (its stdout can end before its exit event).
-        const processGone = exited || connection.signal.aborted;
+        const processGone = proc.exited || connection.signal.aborted;
         // The agent said it ran out of usage (its descriptor's patterns; handoff): the session stays usable.
         const limited = !processGone && !isAuthRequired(error) && !(error instanceof AgentError) && isUsageLimit(descriptor, errorText(error));
         const failure =
@@ -788,7 +605,7 @@ async function startOnChild(
                 {
                   details: { reason: mask(error instanceof Error ? error.message : String(error)) },
                   cause: error,
-                  output: output(),
+                  output: proc.output(),
                 },
               );
         if (processGone) reportGone(failure.message);
@@ -800,7 +617,7 @@ async function startOnChild(
     ...(fixed === undefined ? {} : fixed.session),
 
     async cancel() {
-      if (exited || closing) return;
+      if (proc.exited || closing) return;
       await connection.agent.notify('session/cancel', { sessionId });
     },
 
@@ -808,7 +625,7 @@ async function startOnChild(
     ...(descriptor.sendNow === 'inject' && steeringAdvertised(init)
       ? {
           async steer(text: string): Promise<'injected' | 'no_turn'> {
-            if (exited || closing) throw new AgentError('agent_failed', STOPPED);
+            if (proc.exited || closing) throw new AgentError('agent_failed', STOPPED);
             // `promptRequired`: with no turn running the agent starts nothing, and core sends it as a prompt.
             const answer = await Promise.race([
               connection.agent.request<{ outcome?: unknown }>(STEER_METHOD, { sessionId, prompt: [{ type: 'text', text }], _meta: { steering: { idleBehavior: 'promptRequired' } } }),
@@ -825,7 +642,7 @@ async function startOnChild(
       closed ??= (async () => {
         closing = true;
         listeners.clear();
-        if (!exited && init.agentCapabilities?.sessionCapabilities?.close != null) {
+        if (!proc.exited && init.agentCapabilities?.sessionCapabilities?.close != null) {
           try {
             await withTimeout(connection.agent.request('session/close', { sessionId }), EXIT_GRACE_MS, () => new Error('session/close timed out'));
           } catch (error) {
@@ -833,7 +650,7 @@ async function startOnChild(
           }
         }
         connection.close();
-        await kill();
+        await proc.kill();
       })();
       return closed;
     },

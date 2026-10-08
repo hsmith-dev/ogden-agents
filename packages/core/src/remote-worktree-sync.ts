@@ -56,6 +56,30 @@ import { VcsError, type VcsPort } from './vcs-port.js';
 /** The one fixed base path every run's remote directory lives under (never a run's own choice). */
 const REMOTE_RUNS_BASE = '.ogden-agents/remote-runs';
 
+/**
+ * The `cwd` Ogden Agents' ACP client tells the agent for *any*
+ * remote-launched process (CAP-24; an attended build, story 19.6, or a
+ * plain chat, story 19.7): always `.`, never a build's own `remoteRunDir`
+ * (relative to the machine's login directory) or anything else with a real
+ * segment in it. Two different things both happen to be called "cwd" here,
+ * and must stay separate: the *real* navigation target (what the remote
+ * shell's own `cd` needs, `buildRemoteCommand` in `acp-base/process-launch.ts`
+ * -- a build's own pushed-worktree subdirectory, or nothing at all for a
+ * plain chat) is decided and spent *before* the agent ever starts; what the
+ * ACP protocol's `cwd` field then tells the already-running agent is this
+ * constant instead (`acp-base/acp-agent.ts`'s own `open()`, story 19.7's
+ * fix), because by then the shell has already placed it exactly where it
+ * needs to be -- "the directory you're already in," never a path to
+ * re-derive. Reusing the real navigation target there instead (a build's
+ * own relative `remoteRunDir`, say) is silently re-joined by any agent that
+ * treats a session's reported `cwd` as a base to resolve paths against,
+ * landing writes in a doubly-nested, nonexistent subdirectory -- exactly the
+ * failure this story's own end-to-end proof (`tests/e2e/remote-target.spec.ts`)
+ * first caught, the first test in the whole epic where an agent's process
+ * genuinely ran somewhere else and really touched files there.
+ */
+export const REMOTE_LAUNCH_CWD = '.';
+
 /** The most bytes `pull` reads back as one incremental bundle. Generous (matches the repo's own object-import bound) but still a bound: a runaway remote command is killed, never buffered without limit. */
 const MAX_BUNDLE_BYTES = 512 * 1024 * 1024;
 

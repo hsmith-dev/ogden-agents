@@ -241,7 +241,7 @@ graph LR
   - Note (epic 6 entry 10, 2026-10-04, security; closes the 6.5 review's deferred item): every child process gets an explicit environment built from one allowlist (`packages/adapters/src/child-env.ts`). An agent's process gets the allowlist, its own home variable and only its own key, from its descriptor; helper processes (the kill helper, the Windows shortcut script, npm's install of Claude Code's adapter, uv and BMad Method's scripts, setup probes, the browser opener) get the allowlist plus named non-secret variables only, never a key. `tests/architecture.test.ts` fails when a spawn in `packages/` passes `process.env` or no `env`; the one exemption is the launcher starting the server itself, which is Ogden, not a helper. No rule changes.
   - Note (epic 12, user-approved 2026-10-04): Codex keeps its sign-in in the OS keychain where Codex supports it, else in a plain `auth.json` in `CODEX_HOME` inside the data folder, shown to the user as a known limitation and removed on sign-out; Grok's token lives in `GROK_HOME` inside the data folder. Ogden never reads either. Keys: `agent-api-key/codex`, `agent-api-key/grok`. No rule changes.
   - Note (epic 5, 2026-10-01): webhook URLs are secrets: stored through `SecretStorePort` and redacted in logs and events (epic 11). No rule changes.
-  - Note (CAP-26, proposed, not adopted): AD-26 proposes a Jira API token under `jira-credential/<workspaceId>`, bare like `agent-api-key/<agentId>`, with the board's site URL and account email kept outside the keychain as ordinary, non-secret workspace settings. Not binding until AD-26 is adopted.
+  - Note (CAP-26): AD-29 (adopted) uses a Jira API token under `jira-credential/<workspaceId>`, bare like `agent-api-key/<agentId>`, with the board's site URL and account email kept outside the keychain as ordinary, non-secret workspace settings.
 
 ### AD-17 — Unattended runs are contained
 
@@ -376,7 +376,7 @@ graph LR
   - Open within this proposal, genuinely not decided: whether Ogden reuses an SSH key the user already has (read-only, never copied elsewhere) or generates and owns a fresh keypair per machine. This proposal leans toward Ogden generating and owning the keypair — for the same reason AD-16 prefers Ogden-owned secrets over reading the user's own credential stores — but does not adopt that lean. Either way the user installs the resulting public key on each remote machine's `authorized_keys` by hand, since CAP-24's non-goals rule out Ogden provisioning the remote machine itself.
   - **Why this needed the user's own sign-off:** of CAP-24's three open questions, this is the one that is genuinely security-sensitive and blast-radius-significant — it decides how a user's credentials to their *own other machines* are stored and used, and whether a network attacker can impersonate a trusted one. This project's own pattern for a decision at that blast radius (AD-15's cookie-to-token renegotiation, AD-16's keychain-only decision and its encrypted-file-fallback removal, CAP-25's requirement that Ogden always show and confirm the exact install command before running it) is to put it in front of the user directly rather than have an implementing agent settle it unilaterally. The user confirmed this design as proposed; a build ticket may now cite this AD. The keypair-ownership sub-point above remains open and should be resolved during that ticket's own planning, not assumed.
 
-### AD-24 — Jira sync is polled and refresh-triggered, never a webhook [ADOPTED]
+### AD-27 — Jira sync is polled and refresh-triggered, never a webhook [ADOPTED]
 
 - **Binds:** CAP-26
 - **Prevents:** a Jira webhook forcing the loopback server to accept unauthenticated inbound traffic from the internet, against AD-15's one-gate, no-public-endpoint posture; a linked board's Jira view and Ogden's local ticket tree drifting apart with no way to force them back in step; and a user-supplied Jira site URL turning a routine poll into an unvalidated outbound call.
@@ -387,9 +387,9 @@ graph LR
   - The Board's Refresh action triggers the same sync immediately, debounced to at most once every 10 seconds per workspace.
   - A sync runs through the tracker-store abstraction's existing write and query verbs (`ticketing-store-config.toml`), via a Jira-backed adapter (`tickets-jira`, alongside the repo-file `tickets-v7`) behind the same `TicketStorePort` that AD-7 and AD-10 already govern. Jira's own vocabulary (Issue Type, Epic link, Priority, Issue Links) is known only inside that adapter, never in `packages/core` or `packages/shared` — the port's write and query verbs stay vendor-neutral, matching AD-1's boundary and AD-12's "a vendor's own names appear only inside the adapter that needs them." The local file changes a sync makes are followed by the existing lightweight `ticket.changed` event (AD-7); the event still carries no ticket content, only `workspaceId` and a ref, and exists only to trigger the UI's refetch — exactly as a local edit does today.
   - A failed sync (network, auth, rate limit) never blocks the Board from showing its last-synced local state: it shows a dismissible "last synced at `<time>` — retry" notice, and the next interval tick or Refresh click retries.
-  - Ogden's own routing-significant local writes push to Jira at the moment they happen, not on the next poll — see AD-25's `done`/status rule.
+  - Ogden's own routing-significant local writes push to Jira at the moment they happen, not on the next poll — see AD-28's `done`/status rule.
 
-### AD-25 — Jira field mapping: only a clean native match syncs; files keep the deciding vote [ADOPTED]
+### AD-28 — Jira field mapping: only a clean native match syncs; files keep the deciding vote [ADOPTED]
 
 - **Binds:** CAP-26
 - **Prevents:** Ogden depending on a Jira custom field that may not exist on a given project's schema; a status or content edit made on both sides between syncs being silently lost; a tracker's dependency graph quietly driving build order (CAP-26's own non-goal) through the back door of a synced field; and a Jira-driven status pull writing `done` outside the one action AD-17 reserves it for.
@@ -416,12 +416,12 @@ graph LR
   - `after` flows local → Jira only, never the reverse. This is what keeps CAP-26's non-goal intact — a tracker's link graph never drives build routing — even though a human reading Jira sees the same dependency Ogden is building in order.
   - A ticket Ogden creates under Tooling Drive syncs out to Jira as a new issue on its first successful sync after creation. A ticket already in Jira when a board is first linked is pulled in as a new local file on that first sync, matching the tracker-store convention already designed for exactly this case: a tracker-known ticket not yet in the tree gets its file at first query.
 
-### AD-26 — Jira authentication: proposed, not adopted
+### AD-29 — Jira authentication [ADOPTED]
 
 - **Binds:** CAP-26
-- **Status:** **Proposed only.** This AD is deliberately not marked `[ADOPTED]`. It needs the user's explicit go or no-go before any ticket cites it or any code is written against it, matching this project's own pattern for credential-adjacent decisions (AD-15, AD-16, CAP-25's install-mechanism decision): those were always surfaced for explicit confirmation rather than quietly decided alongside the rest of an architecture pass.
-- **Prevents (once adopted):** a third-party credential stored outside AD-16's keychain pattern; an OAuth refresh/expiry lifecycle bolted on ad hoc without one place owning it; non-secret account details riding inside a keychain blob where only the token itself needs that protection.
-- **Proposed rule:**
+- **Status:** **Adopted by the user (2026-10-07), as proposed.** This was deliberately surfaced for explicit go/no-go before being marked adopted, matching this project's own pattern for credential-adjacent decisions (AD-15, AD-16, CAP-25's install-mechanism decision). The two sub-points at the end (OAuth as a later opt-in; per-board vs. per-site credential scoping) remain genuinely open, deferred to the build ticket, per the approved proposal's own wording.
+- **Prevents:** a third-party credential stored outside AD-16's keychain pattern; an OAuth refresh/expiry lifecycle bolted on ad hoc without one place owning it; non-secret account details riding inside a keychain blob where only the token itself needs that protection.
+- **Rule:**
   - An API token, not OAuth, for v1.2 — a deliberate accepted trade-off, not a free win: a pasted token has no lifecycle Ogden controls (Atlassian now caps new Jira Cloud tokens at one year and is retiring older ones by its own policy, not Ogden's), and stays valid until the user revokes it or it expires, unlike an OAuth access token's short lifetime. The trade is accepted here because, for Jira Cloud specifically, there is currently no secretless OAuth 2.0 (3LO) path for a public client at all: Atlassian does not support PKCE for Jira Cloud's OAuth today (an open feature request, unresolved as of this writing), so the only Atlassian-OAuth option would require Ogden to ship an embedded client secret inside a published npm package — not a workaround, a non-starter. That makes the case for a token stronger than "OAuth is just extra work," not weaker.
   - The user generates a Jira API token (Jira Cloud, in their own Atlassian account settings) or a Personal Access Token (Jira Data Center — Jira Server reached end of support in 2024 and is not a current target) and pastes it into Ogden's "Link a Jira board" flow along with their Jira account email and site URL.
   - Only the token itself is the secret. It is stored through AD-16's existing `SecretStorePort`/OS-keychain mechanism under a new key namespace `jira-credential/<workspaceId>`, as a bare string — matching the existing one-key-one-secret shape (`agent-api-key/<agentId>`), not a blob. The Jira account email and site URL are not secrets (the user already sees the site URL in their own browser, and the email is their own account identity, not a credential); they are kept as ordinary workspace settings beside the other per-board sync state, outside the keychain, so AD-16's redaction rule applies cleanly to the one value that needs it.
@@ -536,7 +536,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 | CAP-19 BMad optional per project | core workspace settings, `bmad-catalog` detect, shared piece list | AD-2, AD-11, AD-22 |
 | CAP-20 desktop app | `packages/desktop` (Tauri shell), launcher, server update notice | AD-3, AD-15, AD-20, AD-21, AD-23 |
 | CAP-24 remote execution over SSH | `vcs-git` (remote push/pull step, AD-24), `RemoteHostPort`/`remote-host-ssh` adapter (proposed), existing `acp-*`/ACP session machinery piped over SSH, fan-out aggregation read model | AD-1, AD-8, AD-9 (notes); AD-24 [ADOPTED]; AD-25 and AD-26 proposed, not adopted |
-| CAP-26 Jira tracker link (Tooling Drive) | `tickets-jira` adapter behind `TicketStorePort`, TanStack Query refetch on `ticket.changed` | AD-7, AD-10, AD-22, AD-24, AD-25, (AD-26 proposed) |
+| CAP-26 Jira tracker link (Tooling Drive) | `tickets-jira` adapter behind `TicketStorePort`, TanStack Query refetch on `ticket.changed` | AD-7, AD-10, AD-22, AD-27, AD-28, AD-29 |
 
 ## Deferred
 
@@ -544,11 +544,10 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 - **Where the CAP-5 toggle appears for each agent:** measured in epic 3, recorded in the spec's `agent-matrix.md`. Antigravity's is measured by epic 6's spike (2026-10-02); other agents' in v2.
 - **Notification transports beyond webhook and opt-in browser notifications:** later, behind `NotifierPort` (v1 transports decided in epic 5, built in epic 11).
 - **Start at login or a tray icon:** later, and neither breaks AD-3. The desktop app itself is CAP-20 (epic 13, AD-23).
-- **Tracker stores other than Jira, remote access, and several users per install:** out of scope (spec non-goals). Jira itself is CAP-26 (AD-24, AD-25, AD-26 proposed).
+- **Tracker stores other than Jira, remote access, and several users per install:** out of scope (spec non-goals). Jira itself is CAP-26 (AD-27, AD-28, AD-29).
 - **Logging library and Drizzle migration tooling:** epic 1, within the Conventions.
 - **Merge-conflict handling beyond Update and retry (a rebase in the run's worktree):** later; see the AD-17 note.
 - **SSH credential and host-key model for remote targets (CAP-24):** AD-26 proposes a specific design but is explicitly not adopted; needs the user's own go/no-go before any ticket cites it.
 - **Whether a remote fan-out authors one diff verified on N machines, or N independently authored diffs (CAP-24):** AD-25 proposes the former but is not adopted; confirm before a build ticket is written against it.
 - **A cross-platform verification failure that needs an actual code fix on a remote-only issue (CAP-24):** out of scope for this pass; AD-17's Update and retry and AD-25's per-machine retry cover re-running, not an automatic remote-informed fix loop.
-- **Jira OAuth as an alternative to an API token, and syncing BMad's `estimate` to Jira's Story Points where a project's schema has it:** later, and only if AD-26 is adopted as API-token-only and the need remains; neither is in CAP-26's v1.2 scope.
-- **Jira authentication's exact credential model:** AD-26 is proposed, not adopted — needs the user's explicit go/no-go before CAP-26 is ticketed or built against it.
+- **Jira OAuth as an alternative to an API token, and syncing BMad's `estimate` to Jira's Story Points where a project's schema has it:** later, if the need remains; neither is in CAP-26's v1.2 scope.

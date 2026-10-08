@@ -37,7 +37,9 @@ describe.skipIf(realUvMissing())('tickets.py reads and marks a tree pullJiraIssu
       const epic: JiraIssue = { key: 'ENG-1', fields: { summary: 'Checkout rewrite', status: { name: 'In Progress' }, issuetype: { name: 'Epic' } } };
       const story: JiraIssue = { key: 'ENG-2', fields: { summary: 'Add a cart', status: { name: 'To Do' }, issuetype: { name: 'Story' }, parent: { key: 'ENG-1' } } };
       const bug: JiraIssue = { key: 'ENG-4', fields: { summary: 'Cart total is wrong', status: { name: 'In Review' }, issuetype: { name: 'Bug' }, parent: { key: 'ENG-1' }, priority: { name: 'High' } } };
-      await pullJiraIssuesIntoLocalTree([epic, story, bug], { initiativeDir, siteUrl: 'https://x.atlassian.net' });
+      // This test only exercises first-sync creation (no existing ticket to reconcile), so this credential is never actually used.
+      const jira = { baseUrl: 'https://unreachable.invalid', email: 'dev@example.com', token: 'unused' };
+      await pullJiraIssuesIntoLocalTree([epic, story, bug], { initiativeDir, siteUrl: 'https://x.atlassian.net', jira });
 
       const status = (await runTicketsPy(['--project-root', initiativeDir, 'status', initiativeDir], uvCache)) as { tickets: Array<Record<string, unknown>>; epics: Array<Record<string, unknown>>; unpinned_after: unknown[] };
       expect(status.unpinned_after).toEqual([]);

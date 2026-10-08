@@ -5,7 +5,7 @@
  * and Jira priority to BMad severity (bugs only).
  */
 import { describe, expect, it } from 'vitest';
-import { isEpicIssueType, mapIssueTypeToLeaf, mapJiraStatusToBmad, mapPriorityToSeverity, plainTextFromDescription, titleSlug } from '../src/tickets-jira/jira-issue-mapping.js';
+import { candidateJiraStatusNames, chooseTransition, isEpicIssueType, mapIssueTypeToLeaf, mapJiraStatusToBmad, mapPriorityToSeverity, plainTextFromDescription, titleSlug } from '../src/tickets-jira/jira-issue-mapping.js';
 
 describe('isEpicIssueType', () => {
   it('recognizes "Epic" case-insensitively', () => {
@@ -57,6 +57,33 @@ describe('mapJiraStatusToBmad', () => {
   it('defaults an unrecognized custom status to draft, but marks it unrecognized rather than guessing confidently', () => {
     expect(mapJiraStatusToBmad('Waiting on Vendor')).toEqual({ status: 'draft', recognized: false });
     expect(mapJiraStatusToBmad(null)).toEqual({ status: 'draft', recognized: false });
+  });
+});
+
+describe('candidateJiraStatusNames (the reverse of mapJiraStatusToBmad)', () => {
+  it('returns every known Jira name that maps to the given BMad status', () => {
+    expect(candidateJiraStatusNames('in-progress')).toEqual(expect.arrayContaining(['In Progress', 'In Development']));
+    expect(candidateJiraStatusNames('draft').length).toBeGreaterThan(1);
+  });
+
+  it('treats built the same as done (Jira has no separate "verified built" concept)', () => {
+    expect(candidateJiraStatusNames('built')).toEqual(candidateJiraStatusNames('done'));
+  });
+});
+
+describe('chooseTransition', () => {
+  const transitions = [
+    { id: '11', to: { name: 'In Progress' } },
+    { id: '21', to: { name: 'Done' } },
+  ];
+
+  it('finds the transition matching a candidate name, case-insensitively', () => {
+    expect(chooseTransition(transitions, 'in-progress')).toEqual({ id: '11', to: { name: 'In Progress' } });
+    expect(chooseTransition(transitions, 'done')).toEqual({ id: '21', to: { name: 'Done' } });
+  });
+
+  it('returns undefined when no available transition leads to that status (never guessed or forced)', () => {
+    expect(chooseTransition(transitions, 'blocked')).toBeUndefined();
   });
 });
 

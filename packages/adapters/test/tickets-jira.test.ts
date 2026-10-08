@@ -8,7 +8,7 @@
 import { JiraUnauthorizedError, JiraUnreachableError } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { basicAuthHeader, startFakeJiraServer, type FakeJiraServer } from '../../../tests/fixtures/fake-jira-server.mjs';
-import { createJiraLinkPort, gatewayBaseUrl, jiraGet, JIRA_SEARCH_MAX_ISSUES, resolveBaseUrl, searchAllIssues } from '../src/index.js';
+import { createJiraLinkPort, gatewayBaseUrl, jiraGet, JIRA_SEARCH_MAX_ISSUES, linkIsBlockedBy, listTransitions, resolveBaseUrl, searchAllIssues, transitionIssue, updateIssueFields } from '../src/index.js';
 import { redactJiraCredential, redactJiraValues, withJiraRedaction } from '../src/tickets-jira/redact.js';
 
 const closers: Array<() => Promise<void> | void> = [];
@@ -171,5 +171,82 @@ describe('searchAllIssues (pagination)', () => {
     await searchAllIssues(call, 'project = "ENG" AND type = Epic');
     expect(server.log[0]?.query).toContain(encodeURIComponent('project = "ENG" AND type = Epic'));
     expect(server.log[0]?.query).toContain('fields=summary');
+  });
+});
+
+describe('listTransitions / transitionIssue', () => {
+  it('lists the standard transitions and applying one updates the issue for a later search', async () => {
+    const server = await fakeServer({ issues: [{ key: 'ENG-1', fields: { summary: 'A story', status: { name: 'To Do' } } }] });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    const transitions = await listTransitions(call, 'ENG-1');
+    expect(transitions.map((t) => t.to.name)).toContain('In Progress');
+    const toInProgress = transitions.find((t) => t.to.name === 'In Progress')!;
+
+    await transitionIssue(call, 'ENG-1', toInProgress.id);
+    expect(server.transitions).toEqual([{ issueKey: 'ENG-1', transitionId: toInProgress.id, at: expect.any(Number) }]);
+
+    const after = await searchAllIssues(call, 'key = ENG-1');
+    expect(after[0]?.fields.status.name).toBe('In Progress');
+  });
+
+  it('honors a per-issue transitions override', async () => {
+    const server = await fakeServer({
+      issues: [{ key: 'ENG-9', fields: { summary: 'Custom workflow', status: { name: 'Open' } } }],
+      transitions: { 'ENG-9': [{ id: '99', name: 'Resolve', to: { name: 'Resolved' } }] },
+    });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    const transitions = await listTransitions(call, 'ENG-9');
+    expect(transitions).toEqual([{ id: '99', name: 'Resolve', to: { name: 'Resolved' } }]);
+  });
+
+  it('rejects listing transitions for an unauthorized credential', async () => {
+    const server = await fakeServer({ tamper: 'unauthorized', issues: [{ key: 'ENG-1', fields: { summary: 'x', status: { name: 'To Do' } } }] });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    await expect(listTransitions(call, 'ENG-1')).rejects.toBeInstanceOf(JiraUnauthorizedError);
+  });
+});
+
+describe('setIssueField (test-only backdoor, simulating a direct Jira change)', () => {
+  it('changes what a later search reports, independent of any transition call', async () => {
+    const server = await fakeServer({ issues: [{ key: 'ENG-1', fields: { summary: 'Original title', status: { name: 'To Do' } } }] });
+    server.setIssueField('ENG-1', { summary: 'Renamed in Jira directly' });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    const issues = await searchAllIssues(call, 'key = ENG-1');
+    expect(issues[0]?.fields.summary).toBe('Renamed in Jira directly');
+  });
+});
+
+describe('updateIssueFields (pushing a local title/body edit, AD-28)', () => {
+  it('pushes a summary change, reflected in a later search', async () => {
+    const server = await fakeServer({ issues: [{ key: 'ENG-1', fields: { summary: 'Old title', status: { name: 'To Do' } } }] });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    await updateIssueFields(call, 'ENG-1', { summary: 'New title from Ogden' });
+    expect(server.fieldUpdates).toHaveLength(1);
+    const after = await searchAllIssues(call, 'key = ENG-1');
+    expect(after[0]?.fields.summary).toBe('New title from Ogden');
+  });
+
+  it('pushes a description change as Atlassian Document Format, and the fixture reads the text back out', async () => {
+    const server = await fakeServer({ issues: [{ key: 'ENG-1', fields: { summary: 'A story', status: { name: 'To Do' } } }] });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    await updateIssueFields(call, 'ENG-1', { description: 'New body text.' });
+    expect(server.fieldUpdates[0]?.fields).toMatchObject({ description: { type: 'doc' } });
+    const after = await searchAllIssues(call, 'key = ENG-1');
+    expect(after[0]?.fields.description).toBe('New body text.');
+  });
+
+  it('rejects for an unauthorized credential', async () => {
+    const server = await fakeServer({ tamper: 'unauthorized', issues: [{ key: 'ENG-1', fields: { summary: 'x', status: { name: 'To Do' } } }] });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    await expect(updateIssueFields(call, 'ENG-1', { summary: 'y' })).rejects.toBeInstanceOf(JiraUnauthorizedError);
+  });
+});
+
+describe('linkIsBlockedBy (local after -> Jira Issue Links, one-way, AD-28)', () => {
+  it('records an "is blocked by" link from the ticket to its prerequisite', async () => {
+    const server = await fakeServer({ issues: [{ key: 'ENG-2', fields: { summary: 'Depends on ENG-1', status: { name: 'To Do' } } }] });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    await linkIsBlockedBy(call, 'ENG-2', 'ENG-1');
+    expect(server.issueLinks).toEqual([{ type: 'Blocks', inward: 'ENG-2', outward: 'ENG-1', at: expect.any(Number) }]);
   });
 });

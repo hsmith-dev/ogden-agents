@@ -39,6 +39,10 @@ describe('parseFrontmatterBlock', () => {
     expect(parseFrontmatterBlock(text)).toEqual({ id: 1, type: 'story', title: 'Tracer bullet', parent: 'epic-jira-tracker-link', covers: ['E18-R1', 'E18-R3'], after: [], hitl: true, risk: 'high' });
   });
 
+  it('keeps a list\'s elements in their own type: a bare after = [1, "1.3"] mixes a number and a string, matching tickets.py\'s own parser (never force-stringified)', () => {
+    expect(parseFrontmatterBlock('---\nafter: [1, "1.3"]\n---\n')).toEqual({ after: [1, '1.3'] });
+  });
+
   it('parses an empty list and an empty frontmatter block', () => {
     expect(parseFrontmatterBlock('---\nafter: []\n---\n')).toEqual({ after: [] });
     expect(parseFrontmatterBlock('no frontmatter here')).toEqual({});

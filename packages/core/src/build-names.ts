@@ -15,6 +15,13 @@ import { isProtectedSegment } from './permission-matching.js';
 export const NO_BUILD_RUNNER_MESSAGE = "That agent can't build any more. Pick another agent, or build it with Claude Code.";
 export const NO_FREE_SLOT_MESSAGE = 'Other builds are using every free slot. Try again when one finishes.';
 
+/** A remote machine was named for an unattended build (CAP-24, epic 19 story 19.6, the scope decision): not supported yet. */
+export const UNATTENDED_REMOTE_MESSAGE = "Unattended builds on a remote machine aren't supported yet. Build with you watching instead.";
+/** A remote machine was named but this install has no remote-build capability wired (CAP-24, epic 19 story 19.6). */
+export const REMOTE_UNAVAILABLE_MESSAGE = "This install can't run builds on a remote machine.";
+/** A remote machine was named, but it can't be reached or used right now (CAP-24, epic 19 story 19.6): fail closed, never a silent local run. */
+export const REMOTE_MACHINE_UNAVAILABLE_MESSAGE = "That remote machine can't be used right now.";
+
 /** The BMad output folder whose uncommitted changes never block approve (user decision 2026-10-01). */
 export const BMAD_OUTPUT_PREFIX = '_bmad-output/';
 

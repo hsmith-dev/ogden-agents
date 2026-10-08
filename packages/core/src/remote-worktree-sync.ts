@@ -162,21 +162,37 @@ function pushScript(dir: string, branch: string): string {
   return [`mkdir -p ${baseQ}`, `rm -rf -- ${dirQ}`, 'tmp=$(mktemp)', 'cat > "$tmp"', `git init --quiet ${dirQ}`, `git -C ${dirQ} fetch --quiet "$tmp" ${refspecQ}`, `git -C ${dirQ} checkout --quiet ${branchQ}`, 'rm -f "$tmp"'].join(' && ');
 }
 
+/**
+ * Opens an authenticated connection to `machineId` (host key pinned and
+ * verified first, never skipped): the connection-opening half of
+ * {@link createRemoteWorktreeSync}'s own `withConnection`, factored out (CAP-24,
+ * epic 19 story 19.6) so `build-start.ts` can open a *long-lived* connection
+ * for the chat layer the same verified way `push`/`pull`/`remove` already do.
+ * The caller owns closing it (never done here): each caller's own posture
+ * (`withConnection`'s own `finally`, or a build's own release) decides when.
+ */
+export async function openRemoteConnection(
+  machineId: RemoteMachineId,
+  { hosts, secrets, machines }: Pick<RemoteWorktreeSyncOptions, 'hosts' | 'secrets' | 'machines'>,
+): Promise<RemoteHostConnection> {
+  await machines.verifyPinnedHostKey(machineId);
+  const machine = machines.get(machineId);
+  const privateKey = await secrets.get(remoteMachineSshSecretName(machineId));
+  if (privateKey === undefined) {
+    throw new RemoteHostError(`No SSH key is stored for ${machine.host}. Remove and re-add the machine.`, { host: machine.host }, 'auth_failed');
+  }
+  // `verifyPinnedHostKey` just proved the key was fine on its own short-lived probe; `connect` itself re-checks it
+  // again, on this exact connection, against the same pinned fingerprint (never confirmed, never null here).
+  if (machine.hostKeyFingerprint === null) {
+    throw new RemoteHostError(`Confirm ${machine.host}'s host key before using it.`, { host: machine.host }, 'host_key_not_confirmed');
+  }
+  return hosts.connect({ host: machine.host, port: machine.port, username: machine.username }, { privateKey }, machine.hostKeyFingerprint);
+}
+
 export function createRemoteWorktreeSync({ vcs, hosts, secrets, machines }: RemoteWorktreeSyncOptions): RemoteWorktreeSync {
-  /** Opens a connection to `machineId` (host key pinned and verified first, never skipped), runs `work`, and closes it on every path. */
+  /** Opens a connection to `machineId` the verified way ({@link openRemoteConnection}), runs `work`, and closes it on every path. */
   const withConnection = async <T>(machineId: RemoteMachineId, work: (connection: RemoteHostConnection) => Promise<T>): Promise<T> => {
-    await machines.verifyPinnedHostKey(machineId);
-    const machine = machines.get(machineId);
-    const privateKey = await secrets.get(remoteMachineSshSecretName(machineId));
-    if (privateKey === undefined) {
-      throw new RemoteHostError(`No SSH key is stored for ${machine.host}. Remove and re-add the machine.`, { host: machine.host }, 'auth_failed');
-    }
-    // `verifyPinnedHostKey` just proved the key was fine on its own short-lived probe; `connect` itself re-checks it
-    // again, on this exact connection, against the same pinned fingerprint (never confirmed, never null here).
-    if (machine.hostKeyFingerprint === null) {
-      throw new RemoteHostError(`Confirm ${machine.host}'s host key before using it.`, { host: machine.host }, 'host_key_not_confirmed');
-    }
-    const connection = await hosts.connect({ host: machine.host, port: machine.port, username: machine.username }, { privateKey }, machine.hostKeyFingerprint);
+    const connection = await openRemoteConnection(machineId, { hosts, secrets, machines });
     try {
       return await work(connection);
     } finally {

@@ -39,6 +39,7 @@ import {
   type ModelChangeCause,
   type PermissionMode,
   type PermissionModeChangeCause,
+  type RemoteMachineId,
   type Run,
   type RunQueueEntry,
   type RunDecision,
@@ -141,6 +142,8 @@ export interface NewRun {
   baseBranch?: string | null;
   /** The agent that builds (story 5.3). Default Claude Code, the only one in v1. */
   agent?: BuildAgent;
+  /** The remote machine this run was dispatched to (CAP-24, epic 19 story 19.6), attended only. Default `null` (a local run). */
+  machineId?: RemoteMachineId | null;
   /** Where it waits in the workspace's queue (story 5.3; 5.8), `null` when dispatched now. */
   queuePosition?: number | null;
 }

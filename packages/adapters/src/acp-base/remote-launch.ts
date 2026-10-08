@@ -69,6 +69,13 @@ export function buildRemoteCommand({ cwd, command, args }: { cwd: string; comman
  * already knows how to handle (never a distinct `'error'`, so a dropped SSH
  * connection is never shown to the UI as something other than the same
  * fatal state a local crash would report).
+ *
+ * The `'exit'` emission's `signal` parameter is otherwise always `null` for
+ * a remote process (ssh2 channels never report a POSIX signal there the way
+ * a local child does), so a dropped connection reuses that unused slot as a
+ * sentinel: `signal === 'connection_lost'` (CAP-24, epic 19 story 19.6).
+ * `startOnChild` special-cases exactly that one string; every other value
+ * (a local child's real `'SIGKILL'`, `'SIGTERM'`, …) is untouched.
  */
 export function remoteProcessOf(channel: RemoteHostChannel): AcpProcess {
   let exitListener: ((code: number | null, signal: string | null) => void) | undefined;
@@ -81,8 +88,9 @@ export function remoteProcessOf(channel: RemoteHostChannel): AcpProcess {
   channel.exitCode.then(
     (code) => settle(code, null),
     // The connection dropped mid-command (`RemoteHostError('connection_lost', …)`): mapped onto the same
-    // `'exit'` path a local process's abrupt death takes, never a second, "remote" failure shape.
-    () => settle(null, null),
+    // `'exit'` path a local process's abrupt death takes, never a second, "remote" failure shape -- but
+    // carrying the one sentinel `startOnChild` reads back out of the otherwise-unused `signal` slot.
+    () => settle(null, 'connection_lost'),
   );
   function once(event: 'error', listener: (error: Error) => void): void;
   function once(event: 'exit', listener: (code: number | null, signal: string | null) => void): void;

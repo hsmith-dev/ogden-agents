@@ -14,7 +14,7 @@ import type { BuildCtx } from './build-context.js';
 export function createOutcome(ctx: BuildCtx) {
   const {
     trust, entities, events, tickets, vcs, sandbox, runnerOf, chat, buildSessions, dataDir, settings, commandEnv, mask, report,
-    writeResult, generation, state, disarmDeadline, release, rerunSignal, fn
+    writeResult, generation, state, disarmDeadline, release, rerunSignal, fn, remote
   } = ctx;
 
   /**
@@ -68,7 +68,7 @@ export function createOutcome(ctx: BuildCtx) {
   };
 
   /** Works out a finished turn's outcome (see the header). */
-  const decideOutcome = async (run: Run, ended: 'idle' | 'error', options: { passedDone?: boolean; errorCode?: 'auth_required' | 'usage_limit' | undefined; agentReason?: string | undefined } = {}): Promise<void> => {
+  const decideOutcome = async (run: Run, ended: 'idle' | 'error', options: { passedDone?: boolean; errorCode?: 'auth_required' | 'usage_limit' | 'connection_lost' | undefined; agentReason?: string | undefined } = {}): Promise<void> => {
     if (run.worktreePath === null) return;
     // The turn is over: the time limit no longer applies (the tests have their own).
     disarmDeadline(run.id);
@@ -78,6 +78,20 @@ export function createOutcome(ctx: BuildCtx) {
       repoPath = workspaceRepoPath(entities, run.workspaceId);
     } catch {
       return;
+    }
+    // A remote run (CAP-24, epic 19 story 19.6) pulls the remote's diff back into the local worktree before anything
+    // below reads the ticket's status, for every ended turn except a hard `connection_lost` (the agent's own session
+    // already reported the drop; there is plainly no connection left to pull from, so the `errorCode` branch below
+    // handles it alone). A failed pull here is `blocked`/`connection_lost` too, never a guessed `verified`/`failed`,
+    // and the local worktree is left exactly as it was (the import only ever fast-forwards, `remote-worktree-sync.ts`'s own doc).
+    if (run.machineId !== null && !(ended === 'error' && options.errorCode === 'connection_lost')) {
+      try {
+        await remote!.sync.pull({ repoPath, worktreePath: run.worktreePath, branch: run.branch!, base: run.baseRevision!, runId: run.id, machineId: run.machineId });
+      } catch (error) {
+        report(run.id, 'pull', error);
+        entities.setRunOutcome(run.id, 'blocked', blockedSentence('connection_lost'), { blockedCode: 'connection_lost' });
+        return;
+      }
     }
     let outcome: 'verified' | 'failed' | 'blocked';
     let reason: string | null = null;
@@ -116,8 +130,10 @@ export function createOutcome(ctx: BuildCtx) {
         blockedCode = runnerOf(run)?.blockedCode(ticket.blocked_reason ?? '') ?? 'other';
         reason = `${said} ${RUN_REASON_NO_NETWORK}`;
       } else if (ended === 'error' && options.errorCode !== undefined) {
-        // The agent said it could not go on for want of a key, a sign in or its usage (epic 17): blocked, in that agent's own plain
-        // words (its name, the key it needs), with Retry. Never retried by itself, so a rejected key or a limit never loops.
+        // The agent said it could not go on for want of a key, a sign in, its usage (epic 17), or (CAP-24, epic 19 story
+        // 19.6) the remote machine dropped the connection: blocked, in that agent's own plain words (its name, the key
+        // it needs) or the shared `connection_lost` sentence, with Retry. Never retried by itself, so a rejected key, a
+        // limit or a drop never loops.
         outcome = 'blocked';
         blockedCode = options.errorCode;
         // The adapter's usage limit sentence ends with the chat's offer; in a build it ends with the build's.
@@ -187,7 +203,7 @@ export function createOutcome(ctx: BuildCtx) {
     if (resumable === true) return;
     const run = entities.getRunBySession(sessionId);
     if (run === undefined || run.outcome !== 'running') return;
-    void track(run.id, () => decideOutcome(run, state, { errorCode: state === 'error' && (errorCode === 'auth_required' || errorCode === 'usage_limit') ? errorCode : undefined, agentReason }));
+    void track(run.id, () => decideOutcome(run, state, { errorCode: state === 'error' && (errorCode === 'auth_required' || errorCode === 'usage_limit' || errorCode === 'connection_lost') ? errorCode : undefined, agentReason }));
   });
 
   return { doneCheckpointOf, verifyBuilt, decideOutcome, resultHolds, deciding, track, unsubscribe };

@@ -240,10 +240,11 @@ describe('a remote chat over SSH (CAP-24, story 19.5)', () => {
     await until(() => events.some((e) => e.type === 'message_chunk'), 'the first chunk');
     connection.dropLatest();
 
-    await expect(turn).rejects.toMatchObject({ code: 'agent_failed' });
+    // CAP-24 epic 19 story 19.6: a dropped connection is its own code, never the generic `agent_failed`.
+    await expect(turn).rejects.toMatchObject({ code: 'connection_lost' });
     const errors = events.filter((e) => e.type === 'state' && e.state === 'error');
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatchObject({ fatal: true });
+    expect(errors[0]).toMatchObject({ fatal: true, code: 'connection_lost' });
     // A dead session refuses further prompts at once -- never a distinct "remote" error shape.
     await expect(session.prompt('whoami')).rejects.toBeInstanceOf(AgentError);
   });

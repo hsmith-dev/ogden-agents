@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { AgentId } from './events-common.js';
 import { BlockedCode, BuildAgent, RunDecision } from './build-runs.js';
-import { RunId, SessionId, WorkspaceId } from './ids.js';
+import { RemoteMachineId, RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
 
 /**
@@ -177,6 +177,8 @@ export const Run = z.object({
   reason: z.string().nullable().default(null),
   /** The agent that builds (story 5.3): the build runner's agent, Claude Code only in v1. `null` in runs from before it. */
   agent: BuildAgent.nullable().default(null),
+  /** The remote machine this run was dispatched to (CAP-24, epic 19 story 19.6), attended only. `null` for a local run, and in runs from before it. */
+  machineId: RemoteMachineId.nullable().default(null),
   /** Why a `blocked` run is blocked (story 5.3; Ogden Agents' code, its sentence from `blockedSentence`), else `null`. */
   blockedCode: BlockedCode.nullable().default(null),
   /** Where a waiting run is in its workspace's queue (1 is next; story 5.3, filled by 5.8), `null` once dispatched. */

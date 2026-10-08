@@ -256,7 +256,7 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
           return;
         }
         const agent = run.agent ?? runner.agent;
-        const plan = await validateStart(run.workspaceId, repoPath, run.ticketRef, agent, run.sandbox === ATTENDED_SANDBOX ? 'attended' : 'unattended', run.id);
+        const plan = await validateStart(run.workspaceId, repoPath, run.ticketRef, agent, run.sandbox === ATTENDED_SANDBOX ? 'attended' : 'unattended', run.machineId, run.id);
         await begin(run.workspaceId, repoPath, run.ticketRef, agent, plan, run, pending?.note);
         pendingNotes.delete(queued.id);
       });

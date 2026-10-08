@@ -12,6 +12,7 @@ import type {
   BuildAgent,
   CautionLevel,
   PermissionMode,
+  RemoteMachineId,
   RunDecision,
   RunOutcome,
   SessionDriver,
@@ -184,6 +185,8 @@ export const runs = sqliteTable(
     reason: text('reason'),
     /** The agent that builds (story 5.3); `null` in runs from before it, read as Claude Code. */
     agent: text('agent').$type<BuildAgent>(),
+    /** The remote machine this run was dispatched to (CAP-24, epic 19 story 19.6), attended only; `null` for a local run. */
+    machineId: text('machine_id').$type<RemoteMachineId>(),
     /** Why a `blocked` run is blocked (story 5.3): Ogden Agents' code. */
     blockedCode: text('blocked_code').$type<BlockedCode>(),
     /** Where a waiting run is in its workspace's queue (story 5.3; 5.8 fills it). */

@@ -8,6 +8,7 @@
  */
 import type { SessionId } from '@ogden-agents/shared';
 import type { AgentPermissionDecision, AgentPermissionRequest } from './agent-port.js';
+import type { RemoteHostConnection } from './remote-host-port.js';
 import type { AgentSandbox } from './sandbox-port.js';
 
 export interface UnattendedBuildSetup {
@@ -28,7 +29,16 @@ export interface UnattendedBuildSetup {
  */
 export interface AttendedBuildSetup {
   attended: true;
+  /** The agent's folder: the run's worktree, or (CAP-24, epic 19 story 19.6) a remote run's own path on its machine. */
   cwd: string;
+  /**
+   * An already-open connection to the machine this run's agent process
+   * actually runs on (CAP-24, epic 19 story 19.6): absent for a local
+   * attended run, exactly as today. Never set on an {@link UnattendedBuildSetup}
+   * (the scope decision: an unattended remote build is refused before this
+   * setup is ever built).
+   */
+  remote?: RemoteHostConnection | undefined;
 }
 
 export type BuildSessionSetup = UnattendedBuildSetup | AttendedBuildSetup;

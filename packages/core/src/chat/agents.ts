@@ -100,6 +100,9 @@ export function createAgents(
       ...(startModel === null ? {} : { model: startModel }),
       ...(unattended === undefined ? {} : { sandbox: unattended.sandbox }),
       ...(build?.attended === true ? { attended: true as const } : {}),
+      // An attended build dispatched to a remote machine (CAP-24, epic 19 story 19.6): the chat layer runs the
+      // agent's process over this already-open connection instead of locally; absent for every other chat.
+      ...(build?.attended === true && build.remote !== undefined ? { remote: build.remote } : {}),
       mcpServers: ctx.installSettings?.globalMcpServers() ?? [],
     };
     const previous = storedAgentSessionId(session.id);

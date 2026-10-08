@@ -133,9 +133,10 @@ export const MAX_DENY_REASON_LENGTH = 2000;
 /**
  * Why a session went to `error`, when it is one the UI acts on
  * (`auth_required`: Sign in again; `usage_limit`: the agent ran out of usage,
- * so the chat offers to continue with another agent).
+ * so the chat offers to continue with another agent; `connection_lost`: a
+ * remote build's machine dropped the connection, CAP-24 epic 19 story 19.6).
  */
-export const SESSION_ERROR_CODES = ['agent_unavailable', 'agent_failed', 'auth_required', 'usage_limit'] as const;
+export const SESSION_ERROR_CODES = ['agent_unavailable', 'agent_failed', 'auth_required', 'usage_limit', 'connection_lost'] as const;
 export const SessionErrorCode = z.enum(SESSION_ERROR_CODES);
 export type SessionErrorCode = z.infer<typeof SessionErrorCode>;
 

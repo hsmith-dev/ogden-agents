@@ -384,8 +384,13 @@ export interface AgentTerminalCommand {
   env: Readonly<Record<string, string>>;
 }
 
-/** `usage_limit`: the agent ran out of usage (its descriptor's patterns matched; handoff), its session is still usable. */
-export type AgentErrorCode = 'agent_unavailable' | 'agent_failed' | 'auth_required' | 'usage_limit';
+/**
+ * `usage_limit`: the agent ran out of usage (its descriptor's patterns
+ * matched; handoff), its session is still usable. `connection_lost` (CAP-24,
+ * epic 19 story 19.6): the remote machine running a build's agent process
+ * dropped the connection; always fatal.
+ */
+export type AgentErrorCode = 'agent_unavailable' | 'agent_failed' | 'auth_required' | 'usage_limit' | 'connection_lost';
 
 /**
  * An agent failure with a plain-language message for the UI. `details` are

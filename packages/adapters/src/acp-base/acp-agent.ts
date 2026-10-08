@@ -349,7 +349,7 @@ async function startOnChild(
   { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, attended, startModel, fixed, askingModeIds, buildModeIds, mcpServers }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
-  const { couldNotStart: COULD_NOT_START, stopped: STOPPED, failed: FAILED } = reasons;
+  const { couldNotStart: COULD_NOT_START, stopped: STOPPED, failed: FAILED, connectionLost: CONNECTION_LOST } = reasons;
   const modeIds = descriptor.permissionModes;
   /** A plain reason for a failed ACP request, for the UI; the raw error goes to the log. */
   const plainReason = (error: unknown, fallback: string) => (isAuthRequired(error) ? reasons.signIn : fallback);
@@ -429,13 +429,13 @@ async function startOnChild(
         : { type: 'state', state: next },
     );
   };
-  /** The process is gone: one `fatal` error, even after a non-fatal one for the same failure. */
-  const reportGone = (reason: string) => {
+  /** The process is gone: one `fatal` error, even after a non-fatal one for the same failure. `code` mirrors `setState`'s own (CAP-24, epic 19 story 19.6: `connection_lost` for a dropped remote connection). */
+  const reportGone = (reason: string, code?: AgentErrorCode) => {
     if (closing || fatalReported) return;
     fatalReported = true;
     flushReply();
     state = 'error';
-    emit({ type: 'state', state: 'error', reason, fatal: true });
+    emit({ type: 'state', state: 'error', reason, fatal: true, ...(code === undefined ? {} : { code }) });
   };
 
   // The agent's stderr is its own log and may echo anything: it is never
@@ -546,15 +546,18 @@ async function startOnChild(
     });
     child.once('exit', (code, signal) => {
       exited = true;
+      // The remote exit path's own sentinel (CAP-24, epic 19 story 19.6; `remote-launch.ts`'s doc comment): a real local
+      // child's signal is never this exact string, so only a dropped SSH connection takes this branch.
+      const connectionLost = signal === 'connection_lost';
       if (!closing) {
         diagnostic('the agent process exited', { code, signal });
         noteStderr();
         // Anything it started goes with it.
         child.kill();
       }
-      rejectGone(new AgentError('agent_failed', STOPPED, { details: { code, signal }, output: output() }));
+      rejectGone(new AgentError(connectionLost ? 'connection_lost' : 'agent_failed', connectionLost ? CONNECTION_LOST : STOPPED, { details: { code, signal }, output: output() }));
       connection.close(new Error('the agent process exited'));
-      reportGone(STOPPED);
+      reportGone(connectionLost ? CONNECTION_LOST : STOPPED, connectionLost ? 'connection_lost' : undefined);
       resolve();
     });
   });

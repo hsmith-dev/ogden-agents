@@ -6,7 +6,8 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILD_RESULT_FILE, BuildRunResult, type SandboxStatus, type SessionId, type TicketDetail, type TicketStatus, type WorkspaceId } from '@ogden-agents/shared';
-import { createBuilds, type BuildRunnerPort, type BuildSessionSetup, type BuildsUseCases, type BuildRefusedError, type Core, type SandboxCheck, type SandboxPort, type SandboxRunRequest, type SandboxRunResult, type TicketStorePort, type UnattendedBuildSetup, type VcsCheck, type VcsHead, type VcsPort } from '../src/index.js';
+import { createBuilds, type BuildRunnerPort, type BuildSessionSetup, type BuildsDeps, type BuildsUseCases, type BuildRefusedError, type Core, type SandboxCheck, type SandboxPort, type SandboxRunRequest, type SandboxRunResult, type TicketStorePort, type UnattendedBuildSetup, type VcsCheck, type VcsHead, type VcsPort } from '../src/index.js';
+import type { createStarter } from '../src/build-start.js';
 import { openTestCore, tempDir, unusedCatalogParts } from './helpers.js';
 
 export const PLAN = '_bmad-output/initiative-demo/epic-first/story-thing-plan.md';
@@ -284,6 +285,14 @@ export interface Harness {
   sendFails: { value: boolean };
   /** Ends the build session's turn (working, then `idle` or `error`) and waits for the outcome. */
   endTurn(sessionId: SessionId, state?: 'idle' | 'error'): Promise<void>;
+  /**
+   * The internal starter (CAP-24, epic 19 story 19.6): `startLocked`'s own
+   * `machineId` has no REST field yet (19.7's job), so a remote-build test
+   * calls `h.start.startLocked(h.wsId, h.repo, ref, agent, mode, note, machineId)`
+   * directly rather than through `h.builds.start` (`StartBuildRequest`, which
+   * never carries one).
+   */
+  start: ReturnType<typeof createStarter>;
 }
 
 export async function harness({
@@ -293,6 +302,7 @@ export async function harness({
   runner = testRunner,
   ticketList,
   devTools,
+  remote,
 }: {
   pieces?: readonly string[];
   trusted?: boolean;
@@ -301,6 +311,8 @@ export async function harness({
   ticketList?: readonly Ticket[];
   /** The generic dev tools' sandbox-gate lookup (CAP-25). Default: nothing denied. */
   devTools?: { deniedReadPathsFor: (workspaceId: WorkspaceId) => Promise<string[]> };
+  /** The remote-build capability (CAP-24, epic 19 story 19.6); default: absent, exactly as before this story (no ripple). */
+  remote?: BuildsDeps['remote'];
 } = {}): Promise<Harness> {
   const dataDir = tempDir('ogden-agents-builds-data-');
   const repo = tempDir('ogden-agents-builds-repo-');
@@ -330,6 +342,7 @@ export async function harness({
   const timers = { armed: [] as Array<{ ms: number; run: () => void; cancelled: boolean }>, fire() { for (const timer of this.armed.filter((each) => !each.cancelled)) timer.run(); } };
   // The project's own test command (story 5.8), so the re-run has one to run.
   core.buildSettings.setWorkspaceSettings(workspace.id, { testCommand: 'run-tests' });
+  let starter: ReturnType<typeof createStarter> | undefined;
   const builds = createBuilds({
     settings: core.buildSettings,
     ...(devTools === undefined ? {} : { devTools }),
@@ -361,11 +374,13 @@ export async function harness({
     },
     buildSessions: core.buildSessions,
     dataDir,
+    ...(remote === undefined ? {} : { remote }),
     ...(freeBytes === undefined ? {} : { freeBytes }),
-  });
+  }, { captureStarter: (started) => (starter = started) });
   return {
     core,
     builds,
+    start: starter!,
     wsId: workspace.id,
     repo: workspace.realPath!,
     dataDir,

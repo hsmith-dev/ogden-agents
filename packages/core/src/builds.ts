@@ -85,9 +85,21 @@ export { BUILD_PERMISSION_DENIED } from './build-permission-policy.js';
 export { BMAD_OUTPUT_PREFIX, buildBranchName, isBuildBranch, prerequisitesMet, forbiddenChanges, atCheckpoint, intentGapPatchOf } from './build-names.js';
 export type { BuildsDeps, BuildsUseCases } from './builds-types.js';
 
-export function createBuilds(deps: BuildsDeps): BuildsUseCases {
+/**
+ * Test-only access to this call's internal starter (CAP-24, epic 19 story
+ * 19.6): `machineId` has no REST field yet (19.7's job), so a test reaches
+ * `startLocked`/`enqueue`/`begin` only by calling the starter directly,
+ * exactly as 19.4/19.5's own seams were reached only by direct calls. Never
+ * read by anything but a test.
+ */
+export interface BuildsTestHooks {
+  captureStarter?: (start: ReturnType<typeof createStarter>) => void;
+}
+
+export function createBuilds(deps: BuildsDeps, testHooks?: BuildsTestHooks): BuildsUseCases {
   const ctx = createBuildContext(deps);
   const start = createStarter(ctx);
+  testHooks?.captureStarter?.(start);
   const outcome = createOutcome(ctx);
   const dispatch = createDispatcher(ctx, start, outcome);
   const reviewer = createReviewer(ctx);

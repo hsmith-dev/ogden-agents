@@ -839,6 +839,26 @@ describe('resuming a chat (story 2.7)', () => {
     await chat.close();
   });
 
+  it('a fatal connection_lost error (CAP-24, epic 19 story 19.6: a remote build machine dropping the connection) sets errorCode and drops the agent', async () => {
+    const core = openTestCore();
+    const agent = scriptedAgent(async (text, emit) => {
+      if (text === 'dropped') {
+        emit({ type: 'state', state: 'error', reason: 'The connection to the remote machine was lost. Retry to carry on.', code: 'connection_lost', fatal: true });
+        throw new AgentError('connection_lost', 'The connection to the remote machine was lost. Retry to carry on.');
+      }
+      return echo(text, emit);
+    }, () => 'resumed');
+    const { chat, workspace, session } = setUp(core, agent.port);
+    chat.sendMessage(workspace.id, session.id, 'dropped');
+    await chat.settled();
+    expect(sessionEvents(core, session.id).filter((event) => event.type === 'session.state_changed').at(-1)).toMatchObject({
+      payload: { state: 'error', errorCode: 'connection_lost', reason: 'The connection to the remote machine was lost. Retry to carry on.' },
+    });
+    // Fatal: the agent is dropped, the same as any other process-gone failure (9.4's own posture, one more code).
+    expect(agent.closed()).toBe(1);
+    await chat.close();
+  });
+
   it('an agent that crashed in this run is reopened on the next message', async () => {
     const core = openTestCore();
     const agent = scriptedAgent(async (text, emit) => {

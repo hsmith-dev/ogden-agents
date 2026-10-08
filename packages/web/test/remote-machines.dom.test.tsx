@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * The remote machines settings page (CAP-24, epic 18 story 18.3): adding a
+ * The remote machines settings page (CAP-24, epic 19 story 19.3): adding a
  * machine shows it unconfirmed with a blocking host-key card; the card
  * shows the live fingerprint and only confirms with an explicit action;
  * once confirmed it collapses to a one-line record whose public key is

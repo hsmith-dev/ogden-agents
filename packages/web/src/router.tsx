@@ -63,7 +63,7 @@ const devToolsSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/dev-tools-settings-page'), 'DevToolsSettingsPage'),
 });
 
-/** Computers added over SSH for a chat or build to run on instead of here (CAP-24, epic 18 story 18.3). */
+/** Computers added over SSH for a chat or build to run on instead of here (CAP-24, epic 19 story 19.3). */
 const remoteMachinesSettingsRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: '/remote-machines',

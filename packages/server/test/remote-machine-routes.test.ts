@@ -1,5 +1,5 @@
 /**
- * The remote-machine routes end to end (CAP-24, epic 18 story 18.3; AD-26):
+ * The remote-machine routes end to end (CAP-24, epic 19 story 19.3; AD-26):
  * a real server with the in-memory keychain and a fake SSH connection
  * (`remote-host-memory`). Adding a machine stores no credential; its host
  * key must be confirmed before anything is pinned; a changed fingerprint
@@ -34,7 +34,7 @@ async function setUp() {
   return { server, tab, secrets, hosts, add, machineOf, checkPath, confirmPath, machinePath, confirm };
 }
 
-describe('the remote-machine routes (CAP-24, epic 18 story 18.3)', () => {
+describe('the remote-machine routes (CAP-24, epic 19 story 19.3)', () => {
   it('lists none at first, adds a machine with no credential, and answers no-store', async () => {
     const { server, tab, add, machineOf } = await setUp();
     const empty = await call(server, tab, 'GET', API_ROUTES.remoteMachines);

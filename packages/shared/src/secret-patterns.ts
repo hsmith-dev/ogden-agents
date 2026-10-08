@@ -65,7 +65,7 @@ export const CREDENTIAL_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
  * matches): CAP-24's generated SSH keys are this shape. One with no `END`
  * line takes the whole key-looking lines after it. Bounded, so it stays
  * linear. Shared by the handoff brief, the log's backstop (`server/src/log.ts`,
- * epic 18 story 18.2) and anywhere else a key could otherwise leak.
+ * epic 19 story 19.2) and anywhere else a key could otherwise leak.
  */
 export const PRIVATE_KEY_BLOCK_PATTERN = /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]{0,10000}?-----END [A-Z ]*PRIVATE KEY-----|(?:\r?\n[A-Za-z0-9+/=]{1,100}(?=\r?\n|$)){0,200})/g;
 

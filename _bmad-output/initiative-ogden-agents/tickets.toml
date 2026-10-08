@@ -101,7 +101,7 @@ after = [{ epic = 5, needs = "the headless build session (5.4), the sandbox chai
 
 # Epic id 18 (2026-10-07): 14 is v1.2 local models, 15 is v2 orchestration, 16 is the native CLI terminal, 17 is builds with other agents; no other open branch uses 18.
 [[epic]]
-id = 18
+id = 19
 slug = "epic-remote-execution"
 title = "Chat and build with an agent on another machine over SSH"
 covers = ["CAP-24"]

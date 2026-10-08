@@ -206,7 +206,7 @@ export const API_ERROR_CODES = [
   'no_install_command',
   /** CAP-25: a dev tool's real install command failed (409). The message is its plain reason, never the raw installer output. */
   'install_failed',
-  /** CAP-24 (epic 18 story 18.3): a remote machine could not be reached within the connect timeout (502). */
+  /** CAP-24 (epic 19 story 19.3): a remote machine could not be reached within the connect timeout (502). */
   'remote_host_unreachable',
   /** CAP-24: reading a remote machine's host key timed out (504). */
   'remote_host_timeout',

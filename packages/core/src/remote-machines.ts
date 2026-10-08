@@ -1,5 +1,5 @@
 /**
- * The remote-machine registry (CAP-24, epic 18 stories 18.1-18.2):
+ * The remote-machine registry (CAP-24, epic 19 stories 19.1-19.2):
  * install-level, not scoped to a workspace, exactly like an agent's own
  * sign-in (AD-2). A record holds only what addresses the machine and what
  * Settings shows — host, port, username, a display label, and the
@@ -11,7 +11,7 @@
  * Core owns this table directly, the same way it owns `localEndpoints`:
  * this repo's adapters never touch Ogden's own database (every `*-port.ts`
  * boundary is an external system — git, the OS keychain, a child process —
- * not Ogden's own SQLite). `RemoteHostPort` (story 18.2) is the adapter
+ * not Ogden's own SQLite). `RemoteHostPort` (story 19.2) is the adapter
  * boundary for the actual SSH-touching operations this class calls through
  * (generating a keypair, reading a host's key) but never performs itself.
  *
@@ -19,7 +19,7 @@
  * was shown, generates and stores a fresh keypair, and marks the machine
  * usable. A later confirm attempt on an already-pinned machine, or
  * {@link RemoteMachines.verifyPinnedHostKey} before any real connection
- * (stories 18.4/18.5), is refused outright if the live fingerprint no
+ * (stories 19.4/19.5), is refused outright if the live fingerprint no
  * longer matches what was pinned — never silently re-pinned.
  */
 import {
@@ -65,7 +65,7 @@ export interface RemoteMachines {
    * and changed: refused outright (`host_key_changed`), never re-pinned.
    */
   confirmHostKey(id: RemoteMachineId, request: unknown): Promise<RemoteMachine>;
-  /** Refuses (`RemoteHostError`) unless the machine is confirmed and its live host key still matches the pinned one; stories 18.4/18.5 call this before any real connection. Never pins or changes anything. */
+  /** Refuses (`RemoteHostError`) unless the machine is confirmed and its live host key still matches the pinned one; stories 19.4/19.5 call this before any real connection. Never pins or changes anything. */
   verifyPinnedHostKey(id: RemoteMachineId): Promise<void>;
 }
 

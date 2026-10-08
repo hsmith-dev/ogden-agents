@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 /**
- * CAP-24, epic 18 story 18.3 in a real browser: Settings, Remote machines.
+ * CAP-24, epic 19 story 19.3 in a real browser: Settings, Remote machines.
  * Adding a machine shows it unconfirmed; the blocking host-key card reads
  * the live fingerprint and only confirms on an explicit click; confirming
  * generates and stores a fresh keypair and the machine becomes a one-line

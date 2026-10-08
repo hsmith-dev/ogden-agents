@@ -9,7 +9,7 @@ import { Text } from '@/ui/typography';
 import { addRemoteMachine } from './remote-machines-api';
 
 /**
- * Add a remote machine (CAP-24, epic 18 story 18.3): host, port (22 unless
+ * Add a remote machine (CAP-24, epic 19 story 19.3): host, port (22 unless
  * changed), username and a display name. Adding it only creates the
  * record; it is unusable until its host key is confirmed (the card that
  * appears for it once added, below).

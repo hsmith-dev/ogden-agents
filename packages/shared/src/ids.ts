@@ -21,7 +21,7 @@ export const ID_PREFIXES = {
   localEndpoint: 'lep',
   /** An orchestration run: a manager's goal and plan (epic 15, story 15.2). */
   orchestrationRun: 'orc',
-  /** A remote machine added over SSH (CAP-24, epic 18 story 18.1; architecture's id-prefix note). */
+  /** A remote machine added over SSH (CAP-24, epic 19 story 19.1; architecture's id-prefix note). */
   remoteMachine: 'mach',
 } as const;
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
@@ -68,6 +68,6 @@ export type LocalEndpointId = z.infer<typeof LocalEndpointId>;
 export const OrchestrationRunId = prefixedUlid('orc');
 export type OrchestrationRunId = z.infer<typeof OrchestrationRunId>;
 
-/** A remote machine the user added over SSH (CAP-24, epic 18 story 18.1). */
+/** A remote machine the user added over SSH (CAP-24, epic 19 story 19.1). */
 export const RemoteMachineId = prefixedUlid('mach');
 export type RemoteMachineId = z.infer<typeof RemoteMachineId>;

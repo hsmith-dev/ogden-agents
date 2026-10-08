@@ -1,11 +1,11 @@
 /**
- * The port for the SSH connection to a remote machine (CAP-24, epic 18
- * story 18.2; the architecture's `RemoteHostPort` note under AD-1). Core
+ * The port for the SSH connection to a remote machine (CAP-24, epic 19
+ * story 19.2; the architecture's `RemoteHostPort` note under AD-1). Core
  * names no SSH library or client: the `remote-host-ssh` adapter does the
  * connecting. This story builds only `checkHostKey` — reading a machine's
  * host-key fingerprint, without authenticating — which is all the
  * confirm-and-pin flow (AD-26) needs. `connect`/spawning a process
- * (story 18.5) and the worktree push/pull (story 18.4) extend this same
+ * (story 19.5) and the worktree push/pull (story 19.4) extend this same
  * interface later; their shapes are not guessed here.
  */
 import { CoreError } from './errors.js';
@@ -19,7 +19,7 @@ export interface RemoteHostTarget {
 
 /** What reading a machine's host key found. */
 export interface RemoteHostKeyCheck {
-  /** The host key hashed with SHA-256, as a lowercase hex string (ssh2's own `hostHash` digest; not yet the `SHA256:base64` form OpenSSH prints — a UI nicety for story 18.3, not a security difference). */
+  /** The host key hashed with SHA-256, as a lowercase hex string (ssh2's own `hostHash` digest; not yet the `SHA256:base64` form OpenSSH prints — a UI nicety for story 19.3, not a security difference). */
   fingerprint: string;
 }
 

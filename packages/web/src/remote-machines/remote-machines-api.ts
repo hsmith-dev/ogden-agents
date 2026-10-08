@@ -6,7 +6,7 @@ import { tabAuth } from '@/auth/tab-token';
 import { useEventStream } from '@/events/event-stream';
 
 /**
- * The remote-machine REST calls (CAP-24, epic 18 story 18.3; AD-26), sent
+ * The remote-machine REST calls (CAP-24, epic 19 story 19.3; AD-26), sent
  * with this tab's token. Only Ogden Agents' server ever connects to a
  * machine: the page asks it to check or confirm a host key and never opens
  * an SSH connection itself. A machine's private key is never sent to, or

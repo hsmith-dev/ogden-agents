@@ -1,5 +1,5 @@
 /**
- * `remote-host-memory` (CAP-24, epic 18 story 18.2): the fake `RemoteHostPort`
+ * `remote-host-memory` (CAP-24, epic 19 story 19.2): the fake `RemoteHostPort`
  * server-level tests use. Checked for its own correctness, the way
  * `vcs-memory` is.
  */

@@ -161,7 +161,7 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
         })
       : undefined;
   const secrets = options.secrets ?? (hooks.secretStore === 'memory' ? createMemorySecretStore() : createKeyringSecretStore());
-  // CAP-24, epic 18 story 18.3: the remote-machine registry, over the real SSH port or a test's fake.
+  // CAP-24, epic 19 story 19.3: the remote-machine registry, over the real SSH port or a test's fake.
   const remoteHosts = options.remoteHost ?? createSshRemoteHostPort();
   const remoteMachines = core.remoteMachines(secrets, remoteHosts);
   // Claude Code's setup (or the ports given in its place), then each extra agent's own (6.3).

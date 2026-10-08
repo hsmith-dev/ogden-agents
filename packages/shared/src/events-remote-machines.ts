@@ -1,5 +1,5 @@
 /**
- * Remote machine registry events (CAP-24, epic 18 story 18.1), re-exported
+ * Remote machine registry events (CAP-24, epic 19 story 19.1), re-exported
  * from `events.ts`. A machine's host, username, label, fingerprint or
  * public key is never in an event (AD-16's pattern for any credential-
  * adjacent record): the page that follows one reads the machine list

@@ -3,17 +3,17 @@ import { RemoteMachineId } from './ids.js';
 
 /**
  * Remote machines the user gives Ogden Agents SSH access to (CAP-24, epic
- * 18 story 18.1). Install-level, not scoped to a workspace, exactly like an
+ * 18 story 19.1). Install-level, not scoped to a workspace, exactly like an
  * agent's own sign-in (AD-2): a machine is the user's own physical computer,
  * usable from any workspace.
  *
- * Story 18.1 stores only what addresses the machine and what Settings
+ * Story 19.1 stores only what addresses the machine and what Settings
  * shows: host, port, username and a display label. `hostKeyFingerprint`,
  * `publicKey` and `hostKeyConfirmed` are reserved here (per the
- * architecture's `RemoteHostPort` note) for story 18.2 to fill in; until
+ * architecture's `RemoteHostPort` note) for story 19.2 to fill in; until
  * then they stay `null`/`false` and the machine cannot be used for a chat
  * or a build. No credential field exists on this record at all: the
- * private key and passphrase, once story 18.2 generates and stores them,
+ * private key and passphrase, once story 19.2 generates and stores them,
  * live only in `SecretStorePort` under `remote-machine-ssh/<machineId>`
  * (AD-16's pattern), never here, never in an event, never in a log line.
  */
@@ -61,9 +61,9 @@ export const RemoteMachine = z.object({
   port: Port,
   username: z.string().min(1).max(MAX_MACHINE_USERNAME),
   label: Label,
-  /** The host key fingerprint shown and pinned at confirm time (story 18.2); `null` until then. */
+  /** The host key fingerprint shown and pinned at confirm time (story 19.2); `null` until then. */
   hostKeyFingerprint: z.string().min(1).nullable(),
-  /** The public half of the keypair Ogden generates and owns for this machine (story 18.2); `null` until then. */
+  /** The public half of the keypair Ogden generates and owns for this machine (story 19.2); `null` until then. */
   publicKey: z.string().min(1).nullable(),
   /** Whether the user has confirmed the host key; the machine cannot be used for a chat or build until this is `true`. */
   hostKeyConfirmed: z.boolean(),
@@ -71,7 +71,7 @@ export const RemoteMachine = z.object({
 });
 export type RemoteMachine = z.infer<typeof RemoteMachine>;
 
-/** Adds a machine. No credential is accepted here; story 18.2 adds the keypair/host-key flow. */
+/** Adds a machine. No credential is accepted here; story 19.2 adds the keypair/host-key flow. */
 export const AddRemoteMachineRequest = z
   .object({
     host: Host,

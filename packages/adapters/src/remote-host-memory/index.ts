@@ -1,5 +1,5 @@
 /**
- * `remote-host-memory` (CAP-24, epic 18 story 18.2): an in-memory
+ * `remote-host-memory` (CAP-24, epic 19 story 19.2): an in-memory
  * `RemoteHostPort` for tests. It runs no SSH and touches no network or
  * disk: `generateKeypair` returns deterministic, obviously-fake strings,
  * and `checkHostKey` answers from a map the test sets directly

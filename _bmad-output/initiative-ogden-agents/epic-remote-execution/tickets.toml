@@ -1,4 +1,4 @@
-# Epic 18 breakdown (chat and build with an agent on another machine over SSH, CAP-24). Table order is the build order; ids never change once written.
+# Epic 19 breakdown (chat and build with an agent on another machine over SSH, CAP-24). Table order is the build order; ids never change once written.
 # Drafted autonomously 2026-10-07 (no live user in this session; bmad-ticket's Autonomous mode). Gaps are Notes in the epic file, not silent guesses.
 # AD-24 and AD-26 are [ADOPTED]; AD-25 (multi-machine fan-out) is explicitly NOT adopted (see the epic's Notes). Entries 01-07 rest only on AD-24/AD-26. Entry 08 is AD-25's own scope and is sliced but left unbuilt and blocked.
 # Tests never touch a real SSH network, a real remote machine, or the real OS keychain: every test uses a fake SSH/remote-host adapter (mirroring secrets-keyring.test.ts's fake-keyring-module pattern and tests/fixtures/fake-acp-agent.mjs's fake-process pattern) plus the memory secret store. What only a real machine can show (a real host-key prompt against a real sshd, a real cross-OS agent CLI) is each story's own hitl live check.

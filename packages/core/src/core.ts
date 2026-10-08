@@ -100,8 +100,8 @@ export interface Core {
    */
   localEndpoints(secrets: SecretStorePort): LocalEndpoints;
   /**
-   * The remote-machine registry (CAP-24, epic 18 story 18.1) over the keychain the server holds (AD-16): a
-   * machine's SSH credential, once story 18.2 stores one, is never in the database. The server calls it once,
+   * The remote-machine registry (CAP-24, epic 19 story 19.1) over the keychain the server holds (AD-16): a
+   * machine's SSH credential, once story 19.2 stores one, is never in the database. The server calls it once,
    * after it has its secret store.
    */
   remoteMachines(secrets: SecretStorePort, hosts: RemoteHostPort): RemoteMachines;

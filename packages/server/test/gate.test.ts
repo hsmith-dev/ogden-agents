@@ -723,7 +723,7 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.localEndpointDetect}`,
   `GET ${API_ROUTES.localEndpointModels}`,
   `POST ${API_ROUTES.localEndpointManagerTest}`,
-  // The remote-machine registry (CAP-24, epic 18 story 18.3): behind the gate; install-level, not a BMad piece.
+  // The remote-machine registry (CAP-24, epic 19 story 19.3): behind the gate; install-level, not a BMad piece.
   `GET ${API_ROUTES.remoteMachines}`,
   `POST ${API_ROUTES.remoteMachines}`,
   `PATCH ${API_ROUTES.remoteMachine}`,

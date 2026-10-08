@@ -1,6 +1,6 @@
 /**
  * `redactSecrets` and `PRIVATE_KEY_BLOCK_PATTERN` (AD-16; extended for
- * CAP-24/AD-26, epic 18 story 18.2): a PEM-style private key block,
+ * CAP-24/AD-26, epic 19 story 19.2): a PEM-style private key block,
  * including OpenSSH's own `OPENSSH PRIVATE KEY` format (CAP-24's generated
  * SSH keys), is redacted wherever it appears in free text — the handoff
  * brief's own backstop, shared with the log's.

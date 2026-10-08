@@ -1,5 +1,5 @@
 /**
- * The remote-machine registry (CAP-24, epic 18 stories 18.1-18.2):
+ * The remote-machine registry (CAP-24, epic 19 stories 19.1-19.2):
  * install-level state, add/list/rename/remove, host-key confirm-and-pin
  * (AD-26), no credential field ever on the row, and one event per change
  * that never carries the host, username, label, fingerprint or key. No
@@ -255,7 +255,7 @@ describe('confirming a host key (AD-26)', () => {
   });
 });
 
-describe('verifying a pinned host key (what a real connection checks first, stories 18.4/18.5)', () => {
+describe('verifying a pinned host key (what a real connection checks first, stories 19.4/19.5)', () => {
   it('refuses an unconfirmed machine', async () => {
     const { machines } = setUp();
     const added = machines.add({ host: 'a', username: 'u', label: 'A' });

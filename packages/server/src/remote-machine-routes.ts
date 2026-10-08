@@ -1,5 +1,5 @@
 /**
- * The remote-machine routes (CAP-24, epic 18 story 18.3; AD-26): the
+ * The remote-machine routes (CAP-24, epic 19 story 19.3; AD-26): the
  * machines the user added over SSH, in Settings. Under `/api/v1`, behind
  * the gate (a tab token and a matching `Origin` on a write; AD-15). Routes
  * call core's `RemoteMachines` and never write themselves (AD-11). A

@@ -165,7 +165,7 @@ describe('redaction', () => {
     expect(out).toContain('failed with [redacted] inside');
   });
 
-  it('a remote machine’s SSH private key is redacted by field name and wherever the PEM block appears in a value (CAP-24, AD-26, epic 18 story 18.2)', () => {
+  it('a remote machine’s SSH private key is redacted by field name and wherever the PEM block appears in a value (CAP-24, AD-26, epic 19 story 19.2)', () => {
     const pem = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZWQy\n-----END OPENSSH PRIVATE KEY-----\n'; // secret-scan:allow: a made-up, invalid fixture, never a real credential
     expect(redact({ private_key: pem, privatekey: pem, passphrase: 'correct-horse-battery-staple' })).toEqual({
       private_key: REDACTED,

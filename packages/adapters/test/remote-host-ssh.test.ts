@@ -1,5 +1,5 @@
 /**
- * `remote-host-ssh` (CAP-24, epic 18 story 18.2): `generateKeypair` is real
+ * `remote-host-ssh` (CAP-24, epic 19 story 19.2): `generateKeypair` is real
  * local cryptography, checked here for real with `ssh2`'s own key parser
  * (no network at all). `checkHostKey`'s unreachable path is checked
  * against a real, briefly-bound-then-closed local TCP port (no fake, but

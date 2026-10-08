@@ -10,7 +10,7 @@ import { RemoteMachineRow } from './remote-machine-row';
 import { REMOTE_MACHINES_QUERY_KEY, useRemoteMachines } from './remote-machines-api';
 
 /**
- * Every machine added over SSH (CAP-24, epic 18 story 18.3). An
+ * Every machine added over SSH (CAP-24, epic 19 story 19.3). An
  * unconfirmed machine shows its blocking host-key confirmation; a
  * confirmed one is a one-line record with its public key available on
  * request. Removing a machine deletes its stored credential too. Split

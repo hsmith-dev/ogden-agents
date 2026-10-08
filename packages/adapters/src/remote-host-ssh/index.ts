@@ -1,5 +1,5 @@
 /**
- * `remote-host-ssh` (CAP-24, epic 18 story 18.2): the real `RemoteHostPort`,
+ * `remote-host-ssh` (CAP-24, epic 19 story 19.2): the real `RemoteHostPort`,
  * over `ssh2`. `generateKeypair` uses ssh2's own key generator so the
  * OpenSSH wire format (and the `authorized_keys` line) is exactly what a
  * real `sshd` expects, never hand-encoded. `checkHostKey` connects only far

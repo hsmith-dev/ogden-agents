@@ -44,7 +44,7 @@ const SECRET_FIELDS = new Set([
   'codex_api_key',
   'openai_api_key',
   'xai_api_key',
-  // A remote machine's SSH credential (CAP-24, AD-26, epic 18 story 18.2): never logged on purpose; these catch a slip.
+  // A remote machine's SSH credential (CAP-24, AD-26, epic 19 story 19.2): never logged on purpose; these catch a slip.
   'private_key',
   'privatekey',
   'passphrase',
@@ -63,7 +63,7 @@ const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
   ...API_KEY_PATTERNS.map((pattern): [RegExp, string] => [pattern, REDACTED]),
   // Bearer tokens, the auth subprotocol, launch codes and token fragments, shared with the handoff brief.
   ...CREDENTIAL_PATTERNS.map(([pattern, replacement]): [RegExp, string] => [pattern, replacement]),
-  // A PEM-style private key block (CAP-24, AD-26, epic 18 story 18.2): a generated SSH key never reaches a log line.
+  // A PEM-style private key block (CAP-24, AD-26, epic 19 story 19.2): a generated SSH key never reaches a log line.
   [PRIVATE_KEY_BLOCK_PATTERN, REDACTED],
 ];
 

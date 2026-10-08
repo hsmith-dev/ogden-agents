@@ -167,7 +167,7 @@ export interface AppOptions {
   notifications?: Notifications;
   /** The Local model's endpoints (epic 14 story 14.3); without it those routes answer 501. */
   localEndpoints?: LocalEndpoints | undefined;
-  /** The remote-machine registry (CAP-24, epic 18 story 18.3); without it those routes answer 501. */
+  /** The remote-machine registry (CAP-24, epic 19 story 19.3); without it those routes answer 501. */
   remoteMachines?: RemoteMachines | undefined;
   /** Test connection and Detect (epic 14 story 14.4); without it those routes answer 501. */
   localModels?: LocalModels | undefined;
@@ -377,7 +377,7 @@ export function createApp({
   registerDevToolsRoutes(app, { devTools, log });
   // The Local model's endpoints (epic 14 story 14.3): app-wide, behind the gate, never a piece's guard; a key never leaves.
   registerLocalEndpointRoutes(app, { localEndpoints, log });
-  // The remote-machine registry (CAP-24, epic 18 story 18.3): app-wide, behind the gate; a credential never leaves.
+  // The remote-machine registry (CAP-24, epic 19 story 19.3): app-wide, behind the gate; a credential never leaves.
   registerRemoteMachineRoutes(app, { remoteMachines, log });
   registerLocalEndpointUseRoutes(app, { localModels, presets: endpointPresets ?? [], log });
   registerLocalEndpointModelsRoute(app, { localModels, log });

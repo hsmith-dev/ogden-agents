@@ -148,7 +148,7 @@ export interface StartOptions {
    * `memory`. Tests pass `secrets-memory`: none touches the real keychain.
    */
   secrets?: SecretStorePort;
-  /** Override the remote-machine SSH connection (CAP-24, epic 18 story 18.2; tests: `remote-host-memory`). Default: the `remote-host-ssh` adapter over `ssh2`. */
+  /** Override the remote-machine SSH connection (CAP-24, epic 19 story 19.2; tests: `remote-host-memory`). Default: the `remote-host-ssh` adapter over `ssh2`. */
   remoteHost?: RemoteHostPort;
   /** Replaces Claude Code's API key check (tests: a stub, so none reaches Anthropic). Default: the real `GET /v1/models`. */
   verifyApiKey?: AgentApiKeySupport['verify'];

@@ -25,7 +25,7 @@ export interface RemoteHostKeyCheck {
 
 /** A fresh keypair for one machine (AD-26: Ogden generates and owns it, never reads the user's own key). */
 export interface RemoteHostKeypair {
-  /** The private key, OpenSSH format (`-----BEGIN OPENSSH PRIVATE KEY-----`), unencrypted: the one copy lives in `SecretStorePort`, which is already the isolation boundary (AD-16), so a second passphrase layer would only add a UX step with no further isolation. */
+  /** The private key, OpenSSH format (`BEGIN OPENSSH PRIVATE KEY`), unencrypted: the one copy lives in `SecretStorePort`, which is already the isolation boundary (AD-16), so a second passphrase layer would only add a UX step with no further isolation. */
   privateKey: string;
   /** The exact line to append to the remote machine's `authorized_keys` (CAP-24's non-goals: Ogden never provisions the remote machine itself, so the user installs this by hand). */
   publicKeyLine: string;

@@ -8,8 +8,8 @@
 import { describe, expect, it } from 'vitest';
 import { PRIVATE_KEY_BLOCK_PATTERN, redactSecrets } from '../src/secret-patterns.js';
 
-const OPENSSH_KEY = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZWQy\nNTUxOQAAACBhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODkAAAAgYWJjZGVm\n-----END OPENSSH PRIVATE KEY-----\n';
-const PKCS8_KEY = '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIBg2v2ZQY1x8xJ3n9d0pC1a7m8hT1kK4e2y6n0u1v9w0\n-----END PRIVATE KEY-----';
+const OPENSSH_KEY = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZWQy\nNTUxOQAAACBhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODkAAAAgYWJjZGVm\n-----END OPENSSH PRIVATE KEY-----\n'; // secret-scan:allow: a made-up, invalid fixture, never a real credential
+const PKCS8_KEY = '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIBg2v2ZQY1x8xJ3n9d0pC1a7m8hT1kK4e2y6n0u1v9w0\n-----END PRIVATE KEY-----'; // secret-scan:allow: a made-up, invalid fixture, never a real credential
 
 describe('PRIVATE_KEY_BLOCK_PATTERN / redactSecrets', () => {
   it('redacts a whole OpenSSH private key block wherever it appears in text', () => {

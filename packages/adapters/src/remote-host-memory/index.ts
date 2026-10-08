@@ -46,7 +46,7 @@ export function createMemoryRemoteHostPort(): MemoryRemoteHostPort {
       keyCounter += 1;
       calls.push(`generateKeypair ${comment}`);
       return {
-        privateKey: `-----BEGIN OPENSSH PRIVATE KEY-----\nfake-memory-key-${keyCounter}\n-----END OPENSSH PRIVATE KEY-----\n`,
+        privateKey: `-----BEGIN OPENSSH PRIVATE KEY-----\nfake-memory-key-${keyCounter}\n-----END OPENSSH PRIVATE KEY-----\n`, // secret-scan:allow: an obviously-fake, in-memory test double, never real key material
         publicKeyLine: `ssh-ed25519 FAKEMEMORYKEY${keyCounter} ${comment}`,
       };
     },

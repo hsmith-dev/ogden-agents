@@ -21,7 +21,7 @@ describe('generateKeypair', () => {
   it('returns a private key ssh2 itself can parse back, and a matching public key line', () => {
     const hosts = createSshRemoteHostPort();
     const pair = hosts.generateKeypair({ comment: 'ogden-agents:mach_test' });
-    expect(pair.privateKey).toMatch(/^-----BEGIN OPENSSH PRIVATE KEY-----/);
+    expect(pair.privateKey).toMatch(/^-----BEGIN OPENSSH PRIVATE KEY-----/); // secret-scan:allow: a format check, not key material
     expect(pair.publicKeyLine).toMatch(/^ssh-ed25519 [A-Za-z0-9+/=]+ ogden-agents:mach_test$/);
     // AD-26's own flagged unknown, for this key type specifically: an Ed25519 OpenSSH key is a few hundred
     // bytes, well under Windows Credential Manager's documented ~512-2560 byte generic-credential ceiling, so

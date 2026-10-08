@@ -36,7 +36,7 @@ function memoryHosts(): RemoteHostPort & { fingerprints: Map<string, string>; un
     generateKeypair({ comment }) {
       n += 1;
       calls.push(`generateKeypair ${comment}`);
-      return { privateKey: `-----BEGIN OPENSSH PRIVATE KEY-----\nfake-${n}\n-----END OPENSSH PRIVATE KEY-----\n`, publicKeyLine: `ssh-ed25519 FAKE${n} ${comment}` };
+      return { privateKey: `-----BEGIN OPENSSH PRIVATE KEY-----\nfake-${n}\n-----END OPENSSH PRIVATE KEY-----\n`, publicKeyLine: `ssh-ed25519 FAKE${n} ${comment}` }; // secret-scan:allow: an obviously-fake, in-memory test double
     },
     async checkHostKey(target) {
       const k = key(target.host, target.port);

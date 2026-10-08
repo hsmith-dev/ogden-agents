@@ -21,6 +21,7 @@ import { createBuildSettings, type BuildSettings } from './build-settings.js';
 import { createDevTools, type DevTools, type DevToolsPort } from './dev-tools.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
+import { createJiraLinks, type JiraLinkPort, type JiraLinks } from './jira-links.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
@@ -97,6 +98,12 @@ export interface Core {
    * never in the database. The server calls it once, after it has its secret store.
    */
   localEndpoints(secrets: SecretStorePort): LocalEndpoints;
+  /**
+   * A workspace's linked Jira board (epic 18; CAP-26, AD-29) over the
+   * keychain the server holds and the `tickets-jira` adapter's
+   * {@link JiraLinkPort}. The server calls it once, after it has both.
+   */
+  jiraLinks(secrets: SecretStorePort, jira: JiraLinkPort): JiraLinks;
   /**
    * The Orchestration use-case (epic 15, 15.3) over the chat the server holds and a manager when there is one.
    * Every call is behind {@link Core.orchestration}'s guard. The server calls it once, after it has its chat.
@@ -242,6 +249,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     terminalsSettings: createTerminalsSettings({ db, events }),
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),
     localEndpoints: (secrets) => createLocalEndpoints({ db, events, secrets }),
+    jiraLinks: (secrets, jira) => createJiraLinks({ db, events, secrets, jira }),
     createOrchestration: (ports) => createOrchestration({ db, events, feature: orchestration, ...ports }),
     createManagerSource: (ports) => createManagerSource({ db, ...ports }),
     createTeam: (ports) => createTeam({ db, events, ...ports }),

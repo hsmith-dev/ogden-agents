@@ -1,5 +1,5 @@
 import { useDeveloperModeOn } from '@/appearance/appearance-provider';
-import { Bell, FolderSimplePlus, GearSix, HandWaving, Hammer, Info, Package, PaintBrush, Plus, Robot, TerminalWindow, Wrench } from '@phosphor-icons/react';
+import { Bell, Desktop, FolderSimplePlus, GearSix, HandWaving, Hammer, Info, Package, PaintBrush, Plus, Robot, TerminalWindow, Wrench } from '@phosphor-icons/react';
 import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -365,6 +365,12 @@ function SettingsMenu() {
           <Link to={'/settings/dev-tools' as '/settings/tools'} data-testid="settings-dev-tools">
             <Package aria-hidden />
             Developer tools
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
+          <Link to={'/settings/remote-machines' as '/settings/tools'} data-testid="settings-remote-machines">
+            <Desktop aria-hidden />
+            Remote machines
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>

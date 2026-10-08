@@ -10,7 +10,10 @@
  */
 import { RemoteHostError } from '@ogden-agents/core';
 import { createServer } from 'node:net';
-import { utils } from 'ssh2';
+// A default import, destructured below: see the comment in src/remote-host-ssh/index.ts.
+import ssh2 from 'ssh2';
+
+const { utils } = ssh2;
 import { describe, expect, it } from 'vitest';
 import { createSshRemoteHostPort } from '../src/remote-host-ssh/index.js';
 

@@ -101,3 +101,15 @@ export const ConfirmHostKeyRequest = z
   })
   .strict();
 export type ConfirmHostKeyRequest = z.infer<typeof ConfirmHostKeyRequest>;
+
+/** `GET /api/v1/remote-machines`. */
+export const RemoteMachinesResponse = z.object({ machines: z.array(RemoteMachine) });
+export type RemoteMachinesResponse = z.infer<typeof RemoteMachinesResponse>;
+
+/** `{ machine }`, the answer to adding, renaming or confirming one. */
+export const RemoteMachineResponse = z.object({ machine: RemoteMachine });
+export type RemoteMachineResponse = z.infer<typeof RemoteMachineResponse>;
+
+/** `POST /api/v1/remote-machines/:machineId/host-key/check`: the live fingerprint, for the page to show before the user confirms it. Never pins anything. */
+export const RemoteHostKeyCheckResponse = z.object({ fingerprint: z.string().min(1) });
+export type RemoteHostKeyCheckResponse = z.infer<typeof RemoteHostKeyCheckResponse>;

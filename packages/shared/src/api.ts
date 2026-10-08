@@ -213,6 +213,29 @@ export const API_ROUTES = {
   /** `GET` → `LocalEndpointPresetsResponse` (epic 14 story 14.4): the one-click presets (label, address, where to get the server). */
   localEndpointPresets: `${API_BASE}/local-endpoint-presets`,
   /**
+   * `GET` → `RemoteMachinesResponse` (CAP-24, epic 18 story 18.3): every remote machine added over
+   * SSH. `POST AddRemoteMachineRequest` → 201 `RemoteMachineResponse`; 400 `invalid_request` for bad
+   * input. A machine cannot be used for a chat or build until its host key is confirmed
+   * (`host-key/confirm`, below). Never carries a credential (AD-16/AD-26).
+   */
+  remoteMachines: `${API_BASE}/remote-machines`,
+  /** `PATCH RenameRemoteMachineRequest` → `RemoteMachineResponse`; `DELETE` → 204 (also removes its stored credential, if any). 404 `not_found`. */
+  remoteMachine: `${API_BASE}/remote-machines/:machineId`,
+  /**
+   * `POST` (no body) → `RemoteHostKeyCheckResponse` (CAP-24, AD-26): connects far enough to read the
+   * machine's live host-key fingerprint, then disconnects without ever authenticating. Never pins or
+   * confirms anything. 502 `remote_host_unreachable`, 504 `remote_host_timeout`.
+   */
+  remoteMachineHostKeyCheck: `${API_BASE}/remote-machines/:machineId/host-key/check`,
+  /**
+   * `POST ConfirmHostKeyRequest` → `RemoteMachineResponse` (AD-26): confirms the fingerprint shown to
+   * the user (`confirm` must be `true`, or 400 `confirmation_required`; nothing changes). First
+   * confirm generates and stores a fresh keypair and marks the machine usable. 409
+   * `remote_host_key_changed` if the live fingerprint no longer matches what was shown or what is
+   * already pinned — refused outright, never silently re-pinned. 503 `secrets_unavailable`.
+   */
+  remoteMachineHostKeyConfirm: `${API_BASE}/remote-machines/:machineId/host-key/confirm`,
+  /**
    * `POST` → `LocalEndpointTestResponse` (story 14.4): Test connection. The server calls the endpoint
    * (never the page); 409 `endpoint_confirmation_required` for an unconfirmed host, in which case nothing is called.
    */

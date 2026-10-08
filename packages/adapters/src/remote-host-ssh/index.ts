@@ -9,7 +9,13 @@
  * host key is presented before authentication in the SSH protocol itself.
  */
 import { RemoteHostError, type RemoteHostKeyCheck, type RemoteHostKeypair, type RemoteHostPort, type RemoteHostTarget } from '@ogden-agents/core';
-import { Client, utils } from 'ssh2';
+// A default import, destructured below: ssh2 is CommonJS and Node's cjs-module-lexer does not
+// detect `utils` as one of its named exports (only some of its other exports), so `import { Client,
+// utils } from 'ssh2'` fails at runtime with "Named export 'utils' not found" even though it
+// typechecks; this is the form Node's own error message recommends.
+import ssh2 from 'ssh2';
+
+const { Client, utils } = ssh2;
 
 /** How long to wait for the handshake (through the host key) before giving up. */
 const DEFAULT_TIMEOUT_MS = 10_000;

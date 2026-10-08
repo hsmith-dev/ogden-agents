@@ -723,6 +723,13 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.localEndpointDetect}`,
   `GET ${API_ROUTES.localEndpointModels}`,
   `POST ${API_ROUTES.localEndpointManagerTest}`,
+  // The remote-machine registry (CAP-24, epic 18 story 18.3): behind the gate; install-level, not a BMad piece.
+  `GET ${API_ROUTES.remoteMachines}`,
+  `POST ${API_ROUTES.remoteMachines}`,
+  `PATCH ${API_ROUTES.remoteMachine}`,
+  `DELETE ${API_ROUTES.remoteMachine}`,
+  `POST ${API_ROUTES.remoteMachineHostKeyCheck}`,
+  `POST ${API_ROUTES.remoteMachineHostKeyConfirm}`,
   // Orchestration (epic 15, 15.2): behind the gate and core's Orchestration guard (its own helper, not a BMad piece's).
   `GET ${API_ROUTES.workspaceOrchestration}`,
   `GET ${API_ROUTES.workspaceTeamRoster}`,

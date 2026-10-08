@@ -5,8 +5,7 @@
  * the link settings again (`GET .../jira-link`).
  */
 import { z } from 'zod';
-import { onWorkspaceStream } from './events-envelope.js';
-import { assigned } from './events-envelope.js';
+import { assigned, onWorkspaceStream } from './events-envelope.js';
 
 /** What changed about the workspace's Jira link. */
 export const JIRA_LINK_CHANGES = ['linked', 'unlinked', 'sync_succeeded', 'sync_failed'] as const;

@@ -116,6 +116,14 @@ title = "v1.2: Local and OpenAI-compatible models: Ollama, LM Studio or any endp
 covers = ["CAP-15", "CAP-3", "CAP-4", "CAP-16", "CAP-19"]
 after = [{ epic = 12, needs = "the contracts with a mode fixed at start (12.3), the checked-binary installer and wiring (12.4), BMad skills for agents (12.9) and v1.1 released (12.11)" }, { epic = 6, needs = "the registry, acp-base and the picker (6.3, 6.4, 6.6)" }, { epic = 4, needs = "BMad setup (4.3) and planning sessions (4.6)" }, { epic = 10, needs = "the pieces guard and its simple-project test (10.2, 10.6)" }]
 
+# Epic id 18 (2026-10-07): 14 is v1.2 local models, 15 is v2 orchestration, 16 is the native CLI terminal, 17 is builds with other agents; no other open branch uses 18. CAP-26/CAP-19 (Jira tracker link, "Tooling Drive"), incepted this branch.
+[[epic]]
+id = 18
+slug = "epic-jira-tracker-link"
+title = "A linked Jira board drives BMad's ticket tree and board as 'Tooling Drive', local files still the only route to a build"
+covers = ["CAP-26", "CAP-19"]
+after = [{ epic = 10, needs = "the BMad pieces contract, requireBmadFeature, the piece route helper and bmad-piece-choice's checkbox UI (10.2, 10.6)" }, { epic = 4, needs = "TicketStorePort, the tickets-v7 adapter, the Board, ticket detail and the ticket.changed event, through its sweep (4.12)" }, { epic = 9, needs = "SecretStorePort and secrets-keyring (9.2) and Welcome's project-creation step (9.5)" }]
+
 # ---- v2 orchestration (envelope only; outside the v1 initiative's Done when) ----
 
 [[epic]]

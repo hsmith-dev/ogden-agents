@@ -35,9 +35,12 @@ export {
 // The Local model's endpoint events (epic 14 story 14.3).
 import { SettingsLocalEndpointsChangedEvent, SettingsLocalEndpointsChangedInput } from './events-local.js';
 import { SettingsRemoteMachinesChangedEvent, SettingsRemoteMachinesChangedInput } from './events-remote-machines.js';
+import { WorkspaceJiraLinkChangedEvent, WorkspaceJiraLinkChangedInput } from './events-jira.js';
 
 export { LOCAL_ENDPOINT_CHANGES, SettingsLocalEndpointsChangedEvent } from './events-local.js';
 export { REMOTE_MACHINE_CHANGES, SettingsRemoteMachinesChangedEvent } from './events-remote-machines.js';
+// The Jira link's events (epic 18; CAP-26, AD-29).
+export { JIRA_LINK_CHANGES, WorkspaceJiraLinkChangedEvent } from './events-jira.js';
 // The orchestration events (epic 15 story 15.2).
 import * as orch from './events-orchestration.js';
 
@@ -381,6 +384,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   WorkspaceSettingsChangedEvent,
   WorkspaceBmadOfferDismissedEvent,
   WorkspaceBmadScriptsTrustedEvent,
+  WorkspaceJiraLinkChangedEvent,
   LookBackOfferDismissedEvent,
   RetrospectiveChangedEvent,
   TicketChangedEvent,
@@ -455,6 +459,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   WorkspaceSettingsChangedInput,
   WorkspaceBmadOfferDismissedInput,
   WorkspaceBmadScriptsTrustedInput,
+  WorkspaceJiraLinkChangedInput,
   LookBackOfferDismissedInput,
   RetrospectiveChangedInput,
   TicketChangedInput,

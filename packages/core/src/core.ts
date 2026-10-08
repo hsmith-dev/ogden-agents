@@ -23,6 +23,7 @@ import { createNotifications, type Notifications, type NotificationsPorts } from
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
 import type { RemoteHostPort } from './remote-host-port.js';
 import { createRemoteMachines, type RemoteMachines } from './remote-machines.js';
+import { createJiraLinks, type JiraLinkPort, type JiraLinks } from './jira-links.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
@@ -105,6 +106,12 @@ export interface Core {
    * after it has its secret store.
    */
   remoteMachines(secrets: SecretStorePort, hosts: RemoteHostPort): RemoteMachines;
+  /**
+   * A workspace's linked Jira board (epic 18; CAP-26, AD-29) over the
+   * keychain the server holds and the `tickets-jira` adapter's
+   * {@link JiraLinkPort}. The server calls it once, after it has both.
+   */
+  jiraLinks(secrets: SecretStorePort, jira: JiraLinkPort): JiraLinks;
   /**
    * The Orchestration use-case (epic 15, 15.3) over the chat the server holds and a manager when there is one.
    * Every call is behind {@link Core.orchestration}'s guard. The server calls it once, after it has its chat.
@@ -251,6 +258,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),
     localEndpoints: (secrets) => createLocalEndpoints({ db, events, secrets }),
     remoteMachines: (secrets, hosts) => createRemoteMachines({ db, events, secrets, hosts }),
+    jiraLinks: (secrets, jira) => createJiraLinks({ db, events, secrets, jira }),
     createOrchestration: (ports) => createOrchestration({ db, events, feature: orchestration, ...ports }),
     createManagerSource: (ports) => createManagerSource({ db, ...ports }),
     createTeam: (ports) => createTeam({ db, events, ...ports }),

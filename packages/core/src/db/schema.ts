@@ -428,6 +428,25 @@ export const localEndpointSettings = sqliteTable('local_endpoint_settings', {
   defaultEndpointId: text('default_endpoint_id'),
 });
 
+/**
+ * A workspace's linked Jira board (epic 18; CAP-26, AD-29): at most one per
+ * workspace, keyed by `workspace_id`. Holds only non-secret settings — the
+ * token lives in the keychain alone, under `jira-credential/<workspaceId>`
+ * (AD-16, AD-29), never in this row. `base_url` is the resolved API base
+ * (classic token: the site directly; scoped token:
+ * `api.atlassian.com/ex/jira/<cloudId>`), resolved once at link time.
+ */
+export const jiraLinks = sqliteTable('jira_links', {
+  workspaceId: text('workspace_id').primaryKey(),
+  siteUrl: text('site_url').notNull(),
+  email: text('email').notNull(),
+  baseUrl: text('base_url').notNull(),
+  projectKey: text('project_key').notNull(),
+  lastSyncedAt: text('last_synced_at'),
+  lastSyncError: text('last_sync_error'),
+  createdAt: text('created_at').notNull(),
+});
+
 /** The install's Terminals settings (epic 16, story 16.9): one row of JSON, written on first change. Never terminal output. */
 export const terminalsSettings = sqliteTable('terminals_settings', {
   id: integer('id').primaryKey(),

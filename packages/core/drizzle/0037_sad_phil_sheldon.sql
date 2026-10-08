@@ -1,1 +1,0 @@
-ALTER TABLE `runs` ADD `machine_id` text;

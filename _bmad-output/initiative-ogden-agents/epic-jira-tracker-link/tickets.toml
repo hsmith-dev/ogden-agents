@@ -1,0 +1,168 @@
+# Epic 18 breakdown (drafted by autonomous inception, 2026-10-07, on branch feature/cap26-jira-tracker). Table order is the build order; ids never change once approved.
+# Epic 18 starts after epic 10's BMad pieces contract and piece UI (10.2, 10.6), epic 4's TicketStorePort, tickets-v7 and Board (4.2 through its sweep, 4.12), and epic 9's SecretStorePort/secrets-keyring (9.2) and Welcome's project-creation step (9.5). References to other epics use "<epic id>.<entry id>".
+# Lanes: entries 1-7 are one lane (the tickets-jira adapter: contracts, the outbound guard, auth/link, read, write, polling) touching packages/core and packages/adapters/src/tickets-jira in order. Entries 8-10 are a second lane in packages/web: entry 8 (conflict/status UI) opens once entry 6 lands and may run beside 7, 9 and 10; entries 9 (unlink) and 10 (the three-way picker) are sequential with each other (10 needs 9's Unlink action), not parallel.
+# Live checks (entries 1 and 12) use a developer's own free Jira Cloud sandbox site and API token, in a scratch board, never a real team's Jira.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: link a Jira board, see one issue on the Board, approve pushes done"
+description = "Adds the thinnest path through every layer this epic touches: a minimal link form (site URL, email, token) on a new Workspace settings panel that calls a core use-case making one live `GET /rest/api/3/myself` call before saving the token bare in the keychain under `jira-credential/<workspaceId>` (9.2's SecretStorePort) and the email/site URL as plain workspace settings; a minimal `tickets-jira` adapter behind `TicketStorePort` (4.2's contract) whose `tree`/`find` fetch one Jira project's issues over REST and map only title, body and status (AD-28) into the same shape `tickets-v7` returns, writing each new ticket's local file and plan the first time it is seen; a minimal poller that calls `tree` once on link and once more on a manual Refresh button (no interval timer yet); and approve (5.9's existing action) pushing the ticket's local `done` to the matching issue's Jira status over one REST call. The hitl step is the developer linking their own free Jira Cloud sandbox site and watching one issue appear on the Board, moving it through the UI, and approving a build pushes it to Jira's board."
+verify = "Live on the developer's own Jira Cloud sandbox: linking the board shows one of its issues on the Board within the manual Refresh, and approving a ticket built from it marks the matching Jira issue done; in CI against a fake Jira server fixture (new, matching this repo's fake-server convention: tests/fixtures/fake-release-server, fake-openai-server.mjs), linking calls the fake server's /myself endpoint before saving, tree/find return the fake board's issues mapped to BMad tickets, and approve's done call reaches the fake server with the right issue key and status."
+covers = ["E18-R1", "E18-R3", "E18-R4", "E18-R7"]
+after = ["4.2", "9.2", "10.2"]
+hitl = true
+risk = "high"
+unknown = "Whether a Jira Cloud sandbox site defaults to a classic or scoped API token and base URL shape (AD-29's two cases); record which the developer's sandbox used and that both code paths exist, even if only one is live-tested here."
+references = [
+  "packages/adapters/src/tickets-v7/index.ts",
+  "packages/core/src/ticket-store-port.ts",
+  "packages/adapters/src/secrets-keyring/index.ts",
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-27--jira-sync-is-polled-and-refresh-triggered-never-a-webhook-adopted",
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-29--jira-authentication-adopted",
+]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Epic contracts and stubs"
+description = "Freezes in shared the full surface later entries fill: the Jira link settings shape (siteUrl, email, boardId or projectKey, linked boolean — no token), the link/test-call request and its error codes (jira_unauthorized, jira_unreachable, jira_url_rejected matching entry 3's guard, jira_already_linked), the sync-baseline shape per two-way field (AD-28, stored beside the ticket's plan file, never the database per AD-10), the conflict-notice shape (field, local value, Jira value, detected-at) a ticket carries, the sync-status shape (lastSyncedAt, lastError) a workspace carries, and the three-way `ProjectMode` enum (`simple` | `bmad_method` | `tooling_drive`) as a view computed from 10.2's existing `BmadPiece` set plus whether a Jira board is linked, not a new stored field (Simple = no pieces on, BMad Method = any piece on with no linked board, Tooling Drive = Planning and Board on with a linked board); extends `TicketStorePort`'s existing contract with no new methods (the same `tree`/`find`/`mark`/`watch` entry 1 already calls) and scaffolds the `tickets-jira` adapter package with `jira-memory` and `jira-link-memory` stubs plus a `fake-jira-server` fixture (new, under `tests/fixtures/`, matching `fake-release-server`'s and `fake-openai-server.mjs`'s shape: a tiny Node http server serving `/rest/api/3/myself`, `/rest/api/3/issue`, `/rest/api/3/search`, and the Data Center equivalents, with a `--tamper` style flag for unauthorized/rate-limited/malformed responses) so every later entry builds against the stub first, pre-registers every new route through 10.2's guarded route helper and the adapters-index wiring slot (user decision 2026-10-01's pattern, reused)."
+verify = "Contract tests parse every new shape and error code; `jira-memory`/`jira-link-memory` drive every `TicketStorePort` method and the link use-case in a test; the fake Jira server answers `/myself`, `/issue` and `/search` with fixture data and `--tamper unauthorized|rate-limited|malformed` for each failure path; the route-registry test in `gate.test.ts` lists every new route behind the gate under `/api/v1/workspaces/:wsId`; a `ProjectMode` test proves it is computed, not stored, for a matrix of piece/link combinations."
+covers = ["E18-R1", "E18-R2", "E18-R3", "E18-R7", "E18-R8", "E18-R9"]
+after = [1]
+hitl = false
+risk = "medium"
+unknown = "Whether the fake Jira server needs to emulate Jira Cloud's and Data Center's response shapes separately, or one fixture set covers both call sites adequately; entry 4 (base URL resolution) answers this."
+references = ["tests/fixtures/fake-release-server/serve.mjs", "tests/fixtures/fake-openai-server.mjs"]
+
+[[entry]]
+id = 3
+type = "story"
+title = "The outbound Jira URL guard: https-only, no redirects, no loopback or private-range targets"
+description = "Adds a shared `validateJiraSiteUrl` (packages/core, used by the link use-case and the poller) that resolves a user-entered site URL once and checks the resolved address before any request is sent, built on `notify-webhook`'s existing resolve-once-connect-to-that-address architecture and its `isBlockedAddress`-style IPv4/IPv6 range helpers (packages/adapters/src/notify-webhook/index.ts) rather than inventing new DNS or range-checking code — but inverting its policy: `notify-webhook` allows loopback and private addresses (a notification app on the user's own network is the point); this guard refuses them, refuses plain `http://` outright (no loopback exception, unlike `local-endpoints.ts`'s more permissive model for local model servers, which this is deliberately not reused for, per AD-27/AD-29's stricter stance on a credentialed, unattended, recurring outbound call), and refuses any 3xx response during the pre-save test call. The confirmed host is bound to the workspace's stored site URL (mirroring `local-endpoints.ts`'s per-host confirmation shape); a changed host re-runs the whole check before the new host is saved. `tickets-jira`'s poller calls this guard again immediately before every scheduled or Refresh-triggered call, not only once at link time, so a DNS answer that changed after linking (rebinding) is still caught."
+verify = "Unit tests on the resolver (no network, an injectable `lookup`/`dns` fake per the notify-webhook pattern) show `http://` is refused, a hostname resolving to 127.0.0.1, ::1, 169.254.0.0/16, fe80::/10, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, the cloud metadata address and the AWS/Alibaba metadata IPv6 forms are all refused with a plain reason, a 3xx during the test call is refused, a normal public https host passes, and a host change re-validates before the new value is stored; an integration test against the fake Jira server from entry 2 proves the poller calls this guard before every poll tick, not only at link time."
+covers = ["E18-R11"]
+after = [2]
+hitl = false
+risk = "high"
+notes = ["High risk: this is this epic's primary SSRF defense (AD-27/AD-29 security review finding 2); the review beyond its own tests is a second person reading the address-range table against notify-webhook's, named in the build record."]
+references = [
+  "packages/adapters/src/notify-webhook/index.ts",
+  "packages/core/src/local-endpoints.ts",
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/reviews/review-cap26-security.md",
+]
+
+[[entry]]
+id = 4
+type = "story"
+title = "Link a Jira board: full auth flow, base-URL resolution, redaction"
+description = "Replaces entry 1's minimal link form with the designed \"Link a Jira board\" flow: site URL, email, and token/PAT fields; on submit, entry 3's guard validates the URL, then the `tickets-jira` adapter resolves whether the token is a classic token (`<site>.atlassian.net` directly) or a scoped token (`api.atlassian.com/ex/jira/<cloudId>`, found via Jira's own `/oauth/token/accessible-resources`-equivalent classic discovery call or a documented probe) and makes the one read-only `GET /rest/api/3/myself` test call (or the Data Center equivalent) against the resolved base URL, shown as a permission-card-style confirmation (CAP-25's \"show the exact action, confirm, then act\" pattern) before anything is saved; only on confirmation does the token go bare into the keychain under `jira-credential/<workspaceId>` and the email/site URL/resolved base URL/board or project key into workspace settings (never the keychain). The link use-case itself turns on Planning and Board first when either is off (AD-22 note: \"linking a board...bootstraps them\"), so this holds regardless of which UI surface calls it — entry 10's picker, or any other — rather than each caller re-implementing the bootstrap. Adds whole-value redaction in `tickets-jira`'s logging and event paths: the stored token, email, and site URL are each replaced wherever any of the three would otherwise appear in a log line, an error message, or an emitted event, with a test that plants all three in a forced failure path and asserts none survive — not a token-shaped substring match (AD-16/AD-29 security review finding 1)."
+verify = "Against the fake Jira server, a classic-token fixture resolves to the direct base URL and a scoped-token fixture resolves to the `api.atlassian.com/ex/jira/<cloudId>` form; an unauthorized token's test call is refused before anything is saved and no keychain entry is created; linking on a Simple-mode project (Planning and Board both off) turns both on as part of the one link call, before the link completes; a forced sync failure, auth failure and rate-limit response each produce a log line and an emitted event with no trace of the token, email, or site URL, checked by a test that searches the raw log/event output for all three verbatim and for substrings of the token, not only an exact match."
+covers = ["E18-R1", "E18-R10", "E18-R12", "E18-R13"]
+after = [3]
+hitl = false
+risk = "high"
+notes = ["High risk: the one place a real credential is stored and the one place redaction must hold; reviewed against AD-16's redaction rule and the webhook-URL precedent it cites, named in the build record."]
+references = [
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-29--jira-authentication-adopted",
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-16--secrets-adopted",
+  "packages/adapters/src/api-key-verify.ts",
+]
+
+[[entry]]
+id = 5
+type = "story"
+title = "tickets-jira read path: the full ticket tree, first-sync pull-in"
+description = "Completes `tickets-jira`'s `tree` and `find` beyond entry 1's title/body/status slice: maps every AD-28 field with a Jira-to-local or two-way direction (type/Issue Type at creation only, parent/Epic-link, assignee/Assignee display-only, severity/Priority set once then Jira-owned) into the local ticket's frontmatter and plan, paginates Jira's search API for a board with more issues than one page, and on first link pulls every pre-existing issue in as a new local file per ticket (matching the tracker-store \"unknown ticket gets a file on first query\" convention `tickets-v7` already follows for its own case) rather than only the one issue entry 1 proved. Stores each two-way field's just-synced value as that ticket's sync baseline (entry 2's shape) beside its plan file at the end of every successful read, which entry 6's write path and conflict detection read."
+verify = "Against the fake Jira server seeded with a multi-page fixture board (type, parent, assignee and priority varied across issues), first link creates one local file per issue with the right fields mapped and a baseline recorded for each two-way field; a board with 150 fixture issues (more than one page) pulls in all of them; `type` and `severity` set locally once are not overwritten by a later read that changes them in the fixture, per AD-28's \"Jira owns it after\" and \"creation only\" rules."
+covers = ["E18-R3", "E18-R8", "E18-R9"]
+after = [4]
+hitl = false
+risk = "medium"
+unknown = "Whether Jira Cloud's and Data Center's pagination cursors differ enough to need two code paths; record which the fake server fixture and any live check used."
+references = ["packages/adapters/src/tickets-v7/folder-watch.ts"]
+
+[[entry]]
+id = 6
+type = "story"
+title = "tickets-jira write path: push, the done exception, and conflict detection"
+description = "Completes `tickets-jira`'s side of `mark` and adds the outbound push AD-28 and AD-10 require: a local status change (other than `done`) and a local title/body edit push to the matching Jira issue on the next successful sync, through the same `tickets.py mark`-equivalent single write path entry 5 reads back from (never a second routing authority, AD-10); `after`/prerequisites push to Jira as one-way \"is blocked by\" Issue Links and are never read back (E18-R6); approve's push of `done` (already wired by entry 1) is confirmed never treated as a conflict candidate even when Jira's status changed concurrently, and a Jira-side pull that finds an issue already in its own done-equivalent state with no matching local approve is written as a conflict notice, never a local `done`. Every two-way field is compared against entry 5's stored baseline on each sync: changed on exactly one side takes that side's value; changed on both sides since the last successful sync is a conflict — the local value is kept, and a conflict-notice record (entry 2's shape) is written for the ticket rather than any auto-merge; a pulled status with no valid local transition from the ticket's current status gets the same notice instead of being coerced or dropped."
+verify = "Against the fake Jira server: a local title edit reaches the fixture's issue on the next sync; a local `after` entry appears as an Issue Link and a later removal of it is never read back as removed from Jira; approving a ticket while the fixture's issue status changes in the same tick still pushes `done` and records no conflict; a fixture issue pulled already `done` with no local approve produces a conflict notice, not a local `done`; a field changed on both sides between two syncs produces exactly one conflict notice, keeps the local value, and a third sync with no further changes does not duplicate the notice; a fixture status with no mapped local transition produces a notice rather than an error or a silent drop."
+covers = ["E18-R4", "E18-R5", "E18-R6", "E18-R8", "E18-R9"]
+after = [5]
+hitl = false
+risk = "high"
+notes = ["High risk: a wrong call here could push build-routing-significant data two directions or silently drop a conflict; reviewed against AD-28's conflict rule line by line, named in the build record."]
+references = ["_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-28--jira-field-mapping-only-a-clean-native-match-syncs-files-keep-the-deciding-vote-adopted"]
+
+[[entry]]
+id = 7
+type = "story"
+title = "Poll on an interval and on Refresh, gated to a watched workspace"
+description = "Replaces entry 1's one-shot manual sync with AD-27's real scheduler: a per-workspace timer (default 5 minutes, configurable only in code, not UI, for v1.2) that calls entry 6's full sync only while at least one tab is subscribed to that workspace's event stream (AD-5's existing per-workspace subscription, not any tab open anywhere), starting on the first subscription and stopping on the last subscription's end exactly as AD-27 specifies Ogden's Jira poll should, unlike AD-3's survive-tab-close sessions and runs; the Board's existing Refresh action is wired to the same sync path, debounced to at most once every 10 seconds per workspace; a failed sync (network, auth, rate limit) leaves the Board showing its last-synced local state with a dismissible \"last synced at `<time>` — retry\" notice, and the next tick or Refresh retries without user action beyond dismissing."
+verify = "Against the fake Jira server and a fake workspace event-stream subscription, a poll fires on the interval only while a subscription is open, stops within one tick of the last subscription closing, and resumes on the next subscription; clicking Refresh twice within 10 seconds triggers one sync, not two; a sync forced to fail (via the fake server's tamper flag) shows the retry notice and leaves the board's last-known tickets unchanged, and the next tick clears the notice on success."
+covers = ["E18-R7"]
+after = [6]
+hitl = false
+risk = "medium"
+references = ["_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-27--jira-sync-is-polled-and-refresh-triggered-never-a-webhook-adopted"]
+
+[[entry]]
+id = 8
+type = "story"
+title = "Conflict and sync-status notices on the Board and ticket detail"
+description = "Surfaces entry 6's conflict-notice records and entry 7's sync-status in the UI: a \"Jira also changed this\" notice on a conflicted ticket's card and detail sheet naming the field, with the local and Jira values shown side by side and one explicit action — Refresh overwrites local with Jira's version for that field (only Refresh may, never the background poll, per AD-28) — and a workspace-level \"last synced at `<time>`\" line with the entry 7 retry notice when the last sync failed; fetched over REST with TanStack Query and refetched on `ticket.changed` (AD-7), matching 4.9's existing Board refetch pattern."
+verify = "Playwright against jira-memory/jira-link-memory stubs seeded with a planted conflict shows the notice with both values on the card and the detail sheet, and clicking the Refresh action in that state clears the notice and shows the Jira value adopted; a planted sync failure shows the retry notice workspace-wide; a ticket.changed event refetches and clears a resolved notice without a reload."
+covers = ["E18-R9"]
+after = [6]
+hitl = false
+risk = "medium"
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns", "_bmad-output/initiative-ogden-agents/ux-ogden-agents/DESIGN.md#components"]
+
+[[entry]]
+id = 9
+type = "story"
+title = "Unlink a board"
+description = "Adds the Unlink action to the Jira link settings panel: a confirmation naming what happens (matching the link flow's permission-card-style confirmation), then deletes `jira-credential/<workspaceId>` from the keychain immediately (a direct read afterward finds nothing) and clears the workspace's site URL/email/board settings and stops entry 7's poller for that workspace at once; the tickets already synced in are left exactly as the ordinary local files and plans they already are — nothing is deleted from the ticket tree, and they remain buildable like any other local ticket, with no further Jira field mapping, conflict notices, or baseline applied to them from then on."
+verify = "Unlinking in a test deletes the keychain entry (checked by reading it directly, not through the port), stops the poller (no further calls to the fake Jira server after unlink even past the interval), and leaves the previously synced tickets' files and plans unchanged and buildable; relinking the same workspace to a different board does not resurrect the old board's conflict notices or baselines."
+covers = ["E18-R1", "E18-R3"]
+after = [6]
+hitl = false
+risk = "medium"
+notes = ["Decision (2026-10-07, this epic's inception): unlinking drops the project back to plain BMad Method mode (Planning/Board stay on, nothing else changes) rather than asking the user what to do next — resolving this epic's own open question from inception, since AD-28's local-file convention already answers what happens to the tickets (they stay local files) and nothing else needs a choice."]
+references = ["_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-29--jira-authentication-adopted"]
+
+[[entry]]
+id = 10
+type = "story"
+title = "The three-way project-mode picker: Simple, BMad Method, Tooling Drive"
+description = "Builds CAP-19's amended picker (not pre-built anywhere in this repo): a radio-style control in Workspace settings and in Welcome's project-creation step (9.5), presenting Simple, BMad Method and Tooling Drive as equally-weighted choices (entry 2's computed `ProjectMode`), replacing the single BMad on/off entry point as the primary control there; choosing Tooling Drive for a project not yet on BMad Method turns on Planning and Board (10.2's existing per-piece contract, unchanged underneath) and opens entry 4's link flow in the same one step, so linking completes the mode change; choosing BMad Method from Tooling Drive, or Simple from either, does not auto-unlink a linked board on its own — it surfaces entry 9's Unlink action instead, so a board is never silently dropped by a mode click. The existing granular per-piece checkboxes (`bmad-piece-choice.tsx`) stay reachable as a secondary \"Advanced\" control under BMad Method and Tooling Drive, since AD-22's per-piece dependency and coming-soon rules still need a surface for the pieces Tooling Drive does not fix (Builds, Retrospectives)."
+verify = "Playwright shows all three modes as one picker in both Workspace settings and Welcome's project step; choosing Tooling Drive on a Simple project turns on Planning and Board and opens the link flow in the same step, and completing it shows Tooling Drive selected; choosing BMad Method on a Tooling Drive project leaves the board linked and shows the Unlink action rather than unlinking; the Advanced per-piece checkboxes still show and work under BMad Method and Tooling Drive exactly as 10.6 already tests."
+covers = ["E18-R2"]
+after = [4, 9]
+hitl = false
+risk = "medium"
+unknown = "Whether Welcome's project-creation step (9.5) needs its own copy of the picker or can share the Workspace settings component as-is; resolved during this entry's build from 9.5's actual layout."
+references = ["packages/web/src/workspaces/bmad-piece-choice.tsx", "packages/web/src/workspaces/bmad-method-section.tsx", "_bmad-output/initiative-ogden-agents/spec-ogden-agents/spec-ogden-agents.md"]
+
+[[entry]]
+id = 11
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during entries 1-10, with no behavior change: in particular, re-checks entry 3's address-range table against any notify-webhook changes since, re-checks entry 4's redaction test still covers every log and event path added by entries 5-9, and confirms no `tickets-jira` code path or its UI ever imports or calls `bmad-build-auto`'s dispatcher (E18-R6's hard boundary, checked by an architecture-style test matching `tests/architecture.test.ts`'s existing pattern for other forbidden-import rules)."
+verify = "All tests pass and no behavior changes; a new architecture test fails if anything under packages/adapters/src/tickets-jira or packages/web's Jira UI imports or calls into the build dispatcher, and passes on the tree as built."
+covers = ["E18-R6"]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 12
+type = "story"
+title = "End-to-end suite"
+description = "Adds an end-to-end suite, run in CI against the fake Jira server fixture on at least one OS (matching this epic's risk, not every epic's full three-OS matrix unless the suite's own runtime allows it), covering: linking a board end to end (the guard, the test call, the keychain write); the full link-to-board flow (CAP-26's own success signal) with no hand-authored tickets.toml; approve pushing done and a direct Jira status edit reaching the local tree on the next poll and on Refresh; a planted two-sided conflict producing the notice and Refresh resolving it; unlinking and confirming the keychain entry is gone and synced tickets remain buildable; and the three-way mode picker's one-step Tooling Drive bootstrap. Also runs this epic's live checks (entries 1 and 12 itself) against the developer's own Jira Cloud sandbox once, recording the result in the plan before any ticket in this epic moves to done, matching this repo's existing live-check convention (epic 4 story 4.13's pattern)."
+verify = "The suite passes in CI against the fake server and fails when any of AD-27's poll-gating, AD-28's conflict rule, or AD-29's redaction or URL guard is reverted (one deliberate revert per rule, checked once during this entry's build and then reverted back); the developer's live run against their own Jira Cloud sandbox completes CAP-26's success signal end to end and the result is recorded in each entry's plan."
+covers = ["E18-R1", "E18-R2", "E18-R3", "E18-R4", "E18-R5", "E18-R6", "E18-R7", "E18-R8", "E18-R9", "E18-R10", "E18-R11", "E18-R12", "E18-R13"]
+after = [11]
+hitl = true
+risk = "medium"

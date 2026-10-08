@@ -1,6 +1,6 @@
 {
   "name": "ogden-agents",
-  "version": "1.0.0",
+  "version": "2026.10.8-1",
   "private": false,
   "description": "Ogden Agents: a local browser UI for running BMAD with coding agents.",
   "license": "MIT",

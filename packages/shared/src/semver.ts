@@ -42,7 +42,17 @@ export function compareVersions(a: string, b: string): number | undefined {
   return 0;
 }
 
-/** `stable` for a release, `preview` for a pre-release (rc, next); `undefined` when it doesn't parse. */
+/**
+ * `stable` for a release, `preview` for a pre-release (rc, next); `undefined` when it doesn't parse.
+ *
+ * UNRESOLVED (2026-10-07): this reads *any* hyphen as a pre-release marker, which was true of classic
+ * semver's optional `-rc.1`/`-beta.2` style, but every continuous date-based version (`YYYY.M.D-N`,
+ * RELEASING.md) now carries a hyphen as a *mandatory* sequence number, not a pre-release marker — so as
+ * written, every future release classifies as "preview", never "stable". See RELEASING.md, "Releasing,
+ * going forward" > "The stable/preview channel question" for what actually depends on this, the options
+ * considered, and a recommendation. Not decided; do not treat "preview" here as intentional until that
+ * section says so.
+ */
 export function channelOf(version: string): 'stable' | 'preview' | undefined {
   const parsed = SEMVER.exec(version.trim());
   if (parsed === null) return undefined;

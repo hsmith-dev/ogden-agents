@@ -9,3 +9,6 @@ CREATE TABLE `remote_machines` (
 	`host_key_confirmed` integer DEFAULT false NOT NULL,
 	`created_at` text NOT NULL
 );
+--> statement-breakpoint
+ALTER TABLE `runs` ADD `machine_id` text;--> statement-breakpoint
+ALTER TABLE `sessions` ADD `machine_id` text;

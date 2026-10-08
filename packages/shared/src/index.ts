@@ -34,3 +34,4 @@ export * from './build-runs.js';
 export * from './build-settings.js';
 export * from './build-verification.js';
 export * from './release-source.js';
+export * from './jira.js';

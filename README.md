@@ -10,8 +10,8 @@ Ogden Agents is a local app, opened in your browser, for working with several AI
 
 The v1 release is being finalized. Implementation and release evidence are tracked in [docs/v1-readiness.md](docs/v1-readiness.md).
 
-- **v1 publication is pending.** This checkout does not establish that `ogden-agents@1.0.0` is available on npm. Until the release workflow publishes and verifies it, run from a checkout (see [Run](#run)).
-- Downloads are listed on the [releases page](https://github.com/hsmith-dev/ogden-agents/releases). Only files attached to an actual release are available; the release process is in [RELEASING.md](RELEASING.md#v1-release-checklist).
+- **Publication is pending.** This checkout does not establish that `ogden-agents@2026.10.7-1` (or any later release) is available on npm. Until the release workflow publishes and verifies it, run from a checkout (see [Run](#run)).
+- Downloads are listed on the [releases page](https://github.com/hsmith-dev/ogden-agents/releases). Only files attached to an actual release are available; releases are continuous and date-based, and the process is in [RELEASING.md](RELEASING.md#releasing-going-forward-continuous-date-based-versions).
 - It has not had an outside security audit. One user on one computer is the design.
 - Release notes are in [CHANGELOG.md](CHANGELOG.md).
 

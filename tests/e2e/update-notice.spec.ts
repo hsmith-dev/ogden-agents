@@ -10,6 +10,13 @@ import { openConnected } from './tab.js';
 import { readFileSync } from 'node:fs';
 
 const VERSION = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
+/**
+ * A version newer than any real release will be for a very long time. Versions are date-based now
+ * (`YYYY.M.D-N`; RELEASING.md), so a classic "high version" sentinel like `99.0.0` sorts as
+ * *older* than any 2026-or-later date version (99 < 2026) — a far-future year keeps this fixture
+ * correct regardless of when the build's own version is bumped.
+ */
+const NEWER_VERSION = '9999.1.1';
 
 /** Npm's registry with one newer stable version than whatever this build is; GitHub Releases (also asked, story 13.14) has no release. */
 function newerRegistry(version: string) {
@@ -25,20 +32,20 @@ function newerRegistry(version: string) {
 
 test('the banner names the newer version, Dismiss keeps it hidden after a reload, and About checks again', async ({ page }) => {
   const dataDir = makeDataDir();
-  const registry = newerRegistry('99.0.0');
+  const registry = newerRegistry(NEWER_VERSION);
   let server: RunningServer | undefined;
   try {
     server = await startServer(dataDir, 0, { updates: { fetch: registry.fetch } });
     await page.setViewportSize({ width: 1440, height: 900 });
     await openConnected(page, '/', server.launchUrl);
     const banner = page.getByTestId('update-banner');
-    await expect(banner).toContainText('Ogden 99.0.0 is available.');
+    await expect(banner).toContainText(`Ogden ${NEWER_VERSION} is available.`);
     await expect(banner).toContainText('npx ogden-agents@latest');
     await expect(page.getByTestId('update-status')).toHaveAttribute('role', 'status');
     const githubUrl = VERSION.includes('-') ? 'https://api.github.com/repos/hsmith-dev/ogden-agents/releases?per_page=5' : 'https://api.github.com/repos/hsmith-dev/ogden-agents/releases/latest';
     expect(registry.requests.sort()).toEqual([githubUrl, 'https://registry.npmjs.org/-/package/ogden-agents/dist-tags']);
 
-    await banner.getByRole('button', { name: 'Dismiss the notice about Ogden 99.0.0' }).click();
+    await banner.getByRole('button', { name: `Dismiss the notice about Ogden ${NEWER_VERSION}` }).click();
     await expect(banner).toHaveCount(0);
     await page.reload();
     await expect(page.locator('aside[data-slot="sidebar"]')).toBeVisible();
@@ -47,9 +54,9 @@ test('the banner names the newer version, Dismiss keeps it hidden after a reload
     await page.goto(`${server.url}/settings/about`);
     await expect(page.getByTestId('about-version')).toBeVisible();
     await expect(page.getByTestId('about-channel')).not.toBeEmpty();
-    await expect(page.getByTestId('about-available')).toContainText('Ogden 99.0.0 is available.');
+    await expect(page.getByTestId('about-available')).toContainText(`Ogden ${NEWER_VERSION} is available.`);
     await page.getByTestId('check-now').click();
-    await expect(page.getByTestId('check-result')).toHaveText('Ogden 99.0.0 is available.');
+    await expect(page.getByTestId('check-result')).toHaveText(`Ogden ${NEWER_VERSION} is available.`);
     expect(registry.requests).toHaveLength(4);
     await expect(page.getByTestId('about-sources')).toHaveText('GitHub Releases and npm');
     await expect(page.getByTestId('about-last-checked')).not.toHaveText('Not yet');
@@ -61,7 +68,7 @@ test('the banner names the newer version, Dismiss keeps it hidden after a reload
 
 test('the switch is saved by the server, and a restart with it off asks npm for nothing', async ({ page }) => {
   const dataDir = makeDataDir();
-  const first = newerRegistry('99.0.0');
+  const first = newerRegistry(NEWER_VERSION);
   let server: RunningServer | undefined;
   try {
     server = await startServer(dataDir, 0, { updates: { fetch: first.fetch } });
@@ -73,7 +80,7 @@ test('the switch is saved by the server, and a restart with it off asks npm for 
     await expect(toggle).not.toBeChecked();
     await server.close();
 
-    const second = newerRegistry('99.0.0');
+    const second = newerRegistry(NEWER_VERSION);
     server = await startServer(dataDir, 0, { updates: { fetch: second.fetch } });
     await openConnected(page, '/settings/about', server.launchUrl);
     await expect(page.getByRole('switch', { name: 'Check for new versions when Ogden starts' })).not.toBeChecked();

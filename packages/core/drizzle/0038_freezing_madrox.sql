@@ -1,1 +1,0 @@
-ALTER TABLE `sessions` ADD `machine_id` text;

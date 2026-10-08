@@ -11,6 +11,16 @@
  *   `core.hooksPath` the repo sets), ever runs: approve runs git unsandboxed
  *   in the main checkout;
  * - `-c core.fsmonitor=false`, so no configured monitor program starts;
+ * - `-c core.autocrlf=false`, so a checkout (`reset --hard`, a worktree
+ *   `add`, …) never rewrites a file's line endings against whatever the
+ *   user's own global/system gitconfig happens to say (CAP-24 epic 19
+ *   story 19.4/19.5's own CI first caught this on `windows-latest`: a file a
+ *   remote Linux build wrote with `\n` endings came back through
+ *   `importBundle`'s own `reset --hard` as `\r\n`, silently, because a
+ *   Windows git install commonly defaults `core.autocrlf=true`). Ogden
+ *   Agents never wants git deciding that on its own behalf: every byte a
+ *   run produced should reach the local worktree exactly as the remote
+ *   wrote it;
  * - `--no-ext-diff --no-textconv` on every diff, so no configured diff
  *   program runs on the agent's files.
  * Branch names and revisions are checked before use; paths given to git
@@ -97,7 +107,7 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
         reject(error);
         return;
       }
-      const fullArgs = ['-c', 'core.longpaths=true', '-c', `core.hooksPath=${hooks}`, '-c', 'core.fsmonitor=false', ...args];
+      const fullArgs = ['-c', 'core.longpaths=true', '-c', `core.hooksPath=${hooks}`, '-c', 'core.fsmonitor=false', '-c', 'core.autocrlf=false', ...args];
       execFile(
         git,
         fullArgs,
@@ -140,7 +150,7 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
         resolvePromise(undefined);
         return;
       }
-      const child = spawn(git, ['-c', 'core.longpaths=true', '-c', `core.hooksPath=${hooks}`, '-c', 'core.fsmonitor=false', ...args], {
+      const child = spawn(git, ['-c', 'core.longpaths=true', '-c', `core.hooksPath=${hooks}`, '-c', 'core.fsmonitor=false', '-c', 'core.autocrlf=false', ...args], {
         cwd,
         env: { ...options.env(), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', LANG: 'C', ...extraEnv },
         stdio: ['pipe', 'pipe', 'ignore'],

@@ -472,5 +472,32 @@ describe('vcs-git (CAP-24 story 19.4: bundleRef, importBundle)', () => {
     await expect(vcs.importBundle(repo, path, 'not..a-branch', head, incremental)).rejects.toBeInstanceOf(VcsError);
     await expect(vcs.importBundle(repo, path, branch, 'not-a-revision', incremental)).rejects.toBeInstanceOf(VcsError);
   });
+
+  it("never rewrites a file's line endings on import, even when the worktree's own gitconfig defaults core.autocrlf=true (the Git for Windows installer's own recommended setting) -- `run`/`runBinary`'s own `-c core.autocrlf=false` wins over it on every call (CAP-24, Windows CI regression)", async () => {
+    const { repo, vcs, path, branch, head } = await branched();
+    // Simulates exactly the ambient environment that made this a real Windows bug, without needing a
+    // real Windows machine: a worktree whose own local config -- never `vcs-git`'s own `-c` flags, which
+    // always win over it -- says to convert. If a future change ever drops `core.autocrlf=false` from
+    // `run`/`runBinary`'s fixed `-c` list, this reproduces the corruption locally on any OS.
+    git(path, 'config', 'core.autocrlf', 'true');
+
+    const remote = temp('ogden-agents-vcs-remote-crlf-');
+    execFileSync('git', ['init', '-q', remote], { encoding: 'utf8' });
+    const pushBundle = await vcs.bundleRef(repo, branch);
+    const pushBundleFile = join(temp('ogden-agents-vcs-push-crlf-'), 'push.bundle');
+    writeFileSync(pushBundleFile, pushBundle);
+    git(remote, 'fetch', '-q', pushBundleFile, `${branch}:${branch}`);
+    git(remote, 'checkout', '-q', branch);
+    // The remote wrote plain `\n`: a real agent run, on a real (POSIX) remote machine, never writes `\r\n`.
+    writeFileSync(join(remote, 'new.txt'), 'hi\n');
+    git(remote, 'add', '-A');
+    git(remote, 'commit', '-q', '--no-verify', '-m', 'remote change');
+    const incremental = gitBinary(remote, 'bundle', 'create', '-', `${head}..${branch}`);
+
+    expect(await vcs.importBundle(repo, path, branch, head, incremental)).toBe('imported');
+    // Read back as a `Buffer` (never `'utf8'`): a byte-for-byte check, so an accidental `\r\n` cannot
+    // hide behind `readFileSync(..., 'utf8')`'s own newline-agnostic string comparisons.
+    expect(readFileSync(join(path, 'new.txt'))).toEqual(Buffer.from('hi\n'));
+  });
 });
 

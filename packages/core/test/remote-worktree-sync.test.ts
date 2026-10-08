@@ -34,13 +34,25 @@ const temp = (prefix: string) => {
   return dir;
 };
 
-/** Plain git for the test's own setup and assertions: a local identity, no hook concerns (not this story's own test target). */
+/**
+ * Plain git for the test's own setup and assertions: a local identity, no
+ * hook concerns (not this story's own test target), and `-c
+ * core.autocrlf=false` -- this file's own `realVcs()` is a deliberately
+ * independent stand-in for `vcs-git`'s real `importBundle` (see the file
+ * doc comment), so it needs the same protection that adapter now carries
+ * (`vcs-git/index.ts`'s own `run`/`runBinary`): without it, `git reset
+ * --hard`'s checkout silently rewrites a file's `\n` to `\r\n` on any
+ * machine whose own gitconfig defaults `core.autocrlf=true` (the Git for
+ * Windows installer's own recommended default; this is exactly what made
+ * `remote-worktree-sync: pull`'s fast-forward test flaky-looking on
+ * `windows-latest`, not a quoting or path bug).
+ */
 const git = (cwd: string, ...args: string[]): string =>
-  execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) as string;
+  execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) as string;
 
 /** The same, but the raw bytes (a bundle is binary). */
 const gitBinary = (cwd: string, ...args: string[]): Buffer =>
-  execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }) as Buffer;
+  execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'core.autocrlf=false', ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }) as Buffer;
 
 const tryGit = (cwd: string, ...args: string[]): string | undefined => {
   try {

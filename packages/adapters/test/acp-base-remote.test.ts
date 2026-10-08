@@ -35,6 +35,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildRemoteCommand, createAcpAgent, MASKED, slashSkillInvocation, type AcpAgentQuirks } from '../src/acp-base/index.js';
 import { baseEnvironment } from '../src/child-env.js';
+import { killProcessTree } from '../src/process-tree.js';
 import { createMemoryRemoteHostPort, type MemoryRemoteHostPort } from '../src/remote-host-memory/index.js';
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
@@ -140,7 +141,13 @@ function createTrackedConnection(): TrackedConnection {
     kills: 0,
     async exec(command, options): Promise<RemoteHostChannel> {
       execCommands.push(command);
-      const child = spawn('sh', ['-c', command], { env: { ...baseEnvironment(), ...options?.env }, stdio: ['pipe', 'pipe', 'pipe'] });
+      // Its own process group on POSIX (as `spawnAcpProcess`'s own local spawn already does), so
+      // `killProcessTree` below can reach the whole tree, not just this one shell.
+      const child = spawn('sh', ['-c', command], {
+        env: { ...baseEnvironment(), ...options?.env },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32',
+      });
       let settled = false;
       let resolveExit!: (code: number) => void;
       let rejectExit!: (error: unknown) => void;
@@ -163,7 +170,16 @@ function createTrackedConnection(): TrackedConnection {
         if (settled) return;
         settled = true;
         rejectExit(new RemoteHostError('The connection to the machine was lost.', {}, 'connection_lost'));
-        child.kill('SIGKILL');
+        // `killProcessTree`, not a plain `child.kill('SIGKILL')`: this `sh -c '… && exec …'` stands in
+        // for a real remote exec channel (see this function's own doc comment), but on `windows-latest`
+        // there is no POSIX `exec` to replace the shell's own image in place -- `sh.exe` (Git for
+        // Windows' MSYS bash) runs the fake agent as a *child* process instead, so killing only the
+        // top-level `sh.exe` leaves that real agent process (and its lock on `tempDir()`'s directory)
+        // running, orphaned, which is exactly what made `afterEach`'s `rmSync` fail with `EPERM` on
+        // Windows CI (the temp dir was still a running process's cwd / had an open handle under it).
+        // POSIX `exec` genuinely replaces the shell's image, so this was always a no-op difference
+        // there -- only `windows-latest` ever had a tree to walk.
+        killProcessTree(child.pid);
       };
       return {
         stdin: child.stdin,
@@ -172,11 +188,7 @@ function createTrackedConnection(): TrackedConnection {
         exitCode,
         kill: () => {
           connection.kills += 1;
-          try {
-            child.kill();
-          } catch {
-            /* best-effort */
-          }
+          killProcessTree(child.pid);
         },
       };
     },
@@ -281,7 +293,15 @@ describe('a remote chat over SSH (CAP-24, story 19.5)', () => {
 describe('buildRemoteCommand (CAP-24 story 19.5)', () => {
   it('shell-quotes cwd, command and args, so ones containing a space and a single quote still run correctly through a real sh -c (mirroring story 19.4)', async () => {
     const dir = tempDir();
-    const cwd = realpathSync(dir);
+    // `realpathSync` (the plain JS one) only resolves symlinks, so on `windows-latest` it leaves a
+    // short (8.3) path segment untouched when the runner's own %TEMP% is set that way (observed:
+    // `...\RUNNER~1\...`), while the child process below, after a real `cd` into it, reports its
+    // `process.cwd()` back through Windows' own canonicalization, which resolves that alias to its
+    // long form (`...\runneradmin\...`) -- a mismatch `buildRemoteCommand` itself never caused (its
+    // quoting is exactly right either way; the `argv` half of this same assertion already proves
+    // that). `realpathSync.native` asks the OS to canonicalize up front, the same resolution the
+    // child's own `process.cwd()` already does, so both sides agree on every platform.
+    const cwd = realpathSync.native(dir);
     const weirdCwd = join(cwd, "weird 'cwd");
     mkdirSync(weirdCwd);
     const weirdCommand = join(cwd, "weird 'node");
@@ -301,5 +321,20 @@ describe('buildRemoteCommand (CAP-24 story 19.5)', () => {
     expect(result.code).toBe(0);
     // `process.argv.slice(2)` drops Node's own argv[0] (its executable) and argv[1] (the script path), leaving only `weirdArg`.
     expect(JSON.parse(result.stdout)).toEqual({ cwd: weirdCwd, argv: [weirdArg] });
+  });
+
+  it('shell-quotes every field as pure strings, with no OS-specific path logic (separators, drive letters, case) applied along the way -- a real Windows path survives byte-for-byte even when the controller itself runs this on win32', () => {
+    // No spawn, no real shell, no temp dir: `buildRemoteCommand` only ever has to splice its three
+    // fields into a string, since the remote end is always a POSIX shell regardless of what OS Ogden
+    // Agents' own controller process runs on (see this file's module doc comment and
+    // `process-launch.ts`'s own). A controller-side "fix" that ran the Windows-style `cwd` it gets
+    // handed through `path.win32`/`path.normalize`/backslash-to-forward-slash translation before
+    // quoting it would be wrong (the remote's own `sh -c` never wants that), and this test would catch
+    // it: nothing here ever touches `node:path`.
+    const windowsStyleCwd = String.raw`C:\Users\RUNNER~1\AppData\Local\Temp\weird 'cwd`;
+    const command = buildRemoteCommand({ cwd: windowsStyleCwd, command: 'node', args: ['probe.mjs'] });
+    expect(command).toBe(`cd '${windowsStyleCwd.replace(/'/g, `'\\''`)}' && exec 'node' 'probe.mjs'`);
+    // The backslashes are untouched, never doubled, converted to `/`, or otherwise reinterpreted.
+    expect(command).toContain(windowsStyleCwd.replace("'", `'\\''`));
   });
 });

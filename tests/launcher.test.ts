@@ -34,6 +34,13 @@ const { version: VERSION } = JSON.parse(readFileSync(join(ROOT, 'package.json'),
  * newer, its last identifier being non-numeric; story 2.13.)
  */
 const OLDER_VERSION = '0.0.0-old';
+/**
+ * A version newer than any real release will be for a very long time. Versions
+ * are date-based now (`YYYY.M.D-N`; RELEASING.md), so a classic "high major"
+ * sentinel like `999.0.0` sorts as *older* than any 2026-or-later date version
+ * (999 < 2026) — picking a year far in the future keeps this fixture correct.
+ */
+const NEWER_VERSION = '9999.1.1-1';
 
 const children: ChildProcess[] = [];
 const dataDirs: string[] = [];
@@ -341,11 +348,11 @@ describe('bin/ogden.js (background)', SUITE, () => {
 
   it('newer server: simply used', async () => {
     const dataDir = makeDataDir();
-    const fake = await fakeServer(dataDir, '999.0.0', 0);
+    const fake = await fakeServer(dataDir, NEWER_VERSION, 0);
 
     const result = await runLauncher(dataDir);
     expect(result.code, result.stderr).toBe(0);
-    expect(result.stdout).toContain('already running (version 999.0.0)');
+    expect(result.stdout).toContain(`already running (version ${NEWER_VERSION})`);
     expect(result.url).toBe(`http://127.0.0.1:${fake.port}`);
     expect(isAlive(fake.pid)).toBe(true);
   });

@@ -2,7 +2,47 @@
 
 Ogden Agents ships as one npm package, `ogden-agents`. Releases are published only by GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)) for a version tag. The tag is made for you when a version bump reaches `main` ([`.github/workflows/tag-release.yml`](.github/workflows/tag-release.yml); see [Releasing by version bump](#releasing-by-version-bump)), or by hand. Nobody publishes from their own machine, and no npm token is stored anywhere: the workflow authenticates to npm through [trusted publishing](https://docs.npmjs.com/trusted-publishers) (GitHub OIDC).
 
-## v1 release checklist
+## Releasing, going forward: continuous, date-based versions
+
+Starting with `2026.10.7-1`, Ogden Agents retires named milestone releases (`1.0.0`, `v1.1`, the `0.x.0` epics below) for continuous, date-stamped ones: there is no more batching several epics or stories into one numbered milestone, and no release-candidate step. A change ships in its own release as soon as it — and whatever else has merged to `main` since the last release — is ready.
+
+**The version format is `YYYY.M.D-N`:** the release date as three plain integers (year, month, day), followed by a mandatory sequence number starting at 1.
+
+- `2026.10.7-1` — the first release on October 7, 2026.
+- `2026.10.7-2` — a second release the same day.
+- `2026.10.8-1` — the first release the next day.
+
+Two rules, both load-bearing:
+
+1. **No leading zeros.** `2026.10.07` and `2026.1.05` are not valid versions at all: npm and semver both forbid a leading zero in a numeric identifier, so a zero-padded month or day fails before it ever reaches a release. Write the month and day as plain integers (`10`, not `010`; `7`, not `07`).
+2. **`-N` is never omitted, not even on a day's first release.** Under semver precedence, a bare version with no suffix always outranks a suffixed one with the same core version (`2026.10.7` sorts higher than `2026.10.7-1`; confirmed against node's `semver` package, and matches `packages/shared/src/semver.ts`'s own comparator, which the launcher's version handshake (AD-20) and the "newer version" notice use). If a day's first release were ever published bare (`2026.10.7`) and a later release the same day were suffixed (`2026.10.7-2`), the bare one would always sort as the newer of the two, however many releases came after it — exactly backwards. Always including `-N`, with no exception, avoids that trap entirely: within one date, higher `N` always sorts higher; across dates, the date always decides first, regardless of `N`.
+
+The version string is still a strictly ordered, valid semver string (that is what makes the above true), so every existing tool that compares versions — npm itself, the launcher's version handshake, the update notice — keeps working with no change to its comparison logic.
+
+### The process
+
+1. **Set the version.** Put the new version — today's date with `-1` if nothing has shipped yet today, or the next unused `-N` if something has — in the five manifests: the root, `packages/server`, `packages/web` and `packages/desktop` `package.json`, and `packages/desktop/src-tauri/tauri.conf.json`. (`tests/desktop-config.test.ts` also keeps `packages/desktop/src-tauri/Cargo.toml`'s crate version, and `Cargo.lock`'s own entry for it, equal to the same version.) Add that version's own section to `CHANGELOG.md` (`## 2026.10.7-1`, matched exactly by `scripts/release-notes.mjs`): every release needs its own section now, with no falling back to a shared "stable" section, since there is no release candidate to share one with.
+2. **Merge to `main`.** A feature's own pull request can carry the version bump, same as before.
+3. **The Tag release workflow does the rest**, mechanically the same as [Releasing by version bump](#releasing-by-version-bump) below, except that it now validates the date-based format instead of classic semver, and the tag it creates is always released straight to `latest` — never a prerelease, never the `next` dist-tag.
+
+### What's retired
+
+- **The release-candidate step.** There is no more "`-rc.1` to `next`, checked live, then the plain version to `latest`." Every release goes out once, straight to `latest`.
+- **The npm `next` dist-tag, for new releases.** `npm publish` always uses `--tag latest` now (`.github/workflows/release.yml`'s guard always computes `dist-tag: latest`). Whatever `next` last pointed at (the last release candidate ever published, if any) is left exactly where it is; nothing moves it going forward. If that matters to anyone still pinned to `ogden-agents@next`, that is a separate decision (repoint it once by hand, or leave it and let it go stale) — this change does not make it for you.
+- **Marking a GitHub Release as a prerelease.** Every dated release is final, so none is ever created with `--prerelease`; each one is the repository's "latest" release.
+- The live-check procedures further down (epic 7, 14, 15, 17) sometimes say to release "as in the 0.2.0 checklist, step 4" or "step 6" — that means the retired two-step release-candidate flow. Use this section's one-step flow instead when actually cutting the release; the step-by-step live-check instructions themselves (what to click, what to watch for with a real agent) are unaffected by the versioning change.
+- The desktop app's own **"next" update channel** (`desktop-channel-next`, a permanent prerelease release holding one `latest.json`) is a separate mechanism from the npm dist-tag above and is unaffected by any of this: it already tracks the highest version of any release, stable or not, so under continuous dating it simply always matches the stable channel now. Nothing about it changed in this release.
+
+### Two things this change surfaces, not decided here
+
+Both are application code, not release infrastructure, so neither was changed as part of switching the version format; both need their own decision and verification before they can be relied on.
+
+- **`packages/shared/src/semver.ts`'s `channelOf`** (used by `decideUpdate`) and **`packages/shared/src/release-source.ts`'s `channelFor`** treat any version with a `-` as a prerelease ("preview" channel, follows `next`). Every date-based version has a mandatory `-N`, so this now classifies *every* installed version as "preview", never "stable". The ordering math itself is unaffected (it still finds the true newest release), but the "newer version" notice's channel bookkeeping — and Settings > About's channel label, and anything in the desktop app that reads a running install's channel the same way — may now behave or read differently than before. Decide whether `channelOf`/`channelFor` should treat the mandatory `-N` as part of a release's identity rather than as a semver prerelease marker, and change it deliberately if so.
+- **The Tauri updater's own version comparison** (the `tauri-plugin-updater` crate's own code, not anything in this repository) has never been exercised against a version that always carries a `-N` suffix — only against classic semver, where a dash meant an optional, genuine prerelease. If it treats any hyphenated version as a non-installable prerelease build by default (a plausible, common pattern for update plugins; unverified here), no continuously dated release would ever be offered as a desktop update, silently. `.github/workflows/desktop.yml`'s "Build version N+1" step now builds and update-tests a same-day `N+1` version (`2026.10.7-1` to `2026.10.7-2`, the realistic case) on every PR and `main` push, which will surface this empirically in CI. It has not yet been run with real signing (`DESKTOP_SIGNING` is still off; see "The desktop app" below). Treat the first real signed desktop release as the first real check of this, and do not assume it is fine before that run is green.
+
+## v1 release checklist (historical, predates date-based versioning)
+
+> This checklist, and the other version-numbered checklists further down (First release 0.2.0, Epic 3 0.3.0, 0.4.0, 0.5.0, v1.1), predate continuous date-based versioning (2026-10-07) and document the old named-milestone process: major/minor version numbers mapped to epics, each cut in two steps (a `-rc.N` prerelease to the npm `next` dist-tag, checked live, then the plain version to `latest`). They remain as real release history, and, for the live-check procedures that are still pending (epic 7, 14, 15, 17; interleaved among them below), as the checklist for verifying those features with real providers — but no new release should follow their version-numbering or two-step tagging steps. See [Releasing, going forward](#releasing-going-forward-continuous-date-based-versions) above for the current process. (The mechanical sections right after this one — "Releasing by version bump", "What the release workflow does", "The desktop app", "Installing and updating from GitHub Releases" — describe the workflow files as they work today and are not historical.)
 
 The historical version checklists below remain as live-test procedures and release history. The current target is **1.0.0**; their old version numbers are not the version to publish. [docs/v1-readiness.md](docs/v1-readiness.md) maps implemented epics to outstanding evidence. App code signing, notarization and production updater signing are excluded from this release request; keep unsigned opening instructions and do not advertise signed updates as configured.
 
@@ -18,13 +58,13 @@ Do not check off a live test without its recorded result. Any remaining external
 
 ## Releasing by version bump
 
-A release is cut by setting the version. Put the new version in the root, server, web and desktop `package.json` and in `packages/desktop/src-tauri/tauri.conf.json`, add its section to `CHANGELOG.md`, and merge that to `main` (a feature's pull request can carry its own bump). The **Tag release** workflow ([`.github/workflows/tag-release.yml`](.github/workflows/tag-release.yml)) runs on every push to `main` that touches `package.json`:
+A release is cut by setting the version. Put the new version — in the date-based format, `YYYY.M.D-N` — in the root, server, web and desktop `package.json` and in `packages/desktop/src-tauri/tauri.conf.json`, add its section to `CHANGELOG.md`, and merge that to `main` (a feature's pull request can carry its own bump). The **Tag release** workflow ([`.github/workflows/tag-release.yml`](.github/workflows/tag-release.yml)) runs on every push to `main` that touches `package.json`:
 
-1. It reads the root version and checks it is the same in every manifest and that `scripts/release-notes.mjs` finds notes for it (a stable version needs its own `CHANGELOG.md` section). A bad bump fails here, with no tag made.
+1. It reads the root version, checks it is in the date-based format and the same in every manifest, and that `scripts/release-notes.mjs` finds notes for it (every version needs its own `CHANGELOG.md` section; there is no more falling back to a shared one). A bad bump fails here, with no tag made.
 2. If `v<version>` is already a tag, it stops: a release is never cut twice, and a tag is never moved. Pushes to `main` that don't change the version do nothing.
 3. Otherwise it creates the annotated tag `v<version>` on that commit and starts the **Release** workflow on the tag, which runs the guard, CI, the assets, the desktop apps, npm (when `NPM_PUBLISH` is `true`; the `npm-release` environment's reviewer still approves it) and the GitHub Release, exactly as for a tag pushed by hand.
 
-The tag is pushed with the repository's own token, which GitHub never lets start another workflow by itself, so the Tag release workflow starts the Release workflow explicitly (`gh workflow run release.yml --ref v<version>`). No stored credential is involved; the workflow has write access to tags and to starting workflows, and nothing else. A prerelease version (`1.1.0-rc.1`) is tagged the same way and goes to the `next` dist-tag.
+The tag is pushed with the repository's own token, which GitHub never lets start another workflow by itself, so the Tag release workflow starts the Release workflow explicitly (`gh workflow run release.yml --ref v<version>`). No stored credential is involved; the workflow has write access to tags and to starting workflows, and nothing else. Every version tag is released the same way, straight to the `latest` dist-tag: there is no more prerelease shape or a separate `next` dist-tag for a new release (see [Releasing, going forward](#releasing-going-forward-continuous-date-based-versions)).
 
 **Actions → Tag release → Run workflow** runs the same check by hand for `main`'s current version, for example to release a version that was on `main` before this workflow existed. To release by hand instead, push the tag yourself: the Tag release workflow then finds it and does nothing.
 
@@ -36,11 +76,11 @@ On a pushed tag `vX.Y.Z`:
 
 1. **Guard.** Fails unless the tagged commit is on `main`'s own (first-parent) history, not a feature-branch commit merged into it, and the version in `package.json`, `packages/server/package.json`, `packages/web/package.json`, `packages/desktop/package.json` and the desktop app's `tauri.conf.json` equals `X.Y.Z`. `tests/packaging.test.ts` and `tests/desktop-config.test.ts` keep them equal.
 2. **CI.** Reruns the full CI workflow (`ci.yml`) for the tagged commit: tests and a clean-install smoke test on macOS, Windows and Linux for Node 24 and 26, and the browser tests. If anything fails, nothing is published.
-3. **Release assets** (Linux, read-only). Builds the packed tarball once (recording the commit as `gitHead`), smoke-tests that exact tarball, and collects what the release carries: `ogden-agents-X.Y.Z.tgz`, `ogden-install.mjs` (the install helper), the start scripts (`Start-Ogden-macOS.zip`, holding `Start Ogden.command` and the helper and zipped so the script stays executable; `Start-Ogden.cmd`; `start-ogden.sh`), and `SHA256SUMS.txt` with the SHA-256 of every one of them. Asset names have no spaces because GitHub turns them into dots. The release notes are the matching section of `CHANGELOG.md` (`scripts/release-notes.mjs`; a stable version with no section fails, a prerelease falls back to its release's section, then to Unreleased) plus how to install and verify. Everything is kept as the workflow artifact `release-assets`.
-4. **Publish to npm** (only with `NPM_PUBLISH=true`; Linux, environment `npm-release`). Builds and packs the tarball (recording the commit as `gitHead`), smoke-tests that exact tarball, then runs `npm publish ogden-agents-X.Y.Z.tgz --access public --tag <dist-tag>` with npm 11.5.1 or later. A stable version goes to the `latest` dist-tag. A prerelease such as `v0.2.0-rc.1` goes to `next`, so `npx ogden-agents` keeps installing the last stable version and the prerelease is installed with `npx ogden-agents@next`. Publishing is idempotent: if `X.Y.Z` is already on npm from this same commit, the job skips publishing and succeeds, so a re-run carries on to verify; if it is on npm from a different commit, the job fails. This job and its environment protections are unchanged by the GitHub Release path.
+3. **Release assets** (Linux, read-only). Builds the packed tarball once (recording the commit as `gitHead`), smoke-tests that exact tarball, and collects what the release carries: `ogden-agents-X.Y.Z.tgz`, `ogden-install.mjs` (the install helper), the start scripts (`Start-Ogden-macOS.zip`, holding `Start Ogden.command` and the helper and zipped so the script stays executable; `Start-Ogden.cmd`; `start-ogden.sh`), and `SHA256SUMS.txt` with the SHA-256 of every one of them. Asset names have no spaces because GitHub turns them into dots. The release notes are the matching section of `CHANGELOG.md` (`scripts/release-notes.mjs`; every version needs its own exact section, or this fails) plus how to install and verify. Everything is kept as the workflow artifact `release-assets`.
+4. **Publish to npm** (only with `NPM_PUBLISH=true`; Linux, environment `npm-release`). Builds and packs the tarball (recording the commit as `gitHead`), smoke-tests that exact tarball, then runs `npm publish ogden-agents-X.Y.Z.tgz --access public --tag latest` with npm 11.5.1 or later. Every release goes to the `latest` dist-tag now (there is no more prerelease split); `npx ogden-agents` always installs the newest one. Publishing is idempotent: if `X.Y.Z` is already on npm from this same commit, the job skips publishing and succeeds, so a re-run carries on to verify; if it is on npm from a different commit, the job fails. This job and its environment protections are unchanged by the GitHub Release path.
 5. **Registry and provenance** (with npm). Waits for `X.Y.Z` to show on npm, then checks provenance. From a public repository npm adds a provenance attestation automatically; the job fails if a public-repository release has none, and only warns if the repository is private. Verify doesn't depend on this job.
 6. **Verify** (with npm). On macOS, Windows and Linux, Node 24 and 26, runs `npx --yes ogden-agents@X.Y.Z` in an empty directory with an empty npm cache, reaches the page and `server.started`, then quits the server (`node scripts/smoke-installed.mjs --registry-spec ogden-agents@X.Y.Z`).
-7. **GitHub Release.** Creates the release for the tag as a draft (marked as a prerelease for a `next` version, so it is never "latest"), checks `SHA256SUMS.txt` against the files, attaches the assets, and only then publishes it, so nobody sees it half-attached. With npm on it waits for verify, because the start scripts' default is `npx ogden-agents@latest`; with npm off it needs only CI and the assets. A re-run replaces the assets. This is the only job with write access to the repository (`contents: write`).
+7. **GitHub Release.** Creates the release for the tag as a draft (never as a prerelease — every dated release is "latest"), checks `SHA256SUMS.txt` against the files, attaches the assets, and only then publishes it, so nobody sees it half-attached. With npm on it waits for verify, because the start scripts' default is `npx ogden-agents@latest`; with npm off it needs only CI and the assets. A re-run replaces the assets. This is the only job with write access to the repository (`contents: write`).
 
 ### Dry run
 
@@ -74,7 +114,9 @@ Installed apps check for updates on start and only install an update signed with
 5. **Turn signed releases on.** Set the repository variable `DESKTOP_SIGNING` to `true` (Settings, Secrets and variables, Actions, Variables).
 6. **Back the private key and its password up offline.** If they are lost, installed apps can never update again and every user must reinstall by hand.
 
-With that, a tag builds the apps in the `desktop-release` environment (the reviewer approves it), signs their update files with your key, and adds `latest.json` to the release. The stable channel reads `https://github.com/hsmith-dev/ogden-agents/releases/latest/download/latest.json`. The next channel reads the `latest.json` of one permanent prerelease, `desktop-channel-next`, which every release replaces (GitHub's `releases/latest` skips prereleases). The workflow creates `desktop-channel-next` the first time it needs it; nobody tags it by hand.
+With that, a tag builds the apps in the `desktop-release` environment (the reviewer approves it), signs their update files with your key, and adds `latest.json` to the release. The stable channel reads `https://github.com/hsmith-dev/ogden-agents/releases/latest/download/latest.json`. The next channel reads the `latest.json` of one permanent prerelease, `desktop-channel-next`, which every release replaces (GitHub's `releases/latest` skips prereleases) — this is a separate mechanism from npm's dist-tags, unaffected by continuous dating retiring the npm `next` dist-tag; since every release is now "stable", the next channel's `latest.json` and the stable channel's now always point at the same version. The workflow creates `desktop-channel-next` the first time it needs it; nobody tags it by hand.
+
+> See [Releasing, going forward](#releasing-going-forward-continuous-date-based-versions)'s "Two things this change surfaces" for an open question about whether the Tauri updater's own version comparison (not this repository's code) has been checked against a version that always carries a `-N` suffix. It has not been run with real signing yet.
 
 A dry run of the desktop part with your key, before the first tag: Actions, Release, Run workflow on `main` (no tag, no npm, no release). It builds the apps with your key behind the reviewer and keeps `desktop-release-assets`; check that `latest.json` is in it and that every `.sig` is next to its file. Nothing is published.
 
@@ -100,7 +142,7 @@ A release is installable without npm having the `ogden-agents` package. The star
 
 `ogden-install.mjs start` looks up the newest release of `hsmith-dev/ogden-agents` (`OGDEN_AGENTS_REPO=owner/name` for another), downloads `ogden-agents-<version>.tgz` and `SHA256SUMS.txt`, and **refuses to install** unless the tarball's SHA-256 is on its line in the list (a missing list, a missing line or a different hash all stop it; there is no flag to skip this). It then runs npm on the file (`npm install <file.tgz>` into a version folder; npm extracts it, the installer has no archive code of its own), checks the installed package is the release's version, and starts it. Everything lives under your own user folder, never globally and never with administrator rights: `~/Library/Application Support/ogden-agents-install` (macOS), `%LOCALAPPDATA%\ogden-agents-install` (Windows) or `~/.local/share/ogden-agents-install` (Linux), or `OGDEN_AGENTS_APP_DIR`.
 
-- **Updates.** Each start looks for a newer release; if the check fails (offline) it starts the installed version. The **stable** channel follows `releases/latest` (never a prerelease); the **next** channel follows the highest version of all published releases. The channel follows the installed version (a prerelease follows `next`) unless `OGDEN_AGENTS_CHANNEL=stable|next` says otherwise. Until a stable release exists, set `OGDEN_AGENTS_CHANNEL=next` for the first install. It never downgrades.
+- **Updates.** Each start looks for a newer release; if the check fails (offline) it starts the installed version. The **stable** channel follows `releases/latest` (never a prerelease, and no release is ever marked one now); the **next** channel follows the highest version of all published releases. The channel follows the installed version (a prerelease follows `next`) unless `OGDEN_AGENTS_CHANNEL=stable|next` says otherwise — "a prerelease" here is decided by `channelFor` in `@ogden-agents/shared/release-source`, which reads any `-` in the version as a prerelease marker. Every date-based version has a mandatory `-N`, so as written this would now default every install to the `next` channel instead of `stable`; see the open question about this in [Releasing, going forward](#releasing-going-forward-continuous-date-based-versions) (not changed here, since it is application code). Until a stable release exists, set `OGDEN_AGENTS_CHANNEL=next` for the first install. It never downgrades.
 - **Rollback.** The previous version stays installed (older ones are removed). `node ogden-install.mjs rollback` switches back, and the next start does not install the version you rolled back from; `node ogden-install.mjs update` does.
 - **Other commands.** `update` installs without starting; `status` shows what is installed, offline. `--check` on a start script reports the source and runs `status`, and never touches the network.
 - **The registry is still used for dependencies.** The release tarball is the `ogden-agents` package itself; its dependencies (`better-sqlite3`, `hono`, ...) come from npm as in any install.
@@ -116,7 +158,7 @@ Release files of a **private** repository need authentication; without it GitHub
 
 A failed publish publishes nothing, since `npm publish` is all or nothing. A failed verify means the release is already public: fix it forward (below).
 
-## First release (0.2.0) checklist
+## First release (0.2.0) checklist (historical)
 
 `0.2.0` is the first real release on npm: `0.0.0` was a name reservation, and it holds the `latest` dist-tag until `0.2.0` ships. `0.2.0` is epic 2 (chat and workspaces) and epic 9 (first-run onboarding, stories 9.1 to 9.7). Epic 3 (the terminal) is not in it: the release is cut before any epic 3 story merges. `0.1.0` was never published (its CHANGELOG entry says so).
 
@@ -212,7 +254,7 @@ npx ogden-agents                  # installs 0.2.0, starts and opens the page
 
 The package page on npmjs.com shows a provenance badge linking back to the workflow run.
 
-## Epic 3 release (0.3.0) checklist
+## Epic 3 release (0.3.0) checklist (historical)
 
 `0.3.0` is epic 3: switching a chat to the agent's own terminal and back (CAP-5). It goes out after `0.2.0`, in the same two steps, by tag: `0.3.0-rc.1` to `next`, checked live, then `0.3.0` to `latest`. As before, the repository owner does every step by hand.
 
@@ -245,7 +287,7 @@ If a check fails, fix it on `main` and release `0.3.0-rc.2` the same way.
 
 As in the 0.2.0 checklist, step 6, with the version `0.3.0` and the tag `v0.3.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.3.0 next`. Epic 3, Done when 6, is met once `npx ogden-agents` installs `0.3.0`.
 
-## 0.4.0 release checklist (epic 10, epic 4 and permission modes)
+## 0.4.0 release checklist (epic 10, epic 4 and permission modes) (historical)
 
 `0.4.0` is one release of epic 10 (BMad Method optional per project, CAP-19), epic 4 (planning and the board, CAP-2, CAP-6, CAP-7, CAP-18) and the per-chat permission modes story (user decision 2026-10-02: epic 10 does not release on its own). It goes out after `0.3.0`, in the same two steps, by tag: `0.4.0-rc.1` to `next`, checked live, then `0.4.0` to `latest`. `0.2.0` and `0.3.0` are unchanged. As before, the repository owner does every step by hand.
 
@@ -291,7 +333,7 @@ If a check fails, fix it on `main` and release `0.4.0-rc.2` the same way.
 
 As in the 0.2.0 checklist, step 6, with the version `0.4.0` and the tag `v0.4.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.4.0 next`. Epic 4, Done when 6, is met once `npx ogden-agents` installs `0.4.0`.
 
-## 0.5.0 release checklist (epic 6: Antigravity beside Claude Code)
+## 0.5.0 release checklist (epic 6: Antigravity beside Claude Code) (historical)
 
 `0.5.0` is epic 6's release (CAP-15, CAP-3, CAP-5, CAP-16): the agent picker, a default agent per project, and Antigravity as a second chat agent. It goes out after `0.4.0`, in the same two steps, by tag: `0.5.0-rc.1` to `next`, checked live, then `0.5.0` to `latest`. Antigravity ships only if it passes on all three OSes (user, 2026-10-02): any check below failing on any OS is a no-go for Antigravity, and the release then waits for the user's decision (drop entries 5, 7 and 8, as the epic says). As before, the repository owner does every step by hand.
 
@@ -326,7 +368,7 @@ When every check has passed on all three OSes, write the final Antigravity row o
 
 As in the 0.2.0 checklist, step 6, with the version `0.5.0` and the tag `v0.5.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.5.0 next`. Epic 6, Done when 7, is met once `npx ogden-agents` installs `0.5.0`.
 
-## v1.1 release checklist (epic 12: Codex and Grok beside Claude Code and Antigravity)
+## v1.1 release checklist (epic 12: Codex and Grok beside Claude Code and Antigravity) (historical)
 
 Epic 12's Codex stories (12.4 to 12.6, 12.9 and the Codex part of 12.11) are in `main`; Grok's stories (12.4, 12.7 to 12.9 and the Grok part of 12.11) are in `main` too; Grok is an xAI API access token only, off until a token is added (user decision, 2026-10-05). Codex is OpenAI API key only (user decision, 2026-10-05): there is no ChatGPT sign in, because OpenAI's terms don't allow other apps to use subscription sign in. CI runs only fakes (the fake agent's Codex personality, a fixture install), so the real Codex needs these live checks, which an agent cannot run. Release it as in the 0.2.0 checklist, step 4 (a release candidate to `next`, `npx ogden-agents@next`), then step 6; the version and the tag are the user's.
 
@@ -494,13 +536,9 @@ If the protected files, the hooks and the credential folders were unwritable and
 - Cost: note the time and, from your own billing page, the cost of one small build per agent. Ogden Agents stores none of it.
 - When the checks are done, finalize the Codex, Grok and Antigravity rows of `agent-matrix.md` through `bmad-spec` (the Builds and unattended-on-Windows cells), from these results.
 
-## Later releases
+## Later releases (historical)
 
-1. On a branch, set the same new version in `package.json`, `packages/server/package.json` and `packages/web/package.json`, and add its entry to `CHANGELOG.md`. Merge to `main`.
-2. Tag that `main` commit `v<version>` and push the tag, as in step 4.
-3. Optionally dry-run first (see Dry run above) to look at the assets and the notes.
-
-For a prerelease, use a version such as `0.2.0-rc.1` and the tag `v0.2.0-rc.1`. It is published to the `next` dist-tag, not `latest`.
+This section described every release after the first few under the old named-milestone process (a version bump, a tag, and for a prerelease, a separate `next` dist-tag). See [Releasing, going forward](#releasing-going-forward-continuous-date-based-versions) at the top of this file for the current, one-step, date-based process; it is unchanged mechanically (set the version, add the `CHANGELOG.md` section, merge to `main`, the Tag release workflow tags it) except that there is no more prerelease step.
 
 ## When something goes wrong
 
@@ -509,8 +547,8 @@ For a prerelease, use a version such as `0.2.0-rc.1` and the tag `v0.2.0-rc.1`. 
 | Guard: "Not on main" | The tag points at a commit that isn't on `main`'s own history (for example a feature-branch commit that was merged into `main`). Delete the tag (`git push origin :refs/tags/vX.Y.Z` and `git tag -d vX.Y.Z`) and tag a `main` commit. |
 | Guard: "Version mismatch" | The package versions don't equal the tag. Delete the tag, fix the versions on `main`, and tag again. |
 | CI fails | Nothing was published. Fix on `main`, delete the tag, and tag again. |
-| Publish: "Already published" (error) | That version is on npm from a different commit. npm never lets a version be reused: release the next patch version. (From the same commit, the job skips publishing and succeeds.) |
+| Publish: "Already published" (error) | That version is on npm from a different commit. npm never lets a version be reused: release a new dated version (bump `-N`, or use the next day's date). (From the same commit, the job skips publishing and succeeds.) |
 | Publish: `ENEEDAUTH`, `E401`, `E403` or `E404` | The trusted publisher is missing or doesn't match (step 3). Fix it on npmjs.com and re-run the failed jobs. Nothing was published. |
 | Publish: `E422` | npm's provenance check rejected the package, usually because `repository.url` in the root `package.json` isn't exactly `git+https://github.com/hsmith-dev/ogden-agents.git` (`tests/packaging.test.ts` checks it). Nothing was published. Fix it on `main`, delete the tag, and tag the fixed commit. |
 | Registry and provenance fails | The release is published. If the version never showed up, re-run the job. If provenance is missing from a public repository, check the repository was public when the release ran; the next release will carry it. |
-| Verify fails on one OS | The release is public but broken there. Never unpublish: fix on `main` and release the next patch version. |
+| Verify fails on one OS | The release is public but broken there. Never unpublish: fix on `main` and release a new dated version. |

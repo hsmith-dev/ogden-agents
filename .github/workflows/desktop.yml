@@ -212,10 +212,14 @@ jobs:
             packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.sig
             packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
 
+      # The next version in the date-based format (RELEASING.md): the same date, the next
+      # sequence number (the ordinary case — another release the same day). Keeping the mandatory
+      # `-N` suffix here, rather than dropping it, exercises the real same-day-sequence ordering
+      # the Tauri updater has to get right, not an easier bare-version comparison.
       - name: Build version N+1
         working-directory: packages/desktop
         run: |
-          next="$(node -e 'const [c]=require("../../package.json").version.split("-"); const p=c.split(".").map(Number); p[2]+=1; console.log(p.join("."))')"
+          next="$(node -e 'const m=/^(\d+\.\d+\.\d+)-(\d+)$/.exec(require("../../package.json").version); if (!m) throw new Error("not a date-based version"); console.log(`${m[1]}-${Number(m[2])+1}`)')"
           echo "NEXT_VERSION=$next" >> "$GITHUB_ENV"
           node -e 'const fs=require("fs"); const c=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/build-config.json","utf8")); c.version=process.argv[1]; fs.writeFileSync(process.env.RUNNER_TEMP+"/build-config-next.json", JSON.stringify(c))' "$next"
           # The bundler keeps earlier outputs; N's files must not be picked as N+1.

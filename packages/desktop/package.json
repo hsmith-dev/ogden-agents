@@ -1,6 +1,6 @@
 {
   "name": "@ogden-agents/desktop",
-  "version": "1.0.0",
+  "version": "2026.10.8-1",
   "private": true,
   "description": "The desktop app: a Tauri shell (src-tauri) around the local server on a bundled Node, and its build scripts. Built by the Desktop workflow, never by `pnpm build`.",
   "type": "module"

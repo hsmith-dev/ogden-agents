@@ -1,6 +1,15 @@
 # Changelog
 
-Every release of the `ogden-agents` npm package. Versions follow [semantic versioning](https://semver.org/); before 1.0.0, a minor version may change behavior. How a release is made is in [RELEASING.md](RELEASING.md).
+Every release of the `ogden-agents` npm package. Since `2026.10.8-1`, each release is dated: `YYYY.M.D-N` (year, month and day as plain integers, a mandatory sequence number). Before that, versions followed [semantic versioning](https://semver.org/)'s major.minor.patch, with named milestones; those entries are kept below as history. How a release is made is in [RELEASING.md](RELEASING.md).
+
+## 2026.10.8-1 — continuous, date-based releases
+
+Starting with this release, Ogden Agents retires named milestone versions (`1.0.0`, `v1.1`, ...) in favor of continuous, date-stamped releases: no more batching features into a numbered milestone, each change ships in its own release as soon as it is ready.
+
+- **New version format: `YYYY.M.D-N`.** A version is the release date as three plain integers (year, month, day) followed by a mandatory sequence number, for example `2026.10.7-1` for the first release on October 7, 2026, `2026.10.7-2` for a second release the same day, and `2026.10.8-1` for the first the next day. Month and day are never zero-padded (`2026.10.7`, not `2026.10.07`): npm and semver both forbid a leading zero in a numeric identifier, so a zero-padded date is not a valid version at all. The `-N` suffix is **never omitted**, not even on a day's first release: under semver precedence a bare version (no suffix) always outranks a suffixed one with the same core date, so if a release ever went out without `-N` while another release on the same date had one, the two could sort in the wrong order; always including `-N` avoids that trap. This is still a valid, strictly ordered semver string (confirmed against node's `semver` package), so every existing tool that compares versions keeps working.
+- **One channel: `latest`.** Every release is "just the newest dated one," so the old two-step release-candidate-then-stable process (`-rc.1` to the npm `next` dist-tag, then the plain version to `latest`) is retired: a release always publishes straight to npm's `latest` dist-tag and is never marked a GitHub prerelease. The desktop app's separate `next` update channel is unaffected (it already tracks the highest version of any release, stable or not) and keeps working, but there is no longer a distinct prerelease track for it to follow.
+- **`scripts/release-notes.mjs` and the Tag release workflow now validate this format**, not classic semver, and every release needs its own exact `CHANGELOG.md` section (there is no more falling back to a shared "stable" section for a release candidate, since there are no release candidates any more).
+- See [RELEASING.md](RELEASING.md#releasing-going-forward-continuous-date-based-versions) for the current process; the version-numbered checklists further down are kept as release history and predate this change.
 
 ## 1.0.0 — every agent, unattended builds and a palette of your own
 

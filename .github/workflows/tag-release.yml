@@ -8,8 +8,13 @@ name: Tag release
 # moved. Nothing here publishes anything: it only names the commit.
 #
 # Before tagging it checks the same things the Release guard checks (one version in every package
-# manifest, a CHANGELOG.md section for a stable version), so a bad bump fails here with the tag
-# never created, instead of leaving a tag whose release failed.
+# manifest, in the new date-based format, with its own CHANGELOG.md section), so a bad bump fails
+# here with the tag never created, instead of leaving a tag whose release failed.
+#
+# Versions are continuous and date-based (RELEASING.md): `YYYY.M.D-N`, year/month/day as plain
+# integers with no leading zero and a mandatory sequence suffix that is never omitted (a bare
+# version would otherwise outrank a suffixed one on the same date under semver precedence). Every
+# release publishes straight to npm's `latest` dist-tag; there is no more release-candidate step.
 #
 # The tag is pushed with the repository token, which GitHub never lets start another workflow on
 # its own; the Release workflow is therefore started explicitly (`gh workflow run`) on the tag,
@@ -52,13 +57,16 @@ jobs:
           node-version: 24
 
       # One version everywhere, as the Release guard requires (tests/packaging.test.ts and
-      # tests/desktop-config.test.ts keep them equal).
+      # tests/desktop-config.test.ts keep them equal), in the date-based format: `YYYY.M.D-N`, each
+      # numeric part with no leading zero (semver and npm both forbid one) and a mandatory `-N` that
+      # is never left off, even on a day's first release (RELEASING.md). This regex must match
+      # scripts/release-notes.mjs's VERSION_PATTERN.
       - name: Read the version and check it is the same in every package
         id: version
         run: |
           version="$(node -p "require('./package.json').version")"
-          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error title=Not a version::package.json's version '$version' is not a semantic version. Nothing was tagged."
+          if ! printf '%s' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(0|[1-9][0-9]*)$'; then
+            echo "::error title=Not a date-based version::package.json's version '$version' is not YYYY.M.D-N (plain integers, no leading zeros, mandatory -N; RELEASING.md). Nothing was tagged."
             exit 1
           fi
           for file in packages/server/package.json packages/web/package.json packages/desktop/package.json packages/desktop/src-tauri/tauri.conf.json; do
@@ -72,8 +80,8 @@ jobs:
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
           echo "main is at $version"
 
-      # A stable version with no CHANGELOG.md section would fail in the Release assets job; find
-      # that out before the tag exists.
+      # A version with no CHANGELOG.md section of its own would fail in the Release assets job;
+      # find that out before the tag exists.
       - name: The changelog has notes for this version
         env:
           VERSION: ${{ steps.version.outputs.version }}

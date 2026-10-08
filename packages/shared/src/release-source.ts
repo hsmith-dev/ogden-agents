@@ -53,7 +53,14 @@ export class ReleaseSourceError extends Error {
   }
 }
 
-/** The channel a version belongs to: a prerelease (`0.5.0-rc.1`) follows `next`. */
+/**
+ * The channel a version belongs to: a prerelease (`0.5.0-rc.1`) follows `next`.
+ *
+ * UNRESOLVED (2026-10-07): same bug as `channelOf` in `./semver.ts` — every continuous date-based
+ * version has a mandatory `-N` suffix that isn't a pre-release marker, so this now reads every
+ * released version as `next`. See RELEASING.md's "The stable/preview channel question" for the
+ * investigation and the proposed options; not decided.
+ */
 export function channelFor(version: string): Channel {
   return /^v?\d+\.\d+\.\d+-/.test(version.trim()) ? 'next' : 'stable';
 }

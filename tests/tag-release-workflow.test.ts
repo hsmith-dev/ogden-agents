@@ -46,6 +46,22 @@ describe('tag-release.yml', () => {
     expect(names.indexOf('The changelog has notes for this version')).toBeLessThan(names.indexOf('Create the tag on this commit'));
   });
 
+  it('validates the date-based format (YYYY.M.D-N), not classic semver with an optional prerelease', () => {
+    const versions = step('Read the version and check it is the same in every package').run!;
+    const match = /grep -Eq '(\^.*\$)'/.exec(versions);
+    expect(match, 'no grep -Eq pattern found in the version step').not.toBeNull();
+    // eslint-disable-next-line security/detect-non-literal-regexp -- the pattern is this repo's own workflow file
+    const pattern = new RegExp(match![1]!);
+    for (const good of ['2026.10.7-1', '2026.10.7-2', '2026.10.8-1', '2026.1.5-1']) expect(pattern.test(good), good).toBe(true);
+    // A leading-zero date component is rejected (semver and npm forbid it).
+    for (const bad of ['2026.10.07-1', '2026.01.7-1', '2026.10.7-01']) expect(pattern.test(bad), bad).toBe(false);
+    // The -N suffix is mandatory, even for a day's first release.
+    expect(pattern.test('2026.10.7'), '2026.10.7').toBe(false);
+    // Classic semver (with or without an optional prerelease) no longer passes.
+    expect(pattern.test('1.0.0'), '1.0.0').toBe(false);
+    expect(pattern.test('0.5.0-rc.1'), '0.5.0-rc.1').toBe(false);
+  });
+
   it('skips when the tag exists, and never deletes, moves or force-pushes one', () => {
     expect(step('Is the version tagged already?').run).toContain('git ls-remote --exit-code --tags origin');
     expect(step('Create the tag on this commit').if).toBe("steps.existing.outputs.exists != 'true'");

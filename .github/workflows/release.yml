@@ -14,6 +14,12 @@ name: Release
 # is idempotent: re-running a release whose version is already on npm from this
 # same commit skips the publish and goes on to verify.
 #
+# Versions are continuous and date-based (RELEASING.md): `YYYY.M.D-N`. Every release is "just the
+# newest dated one," so there is no more stable/prerelease split: every release publishes to npm's
+# `latest` dist-tag (never `next`) and is never marked a GitHub prerelease. The guard still rejects
+# anything that isn't the new format, so a hand-pushed tag in the old semver shape fails loudly
+# instead of publishing something `npx ogden-agents` would never see.
+#
 # The desktop app (epic 13, story 13.9) is built beside the npm path for macOS (one universal
 # .dmg), Windows (x64 and ARM64 NSIS installers) and Linux (x64 and arm64 AppImage and .deb), unsigned. With the repository variable
 # DESKTOP_SIGNING set to `true` it is built in the `desktop-release` environment and its update
@@ -78,7 +84,9 @@ jobs:
           echo "$GITHUB_REF_NAME ($GITHUB_SHA) is on main"
 
       # One version everywhere: the root, server and web package.json versions
-      # (tests/packaging.test.ts keeps them equal) must equal the tag without its `v`.
+      # (tests/packaging.test.ts keeps them equal) must equal the tag without its `v`, and be the
+      # date-based format (RELEASING.md): YYYY.M.D-N, no leading zeros, a mandatory -N. This regex
+      # must match scripts/release-notes.mjs's VERSION_PATTERN and tag-release.yml's.
       - name: Versions match the tag
         id: version
         env:
@@ -87,9 +95,14 @@ jobs:
         run: |
           node --input-type=module -e '
             import { readFileSync, appendFileSync } from "node:fs";
+            const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-(0|[1-9]\d*)$/;
             const files = ["package.json", "packages/server/package.json", "packages/web/package.json", "packages/desktop/package.json", "packages/desktop/src-tauri/tauri.conf.json"];
             const tag = process.env.TAG_NAME || `v${JSON.parse(readFileSync(files[0], "utf8")).version}`;
             const expected = tag.replace(/^v/, "");
+            if (!VERSION_PATTERN.test(expected)) {
+              console.log(`::error title=Not a date-based version::Tag ${tag} is not YYYY.M.D-N (plain integers, no leading zeros, mandatory -N; RELEASING.md). Nothing was published.`);
+              process.exit(1);
+            }
             const mismatches = files
               .map((file) => ({ file, version: JSON.parse(readFileSync(file, "utf8")).version }))
               .filter(({ version }) => version !== expected);
@@ -98,8 +111,9 @@ jobs:
               console.log(`::error title=Version mismatch::Tag ${tag} needs version ${expected}, but ${detail}. Nothing was published.`);
               process.exit(1);
             }
-            // A prerelease (0.2.0-rc.1) goes to the `next` dist-tag so `npx ogden-agents` keeps the last stable version.
-            const distTag = expected.includes("-") ? "next" : "latest";
+            // Every release is "just the newest dated one": always the `latest` dist-tag, never a
+            // prerelease `next` (RELEASING.md, "Releasing, going forward").
+            const distTag = "latest";
             appendFileSync(process.env.GITHUB_OUTPUT, `version=${expected}\ndist-tag=${distTag}\ntag=${tag}\n`);
             console.log(`Tag ${tag} matches version ${expected} in ${files.join(", ")}; npm dist-tag ${distTag}`);
           '
@@ -422,8 +436,9 @@ jobs:
 
       # `npm publish` of the packed tarball, never `pnpm publish` from the
       # workspace. Provenance comes automatically with trusted publishing from a
-      # public repo; from a private repo npm publishes without it. A prerelease
-      # goes to the `next` dist-tag, a stable version to `latest`.
+      # public repo; from a private repo npm publishes without it. Every release
+      # goes to the `latest` dist-tag: continuous dating retired the
+      # release-candidate step that used to go to `next` (RELEASING.md).
       - name: Publish
         if: steps.published.outputs.already != 'true'
         run: |
@@ -435,12 +450,13 @@ jobs:
   # The GitHub Release for this tag, from the assets job's files: the tarball,
   # the start scripts, the install helper, SHA256SUMS.txt and the notes. It is
   # created as a draft, gets every asset, and is published last, so nobody sees
-  # a release half-attached. A prerelease version (`-rc`, `-next`) is marked as
-  # one, so it is never the "latest" release. With npm publishing on, it waits
-  # for verify (the start scripts run `npx ogden-agents@latest`, so they go up
-  # only once the package is on npm and starts on every OS); with it off
-  # (NPM_PUBLISH unset) it needs only CI and the assets. Idempotent: a re-run
-  # replaces the assets. The only job with write access to the repository.
+  # a release half-attached. Every dated release is final: none is ever marked
+  # a GitHub prerelease, so each one is the repository's "latest" release.
+  # With npm publishing on, it waits for verify (the start scripts run
+  # `npx ogden-agents@latest`, so they go up only once the package is on npm
+  # and starts on every OS); with it off (NPM_PUBLISH unset) it needs only CI
+  # and the assets. Idempotent: a re-run replaces the assets. The only job
+  # with write access to the repository.
   github-release:
     name: Create the GitHub Release
     needs: [guard, assets, desktop-assets, publish, verify]
@@ -454,7 +470,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
-      DIST_TAG: ${{ needs.guard.outputs.dist-tag }}
     steps:
       # No checkout: only the assets artifact is used, and the write-scoped
       # token is never written to a .git/config.
@@ -474,12 +489,12 @@ jobs:
       - name: Desktop checksums still match
         run: (cd desktop && sha256sum --check SHA256SUMS-desktop.txt)
 
+      # Every dated release is final (RELEASING.md): never `--prerelease`, so each one is the
+      # repository's "latest" release and the stable channel's own `latest.json`.
       - name: Create the release if needed and attach the assets
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            prerelease=""
-            if [ "$DIST_TAG" = "next" ]; then prerelease="--prerelease"; fi
-            gh release create "$TAG" --verify-tag --draft --title "$TAG" $prerelease --notes-file release/notes.md
+            gh release create "$TAG" --verify-tag --draft --title "$TAG" --notes-file release/notes.md
           fi
           for attempt in 1 2 3; do
             if gh release upload "$TAG" --clobber release/assets/* desktop/*; then break; fi
@@ -492,11 +507,13 @@ jobs:
           fi
           gh release view "$TAG" --json assets --jq '.assets[].name'
 
-      # The next channel's manifest (user decision 2026-10-04): GitHub's `releases/latest` skips
-      # prereleases, so the `next` channel reads `latest.json` from one permanent prerelease whose
-      # asset every release replaces (next is the highest version of all releases, stable ones too).
-      # The stable channel is this release's own `latest.json` (`releases/latest/download/latest.json`).
-      # Only when the builds were signed with the user's key: an unsigned release has no manifest.
+      # The desktop app's own "next" update channel (separate from npm's now-retired `next`
+      # dist-tag above): GitHub's `releases/latest` skips prereleases, so this channel reads
+      # `latest.json` from one permanent prerelease whose asset every release replaces (it is
+      # simply the highest version of all releases; under continuous dating every release is one,
+      # so in practice it now always matches the stable channel). The stable channel is this
+      # release's own `latest.json` (`releases/latest/download/latest.json`). Only when the builds
+      # were signed with the user's key: an unsigned release has no manifest.
       - name: Point the next channel at this release
         if: ${{ hashFiles('desktop/latest.json') != '' }}
         run: |

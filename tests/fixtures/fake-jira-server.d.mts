@@ -14,6 +14,12 @@ export interface FakeJiraIssue {
   };
 }
 
+export interface FakeJiraTransitionOption {
+  id: string;
+  name: string;
+  to: { name: string };
+}
+
 export interface FakeJiraServerOptions {
   /** `0`: any free port. */
   port?: number;
@@ -23,6 +29,8 @@ export interface FakeJiraServerOptions {
   token?: string;
   accountId?: string;
   issues?: FakeJiraIssue[];
+  /** The transitions offered on each issue key (default: the same standard set on every issue). */
+  transitions?: Record<string, FakeJiraTransitionOption[]>;
   /** Plays one failure mode on every request; `null` (default): normal answers. */
   tamper?: 'unauthorized' | 'rate-limited' | 'malformed' | 'tenant-info-down' | null;
   /** Simulates a scoped token: direct `/rest/api/3/...` calls always 401; only the `/ex/jira/<cloudId>` gateway prefix accepts the real credential. */
@@ -47,12 +55,29 @@ export interface FakeJiraTransition {
   at: number;
 }
 
+export interface FakeJiraFieldUpdate {
+  issueKey: string;
+  fields: Record<string, unknown>;
+  at: number;
+}
+
+export interface FakeJiraIssueLink {
+  type: string | undefined;
+  inward: string | undefined;
+  outward: string | undefined;
+  at: number;
+}
+
 export interface FakeJiraServer {
   port: number;
   host: string;
   url: string;
   log: FakeJiraRequest[];
   transitions: FakeJiraTransition[];
+  fieldUpdates: FakeJiraFieldUpdate[];
+  issueLinks: FakeJiraIssueLink[];
+  /** Test-only backdoor: simulates a change made directly in Jira, independent of this adapter. */
+  setIssueField(key: string, patch: Partial<FakeJiraIssue['fields']>): void;
   close(): Promise<void>;
 }
 

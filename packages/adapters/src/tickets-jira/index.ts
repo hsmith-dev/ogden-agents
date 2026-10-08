@@ -18,3 +18,5 @@ export * from './redact.js';
 export * from './bmad-frontmatter.js';
 export * from './jira-issue-mapping.js';
 export * from './local-ticket-tree.js';
+export * from './conflict-resolution.js';
+export * from './ticket-store.js';

@@ -41,12 +41,12 @@ export function writeFrontmatterBlock(fields: ReadonlyArray<readonly [string, Fr
   return `---\n${lines.map(([key, value]) => `${key}: ${value}\n`).join('')}---\n`;
 }
 
-/** Parses one scalar as `tickets.py`'s `_scalar` does: a bracketed list, a JSON-quoted or single-quoted string, `true`/`false`, a bare integer, or the bare text itself. */
-function parseScalar(raw: string): string | number | boolean | string[] {
+/** Parses one scalar as `tickets.py`'s `_scalar` does: a bracketed list, a JSON-quoted or single-quoted string, `true`/`false`, a bare integer, or the bare text itself. A list's elements keep their own type (a bare `after = [1, "1.3"]` mixes a number and a string, exactly as `tickets.py`'s own parser leaves it — never force-stringified). */
+function parseScalar(raw: string): string | number | boolean | (string | number | boolean)[] {
   const value = raw.trim();
   if (value.startsWith('[') && value.endsWith(']')) {
     const inner = value.slice(1, -1).trim();
-    return inner === '' ? [] : inner.split(',').map((each) => String(parseScalar(each.trim())));
+    return inner === '' ? [] : inner.split(',').map((each) => parseScalar(each.trim()) as string | number | boolean);
   }
   if (value.length >= 2 && value[0] === value.at(-1) && (value[0] === '"' || value[0] === "'")) {
     if (value[0] === '"') {
@@ -64,10 +64,10 @@ function parseScalar(raw: string): string | number | boolean | string[] {
 }
 
 /** Every `key: value` line in `text`'s frontmatter block, parsed; `{}` when there is none. Comments (` #...` after three spaces) are stripped first, matching `tickets.py`. */
-export function parseFrontmatterBlock(text: string): Record<string, string | number | boolean | string[]> {
+export function parseFrontmatterBlock(text: string): Record<string, string | number | boolean | (string | number | boolean)[]> {
   const match = FRONTMATTER_RE.exec(text);
   if (match === null) return {};
-  const fields: Record<string, string | number | boolean | string[]> = {};
+  const fields: Record<string, string | number | boolean | (string | number | boolean)[]> = {};
   for (const line of (match[1] ?? '').split(/\r?\n/)) {
     if (!line.trim() || line.trimStart().startsWith('#') || !line.includes(':')) continue;
     const splitAt = line.indexOf(':');

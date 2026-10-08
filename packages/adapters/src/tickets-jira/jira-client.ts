@@ -48,8 +48,8 @@ export interface JiraCallOptions {
 
 const basicAuth = (email: string, token: string): string => `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}`;
 
-/** One GET to `path` on `baseUrl`, parsed as JSON. Rejects with {@link JiraUnauthorizedError} (401/403) or {@link JiraUnreachableError} (anything else that stops it, including a redirect or a timeout). */
-export async function jiraGet(options: JiraCallOptions, path: string): Promise<unknown> {
+/** One call to `path` on `baseUrl`, parsed as JSON (`undefined` for a `204 No Content`, which `transitionIssue` relies on). Rejects with {@link JiraUnauthorizedError} (401/403) or {@link JiraUnreachableError} (anything else that stops it, including a redirect or a timeout). */
+export async function jiraRequest(options: JiraCallOptions, method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<unknown> {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? JIRA_CALL_TIMEOUT_MS);
@@ -57,8 +57,9 @@ export async function jiraGet(options: JiraCallOptions, path: string): Promise<u
     let response: Response;
     try {
       response = await fetchImpl(`${options.baseUrl.replace(/\/+$/, '')}${path}`, {
-        method: 'GET',
-        headers: { accept: 'application/json', authorization: basicAuth(options.email, options.token) },
+        method,
+        headers: { accept: 'application/json', authorization: basicAuth(options.email, options.token), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         redirect: 'manual',
         signal: controller.signal,
       });
@@ -77,8 +78,13 @@ export async function jiraGet(options: JiraCallOptions, path: string): Promise<u
       void response.body?.cancel().catch(() => {});
       throw new JiraUnreachableError();
     }
+    if (response.status === 204) {
+      void response.body?.cancel().catch(() => {});
+      return undefined;
+    }
     const text = await response.text();
     if (text.length > JIRA_MAX_RESPONSE_BYTES) throw new JiraUnreachableError();
+    if (text === '') return undefined;
     try {
       return JSON.parse(text) as unknown;
     } catch {
@@ -90,6 +96,43 @@ export async function jiraGet(options: JiraCallOptions, path: string): Promise<u
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** One GET to `path` on `baseUrl`, parsed as JSON. See {@link jiraRequest}. */
+export async function jiraGet(options: JiraCallOptions, path: string): Promise<unknown> {
+  return jiraRequest(options, 'GET', path);
+}
+
+export interface JiraTransition {
+  id: string;
+  name: string;
+  to: { name: string };
+}
+
+/** The transitions available right now on `issueKey` (its current status decides which ones Jira offers). */
+export async function listTransitions(options: JiraCallOptions, issueKey: string): Promise<JiraTransition[]> {
+  const data = (await jiraRequest(options, 'GET', `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`)) as { transitions?: JiraTransition[] };
+  return data.transitions ?? [];
+}
+
+/** Applies transition `transitionId` to `issueKey` (`POST .../transitions`); Jira answers `204` with no body. */
+export async function transitionIssue(options: JiraCallOptions, issueKey: string, transitionId: string): Promise<void> {
+  await jiraRequest(options, 'POST', `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`, { transition: { id: transitionId } });
+}
+
+/** Pushes a local title and/or body edit to Jira's `summary`/`description` (AD-28, `PUT .../issue/<key>`); Jira answers `204` with no body. Description is sent as a single ADF paragraph (Jira Cloud v3's own format) rather than plain text, so it round-trips through Jira's own editor correctly. */
+export async function updateIssueFields(options: JiraCallOptions, issueKey: string, fields: { summary?: string; description?: string }): Promise<void> {
+  const body: { fields: Record<string, unknown> } = { fields: {} };
+  if (fields.summary !== undefined) body.fields.summary = fields.summary;
+  if (fields.description !== undefined) {
+    body.fields.description = { type: 'doc', version: 1, content: [{ type: 'paragraph', content: fields.description === '' ? [] : [{ type: 'text', text: fields.description }] }] };
+  }
+  await jiraRequest(options, 'PUT', `/rest/api/3/issue/${encodeURIComponent(issueKey)}`, body);
+}
+
+/** One local ticket's `after` entry pushed to Jira as a one-way "is blocked by" Issue Link (AD-28: local → Jira only, never read back). `POST .../issueLink`; Jira answers `201` with no body this adapter reads. */
+export async function linkIsBlockedBy(options: JiraCallOptions, issueKey: string, blockingIssueKey: string): Promise<void> {
+  await jiraRequest(options, 'POST', '/rest/api/3/issueLink', { type: { name: 'Blocks' }, inwardIssue: { key: issueKey }, outwardIssue: { key: blockingIssueKey } });
 }
 
 /** The classic-token base URL: the site itself. */

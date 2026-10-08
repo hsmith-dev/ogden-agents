@@ -76,6 +76,43 @@ export function mapJiraStatusToBmad(statusName: string | null | undefined): Mapp
   return mapped === undefined ? { status: 'draft', recognized: false } : { status: mapped, recognized: true };
 }
 
+/**
+ * The reverse of {@link mapJiraStatusToBmad}: every recognized Jira status
+ * name that maps to `status`, in a fixed, deterministic order (one real
+ * Jira name per BMad status is the common case; this returns every one
+ * this adapter knows, in case a board's workflow uses an alternate name
+ * for the same BMad status, so pushing a local status change can find a
+ * matching transition on whichever name this board's workflow actually
+ * uses). `built`/`done` both look for "Done"-shaped names — a workflow's
+ * own transitions decide what it actually accepts; this is a candidate
+ * list to try, not a guarantee one exists.
+ */
+export function candidateJiraStatusNames(status: TicketStatus): string[] {
+  const titleCase = (text: string): string => text.replace(/\b\w/g, (c) => c.toUpperCase());
+  const names = Object.entries(KNOWN_STATUS_MAP)
+    .filter(([, value]) => value === status || (status === 'built' && value === 'done'))
+    .map(([name]) => titleCase(name));
+  return [...new Set(names)];
+}
+
+export interface JiraTransitionLike {
+  id: string;
+  to: { name: string };
+}
+
+/**
+ * The transition to apply, from `transitions` (an issue's currently
+ * available ones), that would move it to `status` — matched by name
+ * against {@link candidateJiraStatusNames}, case-insensitively.
+ * `undefined` when none of this board's available transitions lead
+ * there (a workflow that simply doesn't have that status, or the issue
+ * is already in it): never guessed, never forced.
+ */
+export function chooseTransition(transitions: readonly JiraTransitionLike[], status: TicketStatus): JiraTransitionLike | undefined {
+  const candidates = candidateJiraStatusNames(status).map((name) => name.toLowerCase());
+  return transitions.find((t) => candidates.includes(t.to.name.trim().toLowerCase()));
+}
+
 /** The BMad `severity` (bugs only, AD-28: Ogden sets it once at creation, then Jira owns it) a Jira priority name maps to; `undefined` for an unrecognized or missing priority (left unset rather than guessed). */
 export function mapPriorityToSeverity(priorityName: string | null | undefined): 'P0' | 'P1' | 'P2' | 'P3' | undefined {
   const key = (priorityName ?? '').trim().toLowerCase();

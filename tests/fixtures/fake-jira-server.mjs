@@ -1,9 +1,11 @@
 // @ts-nocheck
 // The fake Jira Cloud REST server (epic 18, CAP-26): no real Jira, no network. Answers
 // `GET /rest/api/3/myself` (the pre-save test call, AD-29), `GET /rest/api/3/search`
-// (a fixture board's issues) and `POST /rest/api/3/issue/:key/transitions` (recorded, not
-// applied to anything real), matching this repo's fake-server convention
-// (tests/fixtures/fake-openai-server.mjs, fake-release-server/serve.mjs).
+// (a fixture board's issues, paginated), `POST /rest/api/3/issue/:key/transitions`
+// (recorded, not applied to anything real), and `GET /_edge/tenant_info` plus the
+// `/ex/jira/<cloudId>/...` scoped-token gateway prefix (AD-29's base-URL resolution),
+// matching this repo's fake-server convention (tests/fixtures/fake-openai-server.mjs,
+// fake-release-server/serve.mjs).
 //
 // Auth: Jira Cloud's own shape, `Authorization: Basic base64(email:token)`. The fixture's
 // own `email`/`token` are the only credential that answers 200; anything else is 401,
@@ -11,6 +13,11 @@
 //   unauthorized    every call answers 401, as if the token were revoked
 //   rate-limited    every call answers 429 with `Retry-After`
 //   malformed       `/search` answers 200 with a body that is not valid Jira JSON
+//
+// `scopedOnly: true` simulates a scoped token: every direct `/rest/api/3/...` call
+// (not under the `/ex/jira/<cloudId>` gateway prefix) answers 401 regardless of auth,
+// `/_edge/tenant_info` still answers with `cloudId`, and only the gateway-prefixed path
+// accepts the real credential — exercising the scoped-token fallback in jira-client.ts.
 import http from 'node:http';
 
 /** `Basic base64(email:token)` for the fixture's own credential, so a test can build the header it expects to send. */
@@ -18,7 +25,7 @@ export function basicAuthHeader(email, token) {
   return `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}`;
 }
 
-export function startFakeJiraServer({ port = 0, host = '127.0.0.1', email = 'dev@example.com', token = 'fake-jira-token', accountId = 'fake-account-1', issues = [], tamper = null } = {}) {
+export function startFakeJiraServer({ port = 0, host = '127.0.0.1', email = 'dev@example.com', token = 'fake-jira-token', accountId = 'fake-account-1', issues = [], tamper = null, scopedOnly = false, cloudId = 'fake-cloud-id-1234' } = {}) {
   const log = [];
   const transitions = [];
   const sockets = new Set();
@@ -38,15 +45,23 @@ export function startFakeJiraServer({ port = 0, host = '127.0.0.1', email = 'dev
         // left null; a route that needs a body answers its own error.
       }
       const auth = req.headers.authorization ?? '';
-      const path = req.url.split('?')[0];
-      const authorized = auth === basicAuthHeader(email, token);
-      log.push({ t: Date.now(), method: req.method, path, auth: auth ? 'basic-present' : 'none', authorized });
+      const fullPath = req.url.split('?')[0];
+      const query = new URL(req.url, 'http://x').searchParams;
+      const gatewayMatch = /^\/ex\/jira\/([^/]+)(\/.*)$/.exec(fullPath);
+      const gateway = gatewayMatch !== null;
+      const path = gateway ? gatewayMatch[2] : fullPath;
+      const authorized = auth === basicAuthHeader(email, token) && (gateway ? gatewayMatch[1] === cloudId : !scopedOnly);
+      log.push({ t: Date.now(), method: req.method, path: fullPath, query: req.url.split('?')[1] ?? '', auth: auth ? 'basic-present' : 'none', authorized, gateway });
       const send = (code, obj, headers = {}) => {
         res.writeHead(code, { 'content-type': 'application/json', ...headers });
         res.end(JSON.stringify(obj));
       };
 
-      if (path === '/__log') return send(200, { log, transitions });
+      if (fullPath === '/__log') return send(200, { log, transitions });
+      if (req.method === 'GET' && fullPath === '/_edge/tenant_info') {
+        if (tamper === 'tenant-info-down') return send(404, { errorMessages: ['not found'] });
+        return send(200, { cloudId });
+      }
 
       if (tamper === 'rate-limited') return send(429, { errorMessages: ['Rate limit exceeded'] }, { 'retry-after': '1' });
       if (tamper === 'unauthorized') return send(401, { errorMessages: ['Unauthorized'] });
@@ -59,7 +74,10 @@ export function startFakeJiraServer({ port = 0, host = '127.0.0.1', email = 'dev
       if (req.method === 'GET' && path === '/rest/api/3/search') {
         if (!authorized) return send(401, { errorMessages: ['Unauthorized; scope does not match'] });
         if (tamper === 'malformed') return send(200, { not: 'the shape Jira search actually returns' });
-        return send(200, { startAt: 0, maxResults: issues.length, total: issues.length, issues });
+        const startAt = Number(query.get('startAt') ?? '0') || 0;
+        const maxResults = Number(query.get('maxResults') ?? '50') || 50;
+        const page = issues.slice(startAt, startAt + maxResults);
+        return send(200, { startAt, maxResults, total: issues.length, issues: page });
       }
 
       const transitionMatch = /^\/rest\/api\/3\/issue\/([^/]+)\/transitions$/.exec(path);
@@ -70,7 +88,7 @@ export function startFakeJiraServer({ port = 0, host = '127.0.0.1', email = 'dev
         return res.end();
       }
 
-      return send(404, { errorMessages: [`fake Jira server: no route for ${req.method} ${path}`] });
+      return send(404, { errorMessages: [`fake Jira server: no route for ${req.method} ${fullPath}`] });
     });
   });
   server.on('connection', (socket) => {

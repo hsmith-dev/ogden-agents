@@ -11,13 +11,26 @@
  * endpoint if followed), a hard timeout, and Basic auth (Jira Cloud's own
  * shape: `email:token`), never a bearer token.
  *
- * Classic-token base URL resolution only, for now: the given site URL is
- * used directly as the API base (`<site>/rest/api/3/...`). Scoped-token
- * discovery (`api.atlassian.com/ex/jira/<cloudId>`, AD-29) is not yet
- * implemented — `resolveBaseUrl` is the one seam a follow-up story extends,
- * without changing any caller.
+ * Base URL resolution (AD-29): a classic token answers directly at the site
+ * (`<site>/rest/api/3/...`); a scoped token needs the
+ * `api.atlassian.com/ex/jira/<cloudId>` gateway instead. `testConnection`
+ * tries the site directly first (the common case) and, only on an
+ * authorization failure there, discovers the site's cloud id
+ * (`GET <site>/_edge/tenant_info`, an unauthenticated, undocumented-but-
+ * widely-relied-on Atlassian endpoint several other Jira integrations use
+ * for exactly this) and retries through the gateway.
+ *
+ * Caveat, stated plainly rather than left implicit: this fallback path has
+ * no live Jira Cloud account with an actual scoped token to verify against
+ * in this environment, only this adapter's own fake server fixture (which
+ * models the endpoints as documented, not as independently confirmed live).
+ * The classic-token path is the one proven end-to-end here; the scoped-token
+ * path should be confirmed against a real scoped token before being relied
+ * on, and `tenantInfoPath`/`gatewayBaseUrl` are the two seams to adjust if
+ * Atlassian's actual behavior differs.
  */
 import { JiraUnauthorizedError, JiraUnreachableError, type JiraLinkPort } from '@ogden-agents/core';
+import type { JiraIssue } from './jira-issue-mapping.js';
 
 /** How long any one Jira call may take before it counts as unreachable. */
 export const JIRA_CALL_TIMEOUT_MS = 10_000;
@@ -79,23 +92,105 @@ export async function jiraGet(options: JiraCallOptions, path: string): Promise<u
   }
 }
 
-/** The classic-token base URL: the site itself. Scoped-token discovery is a later story's extension of this one function. */
+/** The classic-token base URL: the site itself. */
 export function resolveBaseUrl(siteUrl: string): string {
   return siteUrl.replace(/\/+$/, '');
+}
+
+/** Atlassian's one fixed gateway host for every site's scoped-token access. Tests override it (`JiraClientOptions.gatewayHost`) to point at the fake server instead. */
+export const DEFAULT_GATEWAY_HOST = 'https://api.atlassian.com';
+
+/** The scoped-token gateway base URL for a resolved cloud id, under `gatewayHost`. */
+export function gatewayBaseUrl(cloudId: string, gatewayHost: string = DEFAULT_GATEWAY_HOST): string {
+  return `${gatewayHost.replace(/\/+$/, '')}/ex/jira/${encodeURIComponent(cloudId)}`;
+}
+
+/** The one unauthenticated call used to discover a site's cloud id, for the scoped-token gateway fallback (see this file's header comment). */
+export const TENANT_INFO_PATH = '/_edge/tenant_info';
+
+/** Whether `error` is specifically an authorization failure (401/403), as opposed to any other kind of unreachable. */
+function isUnauthorized(error: unknown): boolean {
+  return error instanceof JiraUnauthorizedError;
+}
+
+/** The site's cloud id, read from {@link TENANT_INFO_PATH}; `undefined` if that call fails or answers without one (never thrown: this is a best-effort fallback step, not a required one). */
+async function discoverCloudId(siteUrl: string, options: { fetch?: typeof fetch; timeoutMs?: number }): Promise<string | undefined> {
+  const fetchImpl = options.fetch ?? globalThis.fetch;
+  try {
+    const response = await fetchImpl(`${siteUrl.replace(/\/+$/, '')}${TENANT_INFO_PATH}`, { method: 'GET', headers: { accept: 'application/json' }, redirect: 'manual' });
+    if (!response.ok) return undefined;
+    const data = (await response.json()) as { cloudId?: unknown };
+    return typeof data.cloudId === 'string' && data.cloudId !== '' ? data.cloudId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface JiraClientOptions {
   fetch?: typeof fetch;
   timeoutMs?: number;
+  /** Default {@link DEFAULT_GATEWAY_HOST}. Tests point this at the fake Jira server instead of the real Atlassian host. */
+  gatewayHost?: string;
 }
 
-/** The real {@link JiraLinkPort}: resolves the base URL and makes the one read-only test call. */
+/**
+ * The real {@link JiraLinkPort}: tries the classic base URL first; on an
+ * authorization failure there, discovers the cloud id and retries through
+ * the scoped-token gateway (see this file's header comment on that path's
+ * verification status) before giving up with the original failure.
+ */
 export function createJiraLinkPort(options: JiraClientOptions = {}): JiraLinkPort {
   return {
     async testConnection({ siteUrl, email, token }) {
-      const baseUrl = resolveBaseUrl(siteUrl);
-      await jiraGet({ baseUrl, email, token, fetch: options.fetch, timeoutMs: options.timeoutMs }, '/rest/api/3/myself');
-      return { baseUrl };
+      const classicBaseUrl = resolveBaseUrl(siteUrl);
+      try {
+        await jiraGet({ baseUrl: classicBaseUrl, email, token, fetch: options.fetch, timeoutMs: options.timeoutMs }, '/rest/api/3/myself');
+        return { baseUrl: classicBaseUrl };
+      } catch (error) {
+        if (!isUnauthorized(error)) throw error;
+        const cloudId = await discoverCloudId(siteUrl, options);
+        if (cloudId === undefined) throw error;
+        const scopedBaseUrl = gatewayBaseUrl(cloudId, options.gatewayHost);
+        try {
+          await jiraGet({ baseUrl: scopedBaseUrl, email, token, fetch: options.fetch, timeoutMs: options.timeoutMs }, '/rest/api/3/myself');
+        } catch {
+          // The gateway retry is a best-effort fallback (see this file's header): whatever it fails
+          // with, the classic attempt's own failure is the one the caller sees, not a confusing
+          // unreachable-gateway error for what is really an authorization problem either way.
+          throw error;
+        }
+        return { baseUrl: scopedBaseUrl };
+      }
     },
   };
+}
+
+/** The largest page `searchIssues` asks for at once. */
+export const JIRA_SEARCH_PAGE_SIZE = 50;
+/** A hard cap on total issues fetched per sync, so a misconfigured JQL (or a huge board) can't loop forever or exhaust memory. */
+export const JIRA_SEARCH_MAX_ISSUES = 5_000;
+
+export interface JiraSearchResponse {
+  startAt: number;
+  maxResults: number;
+  total: number;
+  issues: JiraIssue[];
+}
+
+/**
+ * Every issue matching `jql`, paginating `GET /rest/api/3/search` until
+ * `total` is reached or {@link JIRA_SEARCH_MAX_ISSUES} is hit (whichever
+ * first; hitting the cap is not an error, the caller decides what to do
+ * with a truncated result). Rejects the same way {@link jiraGet} does.
+ */
+export async function searchAllIssues(options: JiraCallOptions, jql: string, pageSize: number = JIRA_SEARCH_PAGE_SIZE): Promise<JiraIssue[]> {
+  const issues: JiraIssue[] = [];
+  let startAt = 0;
+  for (;;) {
+    const page = (await jiraGet(options, `/rest/api/3/search?jql=${encodeURIComponent(jql)}&startAt=${startAt}&maxResults=${pageSize}&fields=summary,description,status,issuetype,parent,assignee,priority`)) as JiraSearchResponse;
+    issues.push(...page.issues);
+    startAt += page.issues.length;
+    if (page.issues.length === 0 || startAt >= page.total || issues.length >= JIRA_SEARCH_MAX_ISSUES) break;
+  }
+  return issues.slice(0, JIRA_SEARCH_MAX_ISSUES);
 }

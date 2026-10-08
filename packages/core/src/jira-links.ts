@@ -15,7 +15,7 @@
  * classes below.
  */
 import { eq } from 'drizzle-orm';
-import { jiraCredentialName, JIRA_URL_REJECTED_MESSAGE, JIRA_UNAUTHORIZED_MESSAGE, JIRA_UNREACHABLE_MESSAGE, JIRA_ALREADY_LINKED_MESSAGE, LinkJiraBoardRequest, type JiraLinkSettings, type WorkspaceId } from '@ogden-agents/shared';
+import { jiraCredentialName, JIRA_UNAUTHORIZED_MESSAGE, JIRA_UNREACHABLE_MESSAGE, JIRA_ALREADY_LINKED_MESSAGE, LinkJiraBoardRequest, type JiraLinkSettings, type WorkspaceId } from '@ogden-agents/shared';
 import type { Database } from './db/database.js';
 import { jiraLinks } from './db/schema.js';
 import { CoreError, SecretsUnavailableError, ValidationError } from './errors.js';

@@ -3,6 +3,7 @@ title: 'Tracer bullet: link a Jira board, see one issue on the Board, approve pu
 type: 'feature'
 ticket: '1'
 created: '2026-10-07'
+baseline_revision: '5a90d7965a7c9bcef5486c6dd733f79b080f6d24'
 status: 'in-progress'
 route: 'full'
 route_source: 'auto'

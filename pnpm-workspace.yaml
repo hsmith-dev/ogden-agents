@@ -4,6 +4,11 @@ allowBuilds:
   esbuild: false
   # The optional terminal (AD-19): prebuilt on macOS and Windows, `node-gyp rebuild` on Linux.
   node-pty: true
+  # CAP-24's SSH client (epic 18): both scripts only attempt an optional native crypto
+  # acceleration binding and exit 0 either way, falling back to ssh2's pure-JS crypto when
+  # denied (its own install.js). Denied to avoid a native compile step on every OS's CI.
+  ssh2: false
+  cpu-features: false
 minimumReleaseAgeExclude:
   - '@hono/node-server@2.1.3'
   - '@types/ws@8.18.2'

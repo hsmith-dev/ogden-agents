@@ -10,8 +10,8 @@ import { SETTINGS_STREAM } from './events-common.js';
 import { assigned } from './events-envelope.js';
 import { RemoteMachineId } from './ids.js';
 
-/** What changed about a remote machine. Story 18.2 adds `host_key_confirmed`/`host_key_refused`. */
-export const REMOTE_MACHINE_CHANGES = ['added', 'renamed', 'removed'] as const;
+/** What changed about a remote machine. */
+export const REMOTE_MACHINE_CHANGES = ['added', 'renamed', 'removed', 'host_key_confirmed'] as const;
 
 export const SettingsRemoteMachinesChangedInput = z.object({
   type: z.literal('settings.remote_machines_changed'),

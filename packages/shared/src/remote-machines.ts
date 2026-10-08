@@ -85,3 +85,19 @@ export type AddRemoteMachineRequest = z.infer<typeof AddRemoteMachineRequest>;
 /** Changes a machine's display label only; its host/port/username are fixed once added (removing and re-adding starts a fresh host-key trust decision). */
 export const RenameRemoteMachineRequest = z.object({ label: Label }).strict();
 export type RenameRemoteMachineRequest = z.infer<typeof RenameRemoteMachineRequest>;
+
+/**
+ * Confirms a machine's host-key fingerprint (AD-26: user-confirmed-then-
+ * pinned, mirroring AD-15's `confirm: true` step for Skip all). `fingerprint`
+ * is the one shown to the user; it is checked against a fresh read of the
+ * machine's live host key at confirm time, so a change in the moment between
+ * showing it and confirming is still caught. `confirm` must be exactly
+ * `true`, or nothing changes (`ConfirmationRequiredError`).
+ */
+export const ConfirmHostKeyRequest = z
+  .object({
+    fingerprint: z.string().min(1, 'The fingerprint to confirm is missing.'),
+    confirm: z.boolean().optional(),
+  })
+  .strict();
+export type ConfirmHostKeyRequest = z.infer<typeof ConfirmHostKeyRequest>;

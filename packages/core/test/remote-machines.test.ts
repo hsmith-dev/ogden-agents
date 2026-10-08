@@ -1,12 +1,14 @@
 /**
- * The remote-machine registry (CAP-24, epic 18 story 18.1): install-level
- * state, add/list/rename/remove, no credential field, and one event per
- * change that never carries the host, username or label. No test reaches
- * a keychain or the network — story 18.2 adds the real SSH connection.
+ * The remote-machine registry (CAP-24, epic 18 stories 18.1-18.2):
+ * install-level state, add/list/rename/remove, host-key confirm-and-pin
+ * (AD-26), no credential field ever on the row, and one event per change
+ * that never carries the host, username, label, fingerprint or key. No
+ * test reaches a real keychain or a real network: `memoryHosts()` below
+ * stands in for `RemoteHostPort`.
  */
-import { MAX_REMOTE_MACHINES } from '@ogden-agents/shared';
+import { MAX_REMOTE_MACHINES, type RemoteMachine } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { NotFoundError, ValidationError, type SecretStorePort } from '../src/index.js';
+import { ConfirmationRequiredError, NotFoundError, RemoteHostError, ValidationError, type RemoteHostPort, type SecretStorePort } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
 
 function memorySecrets(initial: Record<string, string> = {}): SecretStorePort & { values: Map<string, string> } {
@@ -20,11 +22,43 @@ function memorySecrets(initial: Record<string, string> = {}): SecretStorePort & 
   };
 }
 
-const setUp = (secrets: SecretStorePort = memorySecrets()) => {
+/** A tiny in-process fake, matching this file's own `memorySecrets` convention: no network, deterministic, test-settable. */
+function memoryHosts(): RemoteHostPort & { fingerprints: Map<string, string>; unreachable: Set<string>; calls: string[] } {
+  const fingerprints = new Map<string, string>();
+  const unreachable = new Set<string>();
+  const calls: string[] = [];
+  const key = (host: string, port: number) => `${host}:${port}`;
+  let n = 0;
+  return {
+    fingerprints,
+    unreachable,
+    calls,
+    generateKeypair({ comment }) {
+      n += 1;
+      calls.push(`generateKeypair ${comment}`);
+      return { privateKey: `-----BEGIN OPENSSH PRIVATE KEY-----\nfake-${n}\n-----END OPENSSH PRIVATE KEY-----\n`, publicKeyLine: `ssh-ed25519 FAKE${n} ${comment}` };
+    },
+    async checkHostKey(target) {
+      const k = key(target.host, target.port);
+      calls.push(`checkHostKey ${k}`);
+      if (unreachable.has(k)) throw new RemoteHostError(`Could not reach ${target.host}:${target.port}.`, { host: target.host }, 'host_unreachable');
+      return { fingerprint: fingerprints.get(k) ?? `fake-fp-${k}` };
+    },
+  };
+}
+
+const setUp = (secrets: SecretStorePort = memorySecrets(), hosts = memoryHosts()) => {
   const dataDir = tempDir();
   const core = openTestCore(dataDir);
-  return { core, secrets, machines: core.remoteMachines(secrets), dataDir };
+  return { core, secrets, hosts, machines: core.remoteMachines(secrets, hosts), dataDir };
 };
+
+/** Confirms `id` against `hosts`' current fingerprint for it, as the UI would: check, then confirm with exactly that value. */
+async function confirm(machines: ReturnType<typeof setUp>['machines'], hosts: ReturnType<typeof memoryHosts>, id: string): Promise<RemoteMachine> {
+  const { fingerprint } = await machines.checkHostKey(id as never);
+  void hosts;
+  return machines.confirmHostKey(id as never, { fingerprint, confirm: true });
+}
 
 describe('adding a machine', () => {
   it('stores it with no credential, a generated id, host-key fields unset, and appends one event with none of its details in it', () => {
@@ -122,16 +156,126 @@ describe('removing a machine', () => {
     expect(core.events.readAfter(0).at(-1)).toMatchObject({ type: 'settings.remote_machines_changed', payload: { machineId: added.id, change: 'removed' } });
   });
 
-  it('cleans up any stored credential under this machine’s keychain name, even though story 18.1 never stores one', async () => {
-    const { machines, secrets } = setUp();
+  it('cleans up any stored credential under this machine’s keychain name', async () => {
+    const { machines, secrets, hosts } = setUp();
     const added = machines.add({ host: 'a', username: 'u', label: 'A' });
-    await secrets.set(`remote-machine-ssh/${added.id}`, 'pretend-private-key');
+    await confirm(machines, hosts, added.id);
+    expect(await secrets.get(`remote-machine-ssh/${added.id}`)).toBeDefined();
     await machines.remove(added.id);
     expect(await secrets.get(`remote-machine-ssh/${added.id}`)).toBeUndefined();
   });
 
-  it('throws NotFoundError for no such machine, and removing is a no-op on the keychain otherwise', async () => {
+  it('throws NotFoundError for no such machine', async () => {
     const { machines } = setUp();
     await expect(machines.remove('mach_00000000000000000000000000')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('checking a host key', () => {
+  it('reads the live fingerprint without pinning or confirming anything', async () => {
+    const { machines, hosts } = setUp();
+    const added = machines.add({ host: 'a', username: 'u', label: 'A' });
+    hosts.fingerprints.set('a:22', 'fp-1');
+    const check = await machines.checkHostKey(added.id);
+    expect(check).toEqual({ fingerprint: 'fp-1' });
+    expect(machines.get(added.id)).toMatchObject({ hostKeyFingerprint: null, hostKeyConfirmed: false, publicKey: null });
+  });
+
+  it('propagates RemoteHostError for an unreachable machine, in plain words, and pins nothing', async () => {
+    const { machines, hosts } = setUp();
+    const added = machines.add({ host: 'gone', username: 'u', label: 'A' });
+    hosts.unreachable.add('gone:22');
+    await expect(machines.checkHostKey(added.id)).rejects.toBeInstanceOf(RemoteHostError);
+    expect(machines.get(added.id).hostKeyConfirmed).toBe(false);
+  });
+});
+
+describe('confirming a host key (AD-26)', () => {
+  it('refuses without an explicit confirm, and changes nothing', async () => {
+    const { machines, hosts } = setUp();
+    const added = machines.add({ host: 'a', username: 'u', label: 'A' });
+    const { fingerprint } = await machines.checkHostKey(added.id);
+    await expect(machines.confirmHostKey(added.id, { fingerprint })).rejects.toBeInstanceOf(ConfirmationRequiredError);
+    await expect(machines.confirmHostKey(added.id, { fingerprint, confirm: false })).rejects.toBeInstanceOf(ConfirmationRequiredError);
+    expect(machines.get(added.id).hostKeyConfirmed).toBe(false);
+    expect(hosts.calls.some((call) => call.startsWith('generateKeypair'))).toBe(false);
+  });
+
+  it('on first confirm, generates and stores a fresh keypair, pins the fingerprint, marks it confirmed, and appends one event with none of that in it', async () => {
+    const { core, machines, secrets, hosts } = setUp();
+    const added = machines.add({ host: 'bench.local', port: 2222, username: 'ada', label: 'Build bench' });
+    hosts.fingerprints.set('bench.local:2222', 'fp-live');
+    const before = core.events.lastSeq();
+    const confirmed = await confirm(machines, hosts, added.id);
+    expect(confirmed).toMatchObject({ hostKeyFingerprint: 'fp-live', hostKeyConfirmed: true });
+    expect(confirmed.publicKey).toMatch(/^ssh-ed25519 FAKE\d+ ogden-agents:mach_/);
+    const stored = await secrets.get('remote-machine-ssh/' + added.id);
+    expect(stored).toMatch(/BEGIN OPENSSH PRIVATE KEY/);
+    const events = core.events.readAfter(before);
+    expect(events).toEqual([expect.objectContaining({ type: 'settings.remote_machines_changed', payload: { machineId: added.id, change: 'host_key_confirmed' } })]);
+    expect(JSON.stringify(events)).not.toContain('fp-live');
+    expect(JSON.stringify(events)).not.toContain('FAKE');
+  });
+
+  it('refuses when the live fingerprint no longer matches what was shown, and pins nothing', async () => {
+    const { machines, hosts, secrets } = setUp();
+    const added = machines.add({ host: 'a', username: 'u', label: 'A' });
+    hosts.fingerprints.set('a:22', 'fp-shown');
+    const { fingerprint } = await machines.checkHostKey(added.id);
+    hosts.fingerprints.set('a:22', 'fp-changed'); // the key changed between showing it and confirming
+    await expect(machines.confirmHostKey(added.id, { fingerprint, confirm: true })).rejects.toBeInstanceOf(RemoteHostError);
+    expect(machines.get(added.id)).toMatchObject({ hostKeyFingerprint: null, hostKeyConfirmed: false });
+    expect(await secrets.get('remote-machine-ssh/' + added.id)).toBeUndefined();
+  });
+
+  it('a later confirm on an already-pinned, unchanged machine is a harmless no-op', async () => {
+    const { machines, hosts } = setUp();
+    const added = machines.add({ host: 'a', username: 'u', label: 'A' });
+    hosts.fingerprints.set('a:22', 'fp-1');
+    const first = await confirm(machines, hosts, added.id);
+    const { fingerprint } = await machines.checkHostKey(added.id);
+    const second = await machines.confirmHostKey(added.id, { fingerprint, confirm: true });
+    expect(second).toEqual(first);
+  });
+
+  it('refuses outright, never silently re-pinning, when an already-confirmed machine’s host key has changed', async () => {
+    const { machines, hosts } = setUp();
+    const added = machines.add({ host: 'a', username: 'u', label: 'A' });
+    hosts.fingerprints.set('a:22', 'fp-1');
+    const confirmed = await confirm(machines, hosts, added.id);
+    hosts.fingerprints.set('a:22', 'fp-attacker');
+    await expect(machines.confirmHostKey(added.id, { fingerprint: 'fp-attacker', confirm: true })).rejects.toBeInstanceOf(RemoteHostError);
+    // Still pinned to the original fingerprint: never silently replaced.
+    expect(machines.get(added.id)).toMatchObject({ hostKeyFingerprint: confirmed.hostKeyFingerprint, publicKey: confirmed.publicKey });
+  });
+
+  it('throws NotFoundError for no such machine', async () => {
+    const { machines } = setUp();
+    await expect(machines.confirmHostKey('mach_00000000000000000000000000', { fingerprint: 'x', confirm: true })).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('verifying a pinned host key (what a real connection checks first, stories 18.4/18.5)', () => {
+  it('refuses an unconfirmed machine', async () => {
+    const { machines } = setUp();
+    const added = machines.add({ host: 'a', username: 'u', label: 'A' });
+    await expect(machines.verifyPinnedHostKey(added.id)).rejects.toBeInstanceOf(RemoteHostError);
+  });
+
+  it('passes silently for a confirmed, unchanged machine', async () => {
+    const { machines, hosts } = setUp();
+    const added = machines.add({ host: 'a', username: 'u', label: 'A' });
+    hosts.fingerprints.set('a:22', 'fp-1');
+    await confirm(machines, hosts, added.id);
+    await expect(machines.verifyPinnedHostKey(added.id)).resolves.toBeUndefined();
+  });
+
+  it('refuses outright once the live host key no longer matches the pinned one', async () => {
+    const { machines, hosts } = setUp();
+    const added = machines.add({ host: 'a', username: 'u', label: 'A' });
+    hosts.fingerprints.set('a:22', 'fp-1');
+    await confirm(machines, hosts, added.id);
+    hosts.fingerprints.set('a:22', 'fp-changed');
+    await expect(machines.verifyPinnedHostKey(added.id)).rejects.toBeInstanceOf(RemoteHostError);
   });
 });

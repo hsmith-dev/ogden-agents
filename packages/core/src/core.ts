@@ -21,6 +21,7 @@ import { createBuildSettings, type BuildSettings } from './build-settings.js';
 import { createDevTools, type DevTools, type DevToolsPort } from './dev-tools.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
+import type { RemoteHostPort } from './remote-host-port.js';
 import { createRemoteMachines, type RemoteMachines } from './remote-machines.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
@@ -103,7 +104,7 @@ export interface Core {
    * machine's SSH credential, once story 18.2 stores one, is never in the database. The server calls it once,
    * after it has its secret store.
    */
-  remoteMachines(secrets: SecretStorePort): RemoteMachines;
+  remoteMachines(secrets: SecretStorePort, hosts: RemoteHostPort): RemoteMachines;
   /**
    * The Orchestration use-case (epic 15, 15.3) over the chat the server holds and a manager when there is one.
    * Every call is behind {@link Core.orchestration}'s guard. The server calls it once, after it has its chat.
@@ -249,7 +250,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     terminalsSettings: createTerminalsSettings({ db, events }),
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),
     localEndpoints: (secrets) => createLocalEndpoints({ db, events, secrets }),
-    remoteMachines: (secrets) => createRemoteMachines({ db, events, secrets }),
+    remoteMachines: (secrets, hosts) => createRemoteMachines({ db, events, secrets, hosts }),
     createOrchestration: (ports) => createOrchestration({ db, events, feature: orchestration, ...ports }),
     createManagerSource: (ports) => createManagerSource({ db, ...ports }),
     createTeam: (ports) => createTeam({ db, events, ...ports }),

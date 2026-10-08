@@ -60,14 +60,23 @@ export const CREDENTIAL_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
 ];
 
 /**
+ * A PEM-style private key block (PKCS1/PKCS8, or OpenSSH's own
+ * `OPENSSH PRIVATE KEY` format, which this pattern's `[A-Z ]*` wildcard also
+ * matches): CAP-24's generated SSH keys are this shape. One with no `END`
+ * line takes the whole key-looking lines after it. Bounded, so it stays
+ * linear. Shared by the handoff brief, the log's backstop (`server/src/log.ts`,
+ * epic 19 story 19.2) and anywhere else a key could otherwise leak.
+ */
+export const PRIVATE_KEY_BLOCK_PATTERN = /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]{0,10000}?-----END [A-Z ]*PRIVATE KEY-----|(?:\r?\n[A-Za-z0-9+/=]{1,100}(?=\r?\n|$)){0,200})/g;
+
+/**
  * Other secret-looking text a person may paste into a chat (handoff, user
  * decision 2026-10-04): what Ogden masks, beside the API keys above, before a
  * chat's conversation goes to another agent. Each pattern replaces the whole
  * match, except the last, which keeps `NAME=` and masks the value.
  */
 export const TOKEN_PATTERNS: readonly RegExp[] = [
-  // A private key block; one with no END line takes the whole key-looking lines after it. Bounded, so it stays linear.
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]{0,10000}?-----END [A-Z ]*PRIVATE KEY-----|(?:\r?\n[A-Za-z0-9+/=]{1,100}(?=\r?\n|$)){0,200})/g,
+  PRIVATE_KEY_BLOCK_PATTERN,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
   /\bsk-[A-Za-z0-9_-]{20,}/g,

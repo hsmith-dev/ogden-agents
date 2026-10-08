@@ -28,7 +28,7 @@ export interface BuildFns {
 }
 
 export function createBuildContext(deps: BuildsDeps) {
-  const { bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, chat, buildSessions, dataDir, settings } = deps;
+  const { bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, chat, buildSessions, dataDir, settings, remote } = deps;
   const commandEnv = deps.commandEnv ?? (() => ({}));
   /** The runner that builds with `agent` (epic 17: one per agent, found by id); `undefined` for an agent that cannot build. */
   const runnerFor = (agent: BuildAgent): BuildRunnerPort | undefined => [runner, ...(deps.runners ?? [])].find((each) => each.agent === agent);
@@ -251,10 +251,12 @@ export function createBuildContext(deps: BuildsDeps) {
     return run;
   };
 
-  /** Stops the run's agent and forgets its session's setup. */
+  /** Stops the run's agent and forgets its session's setup, closing a remote run's own long-lived connection (CAP-24, epic 19 story 19.6) independently of the agent session's own close. */
   const release = async (run: Run): Promise<void> => {
     abortRerun(run.id);
     await chat.releaseAgent(run.workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
+    const setup = buildSessions.get(run.sessionId);
+    if (setup?.attended === true && setup.remote !== undefined) await setup.remote.close().catch((error: unknown) => report(run.id, 'release', error));
     buildSessions.delete(run.sessionId);
   };
 
@@ -279,7 +281,7 @@ export function createBuildContext(deps: BuildsDeps) {
   const fn: BuildFns = { armDeadline: () => undefined, scheduleDrain: () => undefined };
 
   return {
-    deps, bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, runnerFor, runnerOf, defaultAgentFor, chat, buildSessions, dataDir, settings, commandEnv,
+    deps, bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, runnerFor, runnerOf, defaultAgentFor, chat, buildSessions, dataDir, settings, commandEnv, remote,
     aware, paths, mask, report, recorder, writeResult, guarded, uncommittedPlanFiles, requirePlanCommitted, requireGit, cleanupDeps,
     sandboxFor, requireSandbox, unattendedSetup, hasCapacity, deadlineFromNow, inDispatch, setTimer, timers, pendingNotes, generation,
     bump, draining, state, rerunSignal, abortRerun, abortAllReruns, stopAgent, disarmDeadline, verificationOf, latestRun, release, cleanUp, requireCleanCheckout, fn

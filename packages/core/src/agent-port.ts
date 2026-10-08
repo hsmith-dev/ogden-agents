@@ -11,6 +11,7 @@
 import { AgentId as AgentIdSchema, type AgentId, type AgentModel, type PermissionMode } from '@ogden-agents/shared';
 import { agentDescriptorProblems, declaredModes, type AgentDescriptor } from './agent-descriptor.js';
 import { CoreError } from './errors.js';
+import type { RemoteHostConnection } from './remote-host-port.js';
 import type { AgentSandbox } from './sandbox-port.js';
 
 /** One file change a tool call reports (secrets masked). `oldText` is `null` for a new file. */
@@ -171,6 +172,16 @@ export interface StartAgentSession {
    * gets it, so no allow rule, hook or bypass in them skips a card. Absent for every chat and unattended build.
    */
   attended?: true | undefined;
+  /**
+   * An already-open connection to the machine this chat's agent process
+   * should actually run on (CAP-24, story 19.5): an already-authenticated
+   * `RemoteHostPort.connect` result the caller hands in when the chat
+   * targets a remote machine. Absent: the agent runs locally, exactly as
+   * before. `createAcpAgent`, the permission-card machinery and every event
+   * shape are unchanged either way -- a remote chat looks identical to a
+   * local one in every event the UI sees.
+   */
+  remote?: RemoteHostConnection | undefined;
 }
 
 /** How a reopened session got its context back: the agent resumed it, loaded it, or had to start a new one. */
@@ -373,8 +384,13 @@ export interface AgentTerminalCommand {
   env: Readonly<Record<string, string>>;
 }
 
-/** `usage_limit`: the agent ran out of usage (its descriptor's patterns matched; handoff), its session is still usable. */
-export type AgentErrorCode = 'agent_unavailable' | 'agent_failed' | 'auth_required' | 'usage_limit';
+/**
+ * `usage_limit`: the agent ran out of usage (its descriptor's patterns
+ * matched; handoff), its session is still usable. `connection_lost` (CAP-24,
+ * epic 19 story 19.6): the remote machine running a build's agent process
+ * dropped the connection; always fatal.
+ */
+export type AgentErrorCode = 'agent_unavailable' | 'agent_failed' | 'auth_required' | 'usage_limit' | 'connection_lost';
 
 /**
  * An agent failure with a plain-language message for the UI. `details` are

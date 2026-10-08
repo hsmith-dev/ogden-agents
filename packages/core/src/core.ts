@@ -21,6 +21,8 @@ import { createBuildSettings, type BuildSettings } from './build-settings.js';
 import { createDevTools, type DevTools, type DevToolsPort } from './dev-tools.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
+import type { RemoteHostPort } from './remote-host-port.js';
+import { createRemoteMachines, type RemoteMachines } from './remote-machines.js';
 import { createJiraLinks, type JiraLinkPort, type JiraLinks } from './jira-links.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
@@ -98,6 +100,12 @@ export interface Core {
    * never in the database. The server calls it once, after it has its secret store.
    */
   localEndpoints(secrets: SecretStorePort): LocalEndpoints;
+  /**
+   * The remote-machine registry (CAP-24, epic 19 story 19.1) over the keychain the server holds (AD-16): a
+   * machine's SSH credential, once story 19.2 stores one, is never in the database. The server calls it once,
+   * after it has its secret store.
+   */
+  remoteMachines(secrets: SecretStorePort, hosts: RemoteHostPort): RemoteMachines;
   /**
    * A workspace's linked Jira board (epic 18; CAP-26, AD-29) over the
    * keychain the server holds and the `tickets-jira` adapter's
@@ -249,6 +257,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     terminalsSettings: createTerminalsSettings({ db, events }),
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),
     localEndpoints: (secrets) => createLocalEndpoints({ db, events, secrets }),
+    remoteMachines: (secrets, hosts) => createRemoteMachines({ db, events, secrets, hosts }),
     jiraLinks: (secrets, jira) => createJiraLinks({ db, events, secrets, jira }),
     createOrchestration: (ports) => createOrchestration({ db, events, feature: orchestration, ...ports }),
     createManagerSource: (ports) => createManagerSource({ db, ...ports }),

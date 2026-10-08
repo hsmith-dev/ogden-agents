@@ -33,6 +33,8 @@ const fake = vi.hoisted(() => ({
   switchResult: (() => Promise.resolve()) as () => Promise<unknown>,
   focused: 0,
   connections: 0,
+  /** Every message `sendMessage` was asked to send (CAP-24, epic 19 story 19.7: proving "Try again" resends). */
+  sent: [] as string[],
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -83,7 +85,10 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
     fake.switches.push(next);
     return fake.switchResult();
   },
-  sendMessage: async () => ({ messageId: 'msg_x', queued: false }),
+  sendMessage: async (_wsId: string, _sesId: string, text: string) => {
+    fake.sent.push(text);
+    return { messageId: 'msg_x', queued: false };
+  },
   cancelSession: async () => undefined,
 }));
 // xterm and its socket: the panel's real effect runs, and xterm's focus lands on a textarea of its own.
@@ -170,6 +175,7 @@ beforeEach(() => {
   fake.switchResult = () => Promise.resolve();
   fake.focused = 0;
   fake.connections = 0;
+  fake.sent = [];
 });
 
 afterEach(() => {
@@ -266,5 +272,30 @@ describe('the session page’s driver wiring (story 3.9; 3.6 review F7)', () => 
     fake.driver = 'terminal';
     await push(driverChanged('terminal'));
     expect(screen.queryByTestId('waiting-bar')).toBeNull();
+  });
+});
+
+describe('a dropped remote connection needs no new UI (CAP-24, epic 19 story 19.7)', () => {
+  it('shows the existing fatal-error notice with 19.6’s connection_lost reason, and Try again resends the last message', async () => {
+    const CONNECTION_LOST_REASON = 'The connection to the remote machine was lost. Retry to carry on.';
+    fake.events = [
+      created(),
+      event('session.message_completed', { messageId: 'msg_1', role: 'user', content: 'keep going' }),
+      event('session.state_changed', { sessionId: SES, state: 'error', previous: 'working', reason: CONNECTION_LOST_REASON, errorCode: 'connection_lost' }),
+    ];
+    await mount();
+
+    // The generic fatal-error Notice (unconditional for any errorCode other than auth_required), never a second,
+    // remote-specific error UI: SignInAgain's own "needs sign in" path never renders for this errorCode.
+    expect(screen.queryByTestId('sign-in-again')).toBeNull();
+    const notice = screen.getByTestId('session-error');
+    expect(notice.getAttribute('data-error-code')).toBe('connection_lost');
+    expect(notice.textContent).toContain(CONNECTION_LOST_REASON);
+
+    fireEvent.click(screen.getByTestId('try-again'));
+    await flush();
+    // Resent over what would be a fresh connection server-side (`agentFor`'s own `begin()`, a connect-time concern
+    // this view never has to know about): the client's only job is to resend the same text.
+    expect(fake.sent).toEqual(['keep going']);
   });
 });

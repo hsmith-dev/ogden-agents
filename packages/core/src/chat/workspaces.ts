@@ -231,6 +231,10 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
         permissionMode: options.kind === 'build' ? 'ask' : start.mode,
         ...(start.note === undefined || options.kind === 'build' ? {} : { permissionModeNote: start.note }),
         ...(options.autoTitle === undefined ? {} : { autoTitle: options.autoTitle }),
+        // The chat's remote target (CAP-24, epic 19 story 19.7), fixed for its life: only its shape is checked
+        // here (`entities.createSession`'s own schema check); whether it is reachable is `agentFor`'s own
+        // connect-time refusal, never duplicated here.
+        machineId: options.machineId ?? null,
       });
     },
 

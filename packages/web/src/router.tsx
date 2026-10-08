@@ -63,6 +63,13 @@ const devToolsSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/dev-tools-settings-page'), 'DevToolsSettingsPage'),
 });
 
+/** Computers added over SSH for a chat or build to run on instead of here (CAP-24, epic 19 story 19.3). */
+const remoteMachinesSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/remote-machines',
+  component: lazyRouteComponent(() => import('./routes/remote-machines-settings-page'), 'RemoteMachinesSettingsPage'),
+});
+
 /** Desktop notifications and the sound for when a chat needs you (backlog story 8). */
 const notificationsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -187,7 +194,7 @@ const routeTree = rootRoute.addChildren([
   workspaceOrchestrateRoute,
   workspaceTerminalsRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, devToolsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

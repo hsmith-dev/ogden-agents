@@ -27,6 +27,7 @@ import {
   createOpenAiLocalModel,
   DETECT_PROBE_TIMEOUT_MS,
   createMemorySecretStore,
+  createSshRemoteHostPort,
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
 } from '@ogden-agents/adapters';
@@ -160,6 +161,11 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
         })
       : undefined;
   const secrets = options.secrets ?? (hooks.secretStore === 'memory' ? createMemorySecretStore() : createKeyringSecretStore());
+  // CAP-24, epic 19 story 19.3: the remote-machine registry, over the real SSH port or a test's fake. Returned
+  // too (story 19.7) so `start.ts` builds one shared `remote` capability for chats and builds alike, over this
+  // exact `RemoteHostPort`, never a second, differently-faked instance.
+  const remoteHosts = options.remoteHost ?? createSshRemoteHostPort();
+  const remoteMachines = core.remoteMachines(secrets, remoteHosts);
   // Claude Code's setup (or the ports given in its place), then each extra agent's own (6.3).
   const setupPorts = [...(options.agentSetup ?? (claudeSetup === undefined ? [] : [claudeSetup])), ...extraAgents.flatMap((wiring) => (wiring.setup === undefined ? [] : [wiring.setup]))];
   const agentSetup = createAgentSetup(core.events, setupPorts, {
@@ -266,7 +272,7 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   const localModels = createLocalModels({ onModels: rememberLocalModels, endpoints: localEndpoints(), port: localModelPort, detectPort: options.localModelPort ?? createOpenAiLocalModel({ timeoutMs: DETECT_PROBE_TIMEOUT_MS }) });
   // What the app's routes need for the Local model's endpoints (epic 14).
   const endpointApi = { localModels, localEndpoints: localEndpoints(), endpointPresets: options.endpointPresets ?? ENDPOINT_PRESETS };
-  return { endpointApi, localModelPort, claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
+  return { endpointApi, localModelPort, claudeSetup, secrets, remoteHosts, remoteMachines, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
 }
 
 /**

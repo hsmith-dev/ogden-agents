@@ -18,6 +18,7 @@ import {
   DOCKER_READY_BUT_UNSUPPORTED_TEXT,
   SANDBOX_UNAVAILABLE_MESSAGE,
   TicketsResponse,
+  UNATTENDED_REMOTE_MESSAGE,
   type SandboxStatus,
 } from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -58,6 +59,8 @@ const state = vi.hoisted(() => ({
   bodies: [] as unknown[],
   attended: undefined as unknown,
   tickets: undefined as unknown,
+  /** Confirmed remote machines (CAP-24, epic 19 story 19.7): empty by default, exactly as before this story. */
+  machines: [] as unknown[],
 }));
 
 vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [], caughtUp: true }) }));
@@ -77,6 +80,7 @@ vi.mock('@/auth/tab-token', () => ({
       const method = init.method ?? 'GET';
       state.calls.push(`${method} ${path}`);
       if (path.endsWith('/tickets')) return answer(state.tickets);
+      if (method === 'GET' && path.endsWith(API_ROUTES.remoteMachines)) return answer({ machines: state.machines });
       if (method === 'GET' && path.endsWith('/build-sandbox')) {
         const found = state.status as { status?: number } | SandboxStatus;
         return typeof (found as { status?: number }).status === 'number' ? answer({ error: { code: 'internal_error', message: 'No.' } }, 500) : answer({ status: found });
@@ -128,6 +132,18 @@ const UNAVAILABLE: SandboxStatus = {
   choices: ['other_agent', 'install_docker', 'attended'],
   installHint: 'Install bubblewrap and socat with your package manager.',
 };
+const READY: SandboxStatus = { platform: 'linux', available: true, kind: 'test', summary: 'Builds run inside the test sandbox.', probes: [], choices: [], installHint: null };
+const MACHINE = {
+  id: 'mach_01J9Z3K4M5N6P7Q8R9S0T1V2W6',
+  host: 'bench.local',
+  port: 22,
+  username: 'ada',
+  label: 'Build bench',
+  hostKeyFingerprint: 'fp-fake',
+  publicKey: 'ssh-ed25519 FAKE test', // secret-scan:allow: an obviously-fake, in-memory test double
+  hostKeyConfirmed: true,
+  createdAt: '2026-10-07T00:00:00.000Z',
+};
 const WINDOWS: SandboxStatus = {
   platform: 'windows',
   available: false,
@@ -142,6 +158,7 @@ beforeEach(() => {
   state.calls.length = 0;
   state.bodies.length = 0;
   state.attended = undefined;
+  state.machines = [];
 });
 afterEach(() => cleanup());
 
@@ -205,6 +222,53 @@ describe('the Build dialog (story 5.6)', () => {
     expect(screen.getByTestId('build-dialog-load-error').textContent).toContain(BUILD_DIALOG_LOAD_FAILED);
     expect(order()).toEqual(['other_agent', 'install_docker', 'attended']);
     expect(screen.getByTestId('build-dialog-attended')).toBeTruthy();
+  });
+
+  it('offers a confirmed machine (CAP-24, epic 19 story 19.7); choosing it blocks the unattended Start with the plain, universal reason, never silently local instead', async () => {
+    state.status = READY;
+    state.machines = [MACHINE];
+    mount(<BuildDialog wsId={WS} ticketRef="1.1" onClose={() => {}} onStarted={() => {}} picker />);
+    await settle();
+    const picker = screen.getByTestId('build-machine-picker');
+    expect(picker).toBeTruthy();
+    // Local to start: the Start button is plain, with no blocked reason shown.
+    expect(screen.getByTestId('build-machine-local').getAttribute('aria-checked')).toBe('true');
+    expect(screen.queryByTestId('build-dialog-unattended-remote-blocked')).toBeNull();
+    expect(screen.getByTestId('build-dialog-start').getAttribute('aria-disabled')).toBeNull();
+
+    fireEvent.click(screen.getByTestId(`build-machine-${MACHINE.id}`));
+    await settle();
+    expect(screen.getByTestId('build-dialog-unattended-remote-blocked').textContent).toBe(UNATTENDED_REMOTE_MESSAGE);
+    expect(screen.getByTestId('build-dialog-start').getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(screen.getByTestId('build-dialog-start'));
+    await settle();
+    // Never silently started locally, or at all, with the machine picked: nothing posted.
+    expect(state.bodies).toEqual([]);
+
+    // Back to Local: the block lifts.
+    fireEvent.click(screen.getByTestId('build-machine-local'));
+    await settle();
+    expect(screen.queryByTestId('build-dialog-unattended-remote-blocked')).toBeNull();
+    expect(screen.getByTestId('build-dialog-start').getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('an attended build with a machine chosen sends its id; with none, it sends none (both before this story)', async () => {
+    state.status = READY;
+    state.machines = [MACHINE];
+    mount(<BuildDialog wsId={WS} ticketRef="1.1" onClose={() => {}} onStarted={() => {}} confirm />);
+    await settle();
+    fireEvent.click(screen.getByTestId(`build-machine-${MACHINE.id}`));
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Build with me watching' }));
+    await settle();
+    expect(state.bodies).toEqual([{ ref: '1.1', mode: 'attended', machineId: MACHINE.id }]);
+  });
+
+  it('with no confirmed machine, no machine picker shows at all (exactly as before this story)', async () => {
+    state.status = READY;
+    mount(<BuildDialog wsId={WS} ticketRef="1.1" onClose={() => {}} onStarted={() => {}} picker />);
+    await settle();
+    expect(screen.queryByTestId('build-machine-picker')).toBeNull();
   });
 
   it('a refused attended build says why in the dialog and keeps it open', async () => {

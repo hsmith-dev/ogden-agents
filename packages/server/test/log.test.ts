@@ -165,6 +165,19 @@ describe('redaction', () => {
     expect(out).toContain('failed with [redacted] inside');
   });
 
+  it('a remote machine’s SSH private key is redacted by field name and wherever the PEM block appears in a value (CAP-24, AD-26, epic 19 story 19.2)', () => {
+    const pem = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZWQy\n-----END OPENSSH PRIVATE KEY-----\n'; // secret-scan:allow: a made-up, invalid fixture, never a real credential
+    expect(redact({ private_key: pem, privatekey: pem, passphrase: 'correct-horse-battery-staple' })).toEqual({
+      private_key: REDACTED,
+      privatekey: REDACTED,
+      passphrase: REDACTED,
+    });
+    const out = JSON.stringify(redact({ reason: `could not store the key: ${pem}`, nested: [{ text: `key was ${pem}` }] }));
+    expect(out).not.toContain('b3Blb');
+    expect(out).not.toMatch(/BEGIN [A-Z ]*PRIVATE KEY/);
+    expect(out).toContain('could not store the key: [redacted]');
+  });
+
   it('leaves ordinary fields alone', () => {
     expect(redact({ port: 4317, msg: 'server listening', url: 'http://127.0.0.1:4317', code: 'EADDRINUSE' })).toEqual({
       port: 4317,

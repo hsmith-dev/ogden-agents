@@ -15,6 +15,7 @@ import {
   ModelId as ModelIdSchema,
   PermissionMode as PermissionModeSchema,
   PermissionModeChangeCause as PermissionModeChangeCauseSchema,
+  RemoteMachineId as RemoteMachineIdSchema,
   SessionDriver as SessionDriverSchema,
   SessionKind as SessionKindSchema,
   SessionState as SessionStateSchema,
@@ -39,6 +40,7 @@ import {
   type ModelChangeCause,
   type PermissionMode,
   type PermissionModeChangeCause,
+  type RemoteMachineId,
   type Run,
   type RunQueueEntry,
   type RunDecision,
@@ -92,6 +94,8 @@ export interface NewSession {
   permissionModeNote?: string;
   /** The model it starts on (story 11): the agent's own id; absent or `null`, the agent's own choice. */
   model?: string | null;
+  /** The remote machine this chat runs its agent on (CAP-24, epic 19 story 19.7), set at creation, never changed. Default `null` (a local chat). */
+  machineId?: RemoteMachineId | null;
 }
 
 /** What a newly created workspace starts with (story 10.4). Ignored when the workspace already exists. */
@@ -141,6 +145,8 @@ export interface NewRun {
   baseBranch?: string | null;
   /** The agent that builds (story 5.3). Default Claude Code, the only one in v1. */
   agent?: BuildAgent;
+  /** The remote machine this run was dispatched to (CAP-24, epic 19 story 19.6), attended only. Default `null` (a local run). */
+  machineId?: RemoteMachineId | null;
   /** Where it waits in the workspace's queue (story 5.3; 5.8), `null` when dispatched now. */
   queuePosition?: number | null;
 }
@@ -336,6 +342,7 @@ const toSession = (row: SessionRow): Session => ({
   permissionMode: row.permissionMode,
   ...(row.agentId === null ? {} : { agentId: row.agentId }),
   ...(row.model === null ? {} : { model: row.model }),
+  machineId: row.machineId ?? null,
   title: row.title,
   ...(row.autoTitle === null ? {} : { autoTitle: row.autoTitle }),
   adapterRefs: row.adapterRefs,
@@ -488,6 +495,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
     createSession(input) {
       const at = now();
       const autoTitle = input.autoTitle == null ? null : autoChatName(input.autoTitle, CHAT_NAME_MAX);
+      const machineId = check(RemoteMachineIdSchema.nullable(), input.machineId ?? null, 'machine id');
       const session: Session = {
         id: newId('ses'),
         workspaceId: input.workspaceId,
@@ -498,6 +506,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         permissionMode: check(PermissionModeSchema, input.permissionMode ?? 'ask', 'permission mode'),
         ...(input.agentId === undefined ? {} : { agentId: check(AgentIdSchema, input.agentId, 'agent id') }),
         ...(input.model === undefined || input.model === null ? {} : { model: check(ModelIdSchema, input.model, 'model') }),
+        machineId,
         title: input.title ?? null,
         ...(autoTitle === null ? {} : { autoTitle }),
         adapterRefs: check(AdapterRefsSchema, input.adapterRefs ?? {}, 'adapter refs'),

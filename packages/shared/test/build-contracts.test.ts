@@ -87,9 +87,9 @@ const DASHES = /[–—]/;
 
 describe('runs (story 5.3)', () => {
   it("a run 5.2 stored parses, with no agent, code, queue position or decision; a new run's fields parse and refuse bad values", () => {
-    // Story 5.5 adds `baseBranch`, `null` for runs from before it.
-    expect(Run.parse(run52)).toMatchObject({ agent: null, blockedCode: null, queuePosition: null, decision: null, baseBranch: null });
-    const full = { ...run52, agent: 'claude-code', blockedCode: 'interrupted', queuePosition: null, decision: null, baseBranch: 'main' };
+    // Story 5.5 adds `baseBranch`, `null` for runs from before it; CAP-24 epic 19 story 19.6 adds `machineId` the same way.
+    expect(Run.parse(run52)).toMatchObject({ agent: null, blockedCode: null, queuePosition: null, decision: null, baseBranch: null, machineId: null });
+    const full = { ...run52, agent: 'claude-code', blockedCode: 'interrupted', queuePosition: null, decision: null, baseBranch: 'main', machineId: null };
     expect(Run.parse(full)).toEqual(full);
     expect(Run.safeParse({ ...full, agent: 'Not An Id' }).success).toBe(false);
     expect(Run.safeParse({ ...full, blockedCode: 'tired' }).success).toBe(false);

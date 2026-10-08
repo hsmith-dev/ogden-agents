@@ -37,7 +37,7 @@ describe('default permission mode contracts', () => {
     };
     expect(CoreEvent.parse(confirmed)).toEqual(confirmed);
 
-    const session = { id: sesId, workspaceId: wsId, kind: 'chat', state: 'idle', driver: 'ui', permissionMode: 'auto', title: null, adapterRefs: {}, createdAt: assigned.at, updatedAt: assigned.at };
+    const session = { id: sesId, workspaceId: wsId, kind: 'chat', state: 'idle', driver: 'ui', permissionMode: 'auto', machineId: null, title: null, adapterRefs: {}, createdAt: assigned.at, updatedAt: assigned.at };
     const created = { type: 'session.created', ...assigned, streamId: sesId, payload: { session } };
     expect(CoreEvent.parse(created)).toEqual(created);
     const noted = { ...created, payload: { session, permissionModeNote: "This chat started in Auto, this project's default." } };

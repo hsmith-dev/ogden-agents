@@ -8,7 +8,7 @@ import type { AntigravityPorts } from './antigravity-wiring.js';
 import type { CodexPorts } from './codex-wiring.js';
 import type { GrokPorts } from './grok-wiring.js';
 import type { LocalPorts } from './local-wiring.js';
-import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, NotifierPort, PaneLaunchers, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
+import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, NotifierPort, PaneLaunchers, RemoteHostPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -148,6 +148,8 @@ export interface StartOptions {
    * `memory`. Tests pass `secrets-memory`: none touches the real keychain.
    */
   secrets?: SecretStorePort;
+  /** Override the remote-machine SSH connection (CAP-24, epic 19 story 19.2; tests: `remote-host-memory`). Default: the `remote-host-ssh` adapter over `ssh2`. */
+  remoteHost?: RemoteHostPort;
   /** Replaces Claude Code's API key check (tests: a stub, so none reaches Anthropic). Default: the real `GET /v1/models`. */
   verifyApiKey?: AgentApiKeySupport['verify'];
   /** How old the subscription state may be when a chat starts before it is read again. Default `SUBSCRIPTION_MAX_AGE_MS`. */

@@ -117,6 +117,8 @@ export const BLOCKED_CODES = [
   'agent_error',
   'auth_required',
   'usage_limit',
+  /** The run's remote machine (CAP-24, epic 19 story 19.6) dropped its connection, mid-run or during the pull-back; never retried by itself. */
+  'connection_lost',
   'other',
 ] as const;
 export const BlockedCode = z.enum(BLOCKED_CODES);
@@ -151,6 +153,7 @@ export const BLOCKED_SENTENCES: Readonly<Record<Exclude<BlockedCode, 'time_limit
   // Epic 17: the run shows the agent's own plain reason (its name, its key or limit); these are the words when it has none.
   auth_required: 'The agent needs a valid key or sign in. Fix that in Settings, then retry.',
   usage_limit: 'The agent has reached its usage limit. Retry later, or build again with another agent.',
+  connection_lost: 'The connection to the remote machine was lost. Retry to carry on.',
   other: 'The build stopped. Show details says why.',
 };
 

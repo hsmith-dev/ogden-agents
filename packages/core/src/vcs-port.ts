@@ -153,6 +153,26 @@ export interface VcsPort {
    * which the sandbox never let the agent write); nothing changed then.
    */
   applyPatch(input: { repoPath: string; worktreePath: string; branch: string; patchPath: string; refuse?: (path: string) => boolean }): Promise<'applied' | 'refused'>;
+  /**
+   * A full-history `git bundle` of `ref`, as bytes (CAP-24, epic 19 story
+   * 19.4): the push half of `remote-worktree-sync.ts`'s payload to a fresh
+   * remote clone, which shares no objects with the real repo yet, so only a
+   * full bundle (never an incremental one) lets it reconstruct anything.
+   * Binary-safe; never written to the repo, only read from it.
+   */
+  bundleRef(repoPath: string, ref: string): Promise<Buffer>;
+  /**
+   * Imports a bundle of `branch`'s commits since `base` (story 19.4's pull):
+   * fetched into `repoPath` with a non-forced `branch:branch` refspec, which
+   * only ever succeeds as a fast-forward, then the worktree at
+   * `worktreePath` is reset to match. `'nothing'` when the bundle carries
+   * nothing new (the branch is already at the bundle's tip); `'refused'`
+   * when git would not take it (never a hook, never the repo's or an
+   * agent's configured programs — the same guarantees as every other write
+   * here). Either way nothing partial is left: a refusal touches neither
+   * the branch nor the worktree.
+   */
+  importBundle(repoPath: string, worktreePath: string, branch: string, base: string, bundle: Buffer): Promise<'imported' | 'nothing' | 'refused'>;
 }
 
 /** A git operation failed; `message` is plain words, `details` are for the log and hold no secret. */

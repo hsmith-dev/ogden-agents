@@ -12,6 +12,7 @@ import type {
   BuildAgent,
   CautionLevel,
   PermissionMode,
+  RemoteMachineId,
   RunDecision,
   RunOutcome,
   SessionDriver,
@@ -148,6 +149,8 @@ export const sessions = sqliteTable(
      * for the agent's own choice (and on rows from before it existed).
      */
     model: text('model'),
+    /** The remote machine this chat runs its agent on (CAP-24, epic 19 story 19.7), set at creation, never changed; `NULL` for a local chat. */
+    machineId: text('machine_id').$type<RemoteMachineId>(),
     /** The user's name for the chat (backlog story 12); `NULL` until they give one. */
     title: text('title'),
     /** The name core gave the chat (the planning action's label, or its first message), set once; `NULL` until then. */
@@ -184,6 +187,8 @@ export const runs = sqliteTable(
     reason: text('reason'),
     /** The agent that builds (story 5.3); `null` in runs from before it, read as Claude Code. */
     agent: text('agent').$type<BuildAgent>(),
+    /** The remote machine this run was dispatched to (CAP-24, epic 19 story 19.6), attended only; `null` for a local run. */
+    machineId: text('machine_id').$type<RemoteMachineId>(),
     /** Why a `blocked` run is blocked (story 5.3): Ogden Agents' code. */
     blockedCode: text('blocked_code').$type<BlockedCode>(),
     /** Where a waiting run is in its workspace's queue (story 5.3; 5.8 fills it). */
@@ -538,4 +543,25 @@ export const globalSkills = sqliteTable('global_skills', {
   group: text('group'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
+});
+
+/**
+ * Remote machines the user added over SSH (CAP-24, epic 19 story 19.1):
+ * install-level, like `localEndpoints`, not scoped to a workspace. Only
+ * what addresses the machine and what Settings shows; no credential (AD-16:
+ * the private key and passphrase, once story 19.2 generates and stores
+ * them, live only in `SecretStorePort` under `remote-machine-ssh/<id>`).
+ * `hostKeyFingerprint` and `publicKey` are `NULL` and `hostKeyConfirmed` is
+ * `0` until story 19.2's confirm-and-pin flow fills them in.
+ */
+export const remoteMachines = sqliteTable('remote_machines', {
+  id: text('id').primaryKey(),
+  host: text('host').notNull(),
+  port: integer('port').notNull(),
+  username: text('username').notNull(),
+  label: text('label').notNull(),
+  hostKeyFingerprint: text('host_key_fingerprint'),
+  publicKey: text('public_key'),
+  hostKeyConfirmed: integer('host_key_confirmed', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
 });

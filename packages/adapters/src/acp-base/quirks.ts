@@ -15,6 +15,8 @@ export function acpReasons(displayName: string, options: { apiKeyOnly?: boolean;
     notSetUp: `${displayName} isn't set up for Ogden Agents on this computer yet.`,
     couldNotStart: `${displayName} couldn't start. Try again.`,
     stopped: `${displayName} stopped unexpectedly. Send your message again to restart it.`,
+    /** A remote session's SSH connection dropped (CAP-24, epic 19 story 19.6), never a local crash's own generic `stopped`. */
+    connectionLost: `Lost the connection to the remote machine running ${displayName}. Send your message again to restart it.`,
     signIn: options.apiKeyOnly === true ? `${displayName} needs a valid ${options.keyName ?? 'API key'}. Check it in Settings → Agents.` : `${displayName} needs you to sign in again.`,
     failed: `${displayName} stopped with an error. Try again.`,
     noSuchMode: `${displayName} doesn't offer that permission mode here.`,

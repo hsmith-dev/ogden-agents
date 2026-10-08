@@ -73,8 +73,9 @@ export function createTurns(
       if (entry !== undefined) endTurn(sessionId, entry);
       entities.setSessionState(sessionId, 'error', {
         reason: error.message,
-        // The UI acts on these: Sign in again (9.4), or continue with another agent (handoff).
-        ...(error.code === 'auth_required' || error.code === 'usage_limit' ? { errorCode: error.code } : {}),
+        // The UI acts on these: Sign in again (9.4), continue with another agent (handoff), or (CAP-24,
+        // epic 19 story 19.6) a remote build's own outcome handling (`decideOutcome`'s `errorCode` branch).
+        ...(error.code === 'auth_required' || error.code === 'usage_limit' || error.code === 'connection_lost' ? { errorCode: error.code } : {}),
       });
     } catch (caught) {
       internalError(sessionId, caught);

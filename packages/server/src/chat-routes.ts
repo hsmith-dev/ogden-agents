@@ -177,7 +177,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     try {
       // The agent picked (epic 6), or the default one; an id this install doesn't have is refused by core.
       // Its model (story 11): the one given (an agent handoff's), else the project's or install's default for the agent.
-      const session = await chat.createChatSession(scope.workspaceId, { agentId: body.value?.agentId, model: body.value?.model });
+      // Its remote target (CAP-24, epic 19 story 19.7): the machine picked, or `null`/omitted for a local chat.
+      const session = await chat.createChatSession(scope.workspaceId, { agentId: body.value?.agentId, model: body.value?.model, machineId: body.value?.machineId });
       log.info('chat session created', { workspaceId: scope.workspaceId, sessionId: session.id, agentId: session.agentId });
       return c.json(SessionResponse.parse({ session }), 201);
     } catch (error) {

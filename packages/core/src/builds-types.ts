@@ -1,5 +1,5 @@
 /** The builds use-cases and what they are given (story 5.10 split `builds.ts`; the header of `builds.ts` says what each does). */
-import { ApproveBuildRequest, RetryRunRequest, StartBuildRequest, type BuildAgent, type BuildAgentsResponse, type CommitPlanFilesResponse, type ReviewResponse, type Run, type SandboxStatus, type Session, type SessionId, type WorkspaceId, type AllReadyBuildsResponse, type RunResponse, type RunsResponse } from '@ogden-agents/shared';
+import { ApproveBuildRequest, RetryRunRequest, StartBuildRequest, type BuildAgent, type BuildAgentsResponse, type CommitPlanFilesResponse, type ReviewResponse, type Run, type RemoteMachineId, type SandboxStatus, type Session, type SessionId, type WorkspaceId, type AllReadyBuildsResponse, type RunResponse, type RunsResponse } from '@ogden-agents/shared';
 import type { BmadFeatures } from './bmad-pieces.js';
 import type { BuildSettings } from './build-settings.js';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
@@ -12,6 +12,8 @@ import type { DevTools } from './dev-tools.js';
 import type { Entities } from './entities.js';
 import { NotFoundError, NotImplementedError } from './errors.js';
 import type { EventLog } from './event-log.js';
+import type { RemoteHostConnection } from './remote-host-port.js';
+import type { RemoteWorktreeSync } from './remote-worktree-sync.js';
 import type { SandboxPort } from './sandbox-port.js';
 import type { TicketStorePort } from './ticket-store-port.js';
 import type { VcsPort } from './vcs-port.js';
@@ -164,6 +166,19 @@ export interface BuildsDeps {
    */
   devTools?: Pick<DevTools, 'deniedReadPathsFor'>;
   buildSessions: BuildSessions;
+  /**
+   * The remote-build capability (CAP-24, epic 19 story 19.6): push/pull/remove
+   * a run's worktree and open a long-lived connection for its chat session.
+   * Absent: every existing test harness and installation that doesn't wire
+   * CAP-24 (no ripple) -- a `machineId` given anyway is refused, fail closed,
+   * never run locally instead. Attended builds only (the scope decision): an
+   * unattended build whose `machineId` is set is refused before anything is
+   * written, whether or not this is wired.
+   */
+  remote?: {
+    sync: RemoteWorktreeSync;
+    connect(machineId: RemoteMachineId): Promise<RemoteHostConnection>;
+  };
   /** Ogden Agents' data folder: worktrees go in `<dataDir>/w/`. */
   dataDir: string;
   /** The user's home folder, for the credential folders a build may never read. Default: none listed. */

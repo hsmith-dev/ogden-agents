@@ -11,6 +11,7 @@ import {
   type PermissionDecisionRequest,
   type PermissionMode,
   type PermissionRule,
+  type RemoteMachineId,
   type Session,
   type SessionDriver,
   type WhileWorking,
@@ -41,9 +42,16 @@ export async function openWorkspace(path: string, auth: Pick<TabAuth, 'fetch'> =
  * `POST /api/v1/workspaces/:wsId/sessions`: a new chat in the workspace,
  * with the agent `agentId` (epic 6), or the server's default one.
  */
-export async function createChatSession(wsId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth, agentId?: string, model?: string | null): Promise<Session> {
+export async function createChatSession(
+  wsId: string,
+  auth: Pick<TabAuth, 'fetch'> = tabAuth,
+  agentId?: string,
+  model?: string | null,
+  machineId?: RemoteMachineId | null,
+): Promise<Session> {
   // `model` (story 11): the model it starts on, as an agent handoff passes the target's; omitted, the project's or app's default.
-  const body = { kind: 'chat', ...(agentId === undefined ? {} : { agentId }), ...(model === undefined ? {} : { model }) };
+  // `machineId` (CAP-24, epic 19 story 19.7): the machine this chat runs its agent on; omitted or `null` is local, as before this story.
+  const body = { kind: 'chat', ...(agentId === undefined ? {} : { agentId }), ...(model === undefined ? {} : { model }), ...(machineId === undefined ? {} : { machineId }) };
   const json = await call(auth, apiPath(API_ROUTES.workspaceSessions, { wsId }), postJson(body), "Ogden Agents couldn't start a chat");
   return SessionResponse.parse(json).session;
 }

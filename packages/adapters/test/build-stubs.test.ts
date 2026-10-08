@@ -204,6 +204,10 @@ describe('vcs-memory (story 5.3): every VcsPort method', () => {
     vcs.badPatches.add('/data/bad.patch');
     expect(await port.applyPatch({ ...at, patchPath: '/data/bad.patch' })).toBe('refused');
 
+    // CAP-24 story 19.4: a bundle of the branch's current commit, read right back, carries nothing new.
+    const bundle = await port.bundleRef(repo, branch);
+    expect(await port.importBundle(repo, worktree, branch, revision, bundle)).toBe('nothing');
+
     // Story 5.5: the git check, the branch check and Commit plan files.
     expect(await port.check()).toEqual({ ok: true, version: '2.45.0' });
     vcs.gitCheck = { ok: false, reason: 'too_old', version: '2.30.0' };

@@ -97,6 +97,16 @@ title = "Build unattended with Codex, Grok or Antigravity, not only Claude Code"
 covers = ["CAP-15", "CAP-8", "CAP-9", "CAP-10", "CAP-12", "CAP-4", "CAP-16", "CAP-19"]
 after = [{ epic = 5, needs = "the headless build session (5.4), the sandbox chain and Build dialog (5.6), the runner (5.7), the dispatcher (5.8) and review and approve (5.9)" }, { epic = 6, needs = "the registry, acp-base and the picker (6.3, 6.4, 6.6), Antigravity's chat, setup and skills (6.5, 6.7, 6.8)" }, { epic = 12, needs = "the contracts with a mode fixed at start (12.3), Codex's and Grok's chats, setup and skills (12.5 to 12.9)" }, { epic = 11, needs = "the board's build actions (11.3)" }]
 
+# ---- v1.1 remote execution over SSH (CAP-24; drafted autonomously 2026-10-07 on arch/cap24-remote-execution's resolved AD-24/AD-26; AD-25 not adopted, see the epic's Notes) ----
+
+# Epic id 18 (2026-10-07): 14 is v1.2 local models, 15 is v2 orchestration, 16 is the native CLI terminal, 17 is builds with other agents; no other open branch uses 18.
+[[epic]]
+id = 19
+slug = "epic-remote-execution"
+title = "Chat and build with an agent on another machine over SSH"
+covers = ["CAP-24"]
+after = [{ epic = 5, needs = "the run worktree lifecycle, VcsPort/vcs-git, the sandbox chain and AD-17's single-machine HITL model" }, { epic = 9, needs = "SecretStorePort/secrets-keyring (AD-16) and the agent sign-in UI pattern this reuses for SSH credentials" }, { epic = 2, needs = "AgentPort/acp-base, the permission-card machinery and the event log this reuses unchanged over SSH" }]
+
 # ---- v2 (planned; outside the v1 initiative's Done when) ----
 
 [[epic]]

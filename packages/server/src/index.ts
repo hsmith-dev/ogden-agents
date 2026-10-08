@@ -57,6 +57,9 @@ export { createLocalAgent, createLocalSetup, LOCAL_AGENT_ID } from '@ogden-agent
 export type { LocalChatTarget, LocalChatTargetSource, LocalPorts } from './local-wiring.js';
 // The in-memory secret store, so tests never touch the real OS keychain (story 9.2).
 export { createMemorySecretStore } from '@ogden-agents/adapters';
+
+export { createMemoryRemoteHostPort, createSshRemoteHostPort } from '@ogden-agents/adapters';
+export { RemoteHostError, type RemoteHostPort, type RemoteMachines } from '@ogden-agents/core';
 // BMad Method's catalog (story 4.3): the e2e suite keeps the real read-only parts and stubs setup, so no uv runs.
 export { createBmadCatalog } from '@ogden-agents/adapters';
 export type { BmadCatalogPort } from '@ogden-agents/core';

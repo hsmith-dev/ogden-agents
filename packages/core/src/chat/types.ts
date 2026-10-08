@@ -3,7 +3,7 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { AgentId, ChatAgent, HandoffPreviewResponse, PermissionMode, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, ChatAgent, HandoffPreviewResponse, PermissionMode, RemoteMachineId, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentModels } from '../agent-models.js';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -12,6 +12,7 @@ import type { Entities, NewWorkspaceOptions } from '../entities.js';
 import type { EventLog, HistoryDeleted } from '../event-log.js';
 import type { InstallSettings } from '../install-settings.js';
 import type { Permissions } from '../permissions.js';
+import type { RemoteHostConnection } from '../remote-host-port.js';
 import type { SessionEvents } from '../session-events.js';
 import type { TerminalPort, TerminalProcess } from '../terminal-port.js';
 
@@ -95,6 +96,18 @@ export interface ChatOptions {
    * without an entry for the session) a `build` session never starts an agent.
    */
   buildSessions?: Pick<BuildSessions, 'get'>;
+  /**
+   * The remote-chat capability (CAP-24, epic 19 story 19.7): opens a fresh,
+   * verified connection to a confirmed machine for a session whose
+   * `Session.machineId` names one. Never `.sync`: a plain chat has nothing
+   * to push or pull, unlike a build's worktree. Absent: every existing test
+   * harness and installation that doesn't wire CAP-24 (no ripple) -- a
+   * session with a `machineId` anyway is refused, fail closed, never run
+   * locally instead (`agentFor`, `chat/agents.ts`).
+   */
+  remote?: {
+    connect(machineId: RemoteMachineId): Promise<RemoteHostConnection>;
+  };
 }
 
 /** A terminal's size in character cells. */
@@ -177,10 +190,18 @@ export interface Chat {
    * agent that isn't registered, and `AgentNotReadyError` (6.3) for one that
    * needs a project trust the project lacks, isn't installed, or isn't
    * signed in.
+   *
+   * `machineId` (CAP-24, epic 19 story 19.7) picks a plain `chat` session's
+   * remote target, fixed for its life exactly like its agent; `null` or
+   * omitted is a local chat, as before this story. Only its shape is checked
+   * here (`ValidationError`): whether the machine actually exists and is
+   * still reachable is `agentFor`'s own connect-time refusal
+   * (`agent_unavailable`), the same place a chat already refuses an agent
+   * that isn't ready -- never a second place that can disagree with it.
    */
   createChatSession(
     workspaceId: WorkspaceId,
-    options?: { kind?: SessionKind | undefined; agentId?: AgentId | undefined; autoTitle?: string | undefined; model?: string | null | undefined },
+    options?: { kind?: SessionKind | undefined; agentId?: AgentId | undefined; autoTitle?: string | undefined; model?: string | null | undefined; machineId?: RemoteMachineId | null | undefined },
   ): Promise<Session>;
   /**
    * The agents a chat can be started with, in order (epic 6; frozen in 6.3):

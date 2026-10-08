@@ -14,6 +14,7 @@ import {
   BlockedCode as BlockedCodeSchema,
   BuildAgent as BuildAgentSchema,
   IsoUtcTimestamp,
+  RemoteMachineId as RemoteMachineIdSchema,
   RunDecision as RunDecisionSchema,
   RunOutcome as RunOutcomeSchema,
   TicketRef as TicketRefSchema,
@@ -23,6 +24,7 @@ import {
   type BuildAgent,
   type MessageRole,
   type PermissionMode,
+  type RemoteMachineId,
   type Run,
   type RunQueueEntry,
   type RunId,
@@ -112,6 +114,8 @@ export interface NewRun {
   baseBranch?: string | null;
   /** The agent that builds (story 5.3). Default Claude Code, the only one in v1. */
   agent?: BuildAgent;
+  /** The remote machine this run was dispatched to (CAP-24, epic 19 story 19.6), attended only. Default `null` (a local run). */
+  machineId?: RemoteMachineId | null;
   /** Where it waits in the workspace's queue (story 5.3; 5.8), `null` when dispatched now. */
   queuePosition?: number | null;
 }
@@ -150,6 +154,7 @@ const toRun = (row: RunRow): Run => ({
   baseBranch: row.baseBranch,
   reason: row.reason,
   agent: row.agent,
+  machineId: row.machineId,
   blockedCode: row.blockedCode,
   queuePosition: row.queuePosition,
   decision: row.decision,
@@ -209,6 +214,7 @@ export function createRunEntities({ orm, log, now, requireSession }: { orm: Orm;
       const ticketRef = check(TicketRefSchema, input.ticketRef, 'ticket ref');
       const deadline = check(IsoUtcTimestamp.nullable(), input.deadline ?? null, 'run deadline');
       const agent = check(BuildAgentSchema.nullable(), input.agent ?? null, 'build agent');
+      const machineId = check(RemoteMachineIdSchema.nullable(), input.machineId ?? null, 'machine id');
       const queuePosition = check(z.number().int().positive().nullable(), input.queuePosition ?? null, 'queue position');
       return log.transaction(() => {
         const session = requireSession(input.sessionId);
@@ -232,6 +238,7 @@ export function createRunEntities({ orm, log, now, requireSession }: { orm: Orm;
           baseBranch: input.baseBranch ?? null,
           reason: null,
           agent,
+          machineId,
           blockedCode: null,
           queuePosition,
           decision: null,

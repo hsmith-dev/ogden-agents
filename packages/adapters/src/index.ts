@@ -52,3 +52,5 @@ export * from './tickets-jira/index.js';
 export * from './toolchain-uv/index.js';
 export * from './vcs-git/index.js';
 export * from './vcs-memory/index.js';
+export * from './remote-host-ssh/index.js';
+export * from './remote-host-memory/index.js';

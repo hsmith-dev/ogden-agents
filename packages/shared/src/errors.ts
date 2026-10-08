@@ -206,6 +206,18 @@ export const API_ERROR_CODES = [
   'no_install_command',
   /** CAP-25: a dev tool's real install command failed (409). The message is its plain reason, never the raw installer output. */
   'install_failed',
+  /** CAP-24 (epic 19 story 19.3): a remote machine could not be reached within the connect timeout (502). */
+  'remote_host_unreachable',
+  /** CAP-24: reading a remote machine's host key timed out (504). */
+  'remote_host_timeout',
+  /**
+   * CAP-24 (AD-26): a remote machine's host key no longer matches what was
+   * shown (first confirm) or what is pinned (every later check) (409);
+   * refused outright, never silently re-pinned. `details.host` names it.
+   */
+  'remote_host_key_changed',
+  /** CAP-24: a remote machine was used before its host key was confirmed (409). Nothing was called. */
+  'remote_host_key_not_confirmed',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

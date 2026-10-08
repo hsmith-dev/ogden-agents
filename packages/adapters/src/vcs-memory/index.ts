@@ -229,6 +229,34 @@ export function createMemoryVcs(): MemoryVcs {
       if (repoPath !== given || branch !== expected) throw new VcsError("The run's worktree isn't as Ogden Agents made it, so git didn't run there.", { step: 'worktree' });
       return badPatches.has(patchPath) ? 'refused' : 'applied';
     },
+
+    // CAP-24 story 19.4 (remote-worktree-sync.ts): no real bytes here (this fake tracks branches as
+    // commit strings, never file content), so the "bundle" is just enough JSON for this same fake's
+    // own `importBundle` to read back; never meant to round-trip through the real `vcs-git`.
+    async bundleRef(repoPath, ref) {
+      calls.push(`bundleRef ${repoPath} ${ref}`);
+      const state = repo(repoPath);
+      const commit = state.branches.get(ref);
+      if (commit === undefined) throw new VcsError('That is not a branch Ogden Agents can use.', { step: 'bundle' });
+      return Buffer.from(JSON.stringify({ commit, changes: state.changes.get(ref) ?? [] }), 'utf8');
+    },
+    async importBundle(repoPath, worktreePath, branch, _base, bundle) {
+      calls.push(`importBundle ${repoPath} ${worktreePath} ${branch}`);
+      if (bundle.length === 0) return 'nothing';
+      let parsed: { commit?: unknown; changes?: unknown };
+      try {
+        parsed = JSON.parse(bundle.toString('utf8'));
+      } catch {
+        return 'refused';
+      }
+      if (typeof parsed.commit !== 'string') return 'refused';
+      const state = repo(repoPath);
+      if (state.branches.get(branch) === parsed.commit) return 'nothing';
+      state.branches.set(branch, parsed.commit);
+      if (Array.isArray(parsed.changes)) state.changes.set(branch, parsed.changes as string[]);
+      worktrees.set(worktreePath, { repoPath, branch });
+      return 'imported';
+    },
   };
   return vcs;
 }

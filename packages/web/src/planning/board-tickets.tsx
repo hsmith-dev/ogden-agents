@@ -28,6 +28,7 @@ import { Link } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { isApiError } from '@/api/http';
+import { useRemoteMachines } from '@/remote-machines/remote-machines-api';
 import { Button } from '@/ui/button';
 import { CheckboxOption } from '@/ui/checkbox';
 import { Notice } from '@/ui/notice';
@@ -230,6 +231,11 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
   const [dialogRef, setDialogRef] = useState<string | undefined>();
   // Build itself opened the dialog because more than one agent can build here (epic 17), not because a sandbox was missing.
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Whether there is a confirmed remote machine to offer (CAP-24, epic 19 story 19.7): with one, Build always opens
+  // the dialog -- even for a single agent with a ready sandbox -- so a machine is always reachable from one click,
+  // never only from the sandbox-unavailable or multi-agent paths that happened to already open it.
+  const machinesQuery = useRemoteMachines();
+  const hasConfirmedMachine = (machinesQuery.data ?? []).some((machine) => machine.hostKeyConfirmed);
   const pending = useRef(false);
   const started = useRef(builds?.onStarted);
   started.current = builds?.onStarted;
@@ -241,12 +247,14 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
       setBuildFailure(undefined);
       setCommitted(undefined);
       setAllStarted(undefined);
-      // Epic 17: with more than one agent that can build, the person picks (the dialog), else Build goes straight to the one default agent.
-      // A failed read changes nothing: Build is as it was.
+      // Epic 17: with more than one agent that can build, the person picks (the dialog). CAP-24, epic 19 story
+      // 19.7: with a confirmed remote machine to offer, the dialog opens too, even for a single agent with a
+      // ready sandbox -- a machine must always be reachable from one click. Otherwise Build goes straight to
+      // the one default agent, locally, exactly as before this story. A failed read changes nothing: Build is as it was.
       fetchBuildAgents(wsId)
         .then((found) => found.agents.filter((agent) => agent.way !== 'unavailable').length >= 2, () => false)
         .then((choose) => {
-          if (!choose) return startBuild(wsId, ref).then(({ session }) => started.current?.(session.id));
+          if (!choose && !hasConfirmedMachine) return startBuild(wsId, ref).then(({ session }) => started.current?.(session.id));
           setPickerOpen(true);
           setDialogRef(ref);
           return undefined;
@@ -271,7 +279,7 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
           setBuilding(false);
         });
     },
-    [wsId],
+    [wsId, hasConfirmedMachine],
   );
   const buildAll = useCallback(() => {
     if (pending.current) return;

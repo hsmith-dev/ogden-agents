@@ -1,4 +1,4 @@
-import type { ChatAgent } from '@ogden-agents/shared';
+import type { ChatAgent, RemoteMachineId } from '@ogden-agents/shared';
 import { CaretDown, ChatCircle, GearSix } from '@phosphor-icons/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
@@ -28,7 +28,7 @@ export function useStartChat(wsId: string, onOpened?: () => void) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const start = useCallback(
-    (agentId: string | undefined) => {
+    (agentId: string | undefined, machineId?: RemoteMachineId | null) => {
       if (inFlight.current) return;
       inFlight.current = true;
       setStarting(true);
@@ -37,7 +37,7 @@ export function useStartChat(wsId: string, onOpened?: () => void) {
         inFlight.current = false;
         setStarting(false);
       };
-      createChatSession(wsId, undefined, agentId).then(
+      createChatSession(wsId, undefined, agentId, undefined, machineId).then(
         (session) => {
           // Still starting until the chat replaces this action: the sidebar row stays until the chat's event arrives, and a click then must not start a second chat.
           onOpened?.();

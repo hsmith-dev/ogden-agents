@@ -58,10 +58,11 @@ import {
   type AgentEventListener,
   type AgentPort,
   type AgentRestored,
+  type AgentSandbox,
   type AgentSession,
   type AgentToolCallDiff,
-  type AgentSandbox,
   type ProtectedPaths,
+  type RemoteHostConnection,
 } from '@ogden-agents/core';
 import type { PermissionMode } from '@ogden-agents/shared';
 import { killProcessTree } from '../process-tree.js';
@@ -72,6 +73,7 @@ import { createStreamMasker, maskSecrets, mcpSecretValues, secretValues } from '
 import { agentWords, modelOptionOf, modelsOf } from './models.js';
 import { answerPermissionRequest, type Diagnostic, type PermissionCallback } from './permission-request.js';
 import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch, type AcpLaunchInput } from './quirks.js';
+import { buildRemoteCommand, remoteProcessOf, type AcpProcess } from './remote-launch.js';
 
 export { acpAsksLessThanAsk, acpModeOf, acpReasons, slashSkillInvocation } from './quirks.js';
 export type { AcpAgentOptions, AcpAgentQuirks, AcpAuthChoice, AcpBuildSessionQuirk, AcpBuildStart, AcpLaunch, AcpLaunchInput, AcpStartOptions } from './quirks.js';
@@ -128,8 +130,18 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
   const reasons = acpReasons(descriptor.displayName, { apiKeyOnly: descriptor.signInMethods.length > 0 && descriptor.signInMethods.every((method) => method.kind === 'api_key'), keyName: apiKeyMethod(descriptor)?.apiKey.label });
   checkFixedModeWiring(descriptor, quirks);
 
-  /** Spawns the agent in `cwd` with core's environment (AD-16), in its own process group. */
-  const spawnAgent = (launchInput: AcpLaunchInput, model: string | undefined, buildEnv: Readonly<Record<string, string>> = {}) => {
+  /**
+   * Spawns the agent in `cwd` with core's environment (AD-16): locally, in
+   * its own process group, or (`remote` given, CAP-24 story 19.5) over an
+   * already-open SSH connection, from the exact same `AcpLaunch` the quirk
+   * returns either way -- the quirk never knows which.
+   */
+  const spawnAgent = async (
+    launchInput: AcpLaunchInput,
+    model: string | undefined,
+    buildEnv: Readonly<Record<string, string>> = {},
+    remote: RemoteHostConnection | undefined = undefined,
+  ): Promise<{ child: AcpProcess; secrets: readonly string[] }> => {
     const { env } = launchInput;
     let launch: AcpLaunch;
     try {
@@ -152,6 +164,18 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     }
     diagnostic(`starting the ${descriptor.displayName} adapter`, launch.logFields);
 
+    if (remote !== undefined) {
+      const command = buildRemoteCommand({ cwd, command: launch.command, args });
+      try {
+        // `childEnv` (secrets included) travels only through `exec`'s own `env` option, never in `command` itself (AD-16).
+        const channel = await remote.exec(command, { env: childEnv });
+        return { child: remoteProcessOf(channel), secrets: secretValues(childEnv) };
+      } catch (error) {
+        if (error instanceof AgentError) throw error;
+        throw new AgentError('agent_unavailable', reasons.couldNotStart, { details: { reason: maskSecrets(String(error), secretValues(childEnv)) }, cause: error });
+      }
+    }
+
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(launch.command, args, {
@@ -159,13 +183,13 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
         env: childEnv,
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
-        // Its own process group, so the whole tree can be stopped (see `killTree`).
+        // Its own process group, so the whole tree can be stopped (see `localProcessOf`'s `kill`).
         detached: process.platform !== 'win32',
       });
     } catch (error) {
       throw new AgentError('agent_unavailable', reasons.couldNotStart, { details: { reason: String(error) }, cause: error });
     }
-    return { child, secrets: secretValues(childEnv) };
+    return { child: localProcessOf(child), secrets: secretValues(childEnv) };
   };
 
   const startFixedModeSafely = (permissionMode: PermissionMode, protectedPaths: ProtectedPaths | undefined): FixedModeStart | undefined => {
@@ -187,6 +211,8 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
       model?: string | undefined;
       permissionMode?: PermissionMode | undefined;
       mcpServers?: unknown[];
+      /** An already-open connection to run the agent's process on instead of locally (CAP-24, story 19.5). */
+      remote?: RemoteHostConnection | undefined;
     },
     opening: Opening,
   ) => {
@@ -199,7 +225,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     const fixed = buildStart !== undefined ? buildFixedStart(buildStart, reasons) : startFixedModeSafely(permissionMode, input.protectedPaths);
     // Fail closed: a fixed-mode start has no place for the sandbox, so a build session never runs without it (story 5.2, epic 12).
     if (input.sandbox !== undefined && fixed !== undefined && buildStart === undefined) throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);
-    const { child, secrets } = spawnAgent({ cwd: input.cwd, env: input.env, permissionMode, protectedPaths: input.protectedPaths }, startModel, buildStart?.addEnv);
+    const { child, secrets } = await spawnAgent({ cwd: input.cwd, env: input.env, permissionMode, protectedPaths: input.protectedPaths }, startModel, buildStart?.addEnv, input.remote);
     return startOnChild(
       child,
       {
@@ -296,13 +322,30 @@ interface StartContext {
   buildModeIds: readonly string[] | undefined;
 }
 
-/** Stops `child` and everything it started: its process group on POSIX, its tree on Windows. */
-function killTree(child: ChildProcessWithoutNullStreams): void {
-  killProcessTree(child.pid);
+/**
+ * Wraps a real local child process as an {@link AcpProcess}: its streams and
+ * `once('error'|'exit', …)` pass straight through (the same structural shape
+ * they already are), and `kill()` is today's `killProcessTree(child.pid)` --
+ * its whole process group on POSIX, its tree on Windows.
+ */
+function localProcessOf(child: ChildProcessWithoutNullStreams): AcpProcess {
+  function once(event: 'error', listener: (error: Error) => void): void;
+  function once(event: 'exit', listener: (code: number | null, signal: string | null) => void): void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the standard overload-implementation idiom: only the two signatures above are ever exposed to a caller.
+  function once(event: 'error' | 'exit', listener: (...args: any[]) => void): void {
+    child.once(event, listener);
+  }
+  return {
+    stdin: child.stdin,
+    stdout: child.stdout,
+    stderr: child.stderr,
+    once,
+    kill: () => killProcessTree(child.pid),
+  };
 }
 
 async function startOnChild(
-  child: ChildProcessWithoutNullStreams,
+  child: AcpProcess,
   { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, attended, startModel, fixed, askingModeIds, buildModeIds, mcpServers }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
@@ -470,7 +513,7 @@ async function startOnChild(
           // An unattended build's agent that moves itself out of its build mode is stopped: nothing it does after that is trusted (epic 17).
           if (buildModeIds !== undefined && !buildModeIds.includes(update.currentModeId)) {
             reportGone(`${descriptor.displayName} changed its own permission mode, so the build was stopped.`);
-            killTree(child);
+            child.kill();
             break;
           }
           modeUpdates++;
@@ -507,7 +550,7 @@ async function startOnChild(
         diagnostic('the agent process exited', { code, signal });
         noteStderr();
         // Anything it started goes with it.
-        killTree(child);
+        child.kill();
       }
       rejectGone(new AgentError('agent_failed', STOPPED, { details: { code, signal }, output: output() }));
       connection.close(new Error('the agent process exited'));
@@ -522,7 +565,7 @@ async function startOnChild(
       child.stdin.end();
       await Promise.race([exitedPromise, new Promise((resolve) => setTimeout(resolve, EXIT_GRACE_MS))]);
     }
-    killTree(child);
+    child.kill();
     if (!exited) await Promise.race([exitedPromise, new Promise((resolve) => setTimeout(resolve, EXIT_GRACE_MS))]);
     noteStderr();
   };

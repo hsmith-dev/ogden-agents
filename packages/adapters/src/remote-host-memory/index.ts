@@ -121,10 +121,11 @@ export function createMemoryRemoteHostPort(): MemoryRemoteHostPort {
       }
       const home = homeDirFor(target.host, target.port);
       return {
-        exec(command: string): Promise<RemoteHostChannel> {
+        exec(command: string, options?: { env?: Readonly<Record<string, string>> }): Promise<RemoteHostChannel> {
           calls.push(`exec ${key} ${command}`);
           const dropped = dropNext.delete(key);
-          const child = spawn('sh', ['-c', command], { cwd: home, env: baseEnvironment(), stdio: ['pipe', 'pipe', 'pipe'] });
+          // `options?.env` on top of the base, exactly as the real adapter sends it through ssh2's own exec option (never on the command line).
+          const child = spawn('sh', ['-c', command], { cwd: home, env: { ...baseEnvironment(), ...options?.env }, stdio: ['pipe', 'pipe', 'pipe'] });
           let settled = false;
           let resolveExit!: (code: number) => void;
           let rejectExit!: (error: unknown) => void;

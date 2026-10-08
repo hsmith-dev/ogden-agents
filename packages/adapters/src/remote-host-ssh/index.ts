@@ -98,9 +98,10 @@ function createConnection(conn: SshClient): RemoteHostConnection {
   conn.on('close', dropAll);
   let closed = false;
   return {
-    exec(command) {
+    exec(command, options) {
       return new Promise((resolve, reject) => {
-        conn.exec(command, (error, stream) => {
+        // `env` travels only through ssh2's own protocol-level exec option (AD-16): never spliced into `command`.
+        conn.exec(command, { env: options?.env }, (error, stream) => {
           if (error) {
             reject(new RemoteHostError('The remote command could not start.', {}, 'connection_lost'));
             return;

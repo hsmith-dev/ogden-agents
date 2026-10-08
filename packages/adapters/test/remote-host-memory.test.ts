@@ -133,6 +133,18 @@ describe('connect/exec (CAP-24 story 19.4)', () => {
     expect((await run(next)).code).toBe(0);
   });
 
+  it("exec's env option reaches the spawned command, never through the command string itself (CAP-24 story 19.5)", async () => {
+    const hosts = createMemoryRemoteHostPort();
+    const { fingerprint } = await hosts.checkHostKey({ host: 'a', port: 22, username: 'u' });
+    const connection = await hosts.connect({ host: 'a', port: 22, username: 'u' }, { privateKey: 'fake' }, fingerprint);
+    const channel = await connection.exec('echo "$A_SECRET_VALUE"', { env: { A_SECRET_VALUE: 'sk-super-secret-value' } });
+    const { code, stdout } = await run(channel);
+    expect(code).toBe(0);
+    expect(stdout).toBe('sk-super-secret-value\n');
+    // The secret travelled only through the exec option, never spliced into the recorded command string.
+    expect(hosts.calls.some((call) => call.includes('sk-super-secret-value'))).toBe(false);
+  });
+
   it('a prepared "remote" folder (writeFileSync by the test) is exactly what exec sees, and what exec writes is exactly what the test can read back', async () => {
     const hosts = createMemoryRemoteHostPort();
     const prepared = hosts.homeDirFor('seeded', 22);

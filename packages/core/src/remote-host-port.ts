@@ -10,7 +10,18 @@
  * (`remote-worktree-sync.ts`) and, later, story 19.5's agent spawn both
  * build on. Never a second transport (SFTP, rsync) alongside this one exec
  * channel.
+ *
+ * Story 19.5 (CAP-24): `RemoteHostChannel`'s streams are tightened from the
+ * structural `NodeJS.WritableStream`/`NodeJS.ReadableStream` to real
+ * `node:stream` `Writable`/`Readable` -- both the real `ssh2` channel and the
+ * in-memory fake already hand back genuine Node streams, and the ACP client's
+ * `Writable.toWeb`/`Readable.toWeb` need the concrete class, not just the
+ * structural shape. `exec` also takes an `env` option: variables for the
+ * remote command, sent through SSH's own protocol-level environment request
+ * (never embedded in the command-line text itself, AD-16's "never on a
+ * command line" extended to the remote case).
  */
+import { type Readable, type Writable } from 'node:stream';
 import { CoreError } from './errors.js';
 
 /** Enough to address a machine for a connection attempt; never a credential. */
@@ -47,9 +58,9 @@ export interface RemoteHostCredential {
  * buffers the whole payload in a string.
  */
 export interface RemoteHostChannel {
-  readonly stdin: NodeJS.WritableStream;
-  readonly stdout: NodeJS.ReadableStream;
-  readonly stderr: NodeJS.ReadableStream;
+  readonly stdin: Writable;
+  readonly stdout: Readable;
+  readonly stderr: Readable;
   /**
    * The command's exit code, once the channel has fully closed (after its
    * stdio has finished, never earlier). Rejects with {@link RemoteHostError}
@@ -65,8 +76,15 @@ export interface RemoteHostChannel {
 
 /** An authenticated SSH session to one machine, for running one or more commands on it (each its own `exec`). */
 export interface RemoteHostConnection {
-  /** Runs `command` in the remote's own (POSIX) shell. Rejects with {@link RemoteHostError} if the command could not even start. */
-  exec(command: string): Promise<RemoteHostChannel>;
+  /**
+   * Runs `command` in the remote's own (POSIX) shell. Rejects with
+   * {@link RemoteHostError} if the command could not even start.
+   * `options.env` (story 19.5) is sent through SSH's own protocol-level
+   * environment request, never spliced into `command` itself -- the one way
+   * a secret (an agent's API key, AD-16) reaches the remote process without
+   * ever appearing in the command-line text.
+   */
+  exec(command: string, options?: { env?: Readonly<Record<string, string>> }): Promise<RemoteHostChannel>;
   /** Closes the connection. Idempotent; never throws. */
   close(): Promise<void>;
 }

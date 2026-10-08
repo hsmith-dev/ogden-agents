@@ -34,8 +34,10 @@ export {
 } from './events-panes.js';
 // The Local model's endpoint events (epic 14 story 14.3).
 import { SettingsLocalEndpointsChangedEvent, SettingsLocalEndpointsChangedInput } from './events-local.js';
+import { SettingsRemoteMachinesChangedEvent, SettingsRemoteMachinesChangedInput } from './events-remote-machines.js';
 
 export { LOCAL_ENDPOINT_CHANGES, SettingsLocalEndpointsChangedEvent } from './events-local.js';
+export { REMOTE_MACHINE_CHANGES, SettingsRemoteMachinesChangedEvent } from './events-remote-machines.js';
 // The orchestration events (epic 15 story 15.2).
 import * as orch from './events-orchestration.js';
 
@@ -430,6 +432,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   runs.SettingsRunLimitsChangedEvent,
   runs.SettingsNotificationsChangedEvent,
   SettingsLocalEndpointsChangedEvent,
+  SettingsRemoteMachinesChangedEvent,
   orch.OrchestrationRunStartedEvent, orch.OrchestrationPlanProposedEvent, orch.OrchestrationStepProposedEvent, orch.OrchestrationStepApprovedEvent, orch.OrchestrationStepEditedEvent, orch.OrchestrationStepSkippedEvent, orch.OrchestrationStepsReorderedEvent,
   orch.OrchestrationStepDispatchedEvent, orch.OrchestrationDispatchRefusedEvent, orch.OrchestrationResultReadEvent, orch.OrchestrationRunPausedEvent, orch.OrchestrationRunStoppedEvent, orch.OrchestrationRunFinishedEvent, orch.OrchestrationModeChangedEvent, orch.OrchestrationManagerRepliedEvent,
   orch.OrchestrationDecisionMadeEvent, orch.OrchestrationQuestionAnsweredEvent, orch.OrchestrationRunResumedEvent, orch.OrchestrationBuildLinkedEvent, orch.OrchestrationRoutingChangedEvent,
@@ -503,6 +506,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   runs.SettingsRunLimitsChangedInput,
   runs.SettingsNotificationsChangedInput,
   SettingsLocalEndpointsChangedInput,
+  SettingsRemoteMachinesChangedInput,
   ...orch.ORCHESTRATION_INPUTS,
   SettingsUpdateNoticeChangedInput,
   SettingsTerminalsChangedInput,

@@ -81,6 +81,7 @@ export * from './build-verify.js';
 export * from './build-settings.js';
 export * from './dev-tools.js';
 export * from './local-endpoints.js';
+export * from './remote-machines.js';
 export * from './local-model-port.js';
 export * from './manager-input.js';
 export * from './manager-port.js';

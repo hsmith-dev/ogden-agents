@@ -520,3 +520,24 @@ export const globalSkills = sqliteTable('global_skills', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/**
+ * Remote machines the user added over SSH (CAP-24, epic 18 story 18.1):
+ * install-level, like `localEndpoints`, not scoped to a workspace. Only
+ * what addresses the machine and what Settings shows; no credential (AD-16:
+ * the private key and passphrase, once story 18.2 generates and stores
+ * them, live only in `SecretStorePort` under `remote-machine-ssh/<id>`).
+ * `hostKeyFingerprint` and `publicKey` are `NULL` and `hostKeyConfirmed` is
+ * `0` until story 18.2's confirm-and-pin flow fills them in.
+ */
+export const remoteMachines = sqliteTable('remote_machines', {
+  id: text('id').primaryKey(),
+  host: text('host').notNull(),
+  port: integer('port').notNull(),
+  username: text('username').notNull(),
+  label: text('label').notNull(),
+  hostKeyFingerprint: text('host_key_fingerprint'),
+  publicKey: text('public_key'),
+  hostKeyConfirmed: integer('host_key_confirmed', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
+});

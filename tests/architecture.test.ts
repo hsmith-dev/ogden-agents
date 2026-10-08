@@ -1061,3 +1061,29 @@ describe('E15: a build is started only in the Build dialog (story 15.11)', () =>
     ]);
   });
 });
+
+/**
+ * CAP-24 (epic 18 story 18.1): core and shared name no SSH library or
+ * client for the remote-machine registry — the architecture's
+ * `RemoteHostPort` note (adopted alongside AD-24/AD-26) reserves the
+ * actual SSH connection for a later adapter (`remote-host-ssh`, from
+ * story 18.2). This story's files are plain database CRUD and must not
+ * import a network/SSH module directly, the same way `vcs-port.ts` names
+ * no git binary and `secret-store-port.ts` names no keychain library.
+ */
+const SSH_LIBRARY_IMPORT = /^(?:ssh2|node-ssh|simple-ssh|ssh2-sftp-client|@?[\w-]*\/?ssh2[\w-]*|net$|tls$|dgram$|node:net$|node:tls$|node:dgram$)/;
+const REMOTE_MACHINE_FILE = /(^|[\\/])packages[\\/](?:core|shared)[\\/]src[\\/](?:remote-machines|events-remote-machines|remote-host-port)\.ts$/;
+
+describe('CAP-24: the remote-machine registry names no SSH library (epic 18 story 18.1)', () => {
+  it('core and shared files for the registry import no network/SSH module', () => {
+    const files = loadWorkspaceSources().filter((file) => REMOTE_MACHINE_FILE.test(file.path));
+    expect(files.length).toBeGreaterThan(0);
+    const violations: string[] = [];
+    for (const { path, source } of files) {
+      for (const match of source.matchAll(SPECIFIER)) {
+        if (SSH_LIBRARY_IMPORT.test(match[2]!)) violations.push(`${path}: imports ${match[2]} (CAP-24: the registry names no SSH library)`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+});

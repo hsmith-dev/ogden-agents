@@ -1,8 +1,8 @@
 # Changelog
 
-Every release of the `ogden-agents` npm package. Since `2026.10.7-1`, each release is dated: `YYYY.M.D-N` (year, month and day as plain integers, a mandatory sequence number). Before that, versions followed [semantic versioning](https://semver.org/)'s major.minor.patch, with named milestones; those entries are kept below as history. How a release is made is in [RELEASING.md](RELEASING.md).
+Every release of the `ogden-agents` npm package. Since `2026.10.8-1`, each release is dated: `YYYY.M.D-N` (year, month and day as plain integers, a mandatory sequence number). Before that, versions followed [semantic versioning](https://semver.org/)'s major.minor.patch, with named milestones; those entries are kept below as history. How a release is made is in [RELEASING.md](RELEASING.md).
 
-## 2026.10.7-1 — continuous, date-based releases
+## 2026.10.8-1 — continuous, date-based releases
 
 Starting with this release, Ogden Agents retires named milestone versions (`1.0.0`, `v1.1`, ...) in favor of continuous, date-stamped releases: no more batching features into a numbered milestone, each change ships in its own release as soon as it is ready.
 

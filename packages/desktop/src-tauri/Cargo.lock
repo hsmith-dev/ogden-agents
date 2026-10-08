@@ -2081,7 +2081,7 @@ dependencies = [
 
 [[package]]
 name = "ogden-agents-desktop"
-version = "2026.10.7-1"
+version = "2026.10.8-1"
 dependencies = [
  "libc",
  "serde_json",

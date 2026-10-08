@@ -1,6 +1,6 @@
 {
   "name": "@ogden-agents/server",
-  "version": "2026.10.7-1",
+  "version": "2026.10.8-1",
   "private": true,
   "description": "Delivery: HTTP and WebSocket, wiring of adapters to core ports.",
   "type": "module",

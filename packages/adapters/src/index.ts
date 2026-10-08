@@ -48,6 +48,7 @@ export * from './terminal-pty/index.js';
 export * from './terminal-pty/terminal-port.js';
 export * from './tickets-memory/index.js';
 export * from './tickets-v7/index.js';
+export * from './tickets-jira/index.js';
 export * from './toolchain-uv/index.js';
 export * from './vcs-git/index.js';
 export * from './vcs-memory/index.js';

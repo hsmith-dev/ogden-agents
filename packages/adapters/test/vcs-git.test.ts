@@ -29,6 +29,10 @@ const temp = (prefix: string) => {
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-c', `core.hooksPath=${join(cwd, '.none')}`, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
+/** The same, but the raw bytes (a bundle is binary): no `encoding`, so `execFileSync` hands back a `Buffer`. */
+const gitBinary = (cwd: string, ...args: string[]): Buffer =>
+  execFileSync('git', ['-c', `core.hooksPath=${join(cwd, '.none')}`, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+
 /** A repo on `main` with one commit, whose own hooks (in `.git/hooks` and in `.husky`, its `core.hooksPath`) would leave a file in `markers`. */
 function setup() {
   const repo = temp('ogden-agents-vcs-repo-');
@@ -389,6 +393,84 @@ describe('vcs-git (story 5.3: diff stats, worktree lookup, rebase, patch)', () =
     writeFileSync(del, 'diff --git a/.claude/settings.json b/.claude/settings.json\ndeleted file mode 100644\n--- a/.claude/settings.json\n+++ /dev/null\n@@ -1 +0,0 @@\n-{}\n');
     expect(await vcs.applyPatch({ ...at, patchPath: del, refuse })).toBe('refused');
     expect(existsSync(join(path, '.claude', 'settings.json'))).toBe(true);
+  });
+});
+
+describe('vcs-git (CAP-24 story 19.4: bundleRef, importBundle)', () => {
+  const branched = async () => {
+    const context = setup();
+    const path = join(context.data, 'w', 'abcdefgh');
+    mkdirSync(join(context.data, 'w'));
+    await context.vcs.addWorktree(context.repo, { path, branch: 'ogden/abcdefgh/1.1-x', base: context.head });
+    return { ...context, path, branch: 'ogden/abcdefgh/1.1-x' };
+  };
+
+  it('bundles a branch, byte-identical for a binary blob once fetched into a plain clone; refuses an unknown branch', async () => {
+    const { repo, vcs, path, branch } = await branched();
+    const binary = Buffer.from([0, 1, 2, 3, 255, 254, 0, 10, 13, 9]);
+    writeFileSync(join(path, 'blob.bin'), binary);
+    git(path, 'add', '-A');
+    git(path, 'commit', '-q', '--no-verify', '-m', 'binary');
+
+    const bundle = await vcs.bundleRef(repo, branch);
+    expect(Buffer.isBuffer(bundle)).toBe(true);
+    expect(bundle.length).toBeGreaterThan(0);
+
+    const bundleFile = join(temp('ogden-agents-vcs-bundle-'), 'push.bundle');
+    writeFileSync(bundleFile, bundle);
+    const clone = temp('ogden-agents-vcs-clone-');
+    execFileSync('git', ['init', '-q', clone], { encoding: 'utf8' });
+    git(clone, 'fetch', '-q', bundleFile, `${branch}:${branch}`);
+    git(clone, 'checkout', '-q', branch);
+    expect(readFileSync(join(clone, 'blob.bin'))).toEqual(binary);
+
+    await expect(vcs.bundleRef(repo, 'not-a-real-branch')).rejects.toBeInstanceOf(VcsError);
+  });
+
+  it("imports a remote's incremental bundle as a fast-forward, resetting the worktree; 'nothing' for an empty or already-applied bundle; 'refused' for a non-fast-forward or malformed one, leaving the branch and worktree untouched", async () => {
+    const { repo, vcs, path, branch, head } = await branched();
+
+    // A separate clone stands in for "the remote": pushed the branch (a real full-history bundle, mirroring `push`), then advanced it on its own.
+    const pushBundle = await vcs.bundleRef(repo, branch);
+    const pushBundleFile = join(temp('ogden-agents-vcs-push-'), 'push.bundle');
+    writeFileSync(pushBundleFile, pushBundle);
+    const remote = temp('ogden-agents-vcs-remote-');
+    execFileSync('git', ['init', '-q', remote], { encoding: 'utf8' });
+    git(remote, 'fetch', '-q', pushBundleFile, `${branch}:${branch}`);
+    git(remote, 'checkout', '-q', branch);
+    writeFileSync(join(remote, 'new.txt'), 'hi\n');
+    git(remote, 'add', '-A');
+    git(remote, 'commit', '-q', '--no-verify', '-m', 'remote change');
+    const advanced = git(remote, 'rev-parse', 'HEAD').trim();
+    const incremental = gitBinary(remote, 'bundle', 'create', '-', `${head}..${branch}`);
+
+    expect(await vcs.importBundle(repo, path, branch, head, Buffer.alloc(0))).toBe('nothing');
+    expect(await vcs.importBundle(repo, path, branch, head, incremental)).toBe('imported');
+    expect(readFileSync(join(path, 'new.txt'), 'utf8')).toBe('hi\n');
+    expect(git(repo, 'rev-parse', `refs/heads/${branch}`).trim()).toBe(advanced);
+
+    // The same bundle again: the branch is already at its tip, so nothing changes.
+    expect(await vcs.importBundle(repo, path, branch, head, incremental)).toBe('nothing');
+
+    // Not a bundle at all: refused, and nothing moves.
+    expect(await vcs.importBundle(repo, path, branch, head, Buffer.from('not a bundle at all'))).toBe('refused');
+    expect(git(repo, 'rev-parse', `refs/heads/${branch}`).trim()).toBe(advanced);
+    expect(readFileSync(join(path, 'new.txt'), 'utf8')).toBe('hi\n');
+
+    // Local diverges on its own: the remote's bundle (built on the old tip) is no longer a fast-forward.
+    writeFileSync(join(path, 'local-only.txt'), 'local\n');
+    git(path, 'add', '-A');
+    git(path, 'commit', '-q', '--no-verify', '-m', 'local only');
+    const localHead = git(repo, 'rev-parse', `refs/heads/${branch}`).trim();
+    expect(await vcs.importBundle(repo, path, branch, head, incremental)).toBe('refused');
+    expect(git(repo, 'rev-parse', `refs/heads/${branch}`).trim()).toBe(localHead);
+    expect(readFileSync(join(path, 'local-only.txt'), 'utf8')).toBe('local\n');
+
+    // A syntactically valid but unknown branch has nothing to compare against: refused, never a throw.
+    expect(await vcs.importBundle(repo, path, 'not-a-real-branch', head, incremental)).toBe('refused');
+    // A branch or revision that fails its own safety check throws before git ever runs.
+    await expect(vcs.importBundle(repo, path, 'not..a-branch', head, incremental)).rejects.toBeInstanceOf(VcsError);
+    await expect(vcs.importBundle(repo, path, branch, 'not-a-revision', incremental)).rejects.toBeInstanceOf(VcsError);
   });
 });
 

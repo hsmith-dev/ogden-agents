@@ -25,7 +25,8 @@
  * a branch is deleted only when it is one Ogden made (`ogden/…`).
  */
 import { execFile, spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import {
   isRealFolder,
@@ -603,6 +604,63 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
       if (check.code !== 0) return 'refused';
       const applied = await run(worktreePath, [...SAFE_CONFIG, 'apply', '--whitespace=nowarn', patchPath], undefined, pinned);
       return applied.code === 0 ? 'applied' : 'refused';
+    },
+
+    async bundleRef(repoPath, ref) {
+      checkPath(repoPath);
+      checkBranch(ref);
+      // The run's own object store (if any) as an alternate too: at push time the branch has no commits of its
+      // own yet (its objects are the repo's), but bundling is read-only and this costs nothing when there is none.
+      const result = await runBinary(repoPath, ['bundle', 'create', '-', `refs/heads/${ref}`], '', readEnv(ref));
+      if (result === undefined || result.code !== 0) throw new VcsError("git couldn't bundle the branch.", { step: 'bundle' });
+      return result.stdout;
+    },
+
+    async importBundle(repoPath, worktreePath, branch, base, bundle) {
+      checkPath(repoPath);
+      checkPath(worktreePath);
+      checkBranch(branch);
+      checkRevision(base);
+      if (bundle.length === 0) return 'nothing';
+      const env = readEnv(branch);
+      const revisionOf = async (ref: string): Promise<string | undefined> => {
+        const out = await run(repoPath, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], undefined, env);
+        const id = out.stdout.trim();
+        return out.code === 0 && REVISION.test(id) ? id : undefined;
+      };
+      const before = await revisionOf(`refs/heads/${branch}`);
+      if (before === undefined) return 'refused';
+      // A scratch ref outside `refs/heads/`: fetching straight into the branch itself is refused by git
+      // while it is checked out in `worktreePath` ("refusing to fetch into branch … checked out at …"), so
+      // the new commit lands here first, and the branch ref is moved by Ogden itself (below), right before
+      // the worktree is reset to match it.
+      const scratchRef = 'refs/ogden-agents/incoming-bundle';
+      const dir = mkdtempSync(join(tmpdir(), 'ogden-agents-bundle-'));
+      let after: string | undefined;
+      try {
+        const file = join(dir, 'bundle');
+        writeFileSync(file, bundle);
+        const fetched = await run(repoPath, ['fetch', '--quiet', file, `${branch}:${scratchRef}`], undefined, env);
+        if (fetched.code === 0) after = await revisionOf(scratchRef);
+      } finally {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        await run(repoPath, ['update-ref', '-d', scratchRef]).catch(() => undefined);
+      }
+      if (after === undefined) return 'refused';
+      if (after === before) return 'nothing';
+      // Only ever a fast-forward (never resuming or rewriting a prior remote state): the ancestry is
+      // checked explicitly, since the compare-and-swap below only guards the ref's old value, not its direction.
+      const forward = await run(repoPath, ['merge-base', '--is-ancestor', before, after]);
+      if (forward.code !== 0) return 'refused';
+      // Compare-and-swap: refused (never applied) if the branch moved since `before` was read.
+      const moved = await run(repoPath, ['update-ref', `refs/heads/${branch}`, after, before], undefined, env);
+      if (moved.code !== 0) return 'refused';
+      const pinned = await pinnedWorktree(repoPath, worktreePath, branch);
+      const reset = await run(worktreePath, [...SAFE_CONFIG, 'reset', '--hard', '--quiet', after], undefined, pinned);
+      if (reset.code === 0) return 'imported';
+      // The worktree couldn't be brought to match: the branch ref goes back too, so nothing is left half-moved.
+      await run(repoPath, ['update-ref', `refs/heads/${branch}`, before, after], undefined, env).catch(() => undefined);
+      return 'refused';
     },
   };
 }

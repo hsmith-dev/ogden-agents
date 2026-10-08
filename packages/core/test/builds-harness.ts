@@ -250,6 +250,15 @@ export function fakeVcs() {
       state.refused = ['.claude/settings.json', '_bmad/scripts/tickets.py', '_bmad-output/a/tickets.toml', 'src/ok.ts'].map((file) => refuse?.(file) === true);
       return state.applyPatch;
     },
+    // CAP-24 story 19.4 (remote-worktree-sync.ts): no build use-case here calls either, so these are never exercised.
+    async bundleRef() {
+      calls.push('bundleRef');
+      return Buffer.alloc(0);
+    },
+    async importBundle() {
+      calls.push('importBundle');
+      return 'nothing';
+    },
   };
   return { vcs, calls, state };
 }

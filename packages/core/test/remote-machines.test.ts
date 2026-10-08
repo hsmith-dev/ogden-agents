@@ -38,6 +38,10 @@ function memoryHosts(): RemoteHostPort & { fingerprints: Map<string, string>; un
       calls.push(`generateKeypair ${comment}`);
       return { privateKey: `-----BEGIN OPENSSH PRIVATE KEY-----\nfake-${n}\n-----END OPENSSH PRIVATE KEY-----\n`, publicKeyLine: `ssh-ed25519 FAKE${n} ${comment}` }; // secret-scan:allow: an obviously-fake, in-memory test double
     },
+    // Story 19.4's `connect`: `RemoteMachines` never calls it (that is `remote-worktree-sync.ts`'s own concern, tested on its own), so it is never exercised here.
+    connect() {
+      throw new Error('not used by RemoteMachines');
+    },
     async checkHostKey(target) {
       const k = key(target.host, target.port);
       calls.push(`checkHostKey ${k}`);

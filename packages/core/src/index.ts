@@ -83,6 +83,7 @@ export * from './dev-tools.js';
 export * from './local-endpoints.js';
 export * from './remote-host-port.js';
 export * from './remote-machines.js';
+export * from './remote-worktree-sync.js';
 export * from './local-model-port.js';
 export * from './manager-input.js';
 export * from './manager-port.js';

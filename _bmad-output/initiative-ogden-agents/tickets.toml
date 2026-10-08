@@ -122,7 +122,7 @@ after = [{ epic = 12, needs = "the contracts with a mode fixed at start (12.3), 
 id = 15
 slug = "epic-llm-orchestration"
 title = "v2: A local model manages, and the other agents are told what to do"
-covers = []
+covers = ["CAP-22"]
 after = [{ epic = 14, needs = "LocalModelPort and the Test as a manager check (14.8)" }, { epic = 5, needs = "the Build dialog, dispatcher and review page (5.6, 5.8, 5.9)" }, { epic = 12, needs = "Codex and Grok chats as workers (12.11)" }]
 
 # ---- native CLI terminal workspace (outside the v1 initiative's Done when) ----

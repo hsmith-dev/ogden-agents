@@ -8,15 +8,22 @@
  * keychain or the network.
  */
 import { jiraCredentialName, type WorkspaceId } from '@ogden-agents/shared';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createJiraLinks, JiraAlreadyLinkedError, JiraUnauthorizedError, JiraUnreachableError, JiraUrlRejectedError, SecretsUnavailableError, ValidationError, type JiraLinkPort, type SecretStorePort } from '../src/index.js';
-import { openDatabase } from '../src/db/database.js';
+import { openDatabase, type Database } from '../src/db/database.js';
 import { workspaces } from '../src/db/schema.js';
 import { createEventLog } from '../src/event-log.js';
 import { tempDir } from './helpers.js';
 
 const WS1 = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W1' as WorkspaceId;
 const WS2 = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W2' as WorkspaceId;
+
+// Opened directly with openDatabase (not openTestCore), so nothing else closes them: without this,
+// the sqlite handle outlives the test and Windows refuses to remove the temp dir in afterEach (EPERM).
+const opened: Database[] = [];
+afterEach(() => {
+  for (const db of opened.splice(0)) db.close();
+});
 
 function memorySecrets(initial: Record<string, string> = {}): SecretStorePort & { values: Map<string, string> } {
   const values = new Map(Object.entries(initial));
@@ -39,6 +46,7 @@ const REQUEST = { siteUrl: 'https://my-team.atlassian.net', email: 'dev@example.
 
 const setUp = (jira: JiraLinkPort = fakeJira(), secrets: SecretStorePort = memorySecrets(), lookup = PUBLIC_LOOKUP) => {
   const db = openDatabase(tempDir());
+  opened.push(db);
   // The jira_link_changed event is workspace-scoped (a real foreign key): both workspaces this suite uses must exist first.
   for (const id of [WS1, WS2]) db.orm.insert(workspaces).values({ id, path: `/tmp/${id}`, createdAt: new Date().toISOString() }).run();
   const events = createEventLog(db);

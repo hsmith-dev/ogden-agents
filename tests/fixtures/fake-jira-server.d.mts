@@ -24,15 +24,21 @@ export interface FakeJiraServerOptions {
   accountId?: string;
   issues?: FakeJiraIssue[];
   /** Plays one failure mode on every request; `null` (default): normal answers. */
-  tamper?: 'unauthorized' | 'rate-limited' | 'malformed' | null;
+  tamper?: 'unauthorized' | 'rate-limited' | 'malformed' | 'tenant-info-down' | null;
+  /** Simulates a scoped token: direct `/rest/api/3/...` calls always 401; only the `/ex/jira/<cloudId>` gateway prefix accepts the real credential. */
+  scopedOnly?: boolean;
+  /** The cloud id `/_edge/tenant_info` and the gateway prefix use. */
+  cloudId?: string;
 }
 
 export interface FakeJiraRequest {
   t: number;
   method: string;
   path: string;
+  query: string;
   auth: 'basic-present' | 'none';
   authorized: boolean;
+  gateway: boolean;
 }
 
 export interface FakeJiraTransition {

@@ -8,7 +8,7 @@
 import { JiraUnauthorizedError, JiraUnreachableError } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { basicAuthHeader, startFakeJiraServer, type FakeJiraServer } from '../../../tests/fixtures/fake-jira-server.mjs';
-import { createJiraLinkPort, jiraGet, resolveBaseUrl } from '../src/index.js';
+import { createJiraLinkPort, gatewayBaseUrl, jiraGet, JIRA_SEARCH_MAX_ISSUES, resolveBaseUrl, searchAllIssues } from '../src/index.js';
 import { redactJiraCredential, redactJiraValues, withJiraRedaction } from '../src/tickets-jira/redact.js';
 
 const closers: Array<() => Promise<void> | void> = [];
@@ -28,6 +28,33 @@ describe('resolveBaseUrl', () => {
   });
 });
 
+describe('scoped-token gateway fallback (AD-29; unverified against a real scoped token, see jira-client.ts header)', () => {
+  it('falls back to the gateway when the classic path is unauthorized, discovering the cloud id first', async () => {
+    const server = await fakeServer({ email: 'dev@example.com', token: 'scoped-token', scopedOnly: true, cloudId: 'cloud-abc' });
+    const port = createJiraLinkPort({ gatewayHost: server.url });
+    const result = await port.testConnection({ siteUrl: server.url, email: 'dev@example.com', token: 'scoped-token', projectKey: 'ENG' });
+    expect(result).toEqual({ baseUrl: gatewayBaseUrl('cloud-abc', server.url) });
+    const paths = server.log.map((entry) => `${entry.method} ${entry.path}`);
+    expect(paths).toEqual(['GET /rest/api/3/myself', 'GET /_edge/tenant_info', 'GET /ex/jira/cloud-abc/rest/api/3/myself']);
+    expect(server.log[0]?.authorized).toBe(false); // the classic attempt, correctly refused for a scoped token
+    expect(server.log[2]?.authorized).toBe(true); // the gateway retry, with the same credential
+    expect(server.log[2]?.gateway).toBe(true);
+  });
+
+  it('still fails with the original unauthorized error when tenant_info cannot be reached at all', async () => {
+    const server = await fakeServer({ email: 'dev@example.com', token: 'scoped-token', scopedOnly: true, tamper: 'tenant-info-down' });
+    const port = createJiraLinkPort({ gatewayHost: server.url });
+    await expect(port.testConnection({ siteUrl: server.url, email: 'dev@example.com', token: 'scoped-token', projectKey: 'ENG' })).rejects.toBeInstanceOf(JiraUnauthorizedError);
+  });
+
+  it('never attempts the gateway fallback for a classic token that works on the first try', async () => {
+    const server = await fakeServer({ email: 'dev@example.com', token: 'classic-token' });
+    const port = createJiraLinkPort({ gatewayHost: server.url });
+    await port.testConnection({ siteUrl: server.url, email: 'dev@example.com', token: 'classic-token', projectKey: 'ENG' });
+    expect(server.log.map((entry) => entry.path)).toEqual(['/rest/api/3/myself']);
+  });
+});
+
 describe('the real JiraLinkPort (testConnection)', () => {
   it('succeeds against the matching email and token', async () => {
     const server = await fakeServer({ email: 'dev@example.com', token: 'good-token' });
@@ -40,13 +67,15 @@ describe('the real JiraLinkPort (testConnection)', () => {
 
   it('rejects with JiraUnauthorizedError on a wrong token, before anything else', async () => {
     const server = await fakeServer({ email: 'dev@example.com', token: 'good-token' });
-    const port = createJiraLinkPort();
+    // gatewayHost: a port nothing listens on, so the scoped-token fallback this triggers (the fake server's
+    // tenant_info always answers) fails fast locally instead of reaching the real api.atlassian.com.
+    const port = createJiraLinkPort({ gatewayHost: 'http://127.0.0.1:1', timeoutMs: 500 });
     await expect(port.testConnection({ siteUrl: server.url, email: 'dev@example.com', token: 'wrong-token', projectKey: 'ENG' })).rejects.toBeInstanceOf(JiraUnauthorizedError);
   });
 
   it('rejects with JiraUnauthorizedError when the server plays "unauthorized"', async () => {
     const server = await fakeServer({ tamper: 'unauthorized' });
-    const port = createJiraLinkPort();
+    const port = createJiraLinkPort({ gatewayHost: 'http://127.0.0.1:1', timeoutMs: 500 });
     await expect(port.testConnection({ siteUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token', projectKey: 'ENG' })).rejects.toBeInstanceOf(JiraUnauthorizedError);
   });
 
@@ -99,5 +128,48 @@ describe('whole-value credential redaction', () => {
 
   it('never redacts very short values (which would mangle unrelated text)', () => {
     expect(redactJiraValues('ok', ['', 'a', undefined])).toBe('ok');
+  });
+});
+
+describe('searchAllIssues (pagination)', () => {
+  const issue = (n: number) => ({ key: `ENG-${n}`, fields: { summary: `Issue ${n}`, status: { name: 'To Do' } } });
+
+  it('fetches one page whole when it is smaller than the page size', async () => {
+    const server = await fakeServer({ issues: [issue(1), issue(2)] });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    const issues = await searchAllIssues(call, 'project = ENG', 50);
+    expect(issues.map((i) => i.key)).toEqual(['ENG-1', 'ENG-2']);
+    expect(server.log.filter((l) => l.path.startsWith('/rest/api/3/search'))).toHaveLength(1);
+  });
+
+  it('pages through a board larger than one page, with no duplicate or missing issue', async () => {
+    const all = Array.from({ length: 23 }, (_, i) => issue(i + 1));
+    const server = await fakeServer({ issues: all });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    const issues = await searchAllIssues(call, 'project = ENG', 10);
+    expect(issues.map((i) => i.key)).toEqual(all.map((i) => i.key));
+    expect(server.log.filter((l) => l.path.startsWith('/rest/api/3/search'))).toHaveLength(3); // 10 + 10 + 3
+  });
+
+  it('stops at JIRA_SEARCH_MAX_ISSUES rather than looping forever on a huge board', async () => {
+    const all = Array.from({ length: JIRA_SEARCH_MAX_ISSUES + 500 }, (_, i) => issue(i + 1));
+    const server = await fakeServer({ issues: all });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    const issues = await searchAllIssues(call, 'project = ENG', 500);
+    expect(issues).toHaveLength(JIRA_SEARCH_MAX_ISSUES);
+  }, 15_000);
+
+  it('returns an empty list for an empty board, with no error', async () => {
+    const server = await fakeServer({ issues: [] });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    expect(await searchAllIssues(call, 'project = ENG')).toEqual([]);
+  });
+
+  it('percent-encodes the jql and includes the field list', async () => {
+    const server = await fakeServer({ issues: [issue(1)] });
+    const call = { baseUrl: server.url, email: 'dev@example.com', token: 'fake-jira-token' };
+    await searchAllIssues(call, 'project = "ENG" AND type = Epic');
+    expect(server.log[0]?.query).toContain(encodeURIComponent('project = "ENG" AND type = Epic'));
+    expect(server.log[0]?.query).toContain('fields=summary');
   });
 });

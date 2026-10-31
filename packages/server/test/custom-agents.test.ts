@@ -8,11 +8,12 @@
 import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { API_ROUTES, ApiErrorBody, apiPath, ChatAgentsResponse, CustomAgentListResponse, CustomAgentResponse, CustomAgentTestResponse, SessionResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
+import { API_ROUTES, ApiErrorBody, apiPath, BuildAgentsResponse, ChatAgentsResponse, CustomAgentListResponse, CustomAgentResponse, CustomAgentTestResponse, SessionResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createCustomAgent, createMemorySecretStore, customAgentDescriptor } from '@ogden-agents/adapters';
 import { supportsUnattendedBuild } from '../src/build-agent-sandbox.js';
 import { SecretsUnavailableError, type SecretStorePort } from '@ogden-agents/core';
+import { createFakeBmadRepo, FAKE_BUILD_REPO_FILES } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { FAKE_AGENT, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const folders: string[] = [];
@@ -478,5 +479,27 @@ describe("a custom agent's tool calls always ask (epic 21 story 21.5)", () => {
     await waitFor(() => stateOf(server, session.id) === 'waiting', 'the card for the edit', 15_000);
     const asked = eventsOf(server, session.id).find((event) => event.type === 'permission.requested');
     expect(asked).toMatchObject({ payload: { alwaysAllowScope: null, cautionLevel: 'ask_every_time' } });
+  });
+});
+
+describe('epic 21 story 21.6: a custom agent chats only, and Build never offers it', () => {
+  it('lists a registered custom agent for chats but never among the agents that can build, and refuses a build with it', async () => {
+    const { server, tab, register, listed } = await setUp();
+    expect((await register({ displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    expect((await listed()).map((agent) => agent.agentId)).toContain('custom-my-agent');
+    const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_REPO_FILES, prefix: 'ogden-agents-custom-build-' });
+    folders.push(repo.path);
+    const wsId = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo.path })).json()).workspace.id;
+    expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board', 'builds'] })).status).toBe(200);
+    expect((await request(server, tab, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }))).status).toBe(200);
+    const response = await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuildAgents, { wsId }));
+    expect(response.status).toBe(200);
+    const ids = BuildAgentsResponse.parse(await response.json()).agents.map((agent) => agent.agentId);
+    expect(ids).toContain('claude-code');
+    expect(ids.filter((id) => id.startsWith('custom-'))).toEqual([]);
+    // Asked for by name anyway, a build with it is refused and starts nothing.
+    const refused = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1', agent: 'custom-my-agent', mode: 'attended' });
+    expect(refused.status).toBe(400);
+    expect(server.core.entities.listSessions(wsId)).toEqual([]);
   });
 });

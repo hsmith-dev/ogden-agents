@@ -109,6 +109,9 @@ export function withEndpointWatch(agent: AgentPort, options: EndpointWatchOption
       return agent.permissionModes;
     },
     ...(agent.modeFixedAtStart === true ? { modeFixedAtStart: true } : {}),
+    // What Build reads of the agent (epic 21 story 21.6): kept through the wrapper, or the picker falls back to the generic reason.
+    ...(agent.unattendedBuild === undefined ? {} : { unattendedBuild: agent.unattendedBuild }),
+    ...(agent.attendedOnlyReason === undefined ? {} : { attendedOnlyReason: agent.attendedOnlyReason }),
     async startSession(input) {
       return watched(await agent.startSession(input), input.env, options);
     },

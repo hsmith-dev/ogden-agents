@@ -9,6 +9,7 @@
  */
 import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { LOCAL_AGENT_ID } from '../acp-opencode/constants.js';
 import { BUILD_RESULT_FILE, BuildRunResult, TICKET_REF_PATTERN, type BlockedCode, type BuildAgent } from '@ogden-agents/shared';
 import type { BuildRunnerPort } from '@ogden-agents/core';
 
@@ -115,3 +116,5 @@ export const createCodexBuildRunner = (): BuildRunnerPort => createAcpBuildRunne
 export const createGrokBuildRunner = (): BuildRunnerPort => createAcpBuildRunner({ agent: 'grok' });
 /** Antigravity's build runner (epic 17): the skill run as a slash command. */
 export const createAntigravityBuildRunner = (): BuildRunnerPort => createAcpBuildRunner({ agent: 'antigravity' });
+/** The Local model's build runner (epic 21, story 21.6; attended only): the skill run as a slash command, in `.agents/skills`. */
+export const createLocalBuildRunner = (): BuildRunnerPort => createAcpBuildRunner({ agent: LOCAL_AGENT_ID });

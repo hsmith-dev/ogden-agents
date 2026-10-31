@@ -8,7 +8,7 @@
 import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createLocalBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
 import { createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsPort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import { createPerAgentSandbox } from './build-agent-sandbox.js';
@@ -128,8 +128,9 @@ export function createBuildsWiring({
     sandbox,
     remote,
     runner: options.buildRunner ?? createAcpBuildRunner(),
-    // The other agents that can build (epic 17); a test's own list replaces them.
-    runners: (options.buildRunners ?? [createCodexBuildRunner(), createGrokBuildRunner(), createAntigravityBuildRunner()]).filter((each) => registeredAgents(each.agent)),
+    // The other agents that can build (epic 17; the Local model, attended only, 21.6); a test's own list replaces them.
+    // A custom agent has no runner, so Build never offers it (E21-R6: custom agents chat only).
+    runners: (options.buildRunners ?? [createCodexBuildRunner(), createGrokBuildRunner(), createAntigravityBuildRunner(), createLocalBuildRunner()]).filter((each) => registeredAgents(each.agent)),
     chat,
     buildSessions: core.buildSessions,
     dataDir,

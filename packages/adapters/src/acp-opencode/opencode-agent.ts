@@ -63,6 +63,9 @@ export interface LocalAgentOptions {
   onDiagnostic?: ((message: string, fields?: Record<string, unknown>) => void) | undefined;
 }
 
+/** The Build picker's line for the Local model (epic 21, story 21.6): attended only, every tool call a card (plain words, no dashes). */
+export const LOCAL_ATTENDED_ONLY_REASON = 'The Local model builds only with you watching, and every tool call asks you first.';
+
 export function createLocalAgent(options: LocalAgentOptions): AgentPort {
   const reasons = acpReasons(LOCAL_DESCRIPTOR.displayName);
   const diagnostic = (message: string, fields?: Record<string, unknown>) => {
@@ -73,6 +76,7 @@ export function createLocalAgent(options: LocalAgentOptions): AgentPort {
     }
   };
   const quirks: AcpAgentQuirks = {
+    attendedOnlyReason: LOCAL_ATTENDED_ONLY_REASON,
     launch({ env }) {
       let server: LocalServerCommand | undefined;
       if (options.server !== undefined) server = options.server();

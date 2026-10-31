@@ -35,7 +35,7 @@ export {
 export const localModelId = (id: string): string => `ogden/${id}`;
 export { withEndpointWatch, WATCH_INTERVAL_MS, WATCH_MISSES, type EndpointWatchOptions } from './watch.js';
 export { FAILURE_WORDS, localFailureWords } from './failures.js';
-export { createLocalAgent, type LocalAgentOptions, type LocalServerCommand } from './opencode-agent.js';
+export { createLocalAgent, LOCAL_ATTENDED_ONLY_REASON, type LocalAgentOptions, type LocalServerCommand } from './opencode-agent.js';
 
 /**
  * Whether a shipped install registers the Local model. The slot's on switch

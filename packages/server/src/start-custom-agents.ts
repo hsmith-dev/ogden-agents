@@ -24,6 +24,8 @@ export interface CustomAgentsWiringOptions {
   /** Whether a stored chat or project default still names `agentId` (21.1: such an id is never given to another program). */
   isAgentIdInUse: (agentId: AgentId) => boolean;
   log: Logger;
+  /** Stops every running chat turn of an agent (core's `chat.stopAgent`); bound once the chat exists, after this wiring. */
+  stopChats?: { current: ((agentId: AgentId) => void) | undefined };
   /** How long Test waits for `initialize` (default {@link TEST_TIMEOUT_MS}). */
   testTimeoutMs?: number;
 }
@@ -157,6 +159,12 @@ export function createCustomAgentsWiring(options: CustomAgentsWiringOptions): Cu
           if (store.get(agentId)?.hasKey !== true) keyEnv.delete(agentId);
         }
         unregister(agentId);
+        // A chat working with it stops now, as Stop does; what it had queued stays unsent (21.4).
+        try {
+          options.stopChats?.current?.(agentId);
+        } catch (error) {
+          log.warn("a removed custom agent's chats could not all be stopped", { agentId, code: error instanceof Error ? error.name : 'unexpected' });
+        }
       }),
 
     async load() {

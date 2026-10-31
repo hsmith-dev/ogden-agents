@@ -282,6 +282,12 @@ export interface Chat {
    */
   cancel(workspaceId: WorkspaceId, sessionId: SessionId): void;
   /**
+   * Stops every running turn of `agentId`'s chats, as Stop does: what was
+   * queued stays unsent (epic 21, story 21.4: a custom agent removed while it
+   * works). Chats with nothing running are left as they are.
+   */
+  stopAgent(agentId: AgentId): void;
+  /**
    * Hands the session to `driver` (story 3.1, AD-6). To `terminal`: only
    * while the session is `idle`, with no turn or queue, and has reached its
    * agent; the agent's process is released and has exited before its CLI

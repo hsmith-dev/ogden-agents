@@ -712,6 +712,21 @@ export class LessonsRefusedError extends CoreError {
 /** What a read-only build session refuses (story 5.2): it runs on its own. */
 export const BUILD_SESSION_READ_ONLY_MESSAGE = 'An unattended build runs on its own: its session is read-only.';
 
+/** What a chat whose agent is no longer registered says (epic 21, E21-R4): readable, never continued. */
+export const AGENT_REMOVED_MESSAGE = 'This agent was removed.';
+
+/**
+ * A message was sent to a chat whose agent is no longer registered (epic 21,
+ * story 21.4: a custom agent the user removed): core refuses it before
+ * anything is queued or started. The chat stays readable.
+ */
+export class AgentRemovedError extends CoreError {
+  override readonly name = 'AgentRemovedError';
+  constructor() {
+    super('agent_removed', AGENT_REMOVED_MESSAGE);
+  }
+}
+
 /**
  * A user message, permission mode, driver change or Stop was asked of an
  * unattended build's session (story 5.2 review loop 1): core refuses it,

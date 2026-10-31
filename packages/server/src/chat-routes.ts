@@ -14,7 +14,7 @@
 import {
   AnswerFirstError,
   BUILD_SESSION_READ_ONLY_MESSAGE,
-  BuildSessionReadOnlyError,
+  AgentRemovedError, BuildSessionReadOnlyError,
   ConfirmationRequiredError,
   CoreError,
   createAddProject,
@@ -118,6 +118,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
   const refusal = (c: Context, error: unknown): Response => {
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', NOT_FOUND);
     if (error instanceof BuildSessionReadOnlyError) return readOnlyBuild(c);
+    if (error instanceof AgentRemovedError) return apiError(c, 409, 'agent_removed', error.message);
     if (error instanceof QueueFullError) {
       return apiError(c, 409, 'session_busy', 'Too many messages are waiting. Send this one when the agent has caught up.');
     }

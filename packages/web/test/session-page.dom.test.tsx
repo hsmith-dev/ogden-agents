@@ -35,6 +35,12 @@ const fake = vi.hoisted(() => ({
   connections: 0,
   /** Every message `sendMessage` was asked to send (CAP-24, epic 19 story 19.7: proving "Try again" resends). */
   sent: [] as string[],
+  /** The session's agent (story 21.4); undefined is the install's default. */
+  agentId: undefined as string | undefined,
+  /** Whether the agent list still has Claude Code (story 21.4: a removed agent is no longer listed). */
+  claudeListed: true,
+  /** What `sendMessage` does after recording the text. */
+  sendResult: (() => Promise.resolve({ messageId: 'msg_x', queued: false })) as () => Promise<unknown>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -61,6 +67,17 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
   fetchChatAgents: async () => ({
     agents: [
       {
+        agentId: 'codex',
+        displayName: 'Codex',
+        provider: 'OpenAI',
+        signInMethods: [],
+        install: 'installed',
+        auth: 'signed_in',
+        terminalResume: true,
+        needsProjectTrust: false,
+        permissionModes: ['ask', 'auto', 'skip_all'],
+      },
+      {
         agentId: 'claude-code',
         displayName: 'Claude Code',
         provider: 'Anthropic',
@@ -71,13 +88,13 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
         needsProjectTrust: false,
         permissionModes: ['ask', 'auto', 'skip_all'],
       },
-    ],
-    defaultAgentId: 'claude-code',
+    ].filter((agent) => fake.claudeListed || agent.agentId !== 'claude-code'),
+    defaultAgentId: 'codex',
   }),
   fetchSession: async (): Promise<SessionResponse> => {
     fake.fetches++;
     return {
-      session: { id: 'ses_1', workspaceId: 'ws_1', state: 'idle', driver: fake.driver, adapterRefs: {} },
+      session: { id: 'ses_1', workspaceId: 'ws_1', state: 'idle', driver: fake.driver, adapterRefs: {}, ...(fake.agentId === undefined ? {} : { agentId: fake.agentId }) },
       terminal: { available: true },
     } as unknown as SessionResponse;
   },
@@ -87,7 +104,7 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
   },
   sendMessage: async (_wsId: string, _sesId: string, text: string) => {
     fake.sent.push(text);
-    return { messageId: 'msg_x', queued: false };
+    return fake.sendResult();
   },
   cancelSession: async () => undefined,
 }));
@@ -134,7 +151,8 @@ const { ChatApiError } = await import('../src/chat/chat-api');
 let seq = 0;
 const event = (type: string, payload: Record<string, unknown>) =>
   ({ id: `evt_${++seq}`, seq, at: '2026-10-01T12:00:00.000Z', type, workspaceId: WS, streamId: SES, payload }) as unknown as CoreEvent;
-const created = () => event('session.created', { session: { id: SES, workspaceId: WS, state: 'idle', driver: 'ui' } });
+const created = () =>
+  event('session.created', { session: { id: SES, workspaceId: WS, state: 'idle', driver: 'ui', ...(fake.agentId === undefined ? {} : { agentId: fake.agentId }) } });
 const driverChanged = (driver: SessionDriver) => event('session.driver_changed', { sessionId: SES, driver, previous: driver === 'ui' ? 'terminal' : 'ui', cause: 'user' });
 
 /** Lets queries, effects and the panel's dynamic imports run. */
@@ -176,6 +194,9 @@ beforeEach(() => {
   fake.focused = 0;
   fake.connections = 0;
   fake.sent = [];
+  fake.agentId = undefined;
+  fake.claudeListed = true;
+  fake.sendResult = () => Promise.resolve({ messageId: 'msg_x', queued: false });
 });
 
 afterEach(() => {
@@ -297,5 +318,68 @@ describe('a dropped remote connection needs no new UI (CAP-24, epic 19 story 19.
     // Resent over what would be a fresh connection server-side (`agentFor`'s own `begin()`, a connect-time concern
     // this view never has to know about): the client's only job is to resend the same text.
     expect(fake.sent).toEqual(['keep going']);
+  });
+});
+
+describe('a chat whose agent was removed opens read-only (story 21.4)', () => {
+  const permissionRequested = () =>
+    event('permission.requested', {
+      sessionId: SES,
+      requestId: 'perm_1',
+      toolCall: { toolCallId: 'call_1', title: 'Run ls', kind: 'execute', command: 'ls' },
+      alwaysAllowScope: null,
+      cautionLevel: 'ask_for_commands',
+    });
+  const waiting = () => event('session.state_changed', { sessionId: SES, state: 'waiting' });
+
+  it('shows the banner, no composer, no controls that start work, and inert permission cards', async () => {
+    fake.agentId = 'my-custom-agent';
+    fake.events = [created(), event('session.message_completed', { messageId: 'msg_1', role: 'user', content: 'hello' }), permissionRequested(), waiting()];
+    await mount();
+
+    expect((await screen.findByTestId('agent-removed-banner')).textContent).toBe('This agent was removed. You can read this chat, but not continue it.');
+    expect(screen.queryByTestId('composer')).toBeNull();
+    expect(screen.queryByTestId('permission-mode-picker')).toBeNull();
+    expect(screen.queryByTestId('driver-toggle')).toBeNull();
+    // Continue with another agent stays: the server hands a removed agent's chat over.
+    expect(screen.getByTestId('session-menu')).toBeTruthy();
+    // The transcript stays readable.
+    expect(screen.getByTestId('transcript').textContent).toContain('hello');
+    const card = screen.getByTestId('permission-card');
+    const answers = [...card.querySelectorAll('button')];
+    expect(answers.length).toBeGreaterThan(0);
+    for (const answer of answers) expect(answer.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('a chat whose agent is listed keeps its composer and controls', async () => {
+    fake.agentId = 'claude-code';
+    fake.events = [created(), permissionRequested(), waiting()];
+    await mount();
+
+    expect(await screen.findByTestId('session-menu')).toBeTruthy();
+    expect(screen.queryByTestId('agent-removed-banner')).toBeNull();
+    expect(screen.getByTestId('composer')).toBeTruthy();
+    expect(screen.getByTestId('permission-mode-picker')).toBeTruthy();
+    expect(screen.getByTestId('driver-toggle')).toBeTruthy();
+    expect(screen.getByTestId('session-menu')).toBeTruthy();
+    const card = screen.getByTestId('permission-card');
+    expect(card.querySelector('button')?.getAttribute('aria-disabled')).not.toBe('true');
+  });
+
+  it('a send refused with 409 agent_removed says so and closes the chat', async () => {
+    fake.agentId = 'claude-code';
+    await mount();
+    fake.claudeListed = false;
+    fake.sendResult = () => Promise.reject(new ChatApiError('This agent was removed.', 409, 'agent_removed'));
+    const input = composerInput();
+    if (input === null) throw new Error('no composer input');
+    fireEvent.change(input, { target: { value: 'still there?' } });
+    fireEvent.submit(screen.getByTestId('composer'));
+    await flush();
+
+    expect(fake.sent).toEqual(['still there?']);
+    expect(screen.getByTestId('session-action-error').textContent).toBe('This agent was removed.');
+    expect(screen.getByTestId('agent-removed-banner')).toBeTruthy();
+    expect(screen.queryByTestId('composer')).toBeNull();
   });
 });

@@ -48,6 +48,8 @@ export function customAgentDescriptor(input: { agentId: AgentId; displayName: st
     modeFixedAtStart: true,
     modesNote: 'An agent you add yourself runs in Ask only.',
     needsProjectTrust: true,
+    // Orchestration refuses it as a worker (`orchestration-dispatch.ts`), in these words (E21-R4).
+    interactiveOnly: 'An agent you add yourself works only in chats you drive, never as a worker in an orchestrated run.',
     skillsFolder: CUSTOM_SKILLS_FOLDER,
     sendNow: 'interrupt',
   };

@@ -10,9 +10,9 @@ import { CHAT_AGENTS_QUERY_KEY, fetchChatAgents } from './chat-api';
  * without a reload.
  */
 export function useChatAgents(wsId?: string) {
-  // Story 11: an agent's default model, set in any tab. A project's trust changing changes which agents can start a chat in it (epic 12, 12.3).
+  // Story 11: an agent's default model, set in any tab. A custom agent added, changed or removed in any tab (21.4: its chats close). A project's trust changing changes which agents can start a chat in it (epic 12, 12.3).
   useEventInvalidation((event) =>
-    event.type.startsWith('agent.') || event.type === 'settings.agent_default_model_changed' || event.type === 'workspace.bmad_scripts_trusted' ? [CHAT_AGENTS_QUERY_KEY] : [],
+    event.type.startsWith('agent.') || event.type === 'settings.agent_default_model_changed' || event.type === 'settings.custom_agent_changed' || event.type === 'workspace.bmad_scripts_trusted' ? [CHAT_AGENTS_QUERY_KEY] : [],
   );
   return useQuery({
     queryKey: wsId === undefined ? CHAT_AGENTS_QUERY_KEY : [...CHAT_AGENTS_QUERY_KEY, wsId],

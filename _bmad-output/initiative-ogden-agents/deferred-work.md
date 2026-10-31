@@ -1040,3 +1040,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-bring-your-own-agent/story-epic-contracts-and-stubs-custom-agent-rows-live-registry-rou-plan.md`
   summary: Removing or editing a custom agent leaves its running chats on the old process; entry 4 decides whether removal stops them along with the read-only "This agent was removed." view.
   evidence: `packages/server/src/start-custom-agents.ts` re-registers or unregisters only; sessions keep their live process until they end.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-bring-your-own-agent/story-custom-agent-guards-ask-only-project-trust-no-orchestration-plan.md`
+  summary: Resolved in 21.4's review: a custom agent removed while one of its chats works now stops that turn as Stop does, and its queue is never sent. Still open: the install-wide team roster default (a file, not the database) can name a removed id.
+  evidence: 21.2 left this to entry 4; 21.4 refuses new messages (`AgentRemovedError`) but `start-custom-agents.ts` `remove` only unregisters. The install-wide team roster default (a file, not the database) can also still name a removed id (21.3 audit finding 3).

@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { API_ROUTES, ApiErrorBody, apiPath, ChatAgentsResponse, CustomAgentListResponse, CustomAgentResponse, CustomAgentTestResponse, SessionResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createMemorySecretStore } from '@ogden-agents/adapters';
+import { createCustomAgent, createMemorySecretStore, customAgentDescriptor } from '@ogden-agents/adapters';
+import { supportsUnattendedBuild } from '../src/build-agent-sandbox.js';
 import { SecretsUnavailableError, type SecretStorePort } from '@ogden-agents/core';
 import { FAKE_AGENT, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -345,5 +346,102 @@ describe('Test starts a custom agent once and says what it offers (epic 21 story
     expect(body).not.toContain(KEY);
     const missing = await request(server, tab, 'POST', apiPath(API_ROUTES.customAgentTest, { agentId: 'custom-nobody' }));
     expect(missing.status).toBe(404);
+  });
+});
+
+describe('a custom agent stays in its limits, and its chats outlive it (epic 21 story 21.4)', () => {
+  it('is Ask only, refuses Auto, says it is never an orchestration worker, and needs a trusted project', async () => {
+    const { server, tab, register } = await setUp();
+    expect((await register({ displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    const agent = ChatAgentsResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.chatAgents)).json()).agents.find((each) => each.agentId === 'custom-my-agent');
+    expect(agent).toMatchObject({ permissionModes: ['ask'], interactiveOnly: expect.stringContaining('never as a worker') });
+
+    // An untrusted project refuses a new chat with it, saying what to do.
+    const untrusted = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: temp('ogden-agents-repo-') })).json()).workspace.id;
+    const refused = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceSessions, { wsId: untrusted }), { agentId: 'custom-my-agent' });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('project_not_trusted');
+
+    const { wsId, chatWith } = await trustedProject(server, tab);
+    const session = await chatWith('custom-my-agent');
+    const auto = await request(server, tab, 'PUT', apiPath(API_ROUTES.sessionPermissionMode, { wsId, sesId: session.id }), { mode: 'auto' });
+    expect(auto.status).toBe(409);
+    expect(ApiErrorBody.parse(await auto.json()).error.code).toBe('mode_unavailable');
+    // Skip all is refused before the mode check, at Developer mode (403): either way the chat stays in Ask.
+    const skipAll = await request(server, tab, 'PUT', apiPath(API_ROUTES.sessionPermissionMode, { wsId, sesId: session.id }), { mode: 'skip_all', confirm: true });
+    expect(skipAll.status).toBe(403);
+    expect(server.core.entities.getSession(session.id)!.permissionMode).toBe('ask');
+  });
+
+  it("can't take the worker or reviewer role on a team: the roster says why, in its own words", async () => {
+    const { server, tab, register } = await setUp();
+    expect((await register({ displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    const view = await request(server, tab, 'GET', API_ROUTES.teamRosterDefault);
+    expect(view.status).toBe(200);
+    expect(JSON.stringify(await view.json())).toContain('My Agent is never given instructions by a manager. An agent you add yourself works only in chats you drive');
+  });
+
+  it('never builds unattended: its port declares no unattended build, so the build check refuses it', async () => {
+    const port = createCustomAgent({ descriptor: customAgentDescriptor({ agentId: 'custom-my-agent', displayName: 'My Agent' }), commandLine: FAKE_COMMAND });
+    expect(port.unattendedBuild).not.toBe(true);
+    expect(supportsUnattendedBuild(port)).toBe(false);
+  });
+
+  it('removed while it works, its turn stops as Stop does and what was queued is never sent to it', async () => {
+    const { server, tab, register } = await setUp();
+    expect((await register({ displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    const { wsId, chatWith, send } = await trustedProject(server, tab);
+    const session = await chatWith('custom-my-agent');
+    await send(session.id, 'permission');
+    await waitFor(() => stateOf(server, session.id) === 'waiting', 'the permission card', 15_000);
+    await send(session.id, 'queued after the card');
+    expect((await request(server, tab, 'DELETE', apiPath(API_ROUTES.customAgent, { agentId: 'custom-my-agent' }))).status).toBe(204);
+    await waitFor(() => stateOf(server, session.id) === 'idle', 'the chat stopped', 15_000);
+    const userMessages = eventsOf(server, session.id).flatMap((event) => (event.type === 'session.message_completed' && event.payload.role === 'user' ? [event.payload.content] : []));
+    expect(userMessages).not.toContain('queued after the card');
+    const refused = await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId, sesId: session.id }), { text: 'more' });
+    expect(refused.status).toBe(409);
+  });
+
+  it("removed, its chat is still read-only after a restart", async () => {
+    const dataDir = temp('ogden-agents-data-');
+    const secrets = createMemorySecretStore();
+    const first = await startTestServer({ dataDir, secrets });
+    servers.push(first);
+    const firstTab = await signIn(first);
+    expect((await request(first, firstTab, 'POST', API_ROUTES.customAgents, { displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    const { wsId, chatWith } = await trustedProject(first, firstTab);
+    const session = await chatWith('custom-my-agent');
+    expect((await request(first, firstTab, 'DELETE', apiPath(API_ROUTES.customAgent, { agentId: 'custom-my-agent' }))).status).toBe(204);
+    await first.close();
+
+    const server = await startTestServer({ dataDir, secrets });
+    servers.push(server);
+    const tab = await signIn(server);
+    expect((await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceSession, { wsId, sesId: session.id }))).status).toBe(200);
+    const refused = await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId, sesId: session.id }), { text: 'hello again' });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('agent_removed');
+  });
+
+  it('removed, its chat is still readable, and a message to it is refused 409 agent_removed with nothing sent', async () => {
+    const { server, tab, register } = await setUp();
+    expect((await register({ displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    const { wsId, chatWith, send } = await trustedProject(server, tab);
+    const session = await chatWith('custom-my-agent');
+    await send(session.id, 'hi');
+    await waitFor(() => stateOf(server, session.id) === 'idle' && replies(server, session.id).length > 0, 'the reply to hi', 15_000);
+
+    expect((await request(server, tab, 'DELETE', apiPath(API_ROUTES.customAgent, { agentId: 'custom-my-agent' }))).status).toBe(204);
+    const read = await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceSession, { wsId, sesId: session.id }));
+    expect(read.status).toBe(200);
+    expect(SessionResponse.parse(await read.json()).session.agentId).toBe('custom-my-agent');
+    expect(replies(server, session.id)).toEqual(['Hello from the fake agent.']);
+
+    const before = eventsOf(server, session.id).length;
+    const refused = await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId, sesId: session.id }), { text: 'still there?' });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error).toMatchObject({ code: 'agent_removed', message: 'This agent was removed.' });
+    expect(eventsOf(server, session.id).length).toBe(before);
   });
 });

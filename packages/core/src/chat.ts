@@ -164,6 +164,7 @@ export function createChat(options: ChatOptions): Chat {
     removeQueuedMessage: sendNow.removeQueuedMessage,
     sendQueuedMessageNow: sendNow.sendQueuedMessageNow,
     cancel: turns.cancel,
+    stopAgent: turns.stopAgent,
     switchDriver: async (workspaceId, sessionId, driver) => withAgentId(await terminal.switchDriver(workspaceId, sessionId, driver)),
     attachTerminal: terminal.attachTerminal,
     setPermissionMode: (workspaceId, sessionId, mode, options) => withAgentId(modes.setPermissionMode(workspaceId, sessionId, mode, options)),

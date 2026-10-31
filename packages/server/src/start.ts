@@ -341,6 +341,8 @@ async function listenAndAnnounce({
   );
   // The custom ACP agents the user brings (epic 21, stories 21.1 and 21.2) join the live registry, the unwrapped
   // ports and the descriptors as a wired agent does; the stored ones are registered now, before chats and builds.
+  // Bound to `chat.stopAgent` once the chat exists, below.
+  const stopChats: { current: ((agentId: AgentId) => void) | undefined } = { current: undefined };
   const customAgents = createCustomAgentsWiring({
     store: core.customAgents(secrets),
     agents,
@@ -351,6 +353,7 @@ async function listenAndAnnounce({
     chatEnv,
     isAgentIdInUse: (agentId) => core.entities.isAgentIdInUse(agentId),
     log,
+    stopChats,
   });
   await customAgents.load();
   /** A session's agent id: its own, else (stored before agents could be chosen) Claude Code's. */
@@ -393,6 +396,7 @@ async function listenAndAnnounce({
     remote,
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
+  stopChats.current = (agentId) => chat.stopAgent(agentId);
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
   const { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
     vcs,

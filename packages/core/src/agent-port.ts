@@ -294,6 +294,11 @@ export interface AgentPort {
   /** Plain words on why it builds only with the user watching (epic 17), shown in the Build picker; no dashes. Only with `unattendedBuild` false. */
   readonly attendedOnlyReason?: string | undefined;
   /**
+   * Plain words on why the agent runs only on this computer (epic 21 story 21.6): set, a chat or build naming a
+   * remote machine is refused before any connection, so nothing it is given here (an endpoint key) leaves this computer.
+   */
+  readonly localOnlyReason?: string | undefined;
+  /**
    * Starts the agent and a new session in `cwd`. Rejects with an
    * {@link AgentError} (code `agent_unavailable` when it can't be started).
    */

@@ -188,6 +188,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     // Takes the build's sandbox at start: through its own build start when verified (epic 17), or through `sessionMeta` (Claude Code).
     unattendedBuild: quirks.buildSession !== undefined ? quirks.buildSession.verified : quirks.sessionMeta !== undefined,
     ...(quirks.attendedOnlyReason === undefined ? {} : { attendedOnlyReason: quirks.attendedOnlyReason }),
+    ...(quirks.localOnlyReason === undefined ? {} : { localOnlyReason: quirks.localOnlyReason }),
 
     async startSession(input) {
       const opened = await open(input, { kind: 'new' });

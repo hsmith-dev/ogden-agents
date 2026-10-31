@@ -128,6 +128,10 @@ export function createAgents(
       // never reused across restarts -- fail closed with `agent_unavailable` when this install never wired the
       // capability at all (every existing test harness and installation that doesn't wire CAP-24, no ripple).
       let withRemote = input;
+      // An agent tied to this computer (the Local model: its endpoint and key) never runs remotely, chat or build (21.6).
+      if ((machineId !== null || input.remote !== undefined) && agent.localOnlyReason !== undefined) {
+        throw new AgentError('agent_unavailable', agent.localOnlyReason);
+      }
       if (machineId !== null) {
         if (ctx.options.remote === undefined) throw new AgentError('agent_unavailable', `${agent.displayName} can't run on a remote machine: remote execution isn't set up.`);
         withRemote = { ...input, remote: await ctx.options.remote.connect(machineId) };

@@ -186,4 +186,34 @@ describe('a plain chat targeting a remote machine (CAP-24, epic 19 story 19.7)',
     // left `working` and never run locally instead (defense in depth, the I/O matrix's own "changed host key" row).
     expect(errors.map(([, error]) => error.code)).toEqual(['agent_failed']);
   });
+  it('refuses an agent tied to this computer (the Local model) before any connection, so its key never leaves (21.6)', async () => {
+    const core = openTestCore();
+    const agent = recordingAgent();
+    const port: AgentPort = { ...agent.port, localOnlyReason: 'Runs only on this computer.' };
+    const fake = fakeRemote();
+    const { chat, workspace, errors } = setUp(core, port, fake.remote);
+    const session = await chat.createChatSession(workspace.id, { machineId: newId('mach') });
+
+    chat.sendMessage(workspace.id, session.id, 'hello');
+    await chat.settled();
+
+    expect(fake.connects).toEqual([]);
+    expect(agent.starts).toEqual([]);
+    expect(core.entities.getSession(session.id)!.state).toBe('error');
+    expect(errors.map(([, error]) => [error.code, error.message])).toEqual([['agent_unavailable', 'Runs only on this computer.']]);
+  });
+
+  it('a local chat with that agent is unchanged (21.6)', async () => {
+    const core = openTestCore();
+    const agent = recordingAgent();
+    const port: AgentPort = { ...agent.port, localOnlyReason: 'Runs only on this computer.' };
+    const { chat, workspace, errors } = setUp(core, port, fakeRemote().remote);
+    const session = await chat.createChatSession(workspace.id);
+
+    chat.sendMessage(workspace.id, session.id, 'hello');
+    await chat.settled();
+
+    expect(errors).toEqual([]);
+    expect(agent.starts).toHaveLength(1);
+  });
 });

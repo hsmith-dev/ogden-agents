@@ -8,7 +8,7 @@
 import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { API_ROUTES, ApiErrorBody, apiPath, BuildAgentsResponse, ChatAgentsResponse, CustomAgentListResponse, CustomAgentResponse, CustomAgentTestResponse, SessionResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
+import { API_ROUTES, ApiErrorBody, apiPath, BuildAgentsResponse, ChatAgentsResponse, CustomAgentListResponse, CustomAgentResponse, CustomAgentTestResponse, SessionResponse, UNKNOWN_BUILD_AGENT_MESSAGE, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createCustomAgent, createMemorySecretStore, customAgentDescriptor } from '@ogden-agents/adapters';
 import { supportsUnattendedBuild } from '../src/build-agent-sandbox.js';
@@ -500,6 +500,7 @@ describe('epic 21 story 21.6: a custom agent chats only, and Build never offers 
     // Asked for by name anyway, a build with it is refused and starts nothing.
     const refused = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1', agent: 'custom-my-agent', mode: 'attended' });
     expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: { message: string } }).error.message).toBe(UNKNOWN_BUILD_AGENT_MESSAGE);
     expect(server.core.entities.listSessions(wsId)).toEqual([]);
   });
 });

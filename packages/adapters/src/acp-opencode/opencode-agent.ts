@@ -64,6 +64,8 @@ export interface LocalAgentOptions {
 }
 
 /** The Build picker's line for the Local model (epic 21, story 21.6): attended only, every tool call a card (plain words, no dashes). */
+/** The Local model never runs on a remote machine: its endpoint and key stay on this computer (21.6). */
+export const LOCAL_ONLY_REASON = 'The Local model runs only on this computer, so its endpoint and key never leave it.';
 export const LOCAL_ATTENDED_ONLY_REASON = 'The Local model builds only with you watching, and every tool call asks you first.';
 
 export function createLocalAgent(options: LocalAgentOptions): AgentPort {
@@ -77,6 +79,7 @@ export function createLocalAgent(options: LocalAgentOptions): AgentPort {
   };
   const quirks: AcpAgentQuirks = {
     attendedOnlyReason: LOCAL_ATTENDED_ONLY_REASON,
+    localOnlyReason: LOCAL_ONLY_REASON,
     launch({ env }) {
       let server: LocalServerCommand | undefined;
       if (options.server !== undefined) server = options.server();

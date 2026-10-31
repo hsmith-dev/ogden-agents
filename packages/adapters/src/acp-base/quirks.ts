@@ -124,6 +124,8 @@ export interface AcpAgentQuirks {
   buildSession?: AcpBuildSessionQuirk | undefined;
   /** Why it builds only with the user watching, in plain words (the Build picker's line), when it cannot take a build's sandbox (epic 17). */
   attendedOnlyReason?: string | undefined;
+  /** Plain words on why the agent runs only on this computer; set, a remote chat or build is refused (21.6). */
+  localOnlyReason?: string | undefined;
   /** Its session modes that ask as much as Ask (or more); any other, known or not, asks less. */
   askingModeIds: readonly string[];
   /**

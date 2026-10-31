@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { AgentError, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startFakeServer, type FakeServer } from '../../../tests/fixtures/fake-openai-server.mjs';
-import { createLocalAgent, localHome, opencodeChatEnv, opencodeConfig, writeOpenCodeConfig, type LocalModel } from '../src/index.js';
+import { createLocalAgent, LOCAL_ATTENDED_ONLY_REASON, LOCAL_ONLY_REASON, withEndpointWatch, localHome, opencodeChatEnv, opencodeConfig, writeOpenCodeConfig, type LocalModel } from '../src/index.js';
 
 const FAKE_OPENCODE = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-opencode.mjs');
 const KEY = 'sk-ogden-test-dummy-key-4d2f81';
@@ -95,6 +95,16 @@ describe("the Local model's chat port (epic 14 story 14.2)", () => {
     expect(agent.modeFixedAtStart).toBe(true);
     expect(agent.terminalResume).toBeUndefined();
     expect(agent.skillInvocation('bmad-help', 'an idea')).toBe('/bmad-help an idea');
+  });
+
+  it('runs only on this computer and builds only attended, and the endpoint watch keeps both (21.6)', () => {
+    const agent = createLocalAgent({ dataDir: '/nowhere' });
+    const watched = withEndpointWatch(agent, {});
+    for (const port of [agent, watched]) {
+      expect(port.localOnlyReason).toBe(LOCAL_ONLY_REASON);
+      expect(port.attendedOnlyReason).toBe(LOCAL_ATTENDED_ONLY_REASON);
+      expect(port.unattendedBuild).toBe(false);
+    }
   });
 
   it('streams a reply from the endpoint, with no key and no account, and the endpoint saw only a chat request', async () => {

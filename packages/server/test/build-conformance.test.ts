@@ -322,9 +322,8 @@ describe.each(ROWS)('every agent that builds: $id', { timeout: 90_000 }, (row) =
     expect(ended.run.blockedCode).toBe('unclear_intent');
   });
 
-  it("a rejected key or an expired sign in ends the run blocked in that agent's own words, never retried by itself, and Retry is offered", async () => {
-    // The Local model has no sign in, and Ogden probes its endpoint (key included) before the harness starts: a refused key never reaches a build's turn.
-    if (row.id === 'local') return;
+  // The Local model has no sign in, and Ogden probes its endpoint (key included) before the harness starts: a refused key never reaches a build's turn.
+  it.skipIf(row.id === 'local')("a rejected key or an expired sign in ends the run blocked in that agent's own words, never retried by itself, and Retry is offered", async () => {
     const s = await setup(row, { env: { FAKE_ACP_BUILD_FAIL: 'auth' } });
     const { run, session } = await go(s, 0);
     const ended = await s.settled();
@@ -344,9 +343,8 @@ describe.each(ROWS)('every agent that builds: $id', { timeout: 90_000 }, (row) =
     expect(retry.status).toBe(200);
   });
 
-  it('a usage limit ends the run blocked in that agent\'s words, with the limit named', async () => {
-    // The Local model runs on the person's own server: it has no usage limit to hit.
-    if (row.id === 'local') return;
+  // The Local model runs on the person's own server: it has no usage limit to hit.
+  it.skipIf(row.id === 'local')('a usage limit ends the run blocked in that agent\'s words, with the limit named', async () => {
     const s = await setup(row, { env: { FAKE_ACP_BUILD_FAIL: 'usage', FAKE_ACP_BUILD_FAIL_TEXT: row.usageText } });
     const { answered } = await go(s, 0);
     await answered;

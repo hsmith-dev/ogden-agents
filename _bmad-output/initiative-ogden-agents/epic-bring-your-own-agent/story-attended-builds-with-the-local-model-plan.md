@@ -5,7 +5,7 @@ ticket: '6'
 created: '2026-10-31'
 status: 'built'
 review: 'quick'
-lenses_ran: []
+lenses_ran: ['quick']
 route: 'full'
 route_source: 'auto'
 baseline_revision: 'b9350855'
@@ -51,4 +51,16 @@ context:
 
 - Verified: `pnpm typecheck` clean; `pnpm test` 404 files passed (5112 passed, 8 skipped).
 - Open for the live check (21.8): whether OpenCode's skill invocation and tool use in a worktree match chat.
-- Review: not yet run; next step is a fresh code-only review, triage logged here.
+- Verified after review fixes: `chat-remote.test.ts` 7 passed; `custom-agents` + `build-conformance` 118 passed, 2 skipped.
+
+## Review Triage Log
+
+### Pass 1 (quick lens, fresh code-only subagent), 2026-10-31: medium 2, low 3; no unattended Local path, no custom-agent build path
+
+| # | Finding | Verdict | Route |
+|---|---|---|---|
+| 1 | The fake OpenCode asks on every tool call whatever Ogden's permission config says, so the Local row's "every call is a card" can't fail | medium | defer: needs the fake to honour `OPENCODE_CONFIG` permissions; logged in deferred-work |
+| 2 | Local could be picked for a remote build (and, since epic 19, a remote chat): its endpoint key would go to the remote host | medium | patch: `localOnlyReason` on the agent port (acp-base quirk, kept by `withEndpointWatch`), refused in `chat/agents.ts` before any connection for chats and builds; tests in `chat-remote.test.ts` and `acp-opencode.test.ts` |
+| 3 | A project whose default chat agent is Local now defaults to Local for builds, so Build all ready (unattended) refuses where it used Claude Code | low | accept: same as Grok and Antigravity; noted in the changelog |
+| 4 | Custom-agent build refusal checked only a 400 | low | patch: asserts `UNKNOWN_BUILD_AGENT_MESSAGE` |
+| 5 | Local's auth and usage cases returned early and reported as passed | low | patch: `it.skipIf` |

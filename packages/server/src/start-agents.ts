@@ -52,7 +52,14 @@ import { testApiKeyCheck, testHooksLogFields, type TestHooks } from './test-hook
 export const CLAUDE_ACP_PATH_ENV = 'OGDEN_AGENTS_CLAUDE_ACP_PATH';
 
 /** Wires every agent the server registers, and what a chat runs each with. */
-export function wireAgents({ options, dataDir, log, hooks, core }: { options: StartOptions; dataDir: string; log: Logger; hooks: TestHooks; core: Core }) {
+/**
+ * Each custom agent's key, by its id, as the variable it reaches that agent's
+ * process under (epic 21, story 21.2; E21-R3, AD-16): filled by the custom
+ * agent wiring, read at every chat start, and never added to another agent.
+ */
+export type CustomKeyEnv = ReadonlyMap<AgentId, Readonly<Record<string, string>>>;
+
+export function wireAgents({ options, dataDir, log, hooks, core, customKeyEnv = new Map() }: { options: StartOptions; dataDir: string; log: Logger; hooks: TestHooks; core: Core; customKeyEnv?: CustomKeyEnv }) {
   // Install's source: the option, else (a test run only) a local fixture from the environment, which also ignores a dev install's adapter (story 9.7).
   const claudeInstallOption = options.claudeInstall ?? (hooks.claudeInstall === undefined ? undefined : { ...hooks.claudeInstall, devAdapter: false });
   // The adapter given, else a dev install's; else (read at each use) the one Install put in the data folder (story 9.3).
@@ -212,13 +219,14 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
    * (saved, else from this server's environment) joins only while its
    * subscription is known to be signed out (story 9.2), and no other agent's
    * key reaches it. Every case variant of a key's name is removed first, so
-   * Windows never sees two.
+   * Windows never sees two. A custom agent's own key (story 21.2) comes last,
+   * under its own variable, for that agent only.
    */
-  const chatEnv = (agentId: AgentId) => ({ ...withoutAgentKeys(agentEnv(), envKeys), ...homeEnvOf(agentId), ...agentSetup.agentEnv(agentId) });
+  const chatEnv = (agentId: AgentId) => ({ ...withoutAgentKeys(agentEnv(), envKeys), ...homeEnvOf(agentId), ...agentSetup.agentEnv(agentId), ...customKeyEnv.get(agentId) });
   /** The same, with the subscription state read again first when it is older than {@link SUBSCRIPTION_MAX_AGE_MS} (review F4). */
   const freshChatEnv = async (agentId: AgentId, env: Readonly<Record<string, string>>) => {
     await agentSetup.refreshIfStale(agentId, subscriptionMaxAgeMs);
-    return { ...withoutAgentKeys(env, envKeys), ...homeEnvOf(agentId), ...agentSetup.agentEnv(agentId) };
+    return { ...withoutAgentKeys(env, envKeys), ...homeEnvOf(agentId), ...agentSetup.agentEnv(agentId), ...customKeyEnv.get(agentId) };
   };
   /** The agent's terminal resume with {@link freshChatEnv} applied to each environment. */
   const withChatEnv = (agentId: AgentId, resume: AgentTerminalResume): AgentTerminalResume => {

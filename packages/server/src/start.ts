@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createAcpBuildRunner, createCustomAgent, customAgentDescriptor, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
@@ -29,7 +29,7 @@ import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERR
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
-import type { CustomAgents } from './custom-agent-routes.js';
+import { createCustomAgentsWiring } from './start-custom-agents.js';
 import { supportsUnattendedBuild } from './build-agent-sandbox.js';
 import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
 import { SHIPPED_ORCHESTRATION } from './orchestration-routes.js';
@@ -298,8 +298,10 @@ async function listenAndAnnounce({
     // The event carries the plain reason; the log also gets the target, URL and (on a mismatch) both hashes.
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
+  // Each custom agent's key as its chat environment sees it (story 21.2): filled by the custom agent wiring below.
+  const customKeyEnv = new Map<AgentId, Readonly<Record<string, string>>>();
   // Every agent is wired before the stored sessions are settled, as before story 6.9's split: a wiring error leaves the database untouched.
-  const { endpointApi, localModelPort, claudeSetup, secrets, remoteHosts, remoteMachines, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
+  const { endpointApi, localModelPort, claudeSetup, secrets, remoteHosts, remoteMachines, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core, customKeyEnv });
   const { localEndpoints, localModels } = endpointApi;
   // One git for builds and for Save the lessons (epic 7); built here (moved up from beside Plan and Board, story 19.7)
   // so the real remote capability below can share it, before `createChat` runs.
@@ -337,20 +339,20 @@ async function listenAndAnnounce({
     wirings.map(({ descriptor, agent: port }) => ({ descriptor, agent: descriptor.agentId === CLAUDE_CODE_AGENT_ID ? chatAgent : forChat(descriptor.agentId, port) })),
     { defaultAgentId: CLAUDE_CODE_AGENT_ID, legacyAgentId: CLAUDE_CODE_AGENT_ID },
   );
-  // A custom ACP agent the user registers (epic 21, story 21.1) joins the live registry, the unwrapped ports and the
-  // descriptors, as a wired agent does, through the same `forChat` wrapper (AD-16: the chat's environment only).
-  const customAgents: CustomAgents = {
-    // An id a stored chat or a project default still names is taken too: after a restart it must not bind to another program.
-    isRegistered: (agentId) => agents.get(agentId) !== undefined || core.entities.isAgentIdInUse(agentId),
-    env: (agentId) => chatEnv(agentId),
-    add({ agentId, displayName, commandLine }) {
-      const descriptor = customAgentDescriptor({ agentId, displayName });
-      const port = createCustomAgent({ descriptor, commandLine, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, { agentId, ...fields }) });
-      agents.add({ descriptor, agent: forChat(agentId, port) });
-      unwrapped.set(agentId, port);
-      descriptors.current = [...descriptors.current, descriptor];
-    },
-  };
+  // The custom ACP agents the user brings (epic 21, stories 21.1 and 21.2) join the live registry, the unwrapped
+  // ports and the descriptors as a wired agent does; the stored ones are registered now, before chats and builds.
+  const customAgents = createCustomAgentsWiring({
+    store: core.customAgents(secrets),
+    agents,
+    unwrapped,
+    descriptors,
+    keyEnv: customKeyEnv,
+    forChat,
+    chatEnv,
+    isAgentIdInUse: (agentId) => core.entities.isAgentIdInUse(agentId),
+    log,
+  });
+  await customAgents.load();
   /** A session's agent id: its own, else (stored before agents could be chosen) Claude Code's. */
   const agentIdOf = (session: Session): AgentId => session.agentId ?? agents.legacyAgentId;
   /** A session's agent as a chat runs it (epic 6 entry 8: a planning session's first message is in its own syntax). */

@@ -220,6 +220,8 @@ export const API_ERROR_CODES = [
   'remote_host_key_not_confirmed',
   /** Epic 21 (story 21.1): a custom agent's command can't be found or run (400); the message is the plain reason. Nothing was registered. */
   'custom_agent_command_invalid',
+  /** Story 21.2: no stored custom agent has that id (404). */
+  'custom_agent_not_found',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

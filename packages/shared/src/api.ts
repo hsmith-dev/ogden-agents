@@ -314,6 +314,8 @@ export const API_ROUTES = {
    * for a body that doesn't fit.
    */
   customAgents: `${API_BASE}/custom-agents`,
+  /** One custom agent (story 21.2): `PATCH` changes it, `DELETE` removes it and its key. */
+  customAgent: `${API_BASE}/custom-agents/:agentId`,
   /** `GET` → `OnboardingState`; `PATCH OnboardingState` → `OnboardingState` (9.5): whether Welcome is done. */
   onboarding: `${API_BASE}/onboarding`,
   /**

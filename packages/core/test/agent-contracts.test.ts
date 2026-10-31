@@ -120,6 +120,20 @@ describe('an agent descriptor (6.3)', () => {
     expect(registry.defaultAgentId).toBe('some-agent');
   });
 
+  it('removes an agent while it runs (story 21.2), never the default one', () => {
+    const registry = createAgentRegistry([registered('some-agent', port('Some Agent'))]);
+    registry.add(registered('other-agent', port('Other')));
+    expect(registry.remove('other-agent')).toBe(true);
+    expect(registry.agentIds).toEqual(['some-agent']);
+    expect(registry.get('other-agent')).toBeUndefined();
+    expect(registry.describe('other-agent')).toBeUndefined();
+    expect(registry.remove('other-agent')).toBe(false);
+    expect(() => registry.remove('some-agent')).toThrow(/can't be removed/);
+    // The id can be registered again once it is gone.
+    registry.add(registered('other-agent', port('Other')));
+    expect(registry.agentIds).toEqual(['some-agent', 'other-agent']);
+  });
+
   it("derives every agent's key variables, each once (AGENT_ENV_KEYS)", () => {
     const a = testDescriptor('a-agent', port('A'), SHAPES[2]);
     const b = testDescriptor('b-agent', port('B'));

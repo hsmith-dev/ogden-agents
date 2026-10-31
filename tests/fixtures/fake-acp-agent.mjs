@@ -59,6 +59,8 @@
 //                  registered agent a chat reached (epic 6, two agents at once),
 //                  then ` home=<value>` when FAKE_ACP_HOME_ENV names the
 //                  variable its home folder is in (6.3)
+//   "has-env <NAME>" replies `<NAME>=set ending <last 4>` or `<NAME>=unset`:
+//                  whether a variable reached it, never the whole value (21.2)
 //   "env"          replies with the CLAUDE_CODE_EXECUTABLE it was given
 //   "echo-env"     replies with its whole environment, `NAME=value` per line,
 //                  each value split across two chunks, and writes it to stderr
@@ -1048,6 +1050,12 @@ async function runPrompt(params, client, session) {
       const homeEnv = process.env.FAKE_ACP_HOME_ENV;
       const home = homeEnv ? ` home=${process.env[homeEnv] ?? '(unset)'}` : '';
       await say(client, params.sessionId, `agent=${process.env.FAKE_ACP_AGENT_NAME ?? 'default'}${home}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text.startsWith('has-env ')) {
+      const name = text.slice('has-env '.length).trim();
+      const value = process.env[name];
+      await say(client, params.sessionId, `${name}=${value ? `set ending ${value.slice(-4)}` : 'unset'}`);
       return { stopReason: 'end_turn' };
     }
     if (GROK && text === 'env') {

@@ -1,5 +1,6 @@
 export * from './agent-descriptor.js';
 export * from './agent-linked-commands.js';
+export * from './custom-agents.js';
 export * from './agent-models.js';
 export * from './agent-port.js';
 export * from './agent-setup.js';

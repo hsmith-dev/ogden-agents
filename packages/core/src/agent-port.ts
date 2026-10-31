@@ -463,6 +463,8 @@ export function effectiveDefaultAgent(agents: Pick<AgentRegistry, 'get' | 'defau
 export interface MutableAgentRegistry extends AgentRegistry {
   /** Adds `registered` after the agents already there. Throws (with the same words as construction) when it fails a check. */
   add(registered: RegisteredAgent): void;
+  /** Takes the agent registered under `agentId` out (story 21.2: a custom agent removed). Throws for the default agent; `false` when none was registered. */
+  remove(agentId: AgentId): boolean;
 }
 
 /** Throws (a wiring bug) when `registered` can't join the agents in `byId`: see {@link createAgentRegistry}. */
@@ -514,6 +516,10 @@ export function createAgentRegistry(
     add(registered) {
       checkRegistered(registered, byId);
       byId.set(registered.descriptor.agentId, registered);
+    },
+    remove(agentId) {
+      if (agentId === defaultAgentId) throw new Error(`agent registry: the default agent ${agentId} can't be removed`);
+      return byId.delete(agentId);
     },
   };
 }

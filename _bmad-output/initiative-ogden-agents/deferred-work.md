@@ -1034,3 +1034,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-bring-your-own-agent/story-tracer-bullet-register-a-fake-acp-agent-by-command-and-chat-plan.md`
   summary: A custom agent's tool raw-input shapes are unknown, so path-based (file-kind) auto-allow rules may match on the paths Ogden can see while the tool also names a path in a field Ogden doesn't know; decide in 21.5 whether custom agents get file-kind auto-allow at all.
   evidence: maybe-false, would be medium: `toolCallPaths` reads only the listed fields (acp-custom guesses `path`, `filePath`, `file_path`, `paths`, `pattern`, `glob`); settle by checking real OpenCode and Goose tool inputs in 21.5's contract tests.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-bring-your-own-agent/story-epic-contracts-and-stubs-custom-agent-rows-live-registry-rou-plan.md`
+  summary: Test (start the custom agent once and report what `initialize` advertises, or its own error in one sentence; E21-R2) moves from entry 2 to entry 3, built with the form that shows it.
+  evidence: Split to keep 21.2 one goal (rows, key and live registry); Test needs a new acp-base probe (spawn, `initialize`, stop) that no current adapter exposes.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-bring-your-own-agent/story-epic-contracts-and-stubs-custom-agent-rows-live-registry-rou-plan.md`
+  summary: Removing or editing a custom agent leaves its running chats on the old process; entry 4 decides whether removal stops them along with the read-only "This agent was removed." view.
+  evidence: `packages/server/src/start-custom-agents.ts` re-registers or unregisters only; sessions keep their live process until they end.

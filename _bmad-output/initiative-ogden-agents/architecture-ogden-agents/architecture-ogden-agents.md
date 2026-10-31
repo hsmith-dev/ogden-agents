@@ -22,7 +22,7 @@ The architecture is hexagonal. `packages/core` holds the domain: workspaces, ses
 | Layer | Package | Holds |
 |---|---|---|
 | Domain | `packages/core` | Entities, ports, event log, session and run state machines, verification rules |
-| Adapters | `packages/adapters` | `acp-*`, `buildrunner-acp`, `tickets-v7`, `bmad-catalog`, `sandbox-*`, `vcs-git`, `terminal-pty`, `secrets-keyring`, `notify-*`; proposed (AD-31 to AD-35): `screen-prompt-*`, `discovery-*`, `device-access-*`, `plan-limit-*` |
+| Adapters | `packages/adapters` | `acp-*`, `buildrunner-acp`, `tickets-v7`, `bmad-catalog`, `sandbox-*`, `vcs-git`, `terminal-pty`, `secrets-keyring`, `notify-*`; for AD-31 to AD-35: `screen-prompt-*`, `discovery-*`, `device-access-*`, `plan-limit-*` |
 | Delivery | `packages/server` | HTTP and WebSocket, the security gate, wiring, the launcher handshake |
 | UI | `packages/web` | React app; `packages/web/ui` is the design system |
 | Contract | `packages/shared` | Zod schemas and TypeScript types for every event, API shape and ID |
@@ -56,7 +56,7 @@ graph LR
   - Note (epic 6, user-approved 2026-10-02): server wiring holds a registry of `AgentPort` and `AgentSetupPort` by `AgentId`, and core looks up a session's agent through it; the agent list is agent-neutral data, and each agent declares the permission modes it supports. Core and shared name no agent id, and an architecture test enforces it. The shared ACP client lives in `packages/adapters/src/acp-base`; adapter naming stays `<port>-<variant>` (`acp-claude-code`, `acp-antigravity`, `setup-antigravity`). Built whatever epic 6's Antigravity spike decides; only `acp-antigravity` and `setup-antigravity` depend on a go (user, 2026-10-02). No rule changes.
   - Note (epic 12, user-approved 2026-10-04): Codex (`acp-codex`, `setup-codex`) and Grok (`acp-grok`, `setup-grok`) are v1.1 chat agents, each a descriptor plus quirks on `acp-base`. The quirks gain, agent-neutrally: `authenticate` at start, Deny chosen by option id when several are `reject_once`, a permission mode fixed at chat start and given in `_meta`, and a launch that receives the chat's mode and protected paths. An agent's own config folders come from its descriptor, so core still names no agent. No rule changes.
   - Note (CAP-24, architecture pass 2026-10-07, proposed alongside AD-24/25/26): a new core port, `RemoteHostPort`, joins the list — an install-level registry of configured remote machines (add/remove, connect, confirm-and-pin a host key, spawn a process with piped stdio, push/pull a worktree per AD-24), implemented by an adapter such as `remote-host-ssh`; core names no SSH library or client. Install-level because a machine is the user's own physical box, usable from any workspace (AD-2), not scoped to one project. Proposed alongside AD-24/25/26 and carries their status: the port shape is settled enough to adopt, but it is not wired to a real credential/host-key adapter until AD-26 (or whatever the user confirms in its place) is itself adopted.
-  - Note (CAP-27 to CAP-33, architecture pass 2026-10-31, proposed alongside AD-30 to AD-35): four core ports join the list: `ScreenPromptPort` (AD-31, adapters `screen-prompt-<cli>`), `SessionDiscoveryPort` (AD-32, `discovery-<agent>`), `DeviceAccessPort` (AD-34, `device-access-<variant>`: certificate issuance and interface enumeration) and `PlanLimitPort` (AD-35, `plan-limit-<agent>`). A custom ACP agent (CAP-27) needs no port: it is a user-defined `AgentDescriptor` on `acp-base` with `agentId` `custom-<slug>`, kept as a core-owned install-level row (AD-11) and added to the registry live. Its command is resolved like epic 12's linked command (absolute, runnable, never through a shell). Its optional key is `agent-api-key/custom-<slug>` (AD-16), passed in a variable whose name matches `^[A-Z][A-Z0-9_]*_API_KEY$` and is neither on the child-env allowlist nor a loader variable (`NODE_OPTIONS`, `LD_*`, `DYLD_*`, `PATH`). It offers Ask only, needs project trust, is `interactiveOnly` so orchestration refuses it as a worker, and its `AgentPort` never declares `unattendedBuild`. A removed custom agent's chats open read-only with a plain reason. Core still names no agent. Each note carries its AD's status.
+  - Note (CAP-27 to CAP-33, architecture pass 2026-10-31, adopted with AD-30 to AD-35): four core ports join the list: `ScreenPromptPort` (AD-31, adapters `screen-prompt-<cli>`), `SessionDiscoveryPort` (AD-32, `discovery-<agent>`), `DeviceAccessPort` (AD-34, `device-access-<variant>`: certificate issuance and interface enumeration) and `PlanLimitPort` (AD-35, `plan-limit-<agent>`). A custom ACP agent (CAP-27) needs no port: it is a user-defined `AgentDescriptor` on `acp-base` with `agentId` `custom-<slug>`, kept as a core-owned install-level row (AD-11) and added to the registry live. Its command is resolved like epic 12's linked command (absolute, runnable, never through a shell). Its optional key is `agent-api-key/custom-<slug>` (AD-16), passed in a variable whose name matches `^[A-Z][A-Z0-9_]*_API_KEY$` and is neither on the child-env allowlist nor a loader variable (`NODE_OPTIONS`, `LD_*`, `DYLD_*`, `PATH`). It offers Ask only, needs project trust, is `interactiveOnly` so orchestration refuses it as a worker, and its `AgentPort` never declares `unattendedBuild`. A removed custom agent's chats open read-only with a plain reason. Core still names no agent.
 
 ### AD-2 — Workspace is the top-level scope
 
@@ -79,7 +79,7 @@ graph LR
   - `npx ogden-agents` starts a detached server if none is running. The server runs until Quit in the UI, or a reboot.
   - When the server starts, any session whose process is gone becomes `idle` and is marked resumable.
   - Note (epic 5, 2026-10-01): an unattended run is not resumed. Quit with active runs (after one confirmation), a crash or a reboot leaves each run `blocked` with the reason `interrupted`, its worktree kept, and the user retries it by hand. No rule changes.
-  - Note (epic 13, 2026-10-04, user decision): in the desktop app (CAP-20) the Tauri shell starts the server as its sidecar and owns its life. Quitting the app stops a server and agents the app started, under Quit's busy rule; it never stops a server started by `npx ogden-agents` that the app attached to. A server the app started exits when its parent shell is gone. The npm route is unchanged. No tray icon in v1. Note (CAP-33, 2026-10-31, proposed): from v1.3 the app may show a tray or menu-bar icon (Tauri's built-in `tray-icon` feature) and register one global shortcut (`tauri-plugin-global-shortcut` 2.4.1). Both only open the window or quick entry and show the Needs you count (AD-31); neither starts or stops agents, and quitting still follows the busy rule. On Linux the shortcut works only under X11 and the tray opens from its menu (click events do not fire there). How they authenticate is the AD-15 CAP-33 note.
+  - Note (epic 13, 2026-10-04, user decision): in the desktop app (CAP-20) the Tauri shell starts the server as its sidecar and owns its life. Quitting the app stops a server and agents the app started, under Quit's busy rule; it never stops a server started by `npx ogden-agents` that the app attached to. A server the app started exits when its parent shell is gone. The npm route is unchanged. No tray icon in v1. Note (CAP-33, 2026-10-31, adopted): from v1.3 the app may show a tray or menu-bar icon (Tauri's built-in `tray-icon` feature) and register one global shortcut (`tauri-plugin-global-shortcut` 2.4.1). Both only open the window or quick entry and show the Needs you count (AD-31); neither starts or stops agents, and quitting still follows the busy rule. On Linux the shortcut works only under X11 and the tray opens from its menu (click events do not fire there). How they authenticate is the AD-15 CAP-33 note.
 
 ### AD-4 — One normalized session state
 
@@ -117,7 +117,7 @@ graph LR
   - Note (permission modes, 2026-10-02, user decision): each chat also has a permission mode (`ask`, `auto`, `skip_all`) stored on its session and changed only by core, each change a `session.permission_mode_changed`. While `driver = terminal` core also rejects a mode change (`driver_is_terminal`); the CLI starts in the chat's mode (`--permission-mode default|auto`, or `--dangerously-skip-permissions`). Turning Developer mode off hands a Skip-all terminal back to the chat (`session.driver_changed`, cause `developer_mode_off`) before the chat moves to Ask. (decision by user, 2026-10-02) Auto keeps protected files guarded: in Auto the CLI also gets `--settings` with ask rules for the protected paths. No rule change.
   - Note (default permission mode, 2026-10-04, user decision): a project can set the mode its new chats start in (`workspaces.default_permission_mode`, Ask when absent; the app-wide default for new projects is copied when a project is added). Core picks a new chat's starting mode in the same synchronous step that creates it: the project's default only when the chat's agent declares it, its sessions this run listed it, and, for Skip all, Developer mode is on; otherwise Ask with a note on `session.created` (`permissionModeNote`, optional). Restarts still put every existing chat back in Ask; a chat created after a restart starts in the default. Unattended builds don't use it. The terminal starts in the chat's mode as before. No rule change.
 
-  - Note (CAP-28, 2026-10-31, proposed with AD-31): terminal output is still never logged. The one sanctioned derived view is AD-31's masked, in-memory `ScreenPrompt`, served by one GET and dropped when its prompt resolves; its events carry ids only.
+  - Note (CAP-28, 2026-10-31, adopted with AD-31): terminal output is still never logged. The one sanctioned derived view is AD-31's masked, in-memory `ScreenPrompt`, served by one GET and dropped when its prompt resolves; its events carry ids only.
 
 ### AD-7 — Board data is fetched; ticket events only invalidate [ADOPTED]
 
@@ -141,7 +141,7 @@ graph LR
   - Note (story 11, user request 2026-10-04): a session carries an optional `model` (the agent's own model id; absent is the agent's own choice), set at creation from the project's default for its agent, else the install's, and changed only by core with `session.model_changed` {model, previous, cause user|agent}; per-agent install defaults and each agent's last model list live in `agent_settings`, per-project defaults in `workspaces.default_models` (carried by `workspace.settings_changed`), install changes as `settings.agent_default_model_changed`. Agents expose models agent-neutrally: an ACP session config option of category `model` (switched with `session/set_config_option` at the idle point before the next prompt), else a static descriptor list applied at spawn (restart to switch). Core and the UI name no model id. No rule changes.
   - Note (handoff, user decision 2026-10-04): a chat's `agentId` changes only when the user confirms continuing it with another agent, recorded as `session.agent_changed` (previous agent, the brief sent, whether the agent resumes its own session). Each agent's own session id stays an adapter ref (`agentSessionId@<agentId>`, AD-9). The brief is built by core from the session's events, masked with the shared secret patterns (AD-16), capped per agent's descriptor, and sent only after the user saw which provider receives it. No rule changes.
   - Note (CAP-24, architecture pass 2026-10-07, proposed alongside AD-24/25/26): a Run gains an optional `machineId` (`RemoteMachineId`, AD-9), null for a run on the local machine; a fan-out (AD-25) is recorded as several ordinary Runs — one per target machine, each with its own `machineId` — sharing one new optional `fanOutId` and one ticket ref. Neither field changes Run's existing one-outcome-per-Run shape (AD-8's `outcome` enum is unchanged, and a fan-out has no outcome of its own — only its member Runs do). A remote machine is install-level state (RemoteHostPort, AD-1 note), not a workspace-scoped entity, even though the Runs that use it stay scoped to their workspace as every Run already is (AD-2).
-  - Note (CAP-30, 2026-10-31, proposed with AD-33): rotation is a `session.rotated` event on the same session, like handoff's `session.agent_changed`; lineage is a read model over those and `orchestration.step_dispatched`, with no new column. Note (CAP-33, proposed): a chat may carry an optional `worktreePath` (a chat worktree created through `VcsPort` in the data directory, as AD-17's are), set at creation and never changed; its commit is local to its own branch and never pushed (AD-17 CAP-33 note). Note (CAP-33, proposed): attachments are files under the session in the data directory with a per-file size cap; events carry only `{ name, mediaType, size, sha256, ref }`; they are deleted with the workspace's history and sent as ACP `image` or `resource` content only to agents that advertised it, else as a `resource_link`.
+  - Note (CAP-30, 2026-10-31, adopted with AD-33): rotation is a `session.rotated` event on the same session, like handoff's `session.agent_changed`; lineage is a read model over those and `orchestration.step_dispatched`, with no new column. Note (CAP-33, adopted 2026-10-31): a chat may carry an optional `worktreePath` (a chat worktree created through `VcsPort` in the data directory, as AD-17's are), set at creation and never changed; its commit is local to its own branch and never pushed (AD-17 CAP-33 note). Note (CAP-33, adopted 2026-10-31): attachments are files under the session in the data directory with a per-file size cap; events carry only `{ name, mediaType, size, sha256, ref }`; they are deleted with the workspace's history and sent as ACP `image` or `resource` content only to agents that advertised it, else as a `resource_link`.
 
 ### AD-9 — Ogden Agents owns identity [ADOPTED]
 
@@ -231,8 +231,8 @@ graph LR
   - Note (default permission mode, 2026-10-04, user decision): Skip all as a project's default, or as the app-wide default for new projects, is gated by the server like a chat's: Developer mode on and `confirm: true`, else 403 `developer_mode_required` / 400 `confirmation_required` and nothing written. The confirmation is per project and on the record (`workspace.settings_changed` with `skipAllConfirmed: true`); an app-wide Skip all reaches a new project as Ask waiting for that confirmation (notice `skip_all_unconfirmed`). Turning Developer mode off sets every project's Skip all default back to Ask in the same transaction (`workspace.settings_changed`, cause `developer_mode_off`, notice in its settings) and the app-wide one to Ask (a file: it also reads as Ask while Developer mode is off). A chat created from a Skip all default shows the red banner like any other. No rule change.
   - Note (story 2.1, amending story 1.4's cookie): browsers send cookies for `127.0.0.1` to every port on it, so the session cookie and its signing key `auth.key` are retired; a leftover `auth.key` is deleted at start and old cookies are ignored. The page's boot script (a same-origin file, not inline) strips `#c=` from the URL with `history.replaceState`, exchanges the code, and keeps the token in memory and `sessionStorage`, so a reload keeps the tab connected, while a new tab or a bookmark has no token and shows the app's own "Open Ogden Agents" state. New tab in the sidebar footer asks `POST /api/launch-codes` (token and Origin required) for a fresh launch link.
   - Note (epic 13, 2026-10-04, user decision): AD-15 in a webview. The desktop shell gets a launch URL through the launcher (find, attach, handshake) with the launcher token and opens its window on `/#c=<code>`. The webview's origin is the server's own and gets no Tauri IPC or capability; navigation is locked to that origin and external links open in the system browser. The server's CSP is kept and no remote content loads. The known limit of the launch URL on a process command line does not apply to the app. No rule change.
-  - Note (CAP-31, 2026-10-31, proposed): AD-34 adds one opt-in, off-by-default device listener with its own device tokens, a route allowlist and body rules enforced in core; loopback and the tab-token flow are unchanged. No terminal or pane byte stream is reachable from it; pane input only as an AD-30 `answer`. Until AD-34 is adopted, the loopback-only rule above stands unamended.
-  - Note (CAP-33, 2026-10-31, proposed): the desktop shell's tray and quick entry authenticate as ordinary tabs: the shell exchanges its own launch code (`/#c=`) for a tab token held only in Rust memory and reads the Needs you model with it; quick entry is a same-origin window opened on its own `/#c=<code>`. No Tauri IPC is added and the launcher token still opens only the handshake.
+  - Note (CAP-31, 2026-10-31, adopted): AD-34 adds one opt-in, off-by-default device listener with its own device tokens, a route allowlist and body rules enforced in core; loopback and the tab-token flow are unchanged. No terminal or pane byte stream is reachable from it; pane input only as an AD-30 `answer`. AD-34 is adopted (2026-10-31); the loopback-only rule above holds for everything else.
+  - Note (CAP-33, 2026-10-31, adopted): the desktop shell's tray and quick entry authenticate as ordinary tabs: the shell exchanges its own launch code (`/#c=`) for a tab token held only in Rust memory and reads the Needs you model with it; quick entry is a same-origin window opened on its own `/#c=<code>`. No Tauri IPC is added and the launcher token still opens only the handshake.
   - Known limit: on a computer shared by several accounts, another local user can see the launch URL (with its single-use code) on the process command line while the browser opens it (macOS; Linux without `hidepid`) and race to redeem it. Mitigated by 60-second single-use codes; an install is for one user.
 
 ### AD-16 — Secrets [ADOPTED]
@@ -260,7 +260,7 @@ graph LR
   - After a run, core runs verification before the UI may show `built`: plan status, an independent test re-run, and a non-empty diff.
   - Merging and `done` happen only through the approve action. If the merge conflicts, the run is blocked as needing a rebase. It is never force-merged.
   - Note (epic 7, 2026-10-02): besides approve's merge, Ogden's only commit is **Save the lessons**, made only when the user clicks it: exactly `AGENTS.md` and one retrospective file, on the branch the main checkout has checked out, locally, never pushed; refused while a merge or rebase is in progress. No rule changes.
-  - Note (CAP-33, 2026-10-31, proposed): a chat may work in its own worktree, created through `VcsPort` in the data directory on branch `ogden/chat/<ses_…>` with AD-17's git protections (repo hooks off, protected paths, Windows `core.longpaths`). Its commit is a third commit kind beside approve's merge and Save the lessons: only when the user clicks it, local to that branch, never pushed, serialized with the repo's other git work. Ogden does not merge it back in v1.3. The worktree survives restarts and is removed with the chat after confirmation.
+  - Note (CAP-33, 2026-10-31, adopted): a chat may work in its own worktree, created through `VcsPort` in the data directory on branch `ogden/chat/<ses_…>` with AD-17's git protections (repo hooks off, protected paths, Windows `core.longpaths`). Its commit is a third commit kind beside approve's merge and Save the lessons: only when the user clicks it, local to that branch, never pushed, serialized with the repo's other git work. Ogden does not merge it back in v1.3. The worktree survives restarts and is removed with the chat after confirmation.
   - Note (epic 7, story 7.5, 2026-10-05, E7-R5): approve's clean-checkout check also tolerates an uncommitted `AGENTS.md` at the repo root (as it tolerates `_bmad-output/`), so lessons the agent has written but the user has not yet saved never block an approve; a merge that would overwrite it is refused by git as any other. Save the lessons commits exactly that file and the retrospective, serialized with the repo's other git work, never pushed.
   - Note (epic 6, user-approved 2026-10-02): v1 builds run Claude Code only. Builds with Antigravity (bmad-loop's `agy` profile, whose `--dangerously-skip-permissions` bypasses its approvals and which has no native sandbox recorded), Codex, Gemini CLI and Copilot are v2 (epic 8). When they come, an agent profile that bypasses its own approvals runs only inside a sandbox `SandboxPort` started, and the sandbox chain is per agent and per OS. No rule changes.
   - Note (epic 5, 2026-10-01): `VcsPort` creates the worktree; the build runner runs in it and never creates its own, and bmad-loop's run folder also lives in the data directory. No rule changes.
@@ -438,9 +438,10 @@ graph LR
   - Why OAuth is not the recommendation here, not just "deferred": even where Atlassian's OAuth 3LO is usable at all — a confidential client, which Ogden cannot be — it needs a registered Atlassian OAuth app, a redirect URI the loopback server must accept inbound (a new, narrow unauthenticated path AD-15's gate does not have today — same-machine-browser-only, but still new surface), and, the real gap, a refresh-token lifecycle: silent background refresh, revocation and expiry handling, and re-prompting the user to re-authenticate. Nothing in AD-16 owns that today. AD-16's one existing OAuth case, Antigravity, is delegated entirely to Antigravity's own CLI and its own keychain, which Ogden never reads or writes — it sets no precedent for Ogden itself holding a third-party refresh token. An API token fits AD-16 exactly as it stands; OAuth would not.
   - Open for the user to confirm or redirect, not assumed: whether OAuth should be offered at all, even as a later opt-in (revisit if Atlassian ever ships a secretless OAuth path for Jira Cloud); and whether scoping the credential per linked board is right, versus one credential per Jira site reused across several boards in the same site.
 
-### AD-30 — One keystroke gate for pane input (proposed, not adopted)
+### AD-30 — One keystroke gate for pane input [ADOPTED]
 
 - **Binds:** CAP-28, CAP-31, CAP-15 (Copilot), AD-6
+- **Status:** Adopted by the user (2026-10-31), as written after the reviewer gate.
 - **Prevents:** any Ogden code path (a timer, orchestration, a model's output, a phone request) typing into a pane without the user's own action, a fresh look at the screen and a record; two writers interleaving keys in one pane.
 - **Rule:**
   - **Scope:** PTY input of epic 16 panes only. ACP chats keep the existing chat-send and CAP-22 approval paths. The AD-6 chat terminal stays the user's own and gets no gate sends in v1.3.
@@ -456,12 +457,13 @@ graph LR
 - **Operations:** consent tokens are memory-only; a restart loses them.
 - **Alternatives weighed:** a check inside each path plus a source scan (right only if each author remembers); intercepting at `TerminalPort` only (no notion of consent).
 
-### AD-31 — Screen prompts and the Needs you model (proposed, not adopted)
+### AD-31 — Screen prompts and the Needs you model [ADOPTED]
 
 - **Binds:** CAP-28, CAP-31, CAP-33, AD-4, AD-6
+- **Status:** Adopted by the user (2026-10-31), as written after the reviewer gate.
 - **Prevents:** terminal text entering the event log; the card, the phone and the gate disagreeing on an option; two owners of "this pane needs you"; a stale answer landing on the next identical prompt; CLI wording leaking into core.
 - **Rule:**
-  - A CLI-only agent is an epic 16 pane, never an AD-8 session, and stays behind Developer mode like every pane `[ASSUMPTION]`.
+  - A CLI-only agent is an epic 16 pane, never an AD-8 session, and stays behind Developer mode like every pane (user, 2026-10-31).
   - `ScreenPromptPort` turns a pane's screen snapshot (lines with attributes and the cursor, from `PaneProcess`) into one `ScreenPrompt { kind: single | multi | text | permission | unreadable, question, options: [{ label, checked, effect: once | deny | persistent | mode_change | unknown }], region }`. Parsing is anchored to the CLI's own prompt frame with the cursor inside it; anything ambiguous is `unreadable`.
   - Each pane launcher names its screen-prompt set (`screenPrompts: '<cli>'`); adapters `screen-prompt-<cli>` own the patterns, key encodings and option effects, and epic 16's status patterns are derived from the same set. A plain shell pane has none.
   - One owner: `ScreenPromptPort` runs inside the pane's status tracker; `needs_attention` holds exactly while a prompt (including `unreadable`) is open. Panes keep `PaneStatus`; AD-4 `waiting` stays sessions-only.
@@ -473,9 +475,10 @@ graph LR
   - Enforcement: the fixture test; epic 16's no-text-field event test extended to `terminal.pane_prompt_*` and `terminal.pane_keys_*`; the architecture test's no-agent-names rule.
 - **Operations:** pane programs do not survive a server stop, so every open prompt resolves `agent_ended` at start, and when Developer mode turns off.
 
-### AD-32 — Discovery is read-only; take-over is a resume (proposed, not adopted)
+### AD-32 — Discovery is read-only; take-over is a resume [ADOPTED]
 
 - **Binds:** CAP-29, AD-2, AD-3, AD-16
+- **Status:** Adopted by the user (2026-10-31), as written after the reviewer gate.
 - **Prevents:** Ogden owning a process it did not start; one agent session held by two Ogden sessions; a sandboxed build turned into an attended chat; reading credentials or changing agent config to find sessions.
 - **Rule:**
   - `SessionDiscoveryPort`, one adapter per agent (`discovery-claude-code`, `discovery-codex`), watches only an allowlist of glob patterns declared in its own data (Claude Code: `projects/*/*.jsonl` and its running-session records; Codex: `sessions/**/rollout-*.jsonl` and `archived_sessions/`). It installs no hook and writes nothing (user decision 2026-10-31). Transcript formats are internal to each vendor, so parsing is tolerant: unknown lines are skipped, and fixtures pin what is read.
@@ -489,21 +492,23 @@ graph LR
 - **Operations:** a rescan after restart dedupes on (agent, agent session id).
 - **Alternatives weighed:** Claude hooks for instant alerts (declined 2026-10-31); driving the running outside process (breaks AD-3).
 
-### AD-33 — Rotation and lineage (proposed, not adopted)
+### AD-33 — Rotation and lineage [ADOPTED]
 
 - **Binds:** CAP-30, CAP-22, AD-8
+- **Status:** Adopted by the user (2026-10-31), as written after the reviewer gate.
 - **Prevents:** rotation and handoff becoming two models; rotation settling an orchestration step with its brief; a crash leaving the agent ref ambiguous; lineage stored twice or derived in the UI.
 - **Rule:**
   - Rotation applies to AD-8 chat sessions only: not panes, not `interactiveOnly` agents, not while `driver = terminal`. It applies handoff's preconditions, holds the session's switching lock for the whole job, and is refused (`step_in_flight`) while the session has a dispatched orchestration step; orchestration ignores state changes inside a rotation.
-  - The agent writes the brief in a turn the user started; core masks it, caps it to the descriptor's budget and previews it with a single-use preview token, as handoff does `[ASSUMPTION]`. Only after the fresh agent session exists does core, in one transaction, swap `agentSessionId@<agentId>` and append `session.rotated { previousAgentSessionRef, cause: 'user' }`; until then the old ref stands. The gate is not involved (no keystrokes).
+  - The agent writes the brief in a turn the user started; core masks it, caps it to the descriptor's budget and previews it with a single-use preview token, as handoff does (user, 2026-10-31). Only after the fresh agent session exists does core, in one transaction, swap `agentSessionId@<agentId>` and append `session.rotated { previousAgentSessionRef, cause: 'user' }`; until then the old ref stands. The gate is not involved (no keystrokes).
   - **Lineage** is one core read model, never stored: a session's generations come from `session.rotated` and `session.agent_changed` (a handoff back with resume returns to an earlier generation), and an orchestration run is the parent node of the worker sessions in its `orchestration.step_dispatched` events, with "what came back" from the orchestration readback. Waiting on is derived from each worker's AD-4 state. A new link kind is a new event naming both ends, added here.
   - Enforcement: `packages/web` imports no lineage builder and reads only the family route; a core test covers rotation refused in each precondition and the ref swap.
 - **Operations:** a rotation interrupted before the new session exists leaves the chat on its old agent session, `idle`.
 - **Alternatives weighed:** a new linked chat with `parentSessionId` (declined 2026-10-31); a core-built brief with no agent turn.
 
-### AD-34 — Paired-device access (proposed, not adopted; amends AD-15)
+### AD-34 — Paired-device access [ADOPTED] (amends AD-15)
 
 - **Binds:** CAP-31, AD-15, AD-16, AD-30
+- **Status:** Adopted by the user (2026-10-31), as written after the reviewer gate.
 - **Prevents:** a phone running commands or changing settings by any route or request body; a stolen code or certificate opening Ogden; a second auth model drifting from AD-15.
 - **Rule:**
   - Off by default. When on, the server opens one HTTPS listener on one fixed, user-chosen port and the one interface address the user picks (home network or Tailscale) (user decision 2026-10-31). If that address is missing at start or disappears, the listener closes and Settings says why.
@@ -517,9 +522,10 @@ graph LR
 - **Operations:** device hashes live in SQLite and ride AD-5's pre-migration backup; the listener reopens at start only if enabled and its address exists.
 - **Alternatives weighed:** a Tailscale-only bind (declined 2026-10-31); a relay service (hosted, a non-goal).
 
-### AD-35 — Plan-limit readings (proposed, not adopted)
+### AD-35 — Plan-limit readings [ADOPTED]
 
 - **Binds:** CAP-32, AD-8
+- **Status:** Adopted by the user (2026-10-31), as written after the reviewer gate.
 - **Prevents:** plan meters becoming cost or token tracking; a reading blocking work; Ogden editing agent config to get one.
 - **Rule:**
   - `PlanLimitPort` reports `{ window, usedPercent, resetsAt } | unknown` per agent signed in with a subscription; API-key agents get none.
@@ -540,7 +546,7 @@ graph LR
 | Errors | `{ "error": { "code": "snake_case", "message": "…", "details"?: {} } }`; codes live in `packages/shared` |
 | Adapter naming | `<port>-<variant>`: `acp-claude-code`, `sandbox-seatbelt`, `notify-webhook` |
 | Files | kebab-case; one exported React component per file, except shadcn-style compound components in `packages/web/src/ui` (for example `sidebar.tsx` exporting `Sidebar`, `SidebarGroup`, …), which keep their parts together |
-| Config and data | The OS per-user data directory `ogden-agents/` holds the SQLite database, logs and the encrypted-secrets fallback. Nothing is written to user repos except BMAD's own files (only in projects that turned a BMad piece on, AD-22; note epic 10, 2026-10-01), and for builds only run branches and git's worktree metadata; the worktrees themselves live in the data directory (AD-17; note epic 5, 2026-10-01). Proposed for CAP-27 to CAP-33: chat worktrees and attachments in the data directory, the device CA's key in the keychain, found sessions and plan readings as install-level tables |
+| Config and data | The OS per-user data directory `ogden-agents/` holds the SQLite database, logs and the encrypted-secrets fallback. Nothing is written to user repos except BMAD's own files (only in projects that turned a BMad piece on, AD-22; note epic 10, 2026-10-01), and for builds only run branches and git's worktree metadata; the worktrees themselves live in the data directory (AD-17; note epic 5, 2026-10-01). For CAP-27 to CAP-33: chat worktrees and attachments in the data directory, the device CA's key in the keychain, found sessions and plan readings as install-level tables |
 | Logging | Structured JSON lines to the data directory; secrets redacted (AD-16) |
 | Tests | Every ticket ships its tests; UI layout is checked in a real browser with Playwright, since jsdom doesn't evaluate media queries |
 
@@ -568,7 +574,7 @@ graph LR
 | Tauri (desktop app, Rust) + @tauri-apps/cli | 2.12 |
 | tauri-plugin-updater / -single-instance / -shell | 2.12 / 2.4 / 2.3 |
 | tauri-apps/tauri-action | v1 |
-| tauri-plugin-global-shortcut, Tauri `tray-icon` feature (CAP-33, proposed) | 2.4.1 (needs Rust 1.90) / built in |
+| tauri-plugin-global-shortcut, Tauri `tray-icon` feature (CAP-33) | 2.4.1 (needs Rust 1.90) / built in |
 
 ## Structural Seed
 
@@ -649,7 +655,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 - **Visual direction:** decided in epic 1 by `bmad-ux` with `design-taste-frontend`. AD-18 fixes only the mechanism.
 - **Where the CAP-5 toggle appears for each agent:** measured in epic 3, recorded in the spec's `agent-matrix.md`. Antigravity's is measured by epic 6's spike (2026-10-02); other agents' in v2.
 - **Notification transports beyond webhook and opt-in browser notifications:** later, behind `NotifierPort` (v1 transports decided in epic 5, built in epic 11).
-- **Start at login:** later; it does not break AD-3. The tray and global shortcut are CAP-33 (AD-3 and AD-15 notes, proposed).
+- **Start at login:** later; it does not break AD-3. The tray and global shortcut are CAP-33 (AD-3 and AD-15 notes).
 - **Tracker stores other than Jira, internet-facing access, and several users per install:** out of scope (spec non-goals). Jira is CAP-26; the paired phone is CAP-31 (AD-34).
 - **Logging library and Drizzle migration tooling:** epic 1, within the Conventions.
 - **Merge-conflict handling beyond Update and retry (a rebase in the run's worktree):** later; see the AD-17 note.
@@ -657,7 +663,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 - **Whether a remote fan-out authors one diff verified on N machines, or N independently authored diffs (CAP-24):** AD-25 proposes the former but is not adopted; confirm before a build ticket is written against it.
 - **A cross-platform verification failure that needs an actual code fix on a remote-only issue (CAP-24):** out of scope for this pass; AD-17's Update and retry and AD-25's per-machine retry cover re-running, not an automatic remote-informed fix loop.
 - **Jira OAuth as an alternative to an API token, and syncing BMad's `estimate` to Jira's Story Points where a project's schema has it:** later, if the need remains; neither is in CAP-26's v1.2 scope.
-- **ADs 30 to 35 (CAP-27 to CAP-33):** proposed, not adopted; each needs the user's go or no-go before a ticket cites it. AD-34 changes the security gate and is surfaced on its own.
+- **ADs 30 to 35 (CAP-27 to CAP-33):** adopted by the user 2026-10-31, together with the three defaults (CLI panes behind Developer mode, the agent writes the rotation brief, no plan meter on panes).
 - **Spikes before their stories:** prompt fixtures per CLI and OS (AD-31); Codex resume from the user's own `~/.codex` (AD-32). Claude Code's plan limits over ACP are answered (claude-agent-acp `_claude/rateLimit`, AD-35); Antigravity's is checked in its story.
 - **Attachment limits (CAP-33):** the exact per-file cap and allowed media types, decided in the epic within the AD-8 note.
 - **A plan meter for terminal panes:** none in v1.3 (AD-35 alternatives); revisit if a source exists that neither touches the user's config nor shares Auto's `--settings`.

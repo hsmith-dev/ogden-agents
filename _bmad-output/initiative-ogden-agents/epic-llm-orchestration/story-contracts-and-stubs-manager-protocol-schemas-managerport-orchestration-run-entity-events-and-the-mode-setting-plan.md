@@ -1,7 +1,7 @@
 ---
 title: 'Contracts and stubs: manager protocol schemas, ManagerPort, orchestration run entity, events and the mode setting (epic 15)'
 type: 'feature'
-ticket: '15.2'
+ticket: '2'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

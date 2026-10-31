@@ -1,7 +1,7 @@
 ---
 title: 'Model list and picker: from the server, per project and per chat (epic 14)'
 type: 'feature'
-ticket: '14.5'
+ticket: '5'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

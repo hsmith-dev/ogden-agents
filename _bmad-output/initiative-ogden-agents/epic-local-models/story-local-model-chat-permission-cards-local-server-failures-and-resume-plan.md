@@ -1,7 +1,7 @@
 ---
 title: 'Local model chat: permission cards, local-server failures and resume (epic 14)'
 type: 'feature'
-ticket: '14.6'
+ticket: '6'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

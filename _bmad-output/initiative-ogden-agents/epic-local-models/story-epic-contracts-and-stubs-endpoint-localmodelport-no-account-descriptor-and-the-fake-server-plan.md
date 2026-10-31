@@ -1,7 +1,7 @@
 ---
 title: 'Epic contracts and stubs: endpoint, LocalModelPort, no-account descriptor and the fake server (epic 14)'
 type: 'feature'
-ticket: '14.3'
+ticket: '3'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

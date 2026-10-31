@@ -1,7 +1,7 @@
 ---
 title: 'Dispatch and read-back across workers: handoff and send-message dispatch, masked status, refusal paths (epic 15)'
 type: 'feature'
-ticket: '15.7'
+ticket: '7'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

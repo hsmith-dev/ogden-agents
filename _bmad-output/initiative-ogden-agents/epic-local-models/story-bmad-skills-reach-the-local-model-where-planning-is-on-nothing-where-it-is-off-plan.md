@@ -1,7 +1,7 @@
 ---
 title: 'BMad skills reach the Local model where Planning is on, nothing where it is off (epic 14)'
 type: 'feature'
-ticket: '14.9'
+ticket: '9'
 created: '2026-10-05'
 status: 'in-review'
 route: 'oneshot'

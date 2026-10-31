@@ -1,7 +1,7 @@
 ---
 title: "The manager adapter: build the input from core's data, call structuredComplete, validate, repair once, honour the roster (epic 15)"
 type: 'feature'
-ticket: '15.4'
+ticket: '4'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

@@ -1,7 +1,7 @@
 ---
 title: 'Team roster and roles in Settings: assign agents and models to manager, planner, worker, reviewer per project (epic 15)'
 type: 'feature'
-ticket: '15.5'
+ticket: '5'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

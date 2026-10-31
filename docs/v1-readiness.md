@@ -46,6 +46,8 @@ These checks are not established by this document. Record actual results, OS, pr
 - **Grok:** real token validation, trusted-project settings, Ask permissions, usage limits and attended build. Do not infer unattended safety from a fake sandbox.
 - **Local models:** actual Ollama and LM Studio chat/tool handling, server failure and endpoint confirmation. Record manager validation rates for each model tested; no quality floor has been proven by fake responses.
 - **Orchestration:** real manager with multiple workers, approval and automatic dispatch boundaries, permission waits, stop/restart without duplicate instructions, routing and build proposals through the Build dialog.
+- **Remote machines (2026.10.31-1):** a real SSH host on macOS and Linux: key install, host-key confirm and a changed-key refusal, a chat and an attended build running there with the diff coming back, and a dropped connection mid-turn.
+- **Custom agents and Local builds (2026.10.31-1):** a real third-party ACP agent (for example Goose) added, tested and chatted with, every tool call asking; a real OpenCode attended build with the Local model reaching Ready for review.
 - **BMad:** actual planning, Board updates, retrospective skill, generated files, saved lessons and a later worktree build receiving those lessons.
 
 The detailed procedures and known behavior choices remain in [RELEASING.md](../RELEASING.md). App notarization, Apple/Windows code signing and production updater signing are excluded from this request; unsigned instructions remain available and signed-update availability must be described honestly.

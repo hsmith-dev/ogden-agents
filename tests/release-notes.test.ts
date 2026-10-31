@@ -94,7 +94,13 @@ describe('release notes from CHANGELOG.md', () => {
     const script = fileURLToPath(new URL('../scripts/release-notes.mjs', import.meta.url));
     const run = spawnSync(process.execPath, [script, CURRENT_VERSION], { encoding: 'utf8' });
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toContain('continuous, date-stamped releases');
+    // The current version's own section, whatever this release says (not one release's wording).
+    const changelog = readFileSync(fileURLToPath(new URL('../CHANGELOG.md', import.meta.url)), 'utf8');
+    const section = extractSection(changelog, CURRENT_VERSION);
+    expect(section, `CHANGELOG.md has a section for ${CURRENT_VERSION}`).toBeTruthy();
+    const firstLine = String(section?.body ?? "").split('\n').find((line) => line.trim() !== '') ?? '';
+    expect(firstLine).not.toBe('');
+    expect(run.stdout).toContain(firstLine.trim());
   });
 
   it('the script refuses a version that is not the new date-based format', () => {

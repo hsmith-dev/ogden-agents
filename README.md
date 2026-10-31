@@ -20,8 +20,10 @@ The v1 release is being finalized. Implementation and release evidence are track
 - Work across projects with persistent chats, permission cards, model choices and a preview before handing a conversation to another agent.
 - Use Claude Code, Antigravity, Codex, Grok or a local model. Capabilities and sign-in methods differ by agent; see the table below.
 - Turn on BMad Planning, the live ticket Board and Retrospectives separately for each project.
-- Build tickets in separate worktrees, inspect verification results and approve a merge. Claude Code supports unattended builds where a supported sandbox is available. Codex currently requires you to watch because its unattended sandbox verification is pending; Grok and Antigravity builds also require you to watch. Local model builds are not offered.
+- Build tickets in separate worktrees, inspect verification results and approve a merge. Claude Code supports unattended builds where a supported sandbox is available. Codex currently requires you to watch because its unattended sandbox verification is pending; Grok, Antigravity and the Local model build with you watching. A build can also run on another computer you own over SSH (attended only).
 - Coordinate a manager and workers from Orchestrate, with approval per instruction by default, recorded activity and Stop. Automatic dispatch has limits and agent-specific eligibility.
+- Add any agent that speaks the Agent Client Protocol by its command (Settings > Agents > Add your own agent), for chats, with every tool call asking you first.
+- Run a chat or an attended build on another computer you own over SSH (Settings > Remote machines), with a key Ogden makes for each machine and its host key confirmed once.
 - Choose Ogden, Forest or Ember appearance presets, or build a custom theme with paired light/dark colors, contrast validation and JSON import/export.
 - Use native terminal tabs and splits in Developer mode, or the optional desktop shell.
 
@@ -152,7 +154,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md). For a plain-language 
 
 Ogden Agents is for one user on one machine, and it keeps other web pages and local processes out:
 
-- **Loopback only.** The server listens only on `127.0.0.1`; there is no remote access and no HTTPS. It answers only requests addressed to `127.0.0.1:<port>` or `localhost:<port>`, which blocks DNS rebinding.
+- **Loopback only.** The server listens only on `127.0.0.1`; there is no remote access to Ogden itself and no HTTPS (remote machines are reached outward over SSH; nothing listens for them). It answers only requests addressed to `127.0.0.1:<port>` or `localhost:<port>`, which blocks DNS rebinding.
 - **Launch link.** The launcher opens the browser at a one-time link (`http://127.0.0.1:<port>/#c=<code>`) and also prints it, so you can click it if no browser opened. The code works once, within 60 seconds.
 - **Per-tab token, no cookie.** The page removes the code from the address bar at once and exchanges it, in a same-origin `POST`, for a random token for that one browser tab, held only in the server's memory. The token arrives in the response body and is kept in the tab's `sessionStorage`; it never appears in any URL, so it isn't in your browser history or autocomplete. Every API request sends it as `Authorization: Bearer`, and the WebSocket sends it as a subprotocol. Other local web servers never see it: unlike a cookie, it isn't sent to other ports on `127.0.0.1`.
   - Reloading a tab keeps it connected. A new tab, a bookmark or a copied URL has no token and shows **Open Ogden Agents**, with the command to run; **New tab** in the sidebar footer opens another connected tab.

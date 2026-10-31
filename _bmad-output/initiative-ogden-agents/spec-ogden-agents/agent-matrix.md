@@ -74,3 +74,18 @@ Each agent's own CLI can run in a terminal pane, found by detection and never in
 | Shell | the user's `SHELL`; Windows PowerShell | the system's | none | PowerShell can take seconds to start, so a pane shows Starting and offers Restart |
 
 Status (working, needs attention, idle) is a guess from output and each launcher's prompt patterns, which are data and need the user's live check of the exact words each CLI shows at a permission question.
+
+## Custom agents and screen prompts (CAP-27, CAP-28; v1.3, user-approved 2026-10-31)
+
+**Custom ACP agent (CAP-27).** Any agent the user registers by command, on `acp-base` with a user-defined descriptor. Chat via ACP: yes. Resume: whatever it advertises at `initialize` (resume, then load, then the stored transcript, as for every agent). Terminal resume: not offered. Sign-in: none of Ogden's; an optional API key the user attaches, kept in the keychain as `agent-api-key/<customAgentId>` and passed only to that process. Builds: attended only, never unattended and never Skip all by default, whatever it advertises. Candidate real harnesses for the live check: OpenCode (epic 14's pinned route) and Goose.
+
+**Screen prompts (CAP-28).** Which prompt kinds Ogden can read off each CLI's screen and answer as a card. Every cell stays unverified until that CLI and kind has a captured real fixture (AD-31); a kind with no fixture shows as unreadable.
+
+| CLI | Single choice | Multi-select | Free text | Permission | Notes |
+|---|---|---|---|---|---|
+| Claude Code (`claude`) | unverified | unverified | unverified | unverified | |
+| Codex (`codex`) | unverified | unverified | unverified | unverified | full-screen program; read from the server's screen mirror |
+| Grok (`grok`) | unverified | unverified | unverified | unverified | young CLI, expect wording changes |
+| Antigravity (`agy`) | unverified | unverified | unverified | unverified | |
+| Copilot (`copilot`) | unverified | unverified | unverified | unverified | answered one at a time by the user only; never queued, scheduled or answered by another agent |
+| Gemini (`gemini`) | unverified | unverified | unverified | unverified | only when already installed |

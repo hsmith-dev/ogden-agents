@@ -23,3 +23,9 @@ Checked while studying persona/role presets, explicit agent handoff artifacts, a
 | Honeycomb Agent Timeline (Honeycomb.io, Early Access) | NOT open source — a proprietary SaaS feature | Only the publicly-described UX pattern conceptually: unifying LLM calls, tool calls, and agent handoffs by conversation ID in one trace view; never code |
 
 **Unconfirmed — do not cite as a source.** [AgentCenter](https://agentcenter.cloud) was checked twice and remains unverified both times: no homepage, repo, or pricing found independently of the original claim about it. Treat it as claimed but unconfirmed; do not rely on it or cite it until it can be independently verified.
+
+## The Mob (checked 2026-10-31)
+
+| Project | Has | Lacks relative to Ogden Agents | Role in Ogden Agents |
+|---|---|---|---|
+| [the-mob](https://github.com/hsmith-dev/the-mob) (the user's fork of BlytzPay's original; **private, no licence**) | A macOS dashboard over every Claude Code, Codex and Grok session on the machine: screen-read prompt answering with captured fixtures, one keystroke gate with consent tokens, prompt outcomes, session discovery, rotation, lineage, opt-in phone access, plan-limit meters | Cross-platform support, ACP, BMad builds, sandboxed unattended runs | **Ideas only, never code**: no licence grants reuse. Informs CAP-28 to CAP-32; lessons in `../change-desktop-agent-harness/the-mob-lessons.md` |

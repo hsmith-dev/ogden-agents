@@ -445,3 +445,38 @@ describe('a custom agent stays in its limits, and its chats outlive it (epic 21 
     expect(eventsOf(server, session.id).length).toBe(before);
   });
 });
+
+describe("a custom agent's tool calls always ask (epic 21 story 21.5)", () => {
+  it('asks about a command a saved Always allow rule lets through for a built-in agent in the same project', async () => {
+    const { server, tab, register } = await setUp();
+    expect((await register({ displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    const { wsId, chatWith, send } = await trustedProject(server, tab);
+    // Claude Code's card, answered Always allow, saves a rule for `npm test` in this project; its next one runs without a card.
+    const claude = await chatWith('claude-code');
+    await send(claude.id, 'permission npm test');
+    await waitFor(() => stateOf(server, claude.id) === 'waiting', "Claude Code's card", 15_000);
+    const card = eventsOf(server, claude.id).flatMap((event) => (event.type === 'permission.requested' ? [event.payload] : [])).at(-1)!;
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionPermission, { wsId, sesId: claude.id, requestId: card.requestId }), { decision: 'allow_always' })).status).toBe(204);
+    await waitFor(() => stateOf(server, claude.id) === 'idle', "Claude Code's reply", 15_000);
+    const before = replies(server, claude.id).length;
+    await send(claude.id, 'permission npm test');
+    await waitFor(() => stateOf(server, claude.id) === 'idle' && replies(server, claude.id).length > before, 'the rule to answer', 15_000);
+
+    // The custom agent's same command is still a card: no rule answers it.
+    const custom = await chatWith('custom-my-agent');
+    await send(custom.id, 'permission npm test');
+    await waitFor(() => stateOf(server, custom.id) === 'waiting', "the custom agent's card", 15_000);
+  });
+
+  it('holds an edit inside the project at a card even where the caution level would allow it, with no Always allow', async () => {
+    const { server, tab, register } = await setUp();
+    expect((await register({ displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    const { wsId, chatWith, send } = await trustedProject(server, tab);
+    expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { cautionLevel: 'ask_risky_only' })).status).toBe(200);
+    const session = await chatWith('custom-my-agent');
+    await send(session.id, 'permission-edit src/a.ts');
+    await waitFor(() => stateOf(server, session.id) === 'waiting', 'the card for the edit', 15_000);
+    const asked = eventsOf(server, session.id).find((event) => event.type === 'permission.requested');
+    expect(asked).toMatchObject({ payload: { alwaysAllowScope: null, cautionLevel: 'ask_every_time' } });
+  });
+});

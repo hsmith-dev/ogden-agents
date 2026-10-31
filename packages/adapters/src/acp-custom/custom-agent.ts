@@ -46,8 +46,10 @@ export function customAgentDescriptor(input: { agentId: AgentId; displayName: st
     noAccount: true,
     permissionModes: { ask: CUSTOM_ASK_MODE_ID },
     modeFixedAtStart: true,
-    modesNote: 'An agent you add yourself runs in Ask only.',
+    modesNote: 'An agent you add yourself runs in Ask only, and every tool call asks first.',
     needsProjectTrust: true,
+    // Its tools' shapes are unknown, so no caution level or rule allows a call without a card (21.5).
+    alwaysAsks: true,
     // Orchestration refuses it as a worker (`orchestration-dispatch.ts`), in these words (E21-R4).
     interactiveOnly: 'An agent you add yourself works only in chats you drive, never as a worker in an orchestrated run.',
     skillsFolder: CUSTOM_SKILLS_FOLDER,
@@ -65,6 +67,24 @@ export interface CustomAgentOptions {
   startTimeoutMs?: number | undefined;
 }
 
+/**
+ * Words in the mode ids ACP agents use for modes that never ask (Claude Code's
+ * `bypassPermissions` and `acceptEdits`, Codex's `agent-full-access`, Grok's
+ * `yoloMode` and `autoMode`, Antigravity's `auto_edit`, Gemini's `autoEdit`,
+ * and others), matched in the id lowercased with everything but letters and
+ * digits removed. Claude Code's `dontAsk` is not here: it refuses what isn't
+ * already allowed rather than allowing it.
+ */
+export const NEVER_ASKING_MODE_WORDS = ['bypass', 'yolo', 'fullaccess', 'autoedit', 'acceptedit', 'autoapprove', 'autonomous', 'dangerous', 'skipall', 'trustall'] as const;
+/** Whole ids (normalized as above) that never ask but are too short to match as words. */
+export const NEVER_ASKING_MODE_IDS = ['auto', 'automode'] as const;
+
+/** Whether `modeId` is a mode that never asks, by the words and ids above. */
+export function neverAsksMode(modeId: string): boolean {
+  const normalized = modeId.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return (NEVER_ASKING_MODE_IDS as readonly string[]).includes(normalized) || NEVER_ASKING_MODE_WORDS.some((word) => normalized.includes(word));
+}
+
 /** Core's `AgentPort` for a custom agent: its command resolved again at each start. */
 export function createCustomAgent(options: CustomAgentOptions): AcpAgentPort {
   const { descriptor, commandLine } = options;
@@ -76,6 +96,8 @@ export function createCustomAgent(options: CustomAgentOptions): AcpAgentPort {
     },
     toolInputPaths: TOOL_INPUT_PATHS,
     askingModeIds: [CUSTOM_ASK_MODE_ID],
+    // Its own mode names are unknown; these well-known ones never ask, so a chat never runs in one (21.5).
+    refusesMode: neverAsksMode,
     // No account: sessions open as they are.
     authMethod: () => undefined,
     // Ask is all it has, so there is nothing to send.

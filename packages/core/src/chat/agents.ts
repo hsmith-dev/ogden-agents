@@ -82,8 +82,10 @@ export function createAgents(
     const build = session.kind === 'build' ? ctx.options.buildSessions?.get(session.id) : undefined;
     // An attended build (story 5.6) is the user's: every tool call is a card at the `ask_every_time` level, no rule allows one.
     const unattended = build === undefined || build.attended === true ? undefined : build;
+    // An agent whose tools Ogden can't read (one the user adds, 21.5) is asked about every call, as an attended build is.
+    const alwaysAsks = ctx.agents.describe(agentIdOf(session))?.alwaysAsks === true;
     const onPermissionRequest =
-      build === undefined ? onPermissionRequestFor(session) : unattended === undefined ? onPermissionRequestFor(session, { attended: true }) : async (request: AgentPermissionRequest) => unattended.decide(request);
+      build === undefined ? onPermissionRequestFor(session, alwaysAsks ? { attended: true } : undefined) : unattended === undefined ? onPermissionRequestFor(session, { attended: true }) : async (request: AgentPermissionRequest) => unattended.decide(request);
     // The agent the session was started with (epic 6), looked up for each start: never another one.
     const agent = agentOf(session.id);
     const agentId = agentIdOf(session);

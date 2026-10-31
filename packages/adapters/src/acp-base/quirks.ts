@@ -126,6 +126,14 @@ export interface AcpAgentQuirks {
   attendedOnlyReason?: string | undefined;
   /** Its session modes that ask as much as Ask (or more); any other, known or not, asks less. */
   askingModeIds: readonly string[];
+  /**
+   * Whether a chat must never run in the session mode `modeId` (epic 21,
+   * story 21.5): for an agent whose mode is fixed at start and whose own mode
+   * names Ogden doesn't know, the well-known ones that never ask. A session
+   * that opens (or reopens) in one is refused, and one that switches itself to
+   * one is stopped, so its tool calls never run without a card.
+   */
+  refusesMode?: ((modeId: string) => boolean) | undefined;
   /** Its own CLI on its sessions (CAP-5), when that CLI can resume them. */
   terminalResume?: AgentTerminalResume | undefined;
   /**

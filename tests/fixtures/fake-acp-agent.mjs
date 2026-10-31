@@ -181,6 +181,8 @@
 // `fake-acp-agent-auto-fallback.mjs`): the server passes agents an
 // allowlisted environment.
 //
+// FAKE_ACP_PID_FILE=<file> writes its pid to <file> before anything else
+// (story 21.5: a start that fails still leaves no process behind).
 // With FAKE_ACP_EXIT_AT_START=1 it exits before answering anything. With
 // FAKE_ACP_SPAWN_GRANDCHILD=1 it starts a long-lived child of its own (as the
 // real adapter starts `claude`), which it never stops.
@@ -312,6 +314,8 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
+// FAKE_ACP_PID_FILE=<file>: its pid, written first thing (before any other switch), so a test can check it is gone after a failed start.
+if (process.env.FAKE_ACP_PID_FILE) writeFileSync(process.env.FAKE_ACP_PID_FILE, `${process.pid}\n`);
 if (process.env.FAKE_ACP_EXIT_AT_START === '1') process.exit(3);
 
 if (process.argv.includes('--cli')) {
@@ -1181,10 +1185,15 @@ async function runPrompt(params, client, session) {
       return { stopReason: 'end_turn' };
     }
     if (text === 'hold') {
+      // The cancel handler goes in before "Holding" is said: a client cancelling on that first chunk must never be missed.
+      let cancelled = false;
+      let wake;
+      session.cancel = () => {
+        cancelled = true;
+        wake?.();
+      };
       await say(client, params.sessionId, 'Holding');
-      await new Promise((resolve) => {
-        session.cancel = () => resolve(undefined);
-      });
+      if (!cancelled) await new Promise((resolve) => (wake = resolve));
       session.cancel = undefined;
       return { stopReason: 'cancelled' };
     }

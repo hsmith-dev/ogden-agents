@@ -1,6 +1,6 @@
 ---
 status: final
-updated: 2026-09-29
+updated: 2026-10-31
 name: Ogden Agents
 description: Local browser control room for your own coding agents. shadcn/ui components owned and restyled in packages/web/ui, CSS-variable tokens with light and dark sets (AD-18). This file records the brand layer and every token the components may use.
 sources:
@@ -292,6 +292,38 @@ components:
     border: '1px solid {colors.border}'
     radius: '{rounded.sm}'
     typography: '{typography.mono-compact}'
+  screen-prompt-card:
+    background: '{colors.card}'
+    border: '1px solid {colors.border}'
+    rail: '3px solid {colors.signal}'
+    radius: '{rounded.lg}'
+    padding: '{spacing.panel-padding}'
+    regionBackground: '{colors.muted}'
+    regionTypography: '{typography.mono-compact}'
+  plan-meter-chip:
+    background: 'transparent'
+    foreground: '{colors.muted-foreground}'
+    highForeground: '{colors.signal}'
+    radius: '{rounded.md}'
+    typography: '{typography.caption}'
+  branch-badge:
+    background: '{colors.muted}'
+    radius: '{rounded.sm}'
+    typography: '{typography.mono-compact}'
+  attachment-chip:
+    background: '{colors.muted}'
+    border: '1px solid {colors.border}'
+    radius: '{rounded.md}'
+    typography: '{typography.caption}'
+  found-session-row:
+    foreground: '{colors.muted-foreground}'
+    typography: '{typography.label}'
+  phone-card:
+    background: '{colors.card}'
+    border: '1px solid {colors.border}'
+    rail: '3px solid {colors.signal}'
+    radius: '{rounded.lg}'
+    padding: '{spacing.panel-padding}'
 ---
 
 ## Brand & Style
@@ -405,6 +437,14 @@ Visual specs. Behavior lives in EXPERIENCE.md Component Patterns. Every shadcn c
 - **Launch page.** Single centered column (the one centered layout in the product, because it is a single message): wordmark, `display` headline "Open Ogden Agents from your terminal", one sentence, the command `npx ogden-agents` in a `mono` block with a Copy button.
 - **Update banner** (desktop app and npm; stories 13.3 and 13.7). The Banner component: `{colors.muted}`, `label`, `{rounded.md}`, one sentence and up to two ghost text buttons at the end ("Restart to update", "Restart when they finish"; npm: "Dismiss"). A polite status region that is always mounted, never a modal, never red. A disabled button keeps its label and the sentence carries the reason.
 - **Update channel row** (Settings, About, desktop app only). Two outline buttons "Stable" and "Preview" as a labelled group with the pressed one marked, and a one-line description. The npm rows (Check now, the start-up switch) are replaced by it in the app.
+- **Screen-prompt card** (CAP-28; 2026-10-31). The permission card's visual exactly, with the caption "Read from the screen of <pane>" and, under the question, the read screen region on `{colors.muted}` in `mono-compact` with masked values as a muted block glyph. Options as outline buttons with their number in a kbd hint; multi-select rows use the standard checkbox. The unreadable state drops the options for an outline **Open terminal**.
+- **Plan meter chip** (CAP-32). A ghost chip in `caption` beside the model chip, `muted-foreground` with a thin ring gauge glyph; at 80% and above its text and gauge take `{colors.signal}`. No red, no money symbols.
+- **Branch badge** (CAP-33). `{colors.muted}`, `{rounded.sm}`, `mono-compact`, a Phosphor git-branch glyph; in the session header beside the chat name.
+- **Attachment chip** (CAP-33). `{colors.muted}`, 1px border, `{rounded.md}`, file glyph, name truncated at one line, size in tabular `caption`, an X button with an accessible name.
+- **Found session row** (CAP-29). Like the status row with a hollow, dashed glyph so it never reads as an Ogden session, folder name in `label`, agent and last activity in `caption`.
+- **Family sheet** (CAP-30). The standard sheet; rows are status rows indented by generation, a thin vertical `{colors.border}` line joining them; the divider in a thread is the existing "Continued with" divider with the words "Started fresh from a summary".
+- **Phone page** (CAP-31). One column, 16px gutters, cards (`phone-card`) full width with buttons at 44px tall; the Needs you heading uses the existing group style. No sidebar, no rail.
+- **Tray icon** (CAP-33). The app glyph in monochrome template form (macOS) or the app icon (Windows, Linux) with the count as the platform's own badge; never a custom colored dot.
 - **Kbd hint.** `{colors.muted}`, 1px border, `{rounded.sm}`, `mono-compact`. Visible only in Compact density or on hover in tooltips.
 
 → Visual reference: [`mockups/key-workspace.html`](mockups/key-workspace.html) (workspace view: status sidebar, chat, permission card; light Comfortable and dark Compact). Spines win on conflict.

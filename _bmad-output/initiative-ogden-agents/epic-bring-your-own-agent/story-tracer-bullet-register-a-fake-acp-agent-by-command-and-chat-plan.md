@@ -3,13 +3,14 @@ title: 'Tracer bullet: register a fake ACP agent by command and chat with it'
 type: 'feature'
 ticket: '1'
 created: '2026-10-31'
-status: 'ready-for-dev'
+status: 'built'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
+baseline_revision: '8fc5fd4109066b867dc507bc0b54fccb59c4c16e'
 context:
   - '{project-root}/AGENTS.md'
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-bring-your-own-agent/epic-bring-your-own-agent.md'
@@ -66,14 +67,14 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/core/src/agent-descriptor.ts` -- add the `user` install kind and adjust the checks -- a custom agent has no pin.
-- [ ] `packages/core/src/agent-port.ts` -- mutable registry with live `agentIds` and validated `add` -- runtime registration (E21-R1).
-- [ ] `packages/core/test/agent-port.test.ts` (or the existing registry test) -- `add` validates like construction, refuses a duplicate, and `agentIds` reflects it.
-- [ ] `packages/adapters/src/acp-custom/custom-agent.ts` + `index.ts` -- `customAgentDescriptor({ agentId, displayName })` and `createCustomAgent({ descriptor, commandLine, onDiagnostic? })` on `createAcpAgent`, resolving the command at each launch.
-- [ ] `packages/adapters/test/custom-agent.test.ts` -- descriptor passes `agentDescriptorProblems`; launch resolves an absolute command and throws `agent_unavailable` for a missing one.
-- [ ] `packages/shared/src/custom-agents.ts`, `api.ts`, index -- route constant, `CustomAgentCreateRequest` (`displayName` 1-40 chars trimmed, no control characters; `commandLine` 1-1000), `CustomAgentCreateResponse`, error code `custom_agent_command_invalid`.
-- [ ] `packages/server/src/custom-agent-routes.ts`, `app.ts`, `start.ts` -- the POST, slug from the name (kebab, `-2`… on collision with any registered id), resolve-before-register, add to registry, `unwrapped` and `descriptors.current`.
-- [ ] `packages/server/test/custom-agents.test.ts` -- the I/O matrix through the real server API, including a streamed reply from a chat with the registered fake agent.
+- [x] `packages/core/src/agent-descriptor.ts` -- add the `user` install kind and adjust the checks -- a custom agent has no pin.
+- [x] `packages/core/src/agent-port.ts` -- mutable registry with live `agentIds` and validated `add` -- runtime registration (E21-R1).
+- [x] `packages/core/test/agent-port.test.ts` (or the existing registry test) -- `add` validates like construction, refuses a duplicate, and `agentIds` reflects it.
+- [x] `packages/adapters/src/acp-custom/custom-agent.ts` + `index.ts` -- `customAgentDescriptor({ agentId, displayName })` and `createCustomAgent({ descriptor, commandLine, onDiagnostic? })` on `createAcpAgent`, resolving the command at each launch.
+- [x] `packages/adapters/test/custom-agent.test.ts` -- descriptor passes `agentDescriptorProblems`; launch resolves an absolute command and throws `agent_unavailable` for a missing one.
+- [x] `packages/shared/src/custom-agents.ts`, `api.ts`, index -- route constant, `CustomAgentCreateRequest` (`displayName` 1-40 chars trimmed, no control characters; `commandLine` 1-1000), `CustomAgentCreateResponse`, error code `custom_agent_command_invalid`.
+- [x] `packages/server/src/custom-agent-routes.ts`, `app.ts`, `start.ts` -- the POST, slug from the name (kebab, `-2`… on collision with any registered id), resolve-before-register, add to registry, `unwrapped` and `descriptors.current`.
+- [x] `packages/server/test/custom-agents.test.ts` -- the I/O matrix through the real server API, including a streamed reply from a chat with the registered fake agent.
 
 **Acceptance Criteria:**
 - Given a running server, when a fake ACP agent is registered by command and a chat is created with it, then its reply arrives in that session's events without a restart, on macOS, Windows and Linux CI.
@@ -81,9 +82,29 @@ context:
 
 ## Implementation Notes
 
+- The registry test went into the existing `packages/core/test/agent-contracts.test.ts` (it already holds the construction checks).
+- The route resolves the command against the chat environment of the id it picked (`chatEnv`, AD-16), not `process.env`, so a bare name is found at register exactly as at chat start.
+- `customAgentSlug` folds accents (NFKD), keeps `[a-z0-9]`, caps the slug at 48 characters, and falls back to `agent` when nothing is left; collisions take `-2`, `-3`… against every registered id. No await between choosing the id and `add`, so two requests cannot take the same id.
+- The descriptor's provider is `You`, with a `modesNote` saying why only Ask is offered. Tool path fields are the common shapes (`path`, `filePath`, `file_path`, `paths`; patterns `pattern`, `glob`), since an arbitrary agent's tools are unknown (21.5 parity work).
+- `packages/server/test/gate.test.ts`'s route list gains `POST /api/v1/custom-agents`.
+- The "command gone" tests link Node with a symlink on POSIX and copy `node.exe` on Windows: copying a Homebrew `node` fails, since it loads `libnode` relative to its own path.
+- Verified: `pnpm typecheck` clean; `pnpm test` 4987 passed, 8 skipped (baseline 4972 plus 15 new) after review patches; two timing tests (`local-failures` slow first token, `build-dispatch` Stop/Retry) failed once under full-suite load and pass alone, untouched by this story.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+### Pass 1 (quick lens), 2026-10-31: high 1, medium 1, low 4, false 1, maybe-false 0
+
+| # | Finding | Verdict | Route | Evidence |
+|---|---|---|---|---|
+| 1 | `paths` in acp-custom's TOOL_INPUT_PATHS is never read; a call naming `path` and an array `paths` reaches core with only `path`, so a file auto-allow rule can match | medium | patch | `tool-paths.ts:34-37` reads string values only; fix reads string arrays too (narrows matches for every agent). Wider unknown-tool-shape risk for arbitrary agents deferred to 21.5. |
+| 2 | A custom id is checked only against the live registry; after a restart the same name reuses `custom-my-agent` and old sessions and a project default rebind to a different program | high | patch | `start.ts` `isRegistered` uses `agents.get`; sessions keep `agentId` (`schema.ts` sessions.agent_id) and workspaces `default_agent_id`; fix also checks stored ids. |
+| 3 | Slug helper near-duplicates `titleSlug` (`tickets-jira/jira-issue-mapping.ts:159`), against the AGENTS.md reuse pitfall | low | reject | Sharing needs new options (accent folding, cap, fallback) on Jira code; added complexity for a cosmetic gain. |
+| 4 | Accent regex written with raw invisible combining characters | low | patch | Bytes confirmed; direct correction to `\u0300-\u036f`. |
+| 5 | A body over 16 KB gets 413, not 400 | false | reject | The matrix's over-long command gets the tested 400 `invalid_request`; 413 is the transport cap, matching `agent-setup-routes.ts:242`. |
+| 6 | Name length counts UTF-16 units | low | reject | Rare in everyday use; a code-point count needs a custom refine. |
+| 7 | Windows removal of the Node copy right after close may EPERM; no CI evidence for three OSes | low | patch | Direct correction (retries). Three-OS evidence needs CI, which runs when the branch is pushed. |
 
 ## Design Notes
 

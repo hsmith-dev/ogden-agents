@@ -218,6 +218,8 @@ export const API_ERROR_CODES = [
   'remote_host_key_changed',
   /** CAP-24: a remote machine was used before its host key was confirmed (409). Nothing was called. */
   'remote_host_key_not_confirmed',
+  /** Epic 21 (story 21.1): a custom agent's command can't be found or run (400); the message is the plain reason. Nothing was registered. */
+  'custom_agent_command_invalid',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

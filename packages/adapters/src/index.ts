@@ -8,6 +8,7 @@ export * from './acp-antigravity/index.js';
 export * from './acp-base/index.js';
 export * from './acp-claude-code/index.js';
 export * from './acp-codex/index.js';
+export * from './acp-custom/index.js';
 export * from './acp-grok/index.js';
 export * from './acp-opencode/index.js';
 export * from './bmad-catalog/index.js';

@@ -98,6 +98,28 @@ describe('an agent descriptor (6.3)', () => {
     expect(registry.describe('missing-agent')).toBeUndefined();
   });
 
+  it('takes a user-installed agent with no pinned version (epic 21)', () => {
+    expect(agentDescriptorProblems(testDescriptor('custom-mine', port('Mine'), { install: { kind: 'user' }, signInMethods: [], noAccount: true }))).toEqual([]);
+  });
+
+  it('adds an agent while it runs (epic 21): checked as at construction, a duplicate refused, and `agentIds` live', () => {
+    const agent = port('Some Agent', ['ask', 'skip_all']);
+    const registry = createAgentRegistry([registered('some-agent', agent)]);
+    const before = registry.agentIds;
+    expect(() => registry.add(registered('other-agent', port('Other'), { skillsFolder: '..' }))).toThrow(/skills folder/);
+    expect(() => registry.add(registered('other-agent', port('Other'), { displayName: 'Another Name' }))).toThrow(/is named/);
+    expect(() => registry.add(registered('other-agent', port('Other', ['ask', 'skip_all']), { permissionModes: { ask: 'default' } }))).toThrow(/declares the modes ask,skip_all/);
+    expect(() => registry.add(registered('some-agent', agent))).toThrow(/registered twice/);
+    expect(registry.agentIds).toEqual(['some-agent']);
+    const other = port('Other');
+    registry.add(registered('other-agent', other));
+    expect(registry.agentIds).toEqual(['some-agent', 'other-agent']);
+    expect(before).toEqual(['some-agent']);
+    expect(registry.get('other-agent')).toBe(other);
+    expect(registry.describe('other-agent')?.displayName).toBe('Other');
+    expect(registry.defaultAgentId).toBe('some-agent');
+  });
+
   it("derives every agent's key variables, each once (AGENT_ENV_KEYS)", () => {
     const a = testDescriptor('a-agent', port('A'), SHAPES[2]);
     const b = testDescriptor('b-agent', port('B'));

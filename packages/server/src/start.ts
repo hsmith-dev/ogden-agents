@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, createCustomAgent, customAgentDescriptor, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
@@ -29,6 +29,7 @@ import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERR
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
+import type { CustomAgents } from './custom-agent-routes.js';
 import { supportsUnattendedBuild } from './build-agent-sandbox.js';
 import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
 import { SHIPPED_ORCHESTRATION } from './orchestration-routes.js';
@@ -336,6 +337,20 @@ async function listenAndAnnounce({
     wirings.map(({ descriptor, agent: port }) => ({ descriptor, agent: descriptor.agentId === CLAUDE_CODE_AGENT_ID ? chatAgent : forChat(descriptor.agentId, port) })),
     { defaultAgentId: CLAUDE_CODE_AGENT_ID, legacyAgentId: CLAUDE_CODE_AGENT_ID },
   );
+  // A custom ACP agent the user registers (epic 21, story 21.1) joins the live registry, the unwrapped ports and the
+  // descriptors, as a wired agent does, through the same `forChat` wrapper (AD-16: the chat's environment only).
+  const customAgents: CustomAgents = {
+    // An id a stored chat or a project default still names is taken too: after a restart it must not bind to another program.
+    isRegistered: (agentId) => agents.get(agentId) !== undefined || core.entities.isAgentIdInUse(agentId),
+    env: (agentId) => chatEnv(agentId),
+    add({ agentId, displayName, commandLine }) {
+      const descriptor = customAgentDescriptor({ agentId, displayName });
+      const port = createCustomAgent({ descriptor, commandLine, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, { agentId, ...fields }) });
+      agents.add({ descriptor, agent: forChat(agentId, port) });
+      unwrapped.set(agentId, port);
+      descriptors.current = [...descriptors.current, descriptor];
+    },
+  };
   /** A session's agent id: its own, else (stored before agents could be chosen) Claude Code's. */
   const agentIdOf = (session: Session): AgentId => session.agentId ?? agents.legacyAgentId;
   /** A session's agent as a chat runs it (epic 6 entry 8: a planning session's first message is in its own syntax). */
@@ -499,6 +514,7 @@ async function listenAndAnnounce({
     bmadSetup: withAgentSkillFolders(core.bmadSetup, { core, agents }),
     agentSetup,
     agentLinkedCommands: core.agentLinkedCommands,
+    customAgents,
     onboarding,
     newProjectDefaults,
     installSettings: core.installSettings,

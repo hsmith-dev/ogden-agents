@@ -186,6 +186,8 @@ export interface Entities {
   createSession(input: NewSession): Session;
   getSession(id: SessionId): Session | undefined;
   listSessions(workspaceId: WorkspaceId): Session[];
+  /** Whether any session was started with `agentId`, or any project defaults to it (epic 21: a custom agent's id is never reused). */
+  isAgentIdInUse(agentId: AgentId): boolean;
   /**
    * Sets the normalized state (AD-4), appending `session.state_changed` if it
    * changed. `reason` is plain words for the user (an error's cause), never a
@@ -525,6 +527,12 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
     },
 
     getSession,
+
+    isAgentIdInUse(agentId) {
+      const session = orm.select({ id: sessions.id }).from(sessions).where(eq(sessions.agentId, agentId)).limit(1).get();
+      if (session !== undefined) return true;
+      return orm.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.defaultAgentId, agentId)).limit(1).get() !== undefined;
+    },
 
     listSessions(workspaceId) {
       return orm

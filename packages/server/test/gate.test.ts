@@ -640,6 +640,8 @@ const EXPECTED_API_ROUTES = [
   `DELETE ${API_ROUTES.agentApiKey}`,
   `PUT ${API_ROUTES.agentLinkedCommand}`,
   `DELETE ${API_ROUTES.agentLinkedCommand}`,
+  // A custom ACP agent, registered live (epic 21, story 21.1).
+  `POST ${API_ROUTES.customAgents}`,
   `GET ${API_ROUTES.onboarding}`,
   `PATCH ${API_ROUTES.onboarding}`,
   `GET ${API_ROUTES.bmadPieces}`,

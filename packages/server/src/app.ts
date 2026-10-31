@@ -44,6 +44,7 @@ import { registerBmadSourceRoutes } from './bmad-source-routes.js';
 import { registerBmadTrustRoutes } from './bmad-trust-routes.js';
 import type { TabTokens } from './auth.js';
 import { registerChatRoutes } from './chat-routes.js';
+import { registerCustomAgentRoutes, type CustomAgents } from './custom-agent-routes.js';
 import { apiError } from './errors.js';
 import { registerEventSocket } from './event-socket.js';
 import type { Logger } from './log.js';
@@ -184,6 +185,8 @@ export interface AppOptions {
    * routes answer 501 and no `AgentSetupStatus` ever carries `linkedCommand`.
    */
   agentLinkedCommands?: AgentLinkedCommands;
+  /** Registering a custom ACP agent live (epic 21, story 21.1); without it that route answers 501. */
+  customAgents?: CustomAgents | undefined;
   /** Whether the first-run Welcome is done (9.5); without it those routes answer 501. */
   onboarding?: Onboarding;
   /**
@@ -248,6 +251,7 @@ export function createApp({
   bmadSetup,
   agentSetup,
   agentLinkedCommands,
+  customAgents,
   onboarding,
   newProjectDefaults,
   installSettings,
@@ -353,6 +357,7 @@ export function createApp({
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });
   registerAgentSetupRoutes(app, { agentSetup, onboarding, agentLinkedCommands, log });
+  registerCustomAgentRoutes(app, { customAgents, log });
   registerBmadRoutes(app, { bmad, newProjectDefaults, log });
   // The pinned upstream BMad Method (story 4.14): install-level, not a piece's.
   registerBmadSourceRoutes(app, { bmadSource, log });

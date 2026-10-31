@@ -20,7 +20,7 @@ A developer runs a CLI-only agent in a pane and answers its questions from cards
 
 ## Requirements
 
-Drafted at inception (2026-10-31, autonomous, awaiting the user's approval). Each line maps to a spec capability in `covers`.
+Drafted at inception (2026-10-31, autonomous) and approved by the user the same day. Each line maps to a spec capability in `covers`.
 
 - E20-R1: `KeystrokeGate` is the only Ogden-originated writer of pane input, with single-use consent tokens bound as AD-30 states, a fresh re-read, refusal of a concurrent send, user bytes held during a send, and `terminal.pane_keys_*` events; Copilot-style `interactiveOnly` launchers take answers one at a time only. (CAP-28, CAP-15 for Copilot's terms; AD-30)
 - E20-R2: Panes give a screen snapshot with attributes and the cursor; `ScreenPromptPort` parses it into one `ScreenPrompt` anchored to the CLI's frame, with option effects, an occurrence id and a signature; ambiguity is `unreadable`. (CAP-28; AD-31)
@@ -59,7 +59,7 @@ Reading and answering CLI prompts in epic 16 panes. Not here: screen prompts in 
 
 ## Notes
 
-- Status: drafted autonomously 2026-10-31; awaiting the user's approval of the inception.
+- Status: APPROVED by the user 2026-10-31 (inception, with the autonomous decisions below kept).
 - Decision (2026-10-31, user): CLI-only agent panes stay behind Developer mode like every pane.
 - Decision (2026-10-31, autonomous): tracer bullet is entry 2 (a fake CLI's prompt answered from a card through the gate); entry 1 is the spike that captures real prompts, the part least certain.
 - Unknown: which prompt kinds each real CLI draws in a parseable frame on each OS, and whether any marks selection only with color; entry 1 answers, and entries 7 and 8 wait on it.

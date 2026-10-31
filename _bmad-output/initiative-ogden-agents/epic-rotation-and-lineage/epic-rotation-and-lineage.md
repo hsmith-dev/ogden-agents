@@ -20,7 +20,7 @@ A user whose chat is long and whose plan is nearly used sees the meter, starts f
 
 ## Requirements
 
-Drafted at inception (2026-10-31, autonomous, awaiting the user's approval). Each line maps to a spec capability in `covers`.
+Drafted at inception (2026-10-31, autonomous) and approved by the user the same day. Each line maps to a spec capability in `covers`.
 
 - E24-R1: Rotation applies to AD-8 chat sessions only, under handoff's preconditions and switching lock, refused while an orchestration step is dispatched or the terminal drives; the agent writes the brief in a turn the user started, core masks, caps and previews it; the agent ref swaps and `session.rotated` is appended in one transaction only after the fresh session exists. (CAP-30; AD-33)
 - E24-R2: Lineage is one core read model over `session.rotated`, `session.agent_changed` and `orchestration.step_dispatched`, served by one family route; the web reads only that route. (CAP-30, CAP-22; AD-33)
@@ -55,7 +55,7 @@ Rotation, lineage and plan meters for ACP chats. Not here: rotating panes or int
 
 ## Notes
 
-- Status: drafted autonomously 2026-10-31; awaiting the user's approval of the inception.
+- Status: APPROVED by the user 2026-10-31 (inception, with the autonomous decisions below kept).
 - Decision (2026-10-31, user): the agent writes the rotation brief and the user previews it; no plan meter on panes in v1.3.
 - Decision (2026-10-31, autonomous): tracer bullet is entry 1 (rotate a fake-agent chat end to end); no spike, since AD-35's source was confirmed in the currency review.
 - Assumption: the 80% suggestion threshold and its once-per-window frequency (EXPERIENCE.md).

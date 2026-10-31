@@ -20,7 +20,7 @@ A user who started a Claude Code session in a terminal sees it under On this com
 
 ## Requirements
 
-Drafted at inception (2026-10-31, autonomous, awaiting the user's approval). Each line maps to a spec capability in `covers`.
+Drafted at inception (2026-10-31, autonomous) and approved by the user the same day. Each line maps to a spec capability in `covers`.
 
 - E22-R1: `SessionDiscoveryPort` with per-agent adapters reading only their declared glob allowlist; found sessions are core install-level rows with events only on seen, gone and state change; off by default, per agent. (CAP-29; AD-32)
 - E22-R2: Ogden's own chats, builds and panes are never listed as outside: a found session whose agent session id is in any Ogden session's refs, or whose cwd is in the data directory, is dropped. (CAP-29; AD-32)
@@ -56,7 +56,7 @@ Finding and taking over Claude Code and Codex sessions. Not here: hooks or confi
 
 ## Notes
 
-- Status: drafted autonomously 2026-10-31; awaiting the user's approval of the inception.
+- Status: APPROVED by the user 2026-10-31 (inception, with the autonomous decisions below kept).
 - Decision (2026-10-31, user): discovery watches files only; no hooks.
 - Decision (2026-10-31, autonomous): spike 1 first (Codex resume and Claude's running-session records), then the tracer bullet, entry 2.
 - Unknown: whether a session from the user's `~/.codex` resumes under Ogden's `CODEX_HOME`; entry 5's take-over part waits on spike 1.

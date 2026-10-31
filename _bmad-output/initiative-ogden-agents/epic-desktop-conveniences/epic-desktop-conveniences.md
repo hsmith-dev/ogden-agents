@@ -20,7 +20,7 @@ A desktop-app user sees what needs them from the tray, sends a message from anyw
 
 ## Requirements
 
-Drafted at inception (2026-10-31, autonomous, awaiting the user's approval). Each line maps to a spec capability in `covers`.
+Drafted at inception (2026-10-31, autonomous) and approved by the user the same day. Each line maps to a spec capability in `covers`.
 
 - E25-R1: The shell exchanges its own launch code for a tab token kept only in Rust memory and reads the Needs you model with it; no Tauri IPC is added and the launcher token's reach is unchanged. (CAP-33; AD-15 CAP-33 note)
 - E25-R2: The tray or menu-bar icon (Tauri `tray-icon`) with the count and its menu; on Linux it opens from the menu. (CAP-33; AD-3 CAP-33 note)
@@ -57,7 +57,7 @@ Desktop conveniences on the existing Tauri shell and chats. Not here: start at l
 
 ## Notes
 
-- Status: drafted autonomously 2026-10-31; awaiting the user's approval of the inception.
+- Status: APPROVED by the user 2026-10-31 (inception, with the autonomous decisions below kept).
 - Assumption: the default shortcut Cmd or Ctrl+Shift+Space and a 10 MB per-file attachment cap, both changeable in their stories.
 - Decision (2026-10-31, autonomous): tracer bullet is entry 1 (the tray reads the count through the shell's own tab).
 - Waits on epic 13 because: the shell, single instance and menu (13.3, 13.5). Waits on epic 20 because: the core Needs you model (20.9). Waits on epic 5 because: worktrees through VcsPort (5.5).

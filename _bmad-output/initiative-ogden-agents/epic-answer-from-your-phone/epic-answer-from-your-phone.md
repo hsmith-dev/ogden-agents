@@ -20,10 +20,10 @@ A user away from the desk answers an agent's question from their phone and nothi
 
 ## Requirements
 
-Drafted at inception (2026-10-31, autonomous, awaiting the user's approval). Each line maps to a spec capability in `covers`.
+Drafted at inception (2026-10-31, autonomous) and approved by the user the same day. Each line maps to a spec capability in `covers`.
 
-- E23-R1: The device listener: off by default, one HTTPS listener on the chosen interface and a fixed port, closing when the address disappears, Host and Origin checks including the MagicDNS name. (CAP-31; AD-34)
-- E23-R2: The certificate: a local CA name-constrained to the listener's address and name with `pathLen:0`, its key in the keychain (refused without one), never in a desktop trust store, short-lived leaves re-issued on a new address, the fingerprint shown on both screens. (CAP-31; AD-34, AD-16)
+- E23-R1: The device listener: off by default, one HTTPS listener on the chosen interface and a fixed port, closing when the address disappears or after the idle period with no device activity (default 24 hours), Host and Origin checks including the MagicDNS name. (CAP-31; AD-34)
+- E23-R2: The certificate: a local CA name-constrained to the listener's address and name with `pathLen:0`, its key in the keychain (refused without one), never in a desktop trust store, short-lived leaves re-issued on a new address, the fingerprint shown on both screens; on a tailnet with the Tailscale CLI, `tailscale cert` is preferred and its key moved into the keychain. (CAP-31; AD-34, AD-16)
 - E23-R3: Pairing: a single-use QR code of at least 128 bits for 2 minutes plus a match code and a desktop Allow; hashed device tokens with 30-day idle expiry and immediate revoke; throttling. (CAP-31; AD-34)
 - E23-R4: The route allowlist with a route-enumeration test, and the body rules in core: chat only to existing Ask chats with no `/` or `!` prefix, never creating a chat, permission answers allow once or deny, screen answers only to single-choice or permission prompts and only once or deny options, through the keystroke gate, never free text, never a shell pane; a queued device message is re-checked at delivery and dropped with a notice if the chat left Ask. (CAP-31, CAP-4, CAP-28; AD-34, AD-30)
 - E23-R5: The device event socket carrying only Needs you and allowlisted chats' events, and the phone page per EXPERIENCE.md. (CAP-31; AD-31, AD-34)
@@ -56,9 +56,9 @@ Answering from the same user's paired phone on a network they choose. Not here: 
 
 ## Notes
 
-- Status: drafted autonomously 2026-10-31; awaiting the user's approval of the inception.
+- Status: APPROVED by the user 2026-10-31 (inception, with the autonomous decisions below kept).
 - Decision (2026-10-31, user): one interface the user picks, not Tailscale-only; AD-34 adopted.
 - Decision (2026-10-31, autonomous): spike 1 first, because whether phones accept a name-constrained private CA decides the certificate story; tracer bullet is entry 2.
 - Unknown: how iOS and Android handle installing and trusting a name-constrained local CA, and whether Tailscale's MagicDNS name can be in the constraint; entry 4 waits on spike 1.
 - Waits on epic 20 because: the gate, the screen-prompt model and Needs you (20.5, 20.6, 20.9). Waits on epic 9 because: SecretStorePort (9.2). Waits on epic 2 because: the AD-15 security gate and tab tokens (2.1).
-- Open question (2026-10-31): three security-review recommendations are not in AD-34 as adopted: bind the listener to the network's identity plus an idle auto-close (H5); prefer `tailscale cert` on a tailnet (H1). Asked of the user at inception; until answered they are deferred.
+- Decision (2026-10-31, user): add both security-review extras to AD-34: the listener closes after a period with no device activity (default 24 hours, an assumption, changeable), and on a tailnet with the Tailscale CLI installed Ogden prefers `tailscale cert` for the machine's MagicDNS name, moving the key into the keychain, with the local CA as the fallback.

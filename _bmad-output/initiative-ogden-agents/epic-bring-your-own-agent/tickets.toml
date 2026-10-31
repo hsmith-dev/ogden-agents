@@ -1,5 +1,5 @@
 # Epic 21 breakdown (v1.3, bring your own agent). Table order is the build order; ids never change once written.
-# Drafted autonomously 2026-10-31 for the user's approval. References to other epics use "<epic id>.<entry id>".
+# Drafted autonomously 2026-10-31; approved by the user 2026-10-31. References to other epics use "<epic id>.<entry id>".
 # CI never uses a real agent, model, phone or network: fakes on loopback only. Live checks with real CLIs, agents and devices are hitl.
 
 [[entry]]

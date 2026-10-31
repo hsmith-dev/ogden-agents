@@ -20,7 +20,7 @@ An advanced user registers their own ACP agent by its command, tests it, and cha
 
 ## Requirements
 
-Drafted at inception (2026-10-31, autonomous, awaiting the user's approval). Each line maps to a spec capability in `covers`.
+Drafted at inception (2026-10-31, autonomous) and approved by the user the same day. Each line maps to a spec capability in `covers`.
 
 - E21-R1: A custom agent is a user-defined `AgentDescriptor` on `acp-base`, `agentId` `custom-<slug>`, kept as a core-owned install-level row (AD-11) and added to the agent registry live, without a restart; core and shared still name no agent. (CAP-27; AD-1 note)
 - E21-R2: Its command is resolved like epic 12's linked command (absolute, runnable, never through a shell) at save and at every chat start; **Test** starts it once and shows what `initialize` advertises (resume, modes, models, prompt capabilities) or the agent's own error in one sentence. (CAP-27; AD-1 note; EXPERIENCE.md Add your own agent)
@@ -57,7 +57,7 @@ Registering and using ACP agents the user brings. Not here: agents without ACP (
 
 ## Notes
 
-- Status: drafted autonomously 2026-10-31; awaiting the user's approval of the inception.
+- Status: APPROVED by the user 2026-10-31 (inception, with the autonomous decisions below kept).
 - Decision (2026-10-31, user): attended local-model builds come with this epic; unattended local-model and custom-agent builds stay out (spec CAP-15, CAP-27).
 - Decision (2026-10-31, autonomous after the set check): custom agents chat only in v1.3; epic 17's runner needs a per-agent build quirk (skill invocation, halt wording) an arbitrary agent cannot supply. The user may overrule.
 - Decision (2026-10-31, autonomous): tracer bullet is entry 1 (a fake ACP agent registered through the API and chatted with); no spike, because the ACP client is proven by five agents.

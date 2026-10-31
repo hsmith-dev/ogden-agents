@@ -1,0 +1,103 @@
+# Epic 22 breakdown (v1.3, sessions on this computer). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-31 for the user's approval. References to other epics use "<epic id>.<entry id>".
+# CI never uses a real agent, model, phone or network: fakes on loopback only. Live checks with real CLIs, agents and devices are hitl.
+
+[[entry]]
+id = 1
+type = "spike"
+title = "Can Ogden resume a Codex session from the user's own ~/.codex, and how does Claude Code record a running session?"
+description = "In scratch folders on all three OSes, checks whether a rollout from a user `CODEX_HOME` resumes through codex-acp under Ogden's own `CODEX_HOME` without reading `auth.json`, and records the format and reliability of Claude Code's running-session records (pid and start time) for liveness; the hitl step is the user deciding Codex take-over go or no-go."
+verify = "The plan records both findings with evidence per OS and the user's dated decision in the epic's Notes."
+covers = ["E22-R4", "E22-R5"]
+after = []
+hitl = true
+risk = "medium"
+unknown = "Whether Codex sessions are portable between homes."
+
+[[entry]]
+id = 2
+type = "story"
+title = "Tracer bullet: a fixture Claude Code session appears under On this computer"
+description = "Adds the thinnest path: a minimal Claude Code discovery adapter over a fixture home, one found-session row, its event, and a bare sidebar group listing it."
+verify = "A test writes a fixture transcript into a temp home and the found session appears through the real server API and in the sidebar within seconds."
+covers = ["E22-R1"]
+after = ["2.11"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Epic contracts and stubs: SessionDiscoveryPort, found-session rows, events, routes and settings"
+description = "Adds the port and memory stub, the core install-level table, `discovered.*` events, routes under the AD-15 gate, the per-agent setting, the workspace mapping (deepest path), and the architecture tests that discovery adapters spawn nothing and import no config writer; it also owns the adapter registry in the server wiring and the per-agent setting, so entries 4 and 5 add only their adapter, plus the rescan dedupe on agent and agent session id, dropping rows when discovery turns off, and the no-store transcript read route that resolves paths only inside the allowlist (realpath, no symlinks or ..)."
+verify = "Unit and architecture tests pass, including a fixture adapter that spawns a process failing the test."
+covers = ["E22-R1", "E22-R2"]
+after = [2]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Claude Code discovery: allowlist, tolerant parsing, own-session exclusion, masking and liveness"
+description = "Completes `discovery-claude-code`: the glob allowlist, a tolerant parser with fixtures, dropping Ogden's own sessions and data-directory cwds, AD-16 masking on read, and liveness from the running-session record per spike 1; and lists a session first seen in a pane Ogden started as that pane's, from epic 16's pane records (cwd and start time)."
+verify = "Adapter tests on fixture homes cover an outside session, an Ogden chat's session, a build's session, an unknown line, a secret in a tool result, and an open-outside-allowlist failure; and a check that no agent config or hook file changes while discovery runs."
+covers = ["E22-R2", "E22-R3"]
+after = [1, 3, "16.3"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Codex discovery, view-only or with take-over per spike 1"
+description = "Adds `discovery-codex` over `sessions/**/rollout-*.jsonl` and `archived_sessions/`, skipping compressed rollouts and never matching `auth.json`, view-only unless spike 1 was a go; it updates setup-codex's \"never read ~/.codex\" promise in code comments and docs for discovery only; Codex take-over, when spike 1 is a go, is enabled in entry 6."
+verify = "Adapter tests on a fixture Codex home list its sessions and never open `auth.json`."
+covers = ["E22-R3", "E22-R5"]
+after = [1, 3, "12.3"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Take over: one transaction, add-project first, start in Ask"
+description = "Implements Take over: ownership and liveness re-checked in the creating transaction with `already_in_ogden` and plain refusals, the add-project flow with trust for a folder with no project, the chat created in Ask, and resume of the agent session through its adapter; it reuses 12.3's project trust action for the add-project step and enables Codex take-over only if spike 1 was a go."
+verify = "Server tests take over a fixture session with context, and refuse each case; a folder with no project creates nothing until the user confirms."
+covers = ["E22-R4"]
+after = [4, 5, "12.3"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 7
+type = "story"
+title = "On this computer group, found-session view and Settings, Session discovery"
+description = "Builds the sidebar group, the found-session row, the read-only masked transcript with Take over and refusals, and the Settings page with a switch per agent, from EXPERIENCE.md and DESIGN.md; including Codex's view-only state and its \"Can't continue this in Ogden yet\" wording."
+verify = "Playwright turns discovery on, opens a fixture session, takes it over, and sees each refusal in plain words."
+covers = ["E22-R6"]
+after = [5, 6]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up duplication, dead code and boundary leaks across entries 2 to 7, scoped at start from their build records and deferred review findings."
+verify = "Typecheck, the full suite and the architecture test pass, and the sweep's list is recorded in its plan."
+covers = []
+after = [2, 3, 4, 5, 6, 7]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 9
+type = "story"
+title = "End-to-end suite and v1.3 release part; live check with a terminal Claude Code session"
+description = "Adds the epic's end-to-end journey on all three OSes with fakes only, updates docs, and lists the user's live check: a Claude Code session started in a terminal, found and taken over."
+verify = "The end-to-end suite passes in CI on macOS, Windows and Linux, and the user's live check result is recorded in the plan."
+covers = ["E22-R7"]
+after = [8]
+hitl = true
+risk = "low"

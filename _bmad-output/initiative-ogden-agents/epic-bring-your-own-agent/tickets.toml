@@ -1,0 +1,92 @@
+# Epic 21 breakdown (v1.3, bring your own agent). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-31 for the user's approval. References to other epics use "<epic id>.<entry id>".
+# CI never uses a real agent, model, phone or network: fakes on loopback only. Live checks with real CLIs, agents and devices are hitl.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: register a fake ACP agent by command and chat with it"
+description = "Adds the thinnest path: a `custom-<slug>` descriptor built from a stored command line, added to the registry at runtime, a fake ACP agent fixture launched by that command, and one API call that registers it, then a chat created with it in a workspace streams a reply."
+verify = "On all three OSes a test registers the fake agent through the real server API, creates a chat with it, and the reply streams into the session view without a server restart."
+covers = ["E21-R1", "E21-R5"]
+after = ["6.4", "12.12"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 2
+type = "story"
+title = "Epic contracts and stubs: custom agent rows, live registry, routes and the variable-name rule"
+description = "Adds the core-owned `custom_agents` table and use-cases (create, update, test, remove), the shared schemas, the routes under the AD-15 gate, live add and remove on the registry, the key variable-name validation, and an architecture test that core and shared name no custom agent, with a memory stub so the UI and build lanes start at once; it also owns resolving the command at every chat start, placing the key only in that agent's process under its variable name, the redaction test across database, event log and logs, and the `skillsFolder` a custom row uses (`.agents/skills`); entries 3 and 6 build on its memory stub until the real use-cases land."
+verify = "Unit and architecture tests cover create, update and remove, a refused variable name for each forbidden class, and that existing agents' flows are unchanged."
+covers = ["E21-R1", "E21-R3"]
+after = [1]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Add your own agent in Settings, Agents: command, arguments, key, Test and Remove"
+description = "Builds the Add your own agent form and card from EXPERIENCE.md: command resolved like the linked command with plain refusals, arguments, the optional key and its variable name kept in the keychain, Test showing what `initialize` advertises, and the card's plain lines about Ask only, trust, no unattended builds and no orchestration; plus Remove with its confirmation; it builds on 21.2's memory stub."
+verify = "Playwright: a user adds the fake agent, Test lists its capabilities, a bad command and a forbidden variable name are refused in plain words, and the key is never shown again after saving."
+covers = ["E21-R2", "E21-R3"]
+after = [2]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Custom agent guards: Ask only, project trust, no orchestration, read-only chats after removal"
+description = "Enforces in the server that a custom agent offers Ask only, needs project trust, is refused as an orchestration worker and for unattended builds, and that removing it leaves its chats readable but closed with \"This agent was removed.\"; it declares the custom descriptor's modes (Ask only) that entry 5 relies on, sets `interactiveOnly` (the dispatch refusal already exists in orchestration-dispatch.ts), and builds the web's read-only chat with \"This agent was removed.\"."
+verify = "Server tests refuse Auto, Skip all, dispatch and unattended builds for a custom agent with their codes, and a removed agent's chat opens read-only after a restart."
+covers = ["E21-R4"]
+after = [2, "15.7"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Chat parity for custom agents: cards, cancel, resume chain and models"
+description = "Proves and fixes the shared ACP client's behaviour for an arbitrary agent: permission cards by option kind, cancel, resume then load then the stored transcript, models from its config options, and plain errors when it exits or never answers `initialize`; it uses entry 4's Ask-only mode declaration."
+verify = "Contract tests run the shared chat suite against three fake agents with different advertised capabilities (resume, load only, neither) and all pass."
+covers = ["E21-R5"]
+after = [2, 4]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Attended builds with the Local model"
+description = "Registers the Local model with epic 17's agent-neutral runner as attended-only, so Build offers it with every tool call a card, reuses 14.9's skill placement for `.agents/skills` where Planning is on, and keeps unattended refused; custom agents are not offered for builds."
+verify = "An attended build of a fixture ticket with the Local model against the fake server reaches Ready for review with its diff, every tool call answered by a card, and an unattended request is refused."
+covers = ["E21-R6"]
+after = [4, "14.6", "14.9", "17.8"]
+hitl = false
+risk = "high"
+unknown = "Whether OpenCode's build-skill invocation and tool use behave the same in a worktree as in chat; the live check confirms."
+
+[[entry]]
+id = 7
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up duplication, dead code and boundary leaks across entries 1 to 6, scoped at start from their build records and deferred review findings."
+verify = "Typecheck, the full suite and the architecture test pass, and the sweep's list of changes is recorded in its plan."
+covers = []
+after = [1, 2, 3, 4, 5, 6]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 8
+type = "story"
+title = "End-to-end suite and v1.3 release part; live checks with OpenCode and Goose"
+description = "Adds the epic's end-to-end journey on all three OSes with fakes only, updates the agent matrix and docs, and lists the user's live checks: OpenCode and Goose registered as custom agents against a local model, chat, resume and an attended build."
+verify = "The end-to-end suite passes in CI on macOS, Windows and Linux, and the user's live check results are recorded in the plan."
+covers = ["E21-R7"]
+after = [7]
+hitl = true
+risk = "medium"

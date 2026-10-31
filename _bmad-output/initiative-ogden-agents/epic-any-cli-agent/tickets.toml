@@ -1,0 +1,136 @@
+# Epic 20 breakdown (v1.3, any CLI agent). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-31 for the user's approval. References to other epics use "<epic id>.<entry id>".
+# CI never uses a real agent, model, phone or network: fakes on loopback only. Live checks with real CLIs, agents and devices are hitl.
+
+[[entry]]
+id = 1
+type = "spike"
+title = "Which prompts can be read off each real CLI's screen on all three OSes?"
+description = "Captures real screens from Claude Code, Codex, Grok, Antigravity, Copilot and Gemini CLIs in panes on macOS, Windows and Linux (scratch projects only) for single choice, multi-select, free text and permission prompts, records whether each draws a stable frame with the cursor inside and whether selection is marked only by color, prototypes the capture tool, and lists which kinds are supportable; the hitl step is the user running the captures and accepting the supported list."
+verify = "The plan holds the captured screens (masked), a per-CLI and per-kind table of supportable or not with reasons, the prototype capture tool, and the user's dated acceptance in the epic's Notes."
+covers = ["E20-R2", "E20-R5"]
+after = ["16.6"]
+hitl = true
+risk = "high"
+unknown = "Whether real CLIs draw prompts stable enough to parse; a CLI that does not stays unreadable-only."
+
+[[entry]]
+id = 2
+type = "story"
+title = "Tracer bullet: a fake CLI's prompt answered from a card through the gate"
+description = "Adds the thinnest path: a fake CLI fixture that draws one single-choice prompt in a pane, a minimal parser for it, a minimal gate that mints and redeems one consent token, the GET for the masked prompt, a bare card in the pane view, and the answer's keys reaching the program."
+verify = "On all three OSes a test opens the fake CLI in a pane, the card shows its question and options, answering writes the chosen option's keys, and the program prints its answer."
+covers = ["E20-R1", "E20-R2"]
+after = ["16.3", "16.9"]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Epic contracts and stubs: ScreenPromptPort, the gate, prompt and key events, screen snapshot and Needs you"
+description = "Adds the shared `ScreenPrompt` and option-effect schemas, `terminal.pane_prompt_*` and `terminal.pane_keys_*` events with ids only, `ScreenPromptPort` and `KeystrokeGate` interfaces with memory stubs, the `PaneProcess` screen-snapshot signature, the launcher's `screenPrompts` field, the Needs you read-model contract and route, and the architecture tests for the write allowlist, viewer call sites and no-text events; it also fixes the contracts of the authenticated answer and interrupt POST routes, the shape of the snapshot generation counter that entries 4 and 5 share, and the Needs you list and count shapes that 23.7 and 25.1 read."
+verify = "Unit and architecture tests pass, the tests fail when a fixture module writes pane input outside the allowlist or emits a prompt event with text, and existing pane flows are unchanged."
+covers = ["E20-R1", "E20-R4", "E20-R6"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Pane screen snapshot with attributes and the cursor"
+description = "Extends the terminal adapter's server-side screen mirror so a pane returns its visible lines with SGR attributes and the cursor position on all three OSes, still in memory only; it implements the generation counter in the shape 20.3 fixed."
+verify = "Adapter tests on all three OSes check a fixture program's inverse-video selection, a ticked box and the cursor position in the snapshot."
+covers = ["E20-R2"]
+after = [3]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "The keystroke gate: consent, expectations, one at a time, events"
+description = "Implements `KeystrokeGate` as AD-30 states: token binding and 60 second life, listener origin, re-read with generation, program and signature checks, refusal codes, `target_busy`, holding user bytes during a send, writes through the pane service, write-ahead events, control-character stripping, and the `interactiveOnly` rule; it implements the answer and interrupt POST routes that mint and redeem tokens, and reads 20.3's generation shape rather than its own counter."
+verify = "Gate unit tests cover a missing, expired, reused, wrong-target and wrong-listener token, a changed generation, a stale signature, a concurrent send and an interactiveOnly instruct, each sending nothing."
+covers = ["E20-R1"]
+after = [3]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 6
+type = "story"
+title = "The screen-prompt model inside the status tracker: occurrences, masking and outcomes"
+description = "Runs `ScreenPromptPort` inside epic 16's status tracker as the one owner of needs-attention, with occurrence ids and content hashes, the frame and cursor anchor, AD-16 masking, the region, outcomes, resolution at server start and on Developer mode off, the GET, and launcher status patterns derived from the named screen-prompt set."
+verify = "Core tests drive the fake CLI through prompt, answer in Ogden, answer in the terminal, program exit and a repeated identical prompt, and each records exactly one outcome with a new id for the repeat."
+covers = ["E20-R2", "E20-R3", "E20-R4"]
+after = [4, 5]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 7
+type = "story"
+title = "Claude Code screen prompts, fixtures and the capture tool"
+description = "Adds `screen-prompt-claude-code` from spike 1's captures (patterns, key encodings, option effects such as \"don't ask again\" marked persistent), its fixtures and `expected.json`, and promotes the capture tool to `scripts/` with docs."
+verify = "The fixture test parses every Claude Code fixture to `expected.json`, and the capture tool writes a new fixture from a fake pane."
+covers = ["E20-R5"]
+after = [1, 6]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Codex, Grok, Antigravity, Copilot and Gemini screen prompts and fixtures"
+description = "Adds a `screen-prompt-<cli>` adapter and fixtures for each CLI spike 1 marked supportable, marks the rest unreadable-only in the agent matrix, and sets Copilot's launcher to answers-only; Copilot's answers-only flag also drives the card's caption \"Answered one at a time by you\" (entry 10)."
+verify = "The fixture test passes for every supported CLI and kind, and an unsupported kind's fixture parses as unreadable."
+covers = ["E20-R5"]
+after = [7]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 9
+type = "story"
+title = "One Needs you model in core, read by the sidebar"
+description = "Moves Needs you from the browser's derivation into the core read model (sessions waiting, panes with an open prompt, reviews, blocked runs, each with its workspace), serves it by route and events, and switches the sidebar, the tab title count and notifications to read it; it reads pane needs-attention as entry 6 defines it, and serves the list and count routes that epic 23's device socket (23.7) and epic 25's tray (25.1) read."
+verify = "Server tests cover each kind joining and leaving the model, and Playwright shows the sidebar and tab title unchanged for existing kinds plus a pane row."
+covers = ["E20-R6"]
+after = [3, 6, "11.4"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 10
+type = "story"
+title = "The screen-prompt card: states, keyboard and screen readers"
+description = "Builds the card from EXPERIENCE.md and DESIGN.md over a pane: caption, masked region, numbered options, multi-select with Submit, desktop free text, Sending, changed, refused and unreadable states with Open terminal, the record line, number keys, no default focus, and the assertive announcement; the card also joins Needs you, and shows Copilot's caption from 20.8's answers-only flag."
+verify = "Playwright drives each state with the fake CLI at desktop and narrow widths, keyboard only, and an axe check passes."
+covers = ["E20-R7"]
+after = [6, 9]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 11
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up duplication, dead code and boundary leaks across entries 2 to 10, scoped at start from their build records and deferred review findings."
+verify = "Typecheck, the full suite and the architecture test pass, and the sweep's list is recorded in its plan."
+covers = []
+after = [2, 3, 4, 5, 6, 7, 8, 9, 10]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 12
+type = "story"
+title = "End-to-end suite and v1.3 release part; live checks with real CLIs"
+description = "Adds the epic's end-to-end journey (Flow 4's desktop part) on all three OSes with fakes only, fills the agent matrix's screen-prompt table, updates docs, and lists the user's live checks with each supported real CLI in a scratch project."
+verify = "The end-to-end suite passes in CI on macOS, Windows and Linux, and the user's live check results are recorded in the plan."
+covers = ["E20-R8"]
+after = [11]
+hitl = true
+risk = "medium"

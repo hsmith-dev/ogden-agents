@@ -1,0 +1,102 @@
+# Epic 24 breakdown (v1.3, rotation, lineage and plan limits). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-31 for the user's approval. References to other epics use "<epic id>.<entry id>".
+# CI never uses a real agent, model, phone or network: fakes on loopback only. Live checks with real CLIs, agents and devices are hitl.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: start a fake-agent chat fresh from a summary"
+description = "Adds the thinnest path: a rotation use-case that asks the fake agent for a summary in a user-started turn, previews it through the API, starts a fresh agent session from it, swaps the ref and appends `session.rotated`, and a bare divider in the thread; it builds on the handoff use-case already on main (`core/src/chat/handoff.ts`)."
+verify = "A test rotates a fake-agent chat through the real server API, the fresh session receives the previewed summary, and the thread shows the divider."
+covers = ["E24-R1"]
+after = []
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 2
+type = "story"
+title = "Epic contracts and stubs: session.rotated, lineage read model, PlanLimitPort and plan readings"
+description = "Adds the `session.rotated` schema with cause `user`, the lineage read model and family route contract, `PlanLimitPort` with a memory stub, the core plan-readings table and `plan_limit.changed` event, and architecture tests that the web imports no lineage builder and no stored field holds a cost; it also names the acp-base to AgentPort seam that carries a reading to `PlanLimitPort`, and owns AD-35's enforcement tests: no meter for an API-key agent (Claude Code on a key included), no use case refusing on a reading, no stored cost."
+verify = "Unit and architecture tests pass, and existing handoff and orchestration flows are unchanged."
+covers = ["E24-R1", "E24-R2", "E24-R4"]
+after = [1, "2.3", "15.7"]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Rotation in core: preconditions, switching lock, refusal codes and crash safety"
+description = "Hardens rotation: handoff's preconditions, the switching lock for the whole job, `step_in_flight` while a step is dispatched, orchestration ignoring state changes inside it, masking and capping the brief, the preview token, and the one-transaction ref swap with the old ref standing until the fresh session exists; it also refuses `interactiveOnly` agents."
+verify = "Core tests refuse rotation in each precondition, and a simulated crash at each step leaves the chat on its old session."
+covers = ["E24-R1"]
+after = [2, "15.9"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 9
+type = "story"
+title = "The lineage read model in core"
+description = "Implements the one lineage read model over `session.rotated`, `session.agent_changed` and `orchestration.step_dispatched` (generations with returns, an orchestration run as parent of its workers, waiting-on from each worker's state, what came back from the orchestration readback), rebuilt from the event log after a restart, behind the family route."
+verify = "Core tests build the family for a rotated chat, a handed-off-and-back chat and a fake orchestration run, before and after a simulated restart."
+covers = ["E24-R2"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Start fresh dialog, divider, and the family chip and sheet"
+description = "Builds the header menu item, the dialog with the editable masked summary and its limit, the divider, the family chip and the sheet listing generations and an orchestration run's workers with their state and waiting-on count, from the family route; the sheet shows what came back from 24.9's model, and 24.6's suggestion opens this dialog."
+verify = "Playwright rotates a fake-agent chat and opens the family sheet for it and for a fake orchestration run's worker."
+covers = ["E24-R2", "E24-R3"]
+after = [3, 9]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Claude Code plan-limit readings from ACP"
+description = "Adds `plan-limit-claude-code` reading `usage_update._meta[\"_claude/rateLimit\"]` from the pinned adapter, ignoring cost, dollar and spend-limit fields, writing the 5-point-step events and expiry, and an Antigravity check that reads unknown when nothing is reported; it adds the new `usage_update` case to acp-base through 24.2's seam."
+verify = "Adapter tests feed recorded fake `usage_update` messages (with and without cost, expired, a spend-limit window) and the table and events match."
+covers = ["E24-R4"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 6
+type = "story"
+title = "The plan meter chip and its suggestion"
+description = "Builds the composer and agent-picker chip, its tooltip, the signal color at 80% or more with a one-time offer to start fresh or continue with another agent, and no chip when unknown or for an API-key agent."
+verify = "Playwright shows the chip at 42% and 81% from fake readings, the suggestion once, and no chip for a Codex chat; and no chip for a Claude Code chat signed in with an API key."
+covers = ["E24-R5"]
+after = [4, 5]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 7
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up duplication, dead code and boundary leaks across entries 1 to 6, scoped at start from their build records and deferred review findings."
+verify = "Typecheck, the full suite and the architecture test pass, and the sweep's list is recorded in its plan."
+covers = []
+after = [1, 2, 3, 9, 4, 5, 6]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 8
+type = "story"
+title = "End-to-end suite and v1.3 release part; live check with a long Claude Code chat"
+description = "Adds Flow 5's end-to-end journey on all three OSes with fakes only, updates docs, and lists the user's live check: a real long Claude Code chat shows its meter and starts fresh."
+verify = "The end-to-end suite passes in CI on macOS, Windows and Linux, and the user's live check result is recorded in the plan."
+covers = ["E24-R6"]
+after = [7]
+hitl = true
+risk = "low"

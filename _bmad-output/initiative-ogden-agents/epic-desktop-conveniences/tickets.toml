@@ -1,0 +1,103 @@
+# Epic 25 breakdown (v1.3, desktop conveniences). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-31 for the user's approval. References to other epics use "<epic id>.<entry id>".
+# CI never uses a real agent, model, phone or network: fakes on loopback only. Live checks with real CLIs, agents and devices are hitl.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: the tray shows the Needs you count through the shell's own tab"
+description = "Adds the thinnest path and owns the minimal shell-tab exchange: the shell gets a launch code through the existing launcher handshake (the launcher token still opens only the handshake), exchanges it for a tab token held in Rust memory, polls the Needs you count route (20.9), and shows it on a tray icon on all three OSes; entry 2 extends the exchange for the Quick entry window."
+verify = "A desktop smoke test on each OS starts the app with a fake waiting chat and reads the count through the shell's report hook (and the tray tooltip on macOS and Windows, which Linux does not support), and the launcher token still opens only the handshake."
+covers = ["E25-R1", "E25-R2"]
+after = ["13.5", "20.9"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 2
+type = "story"
+title = "Epic contracts and stubs: attachments, chat worktrees and the shell tab"
+description = "Adds the attachment metadata schema, storage layout and cap, the chat `worktreePath` and branch fields with their events, the routes under the AD-15 gate, an AgentPort field exposing each agent's advertised ACP prompt capabilities, and the shell scaffolding entries 3 and 4 share (plugin registration, capabilities, the Quick entry window config and its launch codes from the same handshake), with stubs so the UI lanes start at once."
+verify = "Unit and architecture tests pass, including that no event schema carries attachment bytes."
+covers = ["E25-R1", "E25-R4", "E25-R5"]
+after = [1]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Tray menu with Needs you rows, New chat and Quit"
+description = "Completes the tray: the menu with Open, New chat, up to three Needs you rows opening their chats, and Quit under the busy rule, menu-only on Linux."
+verify = "Desktop smoke tests on each OS open a Needs you row's chat from the tray menu."
+covers = ["E25-R2", "E25-R6"]
+after = [2]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Global shortcut and Quick entry"
+description = "Adds `tauri-plugin-global-shortcut` pinned at 2.4.1, the changeable shortcut in Settings, Appearance with the Wayland note, and the Quick entry window on its own launch code with project picker, composer, Continue in the last chat or New chat; the tray's New chat opens it; it has no attachments and no separate-copy switch in v1.3."
+verify = "Desktop smoke tests trigger the shortcut, send from Quick entry, and see the message in the chosen chat; and that the main window comes forward on that chat."
+covers = ["E25-R3", "E25-R6"]
+after = [2, 3]
+hitl = false
+risk = "medium"
+unknown = "Whether the shortcut can be registered on every CI runner; the user's installer check covers what CI cannot."
+
+[[entry]]
+id = 5
+type = "story"
+title = "Attachments: storage, caps, composer chips and ACP content by capability"
+description = "Stores attachments under the session in the data directory, enforces the cap and types, shows composer chips with remove, sends image or resource content only to agents that advertised it and a resource link otherwise, and deletes them with history; using 25.2's prompt-capabilities field."
+verify = "Tests send an image to a fake agent that advertises images and to one that does not, and Playwright attaches, removes and sends."
+covers = ["E25-R4", "E25-R6"]
+after = [2, 4]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Worktree chats: a separate copy on its own branch"
+description = "Adds Work in a separate copy: the worktree created through `VcsPort` in the data directory on `ogden/chat/<ses>` with hooks off, protected paths and Windows long paths, the chat's agent running in it, kept on restart, removed with the chat after confirmation, and the branch badge."
+verify = "Tests create a worktree chat on a fixture repo, the fake agent's edits land only in the worktree, and deleting the chat removes it after confirmation."
+covers = ["E25-R5", "E25-R6"]
+after = [2, "5.5"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 7
+type = "story"
+title = "The Changes panel and Commit these changes"
+description = "Builds the Changes panel on the existing diff viewer and the user-clicked local commit to the chat's branch, serialized with the repo's other git work, never pushed, with the plain line about merging."
+verify = "Tests commit a fixture worktree chat's changes to its branch only, with hooks off, and the main checkout is unchanged."
+covers = ["E25-R5", "E25-R6"]
+after = [6]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up duplication, dead code and boundary leaks across entries 1 to 7, scoped at start from their build records and deferred review findings."
+verify = "Typecheck, the full suite and the architecture test pass, and the sweep's list is recorded in its plan."
+covers = []
+after = [1, 2, 3, 4, 5, 6, 7]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 9
+type = "story"
+title = "End-to-end suite and v1.3 release part; installer checks on each OS"
+description = "Adds the epic's end-to-end journey with fakes only, updates docs, and lists the user's installer checks on macOS, Windows and Linux: tray, shortcut, attachments and a worktree chat in the installed app; and on the npm route checks that attachments and worktree chats work while the tray and shortcut are absent."
+verify = "The end-to-end suite passes in CI on all three OSes, and the user's installer check results are recorded in the plan."
+covers = ["E25-R7"]
+after = [8]
+hitl = true
+risk = "medium"

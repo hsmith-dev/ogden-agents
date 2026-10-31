@@ -1,0 +1,125 @@
+# Epic 23 breakdown (v2, answer from your phone). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-31 for the user's approval. References to other epics use "<epic id>.<entry id>".
+# CI never uses a real agent, model, phone or network: fakes on loopback only. Live checks with real CLIs, agents and devices are hitl.
+
+[[entry]]
+id = 1
+type = "spike"
+title = "Do phones accept a name-constrained local CA over the home network and Tailscale?"
+description = "On a real iPhone and Android phone (the user's hitl step), installs a test CA name-constrained to a LAN address and to a MagicDNS name, opens a test HTTPS page through each, and records the install steps, trust prompts, failures and which constraint forms work."
+verify = "The plan records per-OS results, the install steps for EXPERIENCE.md, and the user's dated go or no-go in the epic's Notes."
+covers = ["E23-R2"]
+after = []
+hitl = true
+risk = "high"
+unknown = "Whether name constraints are honored and how painful the install is on each phone OS."
+
+[[entry]]
+id = 2
+type = "story"
+title = "Tracer bullet: a fake device pairs and answers a permission card"
+description = "Adds the thinnest path: the listener on a test loopback-alias address with a test CA, a minimal pairing exchange, a device token, the permission-answer route on the allowlist with the allow-once rule, and a fake device client."
+verify = "A test pairs the fake device, answers a fake agent's permission card allow once, and an allow-always attempt is refused."
+covers = ["E23-R1", "E23-R4"]
+after = ["20.9", "2.1"]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Epic contracts and stubs: DeviceAccessPort, devices, the allowlist registry and the device socket"
+description = "Adds `DeviceAccessPort` with a memory stub, the devices table with hashed tokens, the allowlist registry, the device event socket schema and `ogden.device.<token>` subprotocol, the body-rule use-case interfaces, and the route-enumeration test; it also builds the device gate (tab tokens refused on the device listener and device tokens on loopback, with tests), request throttling per address and overall, an exhaustive device event-type allowlist test that excludes `discovered.*`, and no-store responses."
+verify = "Unit and architecture tests pass, and the enumeration test fails when a fixture route is reachable by a device token but not allowlisted."
+covers = ["E23-R1", "E23-R4", "E23-R5"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "The device certificate authority and listener lifecycle"
+description = "Implements `device-access-<variant>`: the name-constrained CA with `pathLen:0`, its key in the keychain, short-lived leaves, interface enumeration, re-issue on a new address, the fixed port, closing when the address disappears, and Host and Origin checks with the MagicDNS name, per spike 1; and refuses wildcard, loopback and link-local addresses, reopening at start only when enabled and its address exists."
+verify = "Adapter tests check the CA refuses an out-of-constraint name, no key file is written outside the keychain, and the listener closes when its fake interface disappears."
+covers = ["E23-R1", "E23-R2"]
+after = [1, 3, "9.2"]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Pairing: QR, match code, desktop Allow, expiry, revoke and throttling"
+description = "Implements pairing end to end: the single-use 128-bit code in a QR for 2 minutes, the match code, the desktop Allow, hashed tokens with 30-day idle expiry, immediate revoke, devices kept across off and on, and throttling per address and overall; with a device_pending state, the QR hidden once redeemed, and a `device.paired` event with a desktop notice."
+verify = "Tests cover a reused, expired and unmatched code, a revoked and idle-expired token, and throttling."
+covers = ["E23-R3"]
+after = [4]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Body rules in core for device requests"
+description = "Enforces in core every AD-34 body rule for a device origin: chat only to existing plain Ask chats, no `/` or `!` prefix, never creating a chat, allow once or deny only, screen answers only once or deny effects, never free text, never a shell pane, each with its plain refusal; screen answers only for single-choice or permission prompts and always through `KeystrokeGate` (20.5); a queued device message is re-checked at delivery and dropped with a notice if the chat left Ask."
+verify = "Core tests refuse every violation and allow every permitted case, with the device origin recorded on the event."
+covers = ["E23-R4"]
+after = [3, 5, "20.5", "20.6"]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 7
+type = "story"
+title = "The device event socket, phone pairing and the phone page"
+description = "Adds the filtered device event socket and the single-column phone page: Needs you first, chats in Ask, full-width cards, screen prompts with once options, the Ask-only composer, the plain refusals, and the unreachable state, at 320 to 480 px with 44 px targets; it also builds the phone side of pairing (the CA install steps from spike 1, the fingerprint and match code, the pending state, the pairing-only page for unpaired devices), reuses 20.10's card with the verbatim masked region and raw tool input and \"More choices on your computer\", writes the desktop record line \"Answered from <device>\", and registers no caching service worker."
+verify = "Playwright at phone widths drives a fake device through Flow 4's phone part, and an axe check passes."
+covers = ["E23-R5"]
+after = [5, 6, "20.10"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Settings, Phone on the desktop"
+description = "Builds the desktop page: the switch, network pick, pairing with QR, match code and Allow, the fingerprint, the devices list with revoke, and the closed-listener state."
+verify = "Playwright pairs a fake device from Settings and revokes it."
+covers = ["E23-R6"]
+after = [5]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 9
+type = "story"
+title = "Security review of the device listener and fixes"
+description = "Runs an independent security review (bmad-review security lens and the threat model in review-cap27-security.md) over the built listener, pairing, CA and body rules, and fixes its high and critical findings."
+verify = "The review report is in the plan, every high and critical finding has a fix with a test, and the review's re-check passes."
+covers = ["E23-R7"]
+after = [7, 8]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 10
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up duplication, dead code and boundary leaks across entries 2 to 9, scoped at start from their build records and deferred review findings."
+verify = "Typecheck, the full suite and the architecture test pass, and the sweep's list is recorded in its plan."
+covers = []
+after = [2, 3, 4, 5, 6, 7, 8, 9]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 11
+type = "story"
+title = "End-to-end suite and v2 release part; live checks with a real iPhone and Android phone"
+description = "Adds the epic's end-to-end journey with fakes only, updates docs including phone setup, and lists the user's live checks pairing and answering from a real iPhone and Android phone on the home network and over Tailscale."
+verify = "The end-to-end suite passes in CI on all three OSes, and the user's live check results are recorded in the plan."
+covers = ["E23-R7"]
+after = [10]
+hitl = true
+risk = "medium"

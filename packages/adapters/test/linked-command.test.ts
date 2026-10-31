@@ -79,24 +79,26 @@ describe('resolveLinkedCommand', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('on Windows, tries the bare name itself before the PATHEXT extensions', () => {
-    const seen: string[] = [];
-    const result = resolveLinkedCommand(
-      { command: 'grok' },
-      { Path: 'C:\\tools' },
-      { platform: 'win32', isExecutable: (file) => (seen.push(file), file === 'C:\\tools\\grok.EXE') },
-    );
+  it('on Windows, takes the .exe over the extensionless npm shim beside it (epic 21 audit)', () => {
+    const present = new Set(['C:\\npm\\grok', 'C:\\npm\\grok.CMD', 'C:\\tools\\grok.EXE']);
+    const result = resolveLinkedCommand({ command: 'grok' }, { Path: 'C:\\npm;C:\\tools' }, { platform: 'win32', isExecutable: (file) => present.has(file) });
     expect(result).toEqual({ ok: true, resolved: { command: 'C:\\tools\\grok.EXE', args: [] } });
-    expect(seen[0]).toBe('C:\\tools\\grok');
   });
 
-  it('on Windows, honours a custom PATHEXT over the default list', () => {
+  it('on Windows, refuses a name that is only an npm shim, .cmd or .bat, in plain words, since no shell starts it', () => {
+    const present = new Set(['C:\\npm\\goose', 'C:\\npm\\goose.CMD', 'C:\\npm\\goose.ps1']);
+    const result = resolveLinkedCommand({ command: 'goose acp' }, { PATH: 'C:\\npm' }, { platform: 'win32', isExecutable: (file) => present.has(file) });
+    expect(result).toEqual({ ok: false, reason: expect.stringContaining('is a script') });
+    expect(resolveLinkedCommand({ command: 'C:\\npm\\goose.cmd' }, {}, { platform: 'win32', isExecutable: () => true })).toEqual({ ok: false, reason: expect.stringContaining('is a script') });
+  });
+
+  it('on Windows, honours a custom PATHEXT order', () => {
     const result = resolveLinkedCommand(
       { command: 'grok' },
-      { PATH: 'C:\\tools', PATHEXT: '.FOO' },
-      { platform: 'win32', isExecutable: (file) => file === 'C:\\tools\\grok.FOO' },
+      { PATH: 'C:\\tools', PATHEXT: '.EXE;.COM' },
+      { platform: 'win32', isExecutable: (file) => file === 'C:\\tools\\grok.COM' || file === 'C:\\tools\\grok.EXE' },
     );
-    expect(result).toEqual({ ok: true, resolved: { command: 'C:\\tools\\grok.FOO', args: [] } });
+    expect(result).toEqual({ ok: true, resolved: { command: 'C:\\tools\\grok.EXE', args: [] } });
   });
 
   it('on Windows, a backslash in a bare-looking token means a path, not a PATH search, and a relative one is refused', () => {

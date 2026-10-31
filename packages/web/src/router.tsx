@@ -49,6 +49,13 @@ const agentsSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/agents-settings-page'), 'AgentsSettingsPage'),
 });
 
+/** Add your own agent (story 21.3): the agents page with the form already open. */
+const newCustomAgentRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/agents/new',
+  component: lazyRouteComponent(() => import('./routes/agents-settings-page'), 'NewCustomAgentPage'),
+});
+
 /** How many builds run at once, and the time limit of one (story 5.8). */
 const buildsSettingsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -194,7 +201,7 @@ const routeTree = rootRoute.addChildren([
   workspaceOrchestrateRoute,
   workspaceTerminalsRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

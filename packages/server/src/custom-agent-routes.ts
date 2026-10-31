@@ -10,8 +10,8 @@
  * these routes are `no-store`.
  */
 import { resolveLinkedCommand } from '@ogden-agents/adapters';
-import { CoreError, NotFoundError, SecretsUnavailableError, ValidationError } from '@ogden-agents/core';
-import { API_ROUTES, CustomAgentCreateRequest, CustomAgentListResponse, CustomAgentResponse, CustomAgentUpdateRequest, type AgentId, type CustomAgent } from '@ogden-agents/shared';
+import { AgentError, CoreError, NotFoundError, SecretsUnavailableError, ValidationError } from '@ogden-agents/core';
+import { API_ROUTES, CustomAgentCreateRequest, CustomAgentListResponse, CustomAgentResponse, CustomAgentTestRequest, CustomAgentTestResponse, CustomAgentUpdateRequest, customAgentTestLines, type AgentId, type CustomAgent, type CustomAgentAdvertised } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { apiError, notImplemented } from './errors.js';
@@ -32,6 +32,10 @@ export interface CustomAgents {
   update(agentId: AgentId, request: CustomAgentUpdateRequest): Promise<CustomAgent>;
   /** Unregisters it and removes it and its key. Rejects `NotFoundError`, `SecretsUnavailableError`. */
   remove(agentId: AgentId): Promise<void>;
+  /** Starts `request`'s command once with its typed key and reports what it advertised (story 21.3). Keeps nothing. Rejects `AgentError`. */
+  test(request: CustomAgentTestRequest): Promise<CustomAgentAdvertised>;
+  /** The same for a saved agent, with its own command and key. Rejects `NotFoundError`, `AgentError`. */
+  testSaved(agentId: AgentId): Promise<CustomAgentAdvertised>;
 }
 
 export interface CustomAgentRoutesOptions {
@@ -76,6 +80,8 @@ export function registerCustomAgentRoutes(app: Hono, options: CustomAgentRoutesO
     app.post(API_ROUTES.customAgents, notImplemented);
     app.patch(API_ROUTES.customAgent, notImplemented);
     app.delete(API_ROUTES.customAgent, notImplemented);
+    app.post(API_ROUTES.customAgentsTest, notImplemented);
+    app.post(API_ROUTES.customAgentTest, notImplemented);
     return;
   }
   const limit = bodyLimit({ maxSize: MAX_CUSTOM_AGENT_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
@@ -96,6 +102,48 @@ export function registerCustomAgentRoutes(app: Hono, options: CustomAgentRoutesO
   };
   /** The command resolved against the agent's own chat environment, as its chat start will (AD-16); a refusal is the plain reason. */
   const resolve = (agentId: AgentId, commandLine: string) => resolveLinkedCommand({ command: commandLine }, customAgents.env(agentId));
+
+  /** Test's answer, or the agent's own failure in one sentence; neither the command line nor a key is logged. */
+  // One Test at a time per saved agent, and one for unsaved commands: repeated presses never pile up agent processes.
+  const probing = new Set<string>();
+  const tested = async (c: Context, agentId: AgentId | undefined, work: () => Promise<CustomAgentAdvertised>): Promise<Response> => {
+    const slot = agentId ?? '';
+    if (probing.has(slot)) return apiError(c, 409, 'custom_agent_test_running', 'A test of this agent is still running. Wait for it to finish.');
+    probing.add(slot);
+    try {
+      const advertised = await work();
+      log.info('custom agent tested', { ...(agentId === undefined ? {} : { agentId }), resume: advertised.resume, load: advertised.load });
+      return c.json(CustomAgentTestResponse.parse({ advertised, lines: customAgentTestLines(advertised) }));
+    } catch (error) {
+      if (error instanceof AgentError) {
+        log.info('custom agent test failed', { ...(agentId === undefined ? {} : { agentId }), code: error.code });
+        return apiError(c, 422, 'custom_agent_test_failed', error.message, { reason: error.code });
+      }
+      return refusal(c, error, agentId ?? 'custom-agent-test');
+    } finally {
+      probing.delete(slot);
+    }
+  };
+
+  // Test before saving: the typed command and key, started once; nothing is kept. Static, so it is matched before `:agentId`.
+  app.post(API_ROUTES.customAgentsTest, limit, async (c) => {
+    noStore(c);
+    const body = await readBody(c, CustomAgentTestRequest);
+    if (!body.ok) return body.response;
+    const request = body.value;
+    // Refused as Save refuses it, before anything starts.
+    const resolved = resolve('custom--test', request.commandLine);
+    if (!resolved.ok) return apiError(c, 400, 'custom_agent_command_invalid', resolved.reason);
+    return tested(c, undefined, () => customAgents.test(request));
+  });
+
+  app.post(API_ROUTES.customAgentTest, async (c) => {
+    noStore(c);
+    const agentId = c.req.param('agentId');
+    if (stored(agentId) === undefined) return notFound(c);
+    const id = agentId as AgentId;
+    return tested(c, id, () => customAgents.testSaved(id));
+  });
 
   app.get(API_ROUTES.customAgents, (c) => {
     noStore(c);

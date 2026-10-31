@@ -314,8 +314,12 @@ export const API_ROUTES = {
    * for a body that doesn't fit.
    */
   customAgents: `${API_BASE}/custom-agents`,
+  /** Start a command once and report what it advertises (story 21.3): nothing is kept. */
+  customAgentsTest: `${API_BASE}/custom-agents/test`,
   /** One custom agent (story 21.2): `PATCH` changes it, `DELETE` removes it and its key. */
   customAgent: `${API_BASE}/custom-agents/:agentId`,
+  /** Start a saved custom agent once with its own command and key (story 21.3). */
+  customAgentTest: `${API_BASE}/custom-agents/:agentId/test`,
   /** `GET` → `OnboardingState`; `PATCH OnboardingState` → `OnboardingState` (9.5): whether Welcome is done. */
   onboarding: `${API_BASE}/onboarding`,
   /**

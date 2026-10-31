@@ -49,7 +49,8 @@ export type CustomAgentKeyEnvName = z.infer<typeof CustomAgentKeyEnvName>;
 /** An API key and the variable it reaches the agent under. The value is kept in the keychain only. */
 export const CustomAgentKeyInput = z.object({
   envName: CustomAgentKeyEnvName,
-  value: z.string().trim().min(1, 'Paste the key.').max(MAX_CUSTOM_AGENT_KEY_LENGTH, 'That key is too long.'),
+  // At least 8: shorter values escape the output masking (it skips values under 4) and no real key is that short.
+  value: z.string().trim().min(1, 'Paste the key.').min(8, 'That key is too short. Paste the whole key.').max(MAX_CUSTOM_AGENT_KEY_LENGTH, 'That key is too long.'),
 });
 export type CustomAgentKeyInput = z.infer<typeof CustomAgentKeyInput>;
 
@@ -88,3 +89,58 @@ export type CustomAgentListResponse = z.infer<typeof CustomAgentListResponse>;
 /** How a custom agent changed (`settings.custom_agent_changed`). */
 export const CUSTOM_AGENT_CHANGES = ['added', 'updated', 'removed'] as const;
 export const CustomAgentChange = z.enum(CUSTOM_AGENT_CHANGES);
+
+/**
+ * `POST /api/v1/custom-agents/test` (story 21.3, E21-R2): a command to start
+ * once, before it is saved, with the key it would get. Nothing is kept.
+ * `POST /api/v1/custom-agents/:agentId/test` takes no body: the saved command
+ * and key are used.
+ */
+export const CustomAgentTestRequest = z.object({ commandLine, apiKey: CustomAgentKeyInput.optional() });
+export type CustomAgentTestRequest = z.infer<typeof CustomAgentTestRequest>;
+
+/** What an agent advertised in its `initialize` answer, as far as Ogden uses it. */
+export const CustomAgentAdvertised = z.object({
+  /** Its own name and version, when it gave them. */
+  name: z.string().optional(),
+  version: z.string().optional(),
+  /** It can pick a chat up where it left off (`session/resume`). */
+  resume: z.boolean(),
+  /** It can reopen a chat by replaying it (`session/load`). */
+  load: z.boolean(),
+  image: z.boolean(),
+  audio: z.boolean(),
+  embeddedContext: z.boolean(),
+});
+export type CustomAgentAdvertised = z.infer<typeof CustomAgentAdvertised>;
+
+/** The Test answer: what it advertised, and the same in plain lines for the page. */
+export const CustomAgentTestResponse = z.object({ advertised: CustomAgentAdvertised, lines: z.array(z.string()) });
+export type CustomAgentTestResponse = z.infer<typeof CustomAgentTestResponse>;
+
+/** Plain lines for what `advertised` says (EXPERIENCE.md, Add your own agent): its name, how chats reopen, what a message can carry. */
+export function customAgentTestLines(advertised: CustomAgentAdvertised): string[] {
+  const lines: string[] = [];
+  const name = advertised.name?.trim();
+  if (name !== undefined && name !== '') lines.push(`It started and says it is ${name}${advertised.version === undefined || advertised.version.trim() === '' ? '' : ` ${advertised.version.trim()}`}.`);
+  else lines.push("It started. It didn't say its name.");
+  if (advertised.resume) lines.push('It can pick a chat up where it left off.');
+  else if (advertised.load) lines.push('It can reopen a chat by replaying it.');
+  else lines.push("It can't reopen a chat itself. Ogden shows the saved conversation instead.");
+  const takes = [advertised.image ? 'images' : undefined, advertised.audio ? 'audio' : undefined, advertised.embeddedContext ? 'file contents' : undefined].filter((each) => each !== undefined);
+  lines.push(takes.length === 0 ? 'Messages to it are text only.' : `Messages to it can include ${takes.join(' and ')}.`);
+  return lines;
+}
+
+/**
+ * The one stored command line for a Command and its Arguments (story 21.3):
+ * the program quoted when it has a space or a quote (backslashes and quotes
+ * escaped, so a Windows path survives the server's quote-aware split), then
+ * the arguments exactly as typed. Empty arguments store the program alone.
+ */
+export function joinCommandLine(command: string, args: string): string {
+  const program = command.trim();
+  const rest = args.trim();
+  const quoted = /[\s"']/.test(program) ? `"${program.replace(/[\\"]/g, (ch) => `\\${ch}`)}"` : program;
+  return rest === '' ? quoted : `${quoted} ${rest}`;
+}

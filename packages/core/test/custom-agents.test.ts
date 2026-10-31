@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { CustomAgentKeyEnvName } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { NotFoundError, SecretsUnavailableError, ValidationError, apiKeySecretName, type SecretStorePort } from '../src/index.js';
+import { openDatabase } from '../src/db/database.js';
 import { openTestCore, tempDir } from './helpers.js';
 
 const KEY = 'sk-custom-dummy-key-7d41aa';
@@ -91,6 +92,12 @@ describe('core.customAgents', () => {
     expect(allText(dataDir)).not.toContain(KEY);
   });
 
+  it('refuses a key shorter than 8 characters, which output masking would miss', async () => {
+    const { agents } = setUp();
+    await expect(agents.create(AGENT, { ...BODY, apiKey: { envName: 'MY_AGENT_API_KEY', value: 'abc' } })).rejects.toBeInstanceOf(ValidationError);
+    expect(agents.list()).toEqual([]);
+  });
+
   it('refuses a bad body or an id already kept, keeping nothing', async () => {
     const { agents, secrets } = setUp();
     await expect(agents.create(AGENT, { displayName: '', commandLine: 'x' })).rejects.toBeInstanceOf(ValidationError);
@@ -114,6 +121,26 @@ describe('core.customAgents', () => {
     await core.customAgents(secrets).create(AGENT, { ...BODY, apiKey: { envName: 'MY_AGENT_API_KEY', value: KEY } });
     await expect(core.customAgents(broken).remove(AGENT)).rejects.toBeInstanceOf(SecretsUnavailableError);
     expect(core.customAgents(secrets).get(AGENT)).toBeDefined();
+  });
+});
+
+describe('an id something still names stays reserved (epic 21 audit)', () => {
+  it("is in use while a project's build default or team roster names it", () => {
+    const dataDir = tempDir();
+    const core = openTestCore(dataDir);
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    expect(core.entities.isAgentIdInUse('custom-reviewer')).toBe(false);
+    core.close();
+    const db = openDatabase(dataDir);
+    db.sqlite.prepare('UPDATE workspaces SET orchestration_roster = ? WHERE id = ?').run(JSON.stringify({ reviewer: { kind: 'agent', agentId: 'custom-reviewer' } }), workspace.id);
+    db.sqlite.prepare('INSERT INTO workspace_build_settings (workspace_id, default_build_agent_id) VALUES (?, ?)').run(workspace.id, 'custom-builder');
+    db.close();
+    const reopened = openTestCore(dataDir);
+    expect(reopened.entities.isAgentIdInUse('custom-reviewer')).toBe(true);
+    expect(reopened.entities.isAgentIdInUse('custom-builder')).toBe(true);
+    // A longer id containing it is not the same id.
+    expect(reopened.entities.isAgentIdInUse('custom-review')).toBe(false);
+    expect(reopened.entities.isAgentIdInUse('custom-other')).toBe(false);
   });
 });
 

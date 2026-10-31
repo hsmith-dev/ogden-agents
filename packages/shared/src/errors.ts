@@ -222,6 +222,10 @@ export const API_ERROR_CODES = [
   'custom_agent_command_invalid',
   /** Story 21.2: no stored custom agent has that id (404). */
   'custom_agent_not_found',
+  /** Story 21.3: Test started the agent and it failed, or never answered `initialize` (422); the message is its plain reason, `details.reason` the agent error's code. Nothing was kept. */
+  'custom_agent_test_failed',
+  /** Story 21.3: a Test of the same agent (or of an unsaved command) is still running (409). Nothing was started. */
+  'custom_agent_test_running',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

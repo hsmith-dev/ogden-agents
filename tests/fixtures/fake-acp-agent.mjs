@@ -520,6 +520,9 @@ const agentBuilder = acp
         loadSession: RESUME === 'load' || RESUME === 'both',
         sessionCapabilities: { ...(ANTIGRAVITY || CODEX || GROK ? { list: {} } : { close: {} }), ...(GROK ? { close: {} } : {}), ...(RESUME === 'resume' || RESUME === 'both' ? { resume: {} } : {}) },
         ...(ANTIGRAVITY ? { auth: { logout: {} } } : {}),
+        // FAKE_ACP_PROMPT_CAPS=image,audio,embeddedContext: what its prompts take (Test, story 21.3). FAKE_ACP_TITLE_ENV=<NAME>
+        // titles it `<NAME>=set` or `=unset` (agentInfo below): whether a key reached a Test, never its value.
+        ...(process.env.FAKE_ACP_PROMPT_CAPS ? { promptCapabilities: Object.fromEntries(process.env.FAKE_ACP_PROMPT_CAPS.split(',').map((name) => [name.trim(), true])) } : {}),
       },
       authMethods: process.env.FAKE_ACP_AUTH_METHODS
         ? // A generic agent's own sign-in methods, done by the agent itself (6.3).
@@ -532,7 +535,7 @@ const agentBuilder = acp
                 { type: 'terminal', id: 'console-login', name: 'Anthropic Console', description: 'Use Anthropic Console (API usage billing)', args: ['--cli', 'auth', 'login', '--console'] },
               ]
             : [],
-      agentInfo: ANTIGRAVITY ? { name: 'antigravity-acp', title: 'Google Antigravity', version: '1.3.0' } : CODEX ? { name: '@agentclientprotocol/codex-acp', title: 'Codex', version: '2.1.1' } : GROK ? { name: 'grok', title: 'Grok Build', version: '1.0.49' } : { name: 'fake-acp-agent', version: '1.0.0' },
+      agentInfo: ANTIGRAVITY ? { name: 'antigravity-acp', title: 'Google Antigravity', version: '1.3.0' } : CODEX ? { name: '@agentclientprotocol/codex-acp', title: 'Codex', version: '2.1.1' } : GROK ? { name: 'grok', title: 'Grok Build', version: '1.0.49' } : { name: 'fake-acp-agent', version: '1.0.0', ...(process.env.FAKE_ACP_TITLE_ENV ? { title: `${process.env.FAKE_ACP_TITLE_ENV}=${process.env[process.env.FAKE_ACP_TITLE_ENV] ? 'set' : 'unset'}` } : {}) },
       ...(STEERING ? { _meta: { steering: { supported: true } } } : {}),
     };
   })

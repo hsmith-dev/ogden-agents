@@ -645,6 +645,8 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.customAgents}`,
   `PATCH ${API_ROUTES.customAgent}`,
   `DELETE ${API_ROUTES.customAgent}`,
+  `POST ${API_ROUTES.customAgentsTest}`,
+  `POST ${API_ROUTES.customAgentTest}`,
   `GET ${API_ROUTES.onboarding}`,
   `PATCH ${API_ROUTES.onboarding}`,
   `GET ${API_ROUTES.bmadPieces}`,

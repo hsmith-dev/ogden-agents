@@ -83,8 +83,14 @@ export const START_TIMEOUT_MS = 60_000;
 /** How long `close` waits, after ending the agent's stdin, for it to exit before killing its process tree. */
 export const EXIT_GRACE_MS = 2_000;
 
+/** An `AgentPort` that can also be started once just to read what it advertises (epic 21, story 21.3: Test). */
+export interface AcpAgentPort extends AgentPort {
+  /** Starts the agent, sends `initialize`, stops it, and returns its answer. No session is opened. Rejects with `AgentError`. */
+  probe(input: { env: Readonly<Record<string, string>> }): Promise<acp.InitializeResponse>;
+}
+
 /** An `AgentPort` for the ACP agent `descriptor` describes. */
-export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuirks, options: AcpAgentOptions = {}): AgentPort {
+export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuirks, options: AcpAgentOptions = {}): AcpAgentPort {
   const diagnostic: Diagnostic = (message, fields) => {
     try {
       options.onDiagnostic?.(message, fields);
@@ -186,6 +192,11 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     async reopenSession(input) {
       const opened = await open(input, { kind: 'reopen', agentSessionId: input.agentSessionId });
       return { session: opened.session!, restored: opened.restored };
+    },
+
+    async probe({ env }) {
+      // Any folder will do: only `initialize` runs, then the process is stopped.
+      return (await open({ cwd: homedir(), env: { ...env } }, { kind: 'probe' })).init;
     },
 
     async listAuthMethods({ env }) {

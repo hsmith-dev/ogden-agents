@@ -8,7 +8,7 @@
 import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { API_ROUTES, ApiErrorBody, apiPath, ChatAgentsResponse, CustomAgentListResponse, CustomAgentResponse, SessionResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
+import { API_ROUTES, ApiErrorBody, apiPath, ChatAgentsResponse, CustomAgentListResponse, CustomAgentResponse, CustomAgentTestResponse, SessionResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createMemorySecretStore } from '@ogden-agents/adapters';
 import { SecretsUnavailableError, type SecretStorePort } from '@ogden-agents/core';
@@ -115,6 +115,25 @@ describe('registering a custom ACP agent by its command (epic 21 story 21.1)', (
     const { chatWith, send } = await trustedProject(server, tab);
     const session = await chatWith('custom-my-agent');
     expect(session.agentId).toBe('custom-my-agent');
+    await send(session.id, 'hi');
+    await waitFor(() => stateOf(server, session.id) === 'idle' && replies(server, session.id).length > 0, 'the reply to hi', 15_000);
+    expect(replies(server, session.id)).toEqual(['Hello from the fake agent.']);
+  });
+
+  it('finds a bare program name on the chat environment\'s PATH, as a user types it (epic 21 audit)', async () => {
+    // A folder holding a link to Node (a copy on Windows) named `my-agent-node`, put on PATH for the agents only.
+    const bin = temp('ogden-agents-bin-');
+    const name = 'my-agent-node';
+    const node = join(bin, process.platform === 'win32' ? `${name}.exe` : name);
+    if (process.platform === 'win32') copyFileSync(process.execPath, node);
+    else symlinkSync(process.execPath, node);
+    const server = await startTestServer({ extraAgentEnv: { PATH: `${bin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}` } });
+    servers.push(server);
+    const tab = await signIn(server);
+    const added = await request(server, tab, 'POST', API_ROUTES.customAgents, { displayName: 'Bare', commandLine: `${name} ${quoted(FAKE_AGENT)}` });
+    expect(added.status).toBe(201);
+    const { chatWith, send } = await trustedProject(server, tab);
+    const session = await chatWith('custom-bare');
     await send(session.id, 'hi');
     await waitFor(() => stateOf(server, session.id) === 'idle' && replies(server, session.id).length > 0, 'the reply to hi', 15_000);
     expect(replies(server, session.id)).toEqual(['Hello from the fake agent.']);
@@ -252,5 +271,79 @@ describe('custom agents are kept, changed and removed, with a key only they get 
     expect(refused.status).toBe(503);
     expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('secrets_unavailable');
     expect(CustomAgentListResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.customAgents)).json()).agents).toEqual([]);
+  });
+});
+
+describe('Test starts a custom agent once and says what it offers (epic 21 story 21.3)', () => {
+  it('tests a typed command before it is saved: the lines from initialize, nothing kept, no key anywhere', async () => {
+    const lines: string[] = [];
+    const server = await startTestServer({ lines });
+    servers.push(server);
+    const tab = await signIn(server);
+    const response = await request(server, tab, 'POST', API_ROUTES.customAgentsTest, { commandLine: FAKE_COMMAND, apiKey: { envName: 'MY_AGENT_API_KEY', value: KEY } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const body = await response.text();
+    expect(CustomAgentTestResponse.parse(JSON.parse(body)).lines).toEqual([
+      'It started and says it is fake-acp-agent 1.0.0.',
+      "It can't reopen a chat itself. Ogden shows the saved conversation instead.",
+      'Messages to it are text only.',
+    ]);
+    expect(body).not.toContain(KEY);
+    expect(CustomAgentListResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.customAgents)).json()).agents).toEqual([]);
+    expect(JSON.stringify(server.core.events.readAfter(0))).not.toContain(KEY);
+    expect(lines.join('\n')).not.toContain(KEY);
+    expect(lines.join('\n')).not.toContain(FAKE_AGENT);
+  });
+
+  it('refuses a command that does not resolve as Save does, and an agent that fails as one plain sentence', async () => {
+    const server = await startTestServer({ extraAgentEnv: { FAKE_ACP_EXIT_AT_START: '1' } });
+    servers.push(server);
+    const tab = await signIn(server);
+    const refused = await request(server, tab, 'POST', API_ROUTES.customAgentsTest, { commandLine: 'relative/agent --acp' });
+    expect(refused.status).toBe(400);
+    expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('custom_agent_command_invalid');
+    const failed = await request(server, tab, 'POST', API_ROUTES.customAgentsTest, { commandLine: FAKE_COMMAND });
+    expect(failed.status).toBe(422);
+    const { error } = ApiErrorBody.parse(await failed.json());
+    expect(error).toMatchObject({ code: 'custom_agent_test_failed', details: { reason: expect.any(String) } });
+    expect(error.message.length).toBeGreaterThan(0);
+  });
+
+  it("gives Test the typed key, or a saved agent its own key, and no other agent's", async () => {
+    const server = await startTestServer({ extraAgentEnv: { FAKE_ACP_TITLE_ENV: 'MY_AGENT_API_KEY' } });
+    servers.push(server);
+    const tab = await signIn(server);
+    const nameOf = async (response: Response) => CustomAgentTestResponse.parse(await response.json()).advertised.name;
+    expect(await nameOf(await request(server, tab, 'POST', API_ROUTES.customAgentsTest, { commandLine: FAKE_COMMAND, apiKey: { envName: 'MY_AGENT_API_KEY', value: KEY } }))).toBe('MY_AGENT_API_KEY=set');
+    expect(await nameOf(await request(server, tab, 'POST', API_ROUTES.customAgentsTest, { commandLine: FAKE_COMMAND }))).toBe('MY_AGENT_API_KEY=unset');
+    expect((await request(server, tab, 'POST', API_ROUTES.customAgents, WITH_KEY)).status).toBe(201);
+    expect((await request(server, tab, 'POST', API_ROUTES.customAgents, { displayName: 'Other', commandLine: FAKE_COMMAND })).status).toBe(201);
+    expect(await nameOf(await request(server, tab, 'POST', apiPath(API_ROUTES.customAgentTest, { agentId: 'custom-my-agent' })))).toBe('MY_AGENT_API_KEY=set');
+    expect(await nameOf(await request(server, tab, 'POST', apiPath(API_ROUTES.customAgentTest, { agentId: 'custom-other' })))).toBe('MY_AGENT_API_KEY=unset');
+  });
+
+  it('runs one Test of an agent at a time: a second while the first runs is 409', async () => {
+    const server = await startTestServer({ extraAgentEnv: { FAKE_ACP_INIT_DELAY_MS: '1500' } });
+    servers.push(server);
+    const tab = await signIn(server);
+    const first = request(server, tab, 'POST', API_ROUTES.customAgentsTest, { commandLine: FAKE_COMMAND });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const second = await request(server, tab, 'POST', API_ROUTES.customAgentsTest, { commandLine: FAKE_COMMAND });
+    expect(second.status).toBe(409);
+    expect(ApiErrorBody.parse(await second.json()).error.code).toBe('custom_agent_test_running');
+    expect((await first).status).toBe(200);
+  });
+
+  it('tests a saved agent with its own command, and 404s one not added', async () => {
+    const { server, tab, register } = await setUp();
+    expect((await register(WITH_KEY)).status).toBe(201);
+    const response = await request(server, tab, 'POST', apiPath(API_ROUTES.customAgentTest, { agentId: 'custom-my-agent' }));
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(CustomAgentTestResponse.parse(JSON.parse(body)).advertised).toMatchObject({ name: 'fake-acp-agent', resume: false });
+    expect(body).not.toContain(KEY);
+    const missing = await request(server, tab, 'POST', apiPath(API_ROUTES.customAgentTest, { agentId: 'custom-nobody' }));
+    expect(missing.status).toBe(404);
   });
 });

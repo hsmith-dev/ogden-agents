@@ -1,6 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 import { AgentCard } from '@/agents/agent-card';
 import { useAgents } from '@/agents/agent-setup-api';
+import { CustomAgentsSection } from '@/agents/custom-agents';
 import { CHAT_AGENTS_QUERY_KEY, setAgentDefaultModel } from '@/chat/chat-api';
 import { DefaultModelsSection } from '@/chat/default-models';
 import { agentDefaultLabel } from '@/chat/model-picker';
@@ -16,10 +18,13 @@ import { Skeleton } from '@/ui/skeleton';
  * `/settings/agents`: each supported agent, whether it is installed and
  * signed in, signing in with the user's own account (onboarding 9.1), an API
  * key kept in the keychain (9.2) and installing (9.3); CAP-15, CAP-16. The
- * cards follow `agent.auth_changed` through the event log.
+ * cards follow `agent.auth_changed` through the event log. After them, the
+ * user's own ACP agents (story 21.3); `/settings/agents/new` is this page with
+ * the Add your own agent form open.
  */
-export function AgentsSettingsPage() {
+export function AgentsSettingsPage({ adding = false }: { adding?: boolean }) {
   const query = useAgents();
+  const navigate = useNavigate();
   return (
     <>
       <WorkspaceHeader title="Agents" />
@@ -49,11 +54,17 @@ export function AgentsSettingsPage() {
             query.data.map((agent) => <AgentCard key={agent.agentId} agent={agent} />)
           )}
         </PageSection>
+        <CustomAgentsSection startAdding={adding} onFormClosed={adding ? () => void navigate({ to: '/settings/agents' }) : undefined} />
         <AppModelsSection />
         <AppWhileWorkingSection />
       </PageBody>
     </>
   );
+}
+
+/** `/settings/agents/new`: the same page, landing on the Add your own agent form. */
+export function NewCustomAgentPage() {
+  return <AgentsSettingsPage adding />;
 }
 
 /** Each agent's app-wide default model (story 11): new chats start on it unless their project sets its own. */

@@ -6,8 +6,8 @@
  * change one. Its key, read from the keychain, joins only its own chat
  * environment, under its own variable ({@link CustomKeyEnv}).
  */
-import { createCustomAgent, customAgentDescriptor } from '@ogden-agents/adapters';
-import type { AgentDescriptor, AgentPort, CustomAgents as CustomAgentStore, MutableAgentRegistry } from '@ogden-agents/core';
+import { createCustomAgent, customAgentDescriptor, probeCustomAgent } from '@ogden-agents/adapters';
+import { NotFoundError, type AgentDescriptor, type AgentPort, type CustomAgents as CustomAgentStore, type MutableAgentRegistry } from '@ogden-agents/core';
 import type { AgentId, CustomAgent } from '@ogden-agents/shared';
 import type { CustomAgents } from './custom-agent-routes.js';
 import type { Logger } from './log.js';
@@ -24,7 +24,14 @@ export interface CustomAgentsWiringOptions {
   /** Whether a stored chat or project default still names `agentId` (21.1: such an id is never given to another program). */
   isAgentIdInUse: (agentId: AgentId) => boolean;
   log: Logger;
+  /** How long Test waits for `initialize` (default {@link TEST_TIMEOUT_MS}). */
+  testTimeoutMs?: number;
 }
+
+/** How long Test waits for an agent to answer `initialize`: shorter than a chat start, since someone is watching the button. */
+export const TEST_TIMEOUT_MS = 20_000;
+/** The environment Test starts an unsaved command with: no stored agent can have this id (a slug never has two dashes in a row). */
+const UNSAVED_TEST_ID = 'custom--test';
 
 export interface CustomAgentsWiring extends CustomAgents {
   /** Registers every stored custom agent; one that can't be registered, or whose key can't be read, is logged and skipped or keyless. */
@@ -95,13 +102,51 @@ export function createCustomAgentsWiring(options: CustomAgentsWiringOptions): Cu
 
     update: (agentId, request) =>
       serially(async () => {
-        const agent = await store.update(agentId, request);
+        const before = store.get(agentId);
+        if (before === undefined) throw new NotFoundError('custom agent', agentId);
+        const renamed = request.displayName !== undefined || request.commandLine !== undefined;
+        // Registered first, as it will be saved: a refusal changes nothing, the key included. Chats already
+        // running keep their process; the next start uses the new name and command.
+        if (renamed) register({ ...before, displayName: request.displayName ?? before.displayName, commandLine: request.commandLine ?? before.commandLine });
+        let agent: CustomAgent;
+        try {
+          agent = await store.update(agentId, request);
+        } catch (error) {
+          if (renamed) {
+            try {
+              register(before);
+            } catch (restore) {
+              log.error('a custom agent could not be registered again after a refused change', { agentId, reason: restore instanceof Error ? restore.message : 'unexpected' });
+            }
+          }
+          throw error;
+        }
         if (request.apiKey === null) keyEnv.delete(agentId);
         else if (request.apiKey !== undefined) keyEnv.set(agentId, { [request.apiKey.envName]: request.apiKey.value });
-        // Chats already running keep their process; the next start uses the new name and command.
-        if (request.displayName !== undefined || request.commandLine !== undefined) register(agent);
         return agent;
       }),
+
+    test: (request) =>
+      probeCustomAgent({
+        displayName: 'This agent',
+        commandLine: request.commandLine,
+        // A chat's environment (AD-16), and the typed key under its variable only.
+        env: { ...chatEnv(UNSAVED_TEST_ID), ...(request.apiKey === undefined ? {} : { [request.apiKey.envName]: request.apiKey.value }) },
+        onDiagnostic: (message, fields) => log.info(`agent: ${message}`, { test: true, ...fields }),
+        startTimeoutMs: options.testTimeoutMs ?? TEST_TIMEOUT_MS,
+      }),
+
+    async testSaved(agentId) {
+      const agent = store.get(agentId);
+      if (agent === undefined) throw new NotFoundError('custom agent', agentId);
+      return probeCustomAgent({
+        displayName: agent.displayName,
+        commandLine: agent.commandLine,
+        env: chatEnv(agentId),
+        onDiagnostic: (message, fields) => log.info(`agent: ${message}`, { agentId, test: true, ...fields }),
+        startTimeoutMs: options.testTimeoutMs ?? TEST_TIMEOUT_MS,
+      });
+    },
 
     remove: (agentId) =>
       serially(async () => {

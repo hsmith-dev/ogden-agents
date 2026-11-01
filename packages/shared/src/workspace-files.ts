@@ -5,6 +5,8 @@
  * ever in a `GET` response: never in an event, the database or a log line.
  */
 import { z } from 'zod';
+import { EditorId } from './editors.js';
+import { SessionId } from './ids.js';
 
 /** The most bytes of a file the viewer reads: a longer one answers `too_large` with no content. */
 export const MAX_WORKSPACE_FILE_BYTES = 1024 * 1024;
@@ -96,3 +98,104 @@ export const WORKSPACE_PATH_PROTECTED_MESSAGE = WORKSPACE_FILE_PROTECTED_TEXT;
 export const WORKSPACE_PATH_HARD_LINK_MESSAGE = WORKSPACE_FILE_HARD_LINK_TEXT;
 /** The error message for a missing file or folder, or a project that isn't there (404). */
 export const WORKSPACE_PATH_NOT_FOUND_MESSAGE = "That isn't there any more. It may have been moved or deleted.";
+
+// ---------------------------------------------------------------------------
+// Epic 8 entry 2: the `session` root, project search (8.8 builds it) and the
+// editor hand-off (8.10). Every path here is a `WorkspaceRelativePath`.
+// ---------------------------------------------------------------------------
+
+/**
+ * What both files routes take as query parameters: the folder or file
+ * (`path`; absent lists the root) and, for a worktree chat, its `session`,
+ * which roots the request at that chat's `worktreePath` (else the project).
+ * A session of another project, or an unknown one, answers 404.
+ */
+export const WorkspaceFilesQuery = z.object({
+  path: WorkspaceRelativePath.optional(),
+  session: SessionId.optional(),
+});
+export type WorkspaceFilesQuery = z.infer<typeof WorkspaceFilesQuery>;
+
+/** The most matches a search answers, in either mode ("Showing the first 500 matches"). */
+export const WORKSPACE_SEARCH_MAX_MATCHES = 500;
+/** The longest search query, in characters. */
+export const WORKSPACE_SEARCH_MAX_QUERY = 200;
+/** The longest preview of one matching line, in characters (a longer line is cut around the match). */
+export const WORKSPACE_SEARCH_MAX_PREVIEW = 240;
+/** The most files one search looks at; past this it answers `truncated`. */
+export const WORKSPACE_SEARCH_MAX_FILES = 20_000;
+/** The longest one search runs, in milliseconds; past this it answers `truncated`. */
+export const WORKSPACE_SEARCH_TIMEOUT_MS = 5_000;
+/** Files over this many bytes (and binary files) are skipped by a text search. */
+export const WORKSPACE_SEARCH_MAX_FILE_BYTES = MAX_WORKSPACE_FILE_BYTES;
+
+/** **Text** searches file contents; **File names** matches paths. */
+export const WorkspaceSearchMode = z.enum(['text', 'names']);
+export type WorkspaceSearchMode = z.infer<typeof WorkspaceSearchMode>;
+
+/** `GET …/files/search?q=&mode=&matchCase=&session=`, as the server reads it (`matchCase` is `true` or absent). */
+export const WorkspaceSearchQuery = z
+  .object({
+    q: z.string().min(1).max(WORKSPACE_SEARCH_MAX_QUERY),
+    mode: WorkspaceSearchMode.default('text'),
+    matchCase: z.boolean().default(false),
+    session: SessionId.optional(),
+  })
+  .strict();
+export type WorkspaceSearchQuery = z.infer<typeof WorkspaceSearchQuery>;
+
+/**
+ * One matching line: 1-based line and column (counted in the whole line),
+ * and the line's text; a line longer than {@link WORKSPACE_SEARCH_MAX_PREVIEW}
+ * is cut to a window of that length around the match.
+ */
+export const WorkspaceSearchMatch = z.object({
+  line: z.number().int().positive(),
+  column: z.number().int().positive(),
+  preview: z.string().max(WORKSPACE_SEARCH_MAX_PREVIEW),
+});
+export type WorkspaceSearchMatch = z.infer<typeof WorkspaceSearchMatch>;
+
+/** One file with matches (in File names mode, `matches` is empty: the file itself is the match). */
+export const WorkspaceSearchFile = z.object({
+  path: WorkspaceRelativePath,
+  matches: z.array(WorkspaceSearchMatch),
+});
+export type WorkspaceSearchFile = z.infer<typeof WorkspaceSearchFile>;
+
+/** The search's answer, grouped by file; `truncated` when any cap (matches, files looked at, time) was hit. */
+export const WorkspaceSearchResponse = z.object({
+  files: z.array(WorkspaceSearchFile),
+  truncated: z.boolean(),
+  /** The match cap the answer was held to ({@link WORKSPACE_SEARCH_MAX_MATCHES}). */
+  limit: z.number().int().positive(),
+});
+export type WorkspaceSearchResponse = z.infer<typeof WorkspaceSearchResponse>;
+
+/**
+ * `POST …/files/open-in-editor`: one file of the project (or of the
+ * chat's worktree) handed to an editor at its line. `editorId` absent: the
+ * default editor. The path is checked as the files routes check it before
+ * the launcher is asked anything.
+ */
+export const OpenInEditorRequest = z
+  .object({
+    path: WorkspaceRelativePath,
+    line: z.number().int().positive().optional(),
+    column: z.number().int().positive().optional(),
+    editorId: EditorId.optional(),
+    session: SessionId.optional(),
+  })
+  .strict();
+export type OpenInEditorRequest = z.infer<typeof OpenInEditorRequest>;
+
+/** The Workbench's Search panel. */
+export const WORKBENCH_SEARCH_LABEL = 'Search';
+/** Search's field, before typing. */
+export const WORKSPACE_SEARCH_EMPTY_TEXT = 'Search text or file names in this project.';
+/** Over the cap. */
+export const WORKSPACE_SEARCH_CAPPED_TEXT = `Showing the first ${WORKSPACE_SEARCH_MAX_MATCHES} matches. Narrow the search to see more.`;
+/** No match. */
+export const workspaceSearchNoMatchText = (query: string): string => `No matches for "${query}" in this project.`;
+/** Search isn't built on this server yet (501). */
+export const WORKSPACE_SEARCH_UNAVAILABLE_TEXT = "Search isn't available here yet.";

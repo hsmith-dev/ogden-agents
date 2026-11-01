@@ -21,6 +21,10 @@ import { createBuildSettings, type BuildSettings } from './build-settings.js';
 import { createDevTools, type DevTools, type DevToolsPort } from './dev-tools.js';
 import { createWorkspaceFiles, type WorkspaceFiles } from './workspace-files.js';
 import type { WorkspaceFilesPort } from './workspace-files-port.js';
+import { createWorkspaceChanges, type WorkspaceChanges } from './workspace-changes.js';
+import type { VcsWorkingTreePort } from './vcs-port.js';
+import { createEditorLaunch, type EditorLaunch } from './editor-launch.js';
+import type { EditorLauncherPort } from './editor-launcher-port.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
 import type { RemoteHostPort } from './remote-host-port.js';
@@ -98,6 +102,10 @@ export interface Core {
   readonly devTools: DevTools;
   /** The Workbench's Files (AD-36): one folder listed, one file read, read-only; `undefined` without a {@link OpenCoreOptions.workspaceFilesPort}. */
   readonly workspaceFiles: WorkspaceFiles | undefined;
+  /** The Workbench's Changes (AD-37; epic 8 entry 2): the views, a file's diff, hunk actions, turns and a worktree chat's commit; `undefined` without a {@link OpenCoreOptions.vcsWorkingTreePort}. */
+  readonly workspaceChanges: WorkspaceChanges | undefined;
+  /** Open in editor (AD-39; epic 8 entry 2); `undefined` without an {@link OpenCoreOptions.editorLauncherPort} or a files port that can locate. */
+  readonly editorLaunch: EditorLaunch | undefined;
   /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
   readonly createNotifications: (ports: NotificationsPorts) => Notifications;
   /**
@@ -187,6 +195,13 @@ export type OpenCoreOptions = OpenDatabaseOptions &
      */
     workspaceFilesPort?: WorkspaceFilesPort;
     /**
+     * The working-tree half of the VCS port (AD-37; 8.4 and 8.5 build it on
+     * git). Absent: no Changes use-case (`core.workspaceChanges` is `undefined`).
+     */
+    vcsWorkingTreePort?: VcsWorkingTreePort;
+    /** The editor launcher (AD-39; 8.10). Absent: no Open in editor use-case. */
+    editorLauncherPort?: EditorLauncherPort;
+    /**
      * The repo-relative files the registered agents that need project trust
      * run (their descriptors' `projectFiles`, epic 12, 12.3); the trust is
      * bound to their contents. Read at each call. Absent: none.
@@ -248,6 +263,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     agentConfigFolders: options.agentConfigFolders,
     ...(options.onPermissionError === undefined ? {} : { onError: options.onPermissionError }),
   });
+  const workspaceFiles = options.workspaceFilesPort === undefined ? undefined : createWorkspaceFiles({ entities, port: options.workspaceFilesPort });
   return {
     events,
     sessionEvents,
@@ -266,7 +282,9 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     buildSessions: createBuildSessions(),
     buildSettings: createBuildSettings({ db, events, entities }),
     devTools: createDevTools({ db, events, entities, port: options.devToolsPort ?? NOOP_DEV_TOOLS_PORT }),
-    workspaceFiles: options.workspaceFilesPort === undefined ? undefined : createWorkspaceFiles({ entities, port: options.workspaceFilesPort }),
+    workspaceFiles,
+    workspaceChanges: options.vcsWorkingTreePort === undefined ? undefined : createWorkspaceChanges({ entities, sessionEvents, port: options.vcsWorkingTreePort }),
+    editorLaunch: options.editorLauncherPort === undefined || workspaceFiles?.locate === undefined ? undefined : createEditorLaunch({ entities, files: { locate: workspaceFiles.locate }, launcher: options.editorLauncherPort }),
     paneStore: createPaneStore({ db }),
     terminalsSettings: createTerminalsSettings({ db, events }),
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),

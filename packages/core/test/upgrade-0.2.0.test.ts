@@ -94,7 +94,7 @@ describe('upgrading a 0.2.0 data folder (story 10.7)', () => {
       // 0.2.0 session's permission mode, read as Ask (permission modes: old history reads as Ask),
       // and its remote target, read as local (CAP-24, epic 19 story 19.7: old history ran nowhere else).
       const stored = JSON.parse(row.payload) as { session?: Record<string, unknown> };
-      const expected = row.type === 'session.created' ? { ...stored, session: { ...stored.session, permissionMode: 'ask', machineId: null } } : stored;
+      const expected = row.type === 'session.created' ? { ...stored, session: { ...stored.session, permissionMode: 'ask', machineId: null, worktreePath: null, branch: null } } : stored;
       expect(parsed.data?.payload).toEqual(expected);
     }
     // The 0.2.0 event types the fixture covers.

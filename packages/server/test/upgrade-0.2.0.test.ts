@@ -144,7 +144,7 @@ describe('starting on a 0.2.0 data folder (story 10.7)', () => {
     // As stored; a 0.2.0 `session.created` reads its session's permission mode as Ask (permission modes) and
     // its remote target as local (CAP-24, epic 19 story 19.7: old history ran nowhere else).
     const asRead = (type: string, payload: { session?: Record<string, unknown> }) =>
-      type === 'session.created' ? { ...payload, session: { ...payload.session, permissionMode: 'ask', machineId: null } } : payload;
+      type === 'session.created' ? { ...payload, session: { ...payload.session, permissionMode: 'ask', machineId: null, worktreePath: null, branch: null } } : payload;
     expect(replayed).toEqual(
       data.events.map((row) => ({ id: row.id, seq: row.seq, workspaceId: row.workspace_id, streamId: row.stream_id, type: row.type, at: row.at, payload: asRead(row.type, JSON.parse(row.payload)) as unknown })),
     );

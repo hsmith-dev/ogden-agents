@@ -151,6 +151,10 @@ export const sessions = sqliteTable(
     model: text('model'),
     /** The remote machine this chat runs its agent on (CAP-24, epic 19 story 19.7), set at creation, never changed; `NULL` for a local chat. */
     machineId: text('machine_id').$type<RemoteMachineId>(),
+    /** The chat's own worktree (AD-8 CAP-33 note), an absolute path, set at creation and never changed; `NULL` for a chat in the project folder. */
+    worktreePath: text('worktree_path'),
+    /** That worktree's branch (`ogden/chat/<id>`), set with it; `NULL` without one. */
+    branch: text('branch'),
     /** The user's name for the chat (backlog story 12); `NULL` until they give one. */
     title: text('title'),
     /** The name core gave the chat (the planning action's label, or its first message), set once; `NULL` until then. */

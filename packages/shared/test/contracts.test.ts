@@ -354,7 +354,7 @@ describe('the terminal contracts (story 3.2)', () => {
 
   it('SessionResponse carries terminal optionally', () => {
     // A session from before permission modes reads as Ask, and from before a remote target as local.
-    const read = { ...session, permissionMode: 'ask', machineId: null };
+    const read = { ...session, permissionMode: 'ask', machineId: null, worktreePath: null, branch: null };
     expect(SessionResponse.parse({ session })).toEqual({ session: read });
     expect(SessionResponse.parse({ session, terminal: { available: true } })).toEqual({ session: read, terminal: { available: true } });
     expect(SessionResponse.safeParse({ session, terminal: { available: 'yes' } }).success).toBe(false);

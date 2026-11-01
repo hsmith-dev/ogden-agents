@@ -516,6 +516,9 @@ async function listenAndAnnounce({
     buildSettings: core.buildSettings,
     devTools: core.devTools,
     workspaceFiles: core.workspaceFiles,
+    // Changes and Open in editor (epic 8 entry 2): undefined until their lanes wire a port (8.4, 8.10), so 501.
+    workspaceChanges: core.workspaceChanges,
+    editorLaunch: core.editorLaunch,
     notifications,
     remoteMachines,
     ...endpointApi,

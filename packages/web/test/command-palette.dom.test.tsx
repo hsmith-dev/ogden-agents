@@ -9,7 +9,12 @@
  * announced; no match says so. Tickets show only with the Board on; "New
  * chat in..." lists projects and Esc or Backspace goes back; Show every step
  * switches the chat's level and returns focus; kbd hints only in Developer
- * mode. The router, the sidebar data and the REST reads are stand-ins.
+ * mode. 8.11: in a project, typing asks the file-name search once after a
+ * pause (a newer query or closing aborts the one in flight; nothing outside
+ * a project, in "New chat in..." or on the empty query; a failure leaves the
+ * Files group out); a file opens in the viewer; Workbench and Search the
+ * project open the Workbench. The router, the sidebar data and the REST
+ * reads are stand-ins.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -25,6 +30,33 @@ const state = vi.hoisted(() => ({
   ticketReads: 0,
   ticketsFail: false,
 }));
+
+/** The file-name search's stand-in: each request's query and signal; `answer` (or held open while `hold`). */
+const search = vi.hoisted(() => ({
+  calls: [] as { url: string; q: string | null; mode: string | null; signal: AbortSignal | undefined }[],
+  hold: false,
+  answer: (_q: string): unknown => ({ files: [], truncated: false, limit: 500 }),
+}));
+
+vi.mock('@/api/http', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/api/http')>();
+  return {
+    ...actual,
+    call: (auth: Parameters<typeof actual.call>[0], url: string, init: RequestInit, fallback: string) => {
+      if (!url.includes('/files/search?')) return actual.call(auth, url, init, fallback);
+      const params = new URLSearchParams(url.split('?')[1]);
+      const signal = init.signal ?? undefined;
+      search.calls.push({ url, q: params.get('q'), mode: params.get('mode'), signal });
+      return new Promise((resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        if (search.hold) return;
+        const answer = search.answer(params.get('q')!);
+        if (answer instanceof Error) reject(answer);
+        else resolve(answer);
+      });
+    },
+  };
+});
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => (options: unknown) => {
@@ -74,6 +106,9 @@ const { openCommandPalette, closeCommandPalette } = await import('../src/palette
 const { RECENT_CHATS_KEY } = await import('../src/palette/recent-chats');
 const { AppearanceProvider } = await import('../src/appearance/appearance-provider');
 const { chatDetailOf, resetChatDetailForTests, CHAT_DETAIL_KEY } = await import('../src/chat/detail-level');
+const { ChatApiError } = await import('../src/api/http');
+const { PALETTE_GROUP_LABELS, PALETTE_GROUP_ORDER } = await import('../src/palette/palette-sources');
+const { SEARCH_DEBOUNCE_MS } = await import('../src/workbench/workbench-search');
 
 function mount() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -112,6 +147,9 @@ beforeEach(() => {
   state.boardOn = true;
   state.ticketReads = 0;
   state.ticketsFail = false;
+  search.calls = [];
+  search.hold = false;
+  search.answer = () => ({ files: [], truncated: false, limit: 500 });
   localStorage.clear();
   resetChatDetailForTests();
 });
@@ -408,5 +446,157 @@ describe('New chat in...', () => {
     act(() => openCommandPalette('new-chat-in'));
     type('zzz');
     expect(screen.getByTestId('command-palette-empty').textContent).toBe('Nothing matches “zzz”.');
+  });
+});
+
+describe('files (8.11)', () => {
+  /** Longer than the pause in typing. */
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 100)));
+  const files = (...paths: string[]) => ({ files: paths.map((path) => ({ path, matches: [] })), truncated: false, limit: 500 });
+  const inProject = () => {
+    state.params = { wsId: 'ws_a' };
+    state.pathname = '/w/ws_a';
+  };
+
+  it('in a project, a pause in typing sends one names search; the file shows under Files, between Projects and Tickets, and Enter opens the viewer', async () => {
+    inProject();
+    search.answer = () => files('src/ui/palette.ts');
+    mount();
+    act(() => openCommandPalette());
+    await waitFor(() => expect(palette()).not.toBeNull());
+    type('p');
+    type('pa');
+    type('pal');
+    type('palet');
+    const group = await screen.findByRole('group', { name: 'Files' });
+    expect(search.calls.map((each) => [each.q, each.mode])).toEqual([['palet', 'names']]);
+    expect(search.calls[0]!.url).not.toMatch(/matchCase|regex|session/);
+    expect(within(group).getAllByRole('option').map((option) => option.textContent)).toEqual(['palette.tssrc/ui']);
+    const order = PALETTE_GROUP_ORDER.map((id) => PALETTE_GROUP_LABELS[id]);
+    const shown = groupHeadings().map((heading) => order.indexOf(heading!));
+    expect(shown).toEqual([...shown].sort((a, b) => a - b));
+    expect(options()[0]!.getAttribute('data-id')).toBe('file:src/ui/palette.ts');
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(state.navigations).toEqual([{ to: '/w/$wsId/workbench', params: { wsId: 'ws_a' }, search: { path: 'src/ui/palette.ts' } }]);
+  });
+
+  it('files arriving after a row is highlighted leave it highlighted: Enter still runs it', async () => {
+    inProject();
+    search.answer = () => files('src/workbench-api.ts');
+    mount();
+    act(() => openCommandPalette());
+    type('workbench');
+    expect(options()[0]!.textContent).toBe('Workbench');
+    await waitFor(() => expect(options()[0]!.getAttribute('aria-selected')).toBe('true'));
+    await screen.findByRole('group', { name: 'Files' });
+    expect(options()[0]!.getAttribute('data-id')).toBe('file:src/workbench-api.ts');
+    const action = options().find((option) => option.getAttribute('data-id') === 'action:workbench')!;
+    expect(action.getAttribute('aria-selected')).toBe('true');
+    expect(field().getAttribute('aria-activedescendant')).toBe(action.id);
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(state.navigations).toEqual([{ to: '/w/$wsId/workbench', params: { wsId: 'ws_a' }, search: {} }]);
+  });
+
+  it('a newer query aborts the one in flight; closing aborts it and sends nothing more', async () => {
+    inProject();
+    search.hold = true;
+    mount();
+    act(() => openCommandPalette());
+    type('pal');
+    await waitFor(() => expect(search.calls).toHaveLength(1));
+    type('pale');
+    await waitFor(() => expect(search.calls).toHaveLength(2));
+    expect(search.calls.map((each) => [each.q, each.signal?.aborted])).toEqual([
+      ['pal', true],
+      ['pale', false],
+    ]);
+    act(() => closeCommandPalette());
+    await waitFor(() => expect(search.calls[1]!.signal?.aborted).toBe(true));
+    await settle();
+    expect(search.calls).toHaveLength(2);
+  });
+
+  it('no request outside a project, in "New chat in..." or on the empty query', async () => {
+    const first = mount();
+    act(() => openCommandPalette());
+    type('pal');
+    await settle();
+    expect(screen.queryByRole('group', { name: 'Files' })).toBeNull();
+    act(() => closeCommandPalette());
+    first.unmount();
+
+    inProject();
+    const second = mount();
+    act(() => openCommandPalette('new-chat-in'));
+    type('pal');
+    await settle();
+    act(() => closeCommandPalette());
+    second.unmount();
+
+    mount();
+    act(() => openCommandPalette());
+    await settle();
+    type('   ');
+    await settle();
+    expect(screen.queryByRole('group', { name: 'Files' })).toBeNull();
+    expect(search.calls).toEqual([]);
+  });
+
+  it('at most 8 files show', async () => {
+    inProject();
+    search.answer = () => files(...Array.from({ length: 500 }, (_, index) => `notes/zebra-${index}.md`));
+    mount();
+    act(() => openCommandPalette());
+    type('zebra');
+    const group = await screen.findByRole('group', { name: 'Files' });
+    expect(within(group).getAllByRole('option')).toHaveLength(8);
+  });
+
+  it('a 501, a 400 or a network error leaves the Files group out and the other groups as they were', async () => {
+    inProject();
+    for (const failure of [new ChatApiError('Not implemented yet.', 501, 'not_implemented'), new ChatApiError('Bad query.', 400, 'invalid_request'), new TypeError('Failed to fetch')]) {
+      search.calls = [];
+      search.answer = () => failure;
+      const view = mount();
+      act(() => openCommandPalette());
+      type('invoice');
+      await waitFor(() => expect(search.calls).toHaveLength(1));
+      await settle();
+      expect(screen.queryByRole('group', { name: 'Files' })).toBeNull();
+      expect(within(screen.getByRole('group', { name: 'Chats' })).getAllByRole('option').map((option) => option.textContent)).toEqual(['Invoice totalsBilling']);
+      expect(search.calls).toHaveLength(1);
+      act(() => closeCommandPalette());
+      view.unmount();
+    }
+  });
+
+  it('Workbench and Search the project open the Workbench, in a project only', async () => {
+    inProject();
+    mount();
+    act(() => openCommandPalette());
+    type('workbench');
+    expect(options()[0]!.textContent).toBe('Workbench');
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    await waitFor(() => expect(palette()).toBeNull());
+    act(() => openCommandPalette());
+    type('search the');
+    expect(options()[0]!.textContent).toBe('Search the project');
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(state.navigations).toEqual([
+      { to: '/w/$wsId/workbench', params: { wsId: 'ws_a' }, search: {} },
+      { to: '/w/$wsId/workbench', params: { wsId: 'ws_a' }, search: { panel: 'search' } },
+    ]);
+    act(() => closeCommandPalette());
+    cleanup();
+    state.params = {};
+    mount();
+    act(() => openCommandPalette());
+    type('workbench');
+    expect(options().map((option) => option.textContent)).not.toContain('Workbench');
+    type('search the');
+    expect(options().map((option) => option.textContent)).not.toContain('Search the project');
   });
 });

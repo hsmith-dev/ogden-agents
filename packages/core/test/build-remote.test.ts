@@ -203,3 +203,68 @@ describe('Retry after a connection_lost drop (CAP-24, epic 19 story 19.6)', () =
     expect(h.core.entities.getRun(run.id)).toMatchObject({ outcome: 'verified' });
   });
 });
+
+describe('an agent tied to this computer never builds on a machine (27.9; 27.5 review 5 and 6)', () => {
+  const LOCAL_ONLY = 'The Local model runs on this computer only.';
+
+  it('refuses an attended remote build in its own words before any connection opens or the repo is pushed', async () => {
+    const fake = fakeRemote();
+    const h = await harness({ remote: fake.remote, localOnly: { local: LOCAL_ONLY } });
+    const machineId = newId('mach');
+
+    const error = (await refusal(h.start.startLocked(h.wsId, h.repo, '1.1', 'local', 'attended', undefined, machineId))) as BuildRefusedError;
+    expect(error).toMatchObject({ name: 'BuildRefusedError', code: 'sandbox_unavailable', message: LOCAL_ONLY });
+    expect(fake.connects).toEqual([]);
+    expect(fake.pushes).toEqual([]);
+    expect(h.git.calls).toEqual([]);
+    expect(h.core.entities.listSessions(h.wsId)).toEqual([]);
+  });
+
+  it('refuses a Retry once the build session went to such an agent, before any connection or push', async () => {
+    const fake = fakeRemote();
+    const h = await harness({ remote: fake.remote, localOnly: { local: LOCAL_ONLY } });
+    const machineId = newId('mach');
+    const { run, session } = await h.start.startLocked(h.wsId, h.repo, '1.1', 'claude-code', 'attended', undefined, machineId);
+    h.core.entities.setSessionState(session.id, 'working');
+    h.core.entities.setSessionState(session.id, 'error', { reason: 'dropped', errorCode: 'connection_lost' });
+    await h.builds.settled();
+    // Continue with another agent handed the build session to the Local model meanwhile.
+    h.core.entities.setSessionAgent(session.id, { agentId: 'local', previous: 'claude-code', brief: '', resumes: false, refs: {} });
+
+    fake.pushes.length = 0;
+    fake.connects.length = 0;
+    const error = (await refusal(h.builds.retry(h.wsId, run.id, {}))) as BuildRefusedError;
+    expect(error).toMatchObject({ code: 'sandbox_unavailable', message: LOCAL_ONLY });
+    expect(fake.connects).toEqual([]);
+    expect(fake.pushes).toEqual([]);
+  });
+
+  it("refuses a queued remote run's dispatch once its session went to such an agent, before any connection or push", async () => {
+    const fake = fakeRemote();
+    const h = await harness({ remote: fake.remote, localOnly: { local: LOCAL_ONLY }, ticketList: [{ ref: '1.1', title: 'First', after: [] }, { ref: '1.2', title: 'Second', after: [] }] });
+    h.core.buildSettings.setWorkspaceSettings(h.wsId, { maxConcurrentRuns: 1 });
+    const machineId = newId('mach');
+    const first = await h.start.startLocked(h.wsId, h.repo, '1.1', 'claude-code', 'attended', undefined, machineId);
+    const queued = await h.start.startLocked(h.wsId, h.repo, '1.2', 'claude-code', 'attended', undefined, machineId);
+    expect(queued.run.queuePosition).toBe(1);
+    // Continue with another agent handed the queued run's session to the Local model meanwhile.
+    h.core.entities.setSessionAgent(queued.session.id, { agentId: 'local', previous: 'claude-code', brief: '', resumes: false, refs: {} });
+
+    fake.pushes.length = 0;
+    fake.connects.length = 0;
+    h.tickets.set(first.run.worktreePath!, '1.1', 'built');
+    await h.endTurn(first.session.id);
+    await h.builds.settled();
+    // 1.1's own pull-back is all that reached the machine: 1.2 never connected, pushed or got a worktree.
+    expect(fake.connects).toEqual([]);
+    expect(fake.pushes).toEqual([]);
+    expect(h.core.entities.getRun(queued.run.id)).toMatchObject({ worktreePath: null, queuePosition: null, outcome: 'failed' });
+  });
+
+  it('still starts a remote build with any other agent', async () => {
+    const fake = fakeRemote();
+    const h = await harness({ remote: fake.remote, localOnly: { local: LOCAL_ONLY } });
+    const { run } = await h.start.startLocked(h.wsId, h.repo, '1.1', 'claude-code', 'attended', undefined, newId('mach'));
+    expect(run.outcome).toBe('running');
+  });
+});

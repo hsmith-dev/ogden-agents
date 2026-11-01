@@ -106,6 +106,28 @@ describe("vcs-git working tree: a project's .git file (user decision 2026-11-01)
     expect((await vcs.changedFiles({ path: join(worktree, 'src') }, { view: 'unstaged' })).files.map((file) => file.path)).toEqual(['b.ts']);
   });
 
+  it('follows a linked worktree of a bare repository (<name>.git/worktrees/<name>)', async () => {
+    const { root, vcs } = setup();
+    const main = repoAt(join(root, 'main'));
+    const bare = join(root, 'project.git');
+    git(root, 'clone', '-q', '--bare', main, bare);
+    const worktree = join(root, 'feature');
+    git(bare, 'worktree', 'add', '-q', '-b', 'feature', worktree, 'HEAD');
+    writeFileSync(join(worktree, 'new.txt'), 'new\n');
+    const folder: VcsFolder = { path: worktree };
+    expect((await vcs.changedFiles(folder, { view: 'unstaged' })).files.map((file) => file.path)).toEqual(['new.txt']);
+    expect(await vcs.snapshot(folder)).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it('refuses a pointer into worktrees/ of a folder that only looks like a bare repository', async () => {
+    const { root, vcs } = setup();
+    const project = join(root, 'project');
+    mkdirSync(join(root, 'fake.git', 'worktrees', 'x'), { recursive: true });
+    mkdirSync(project);
+    writeFileSync(join(project, '.git'), `gitdir: ${join(root, 'fake.git', 'worktrees', 'x')}\n`);
+    await expectRefused(vcs.changedFiles({ path: project }, { view: 'unstaged' }));
+  });
+
   it('follows a submodule: views and a snapshot read it', async () => {
     const { root, vcs } = setup();
     const library = repoAt(join(root, 'library'));

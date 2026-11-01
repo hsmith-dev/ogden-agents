@@ -101,10 +101,12 @@ export async function checkGitPointer(folder: string, readCoreWorktree: ReadCore
   const target = realOf(resolve(top, pointer));
   if (!isRealFolder(target)) return refuse('not_folder');
 
-  // A linked worktree: `<repo>/.git/worktrees/<name>`.
+  // A linked worktree: `<repo>/.git/worktrees/<name>`, or of a bare repository `<name>.git/worktrees/<name>`
+  // (a bare repo has its own HEAD, objects and refs; the back-link and commondir checks below still prove the pairing).
   const admin = dirname(target);
   const repoGit = dirname(admin);
-  if (basename(admin) === 'worktrees' && basename(repoGit) === '.git' && isRealFolder(repoGit)) {
+  const bareRepo = (dir: string) => /.\.git$/i.test(basename(dir)) && small(join(dir, 'HEAD')) !== undefined && isRealFolder(join(dir, 'objects')) && isRealFolder(join(dir, 'refs'));
+  if (basename(admin) === 'worktrees' && (basename(repoGit) === '.git' || bareRepo(repoGit)) && isRealFolder(repoGit)) {
     const back = small(join(target, 'gitdir'));
     if (back === undefined || realOf(resolve(target, back.trim())) !== dotGit) return refuse('worktree_back_link');
     const commondir = small(join(target, 'commondir'));

@@ -11,7 +11,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMemoryEditorLauncher, createMemoryVcsWorkingTree, createMemoryWorkspaceFiles } from '@ogden-agents/adapters';
 import { newId, openCore, type Core } from '@ogden-agents/core';
-import { API_ROUTES, apiPath, ApiErrorBody, chatWorktreeBranch, WorkspaceFolderResponse, WorkspaceResponse, WorkspaceSearchResponse } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, ApiErrorBody, chatWorktreeBranch, HUNK_CHANGED_SINCE_TEXT, WorkspaceFolderResponse, WorkspaceResponse, WorkspaceSearchResponse } from '@ogden-agents/shared';
 import type { MiddlewareHandler } from 'hono';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fullTestApp, signIn, startTestServer, tempDataDir } from './helpers.js';
@@ -35,8 +35,7 @@ describe('workbench routes on the real server', () => {
     const wsId = WorkspaceResponse.parse(await created.json()).workspace.id;
     const unwired: Array<[string, string]> = [
       ['GET', `${apiPath(API_ROUTES.workspaceFileSearch, { wsId })}?q=x`],
-      // Changes are wired on git since 8.4; hunk actions are 8.5's.
-      ['POST', apiPath(API_ROUTES.workspaceChangesHunks, { wsId })],
+      // Changes, hunk actions and their undo are wired on git (8.4, 8.5).
       ['GET', apiPath(API_ROUTES.workspaceProjectCommands, { wsId })],
       ['PUT', apiPath(API_ROUTES.workspaceProjectCommands, { wsId })],
       ['POST', apiPath(API_ROUTES.workspaceProjectCommandRuns, { wsId, commandId: 'test' })],
@@ -123,7 +122,25 @@ describe('workbench routes in-process, on memory ports', () => {
     vcs.outdated.add('h1');
     await expectError(await json('POST', hunks, { action: 'stage', view: 'unstaged', path: 'a.ts', hunkId: 'h1' }), 409, 'hunk_outdated');
     expect(vcs.folder(root).unstaged).toHaveLength(1);
-    await expectError(await json('POST', hunks, { action: 'stage', view: 'unstaged', path: '.git/config' }), 403, 'path_protected');
+    await expectError(await json('POST', hunks, { action: 'stage', view: 'unstaged', path: '.git/config', hunkId: 'h1' }), 403, 'path_protected');
+    // The view's own sentence for an outdated hunk; a revert answers its undo, and Undo puts it back once.
+    const outdated = await json('POST', hunks, { action: 'revert', view: 'unstaged', path: 'a.ts', hunkId: 'h1' });
+    expect(ApiErrorBody.parse(await outdated.json()).error).toEqual({ code: 'hunk_outdated', message: HUNK_CHANGED_SINCE_TEXT });
+    vcs.outdated.clear();
+    const reverted = await json('POST', hunks, { action: 'revert', view: 'unstaged', path: 'a.ts', hunkId: 'h1' });
+    expect(reverted.status).toBe(200);
+    const { undo } = (await reverted.json()) as { undo: string };
+    expect(undo).toMatch(/^[0-9a-f]{32}$/);
+    const undoPath = apiPath(API_ROUTES.workspaceChangesHunksUndo, { wsId: workspace.id });
+    core.entities.setSessionState(chat.id, 'waiting');
+    await expectError(await json('POST', undoPath, { undo, path: 'a.ts', view: 'unstaged' }), 409, 'agent_mid_turn');
+    core.entities.setSessionState(chat.id, 'idle');
+    const putBack = await json('POST', undoPath, { undo, path: 'a.ts', view: 'unstaged' });
+    expect(putBack.status).toBe(200);
+    expect(putBack.headers.get('cache-control')).toBe('no-store');
+    await expectError(await json('POST', undoPath, { undo, path: 'a.ts', view: 'unstaged' }), 404, 'not_found');
+    await expectError(await json('POST', undoPath, { undo: 'x', path: 'a.ts', view: 'unstaged' }), 400, 'invalid_request');
+    expect(vcs.folder(root).unstaged).toHaveLength(1);
 
     await expectError(await json('POST', apiPath(API_ROUTES.sessionWorktreeCommit, { wsId: workspace.id, sesId: chat.id }), { message: 'Save' }), 409, 'invalid_operation');
     const id = newId('ses');

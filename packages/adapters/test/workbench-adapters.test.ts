@@ -117,16 +117,28 @@ describe('the Workbench memory stubs', () => {
     expect(createMemoryWorkspaceFiles({ search: false }).search).toBeUndefined();
   });
 
-  it('vcs-memory working tree: stage moves a hunk to Staged, an outdated hunk is refused, commit clears', async () => {
+  it('vcs-memory working tree: stage moves a hunk to Staged, an outdated hunk is refused, a revert undoes once, commit clears', async () => {
     const vcs = createMemoryVcsWorkingTree();
     const w = { path: '/w' };
     const hunk = { id: 'h1', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ kind: 'add' as const, text: 'x', newLine: 1 }] };
-    vcs.folder('/w').unstaged.push({ file: { path: 'a.ts', change: 'changed', additions: 1, deletions: 0, binary: false, tooLarge: false }, hunks: [hunk, { ...hunk, id: 'h2' }] });
-    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'stage', path: 'a.ts', hunkId: 'h1' })).toBe('applied');
+    vcs.folder('/w').unstaged.push({ file: { path: 'a.ts', change: 'changed', additions: 1, deletions: 0, binary: false, tooLarge: false }, hunks: [hunk, { ...hunk, id: 'h2' }, { ...hunk, id: 'h3' }] });
+    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'stage', path: 'a.ts', hunkId: 'h1' })).toEqual({ outcome: 'applied' });
     expect((await vcs.changedFiles(w, { view: 'staged' })).files).toMatchObject([{ path: 'a.ts', additions: 1 }]);
     vcs.outdated.add('h2');
-    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'revert', path: 'a.ts', hunkId: 'h2' })).toBe('outdated');
-    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'revert', path: 'b.ts' })).toBe('not_found');
+    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'revert', path: 'a.ts', hunkId: 'h2' })).toEqual({ outcome: 'outdated' });
+    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'revert', path: 'b.ts', hunkId: 'h1' })).toEqual({ outcome: 'outdated' });
+    // A whole file only with the ids it has now.
+    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'revert', path: 'a.ts', hunkIds: ['h2'] })).toEqual({ outcome: 'outdated' });
+    vcs.outdated.clear();
+    const reverted = await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'revert', path: 'a.ts', hunkId: 'h3' });
+    expect(reverted).toEqual({ outcome: 'applied', undo: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    const undo = reverted.outcome === 'applied' ? reverted.undo! : '';
+    expect(await vcs.undoRevert({ path: '/other' }, { undo, path: 'a.ts' })).toEqual({ outcome: 'not_found' });
+    expect(await vcs.undoRevert(w, { undo, path: 'a.ts' })).toEqual({ outcome: 'applied' });
+    expect(await vcs.undoRevert(w, { undo, path: 'a.ts' })).toEqual({ outcome: 'not_found' });
+    expect((await vcs.fileDiff(w, { view: 'unstaged' }, 'a.ts'))?.hunks.map((one) => one.id)).toEqual(['h2', 'h3']);
+    vcs.unsupported.add('a.ts');
+    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'stage', path: 'a.ts', hunkId: 'h2' })).toEqual({ outcome: 'unsupported' });
     expect(await vcs.commitAll(w, 'msg')).toMatchObject({ files: 1 });
     expect((await vcs.changedFiles(w, { view: 'unstaged' })).files).toEqual([]);
     expect(await vcs.snapshot(w)).toMatch(/^[0-9a-f]{40}$/);

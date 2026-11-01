@@ -127,10 +127,16 @@ export type HunkAction = z.infer<typeof HunkAction>;
 /** The actions each view offers (Branch none: the build's branch is not edited from here). */
 export const HUNK_ACTIONS_BY_VIEW: Readonly<Record<ChangesView, readonly HunkAction[]>> = { turn: ['revert'], unstaged: ['stage', 'revert'], staged: ['unstage'], branch: [] };
 
+/** The most hunk ids a whole-file action names. */
+export const MAX_HUNK_IDS = 1000;
+
 /**
- * `POST …/changes/hunks`: one hunk's action, or the whole file's when
- * `hunkId` is absent. Refused (409 `agent_mid_turn`) while an agent works
- * in the same folder, and (409 `hunk_outdated`) when the hunk changed since.
+ * `POST …/changes/hunks`: one hunk's action (`hunkId`), or the whole
+ * file's (`hunkIds`: every hunk id shown, so a file that changed since is
+ * refused rather than applied as it is now). Refused (409
+ * `agent_mid_turn`) while an agent works in the same folder, and (409
+ * `hunk_outdated`) when the hunk, or the file's hunks, changed since. The
+ * patch is the server's own diff: the client never sends one.
  */
 export const HunkActionRequest = z
   .object({
@@ -138,18 +144,42 @@ export const HunkActionRequest = z
     view: ChangesView,
     path: WorkspaceRelativePath,
     hunkId: HunkId.optional(),
+    hunkIds: z.array(HunkId).min(1).max(MAX_HUNK_IDS).optional(),
     session: SessionId.optional(),
     turn: TurnId.optional(),
   })
   .strict()
   .refine((request) => HUNK_ACTIONS_BY_VIEW[request.view].includes(request.action), { message: "That view doesn't offer that action.", path: ['action'] })
   .refine((request) => request.turn === undefined || request.view === 'turn', { message: 'A turn is only for This turn.', path: ['turn'] })
-  .refine((request) => request.view !== 'turn' || request.session !== undefined, { message: 'This turn needs a chat.', path: ['session'] });
+  .refine((request) => request.view !== 'turn' || request.session !== undefined, { message: 'This turn needs a chat.', path: ['session'] })
+  .refine((request) => (request.hunkId === undefined) !== (request.hunkIds === undefined), { message: 'Name one hunk, or every hunk of the file.', path: ['hunkIds'] });
 export type HunkActionRequest = z.infer<typeof HunkActionRequest>;
 
-/** `POST …/changes/hunks` → this: the file as the view has it now (`null` when it has no changes left there). */
-export const HunkActionResponse = z.object({ file: ChangedFile.nullable() });
+/** A revert's undo: 32 lower-case hex digits, kept by the server for a short while (8.5). */
+export const UndoId = z.string().regex(/^[0-9a-f]{32}$/, 'An undo id.');
+export type UndoId = z.infer<typeof UndoId>;
+
+/** How long a revert can be undone, and how many reverts are kept for it (in the server's memory only). */
+export const UNDO_KEPT_MS = 30 * 60 * 1000;
+export const MAX_UNDOS_KEPT = 50;
+
+/** `POST …/changes/hunks` → this: the file as the view has it now (`null` when it has no changes left there), and a revert's undo. */
+export const HunkActionResponse = z.object({ file: ChangedFile.nullable(), undo: UndoId.optional() });
 export type HunkActionResponse = z.infer<typeof HunkActionResponse>;
+
+/**
+ * `POST …/changes/hunks/undo`: put back what the revert `undo` took, in the
+ * same folder (`session`'s) and `path`, answered as `view` has the file
+ * (This turn: the latest turn). 404 for an undo that is gone, used, or of
+ * another folder or path; 409 `hunk_outdated` when the file was edited
+ * since; 409 `agent_mid_turn`.
+ */
+export const UndoHunkRequest = z
+  .object({ undo: UndoId, path: WorkspaceRelativePath, view: ChangesView, session: SessionId.optional() })
+  .strict()
+  .refine((request) => HUNK_ACTIONS_BY_VIEW[request.view].includes('revert'), { message: "That view doesn't offer revert.", path: ['view'] })
+  .refine((request) => request.view !== 'turn' || request.session !== undefined, { message: 'This turn needs a chat.', path: ['session'] });
+export type UndoHunkRequest = z.infer<typeof UndoHunkRequest>;
 
 /** One recorded turn of a chat, for the turn picker. */
 export const TurnSummary = z.object({
@@ -191,12 +221,41 @@ export const agentStartedHereText = (agentName: string): string => `${agentName}
 export const AGENT_MID_TURN_MESSAGE = 'An agent is working in this folder, so nothing was changed. Wait for it to finish, or stop it.';
 /** A This turn hunk edited again since the turn (409 `hunk_outdated`). */
 export const HUNK_OUTDATED_TEXT = "Changed again since this turn, so it can't be reverted here.";
+/** An Unstaged or Staged hunk (or file) that changed since it was shown (409 `hunk_outdated`); the diffs are read again. */
+export const HUNK_CHANGED_SINCE_TEXT = 'This change was edited since it was shown, so nothing was changed. Here it is as it is now.';
+/** An Undo whose file was edited since the revert (409 `hunk_outdated`). */
+export const UNDO_OUTDATED_TEXT = 'This file was edited since the revert, so nothing was put back.';
+/** An Undo that is gone: used, too old, or lost when Ogden restarted (404). */
+export const UNDO_GONE_TEXT = "Ogden can't undo that revert any more.";
+/** Every `hunk_outdated` message the server sends. */
+export const HUNK_OUTDATED_MESSAGES: readonly string[] = [HUNK_OUTDATED_TEXT, HUNK_CHANGED_SINCE_TEXT, UNDO_OUTDATED_TEXT];
+/** A hunk action on a binary, too large, link or submodule file, or one under a linked folder (409 `invalid_operation`). */
+export const HUNK_UNSUPPORTED_MESSAGE = 'Ogden can only stage or revert lines of a plain text file.';
+/** A hunk action or Undo that failed otherwise. */
+export const HUNK_ACTION_FAILED = "Ogden Agents couldn't change that.";
+/** Each action's button. */
+export const HUNK_ACTION_LABELS: Readonly<Record<HunkAction, string>> = { stage: 'Stage', unstage: 'Unstage', revert: 'Revert' };
+/** The first letter of a hunk's range in lower case, inside a sentence ("lines 40 to 46"). */
+const inSentence = (range: string): string => `${range.charAt(0).toLowerCase()}${range.slice(1)}`;
+/** A hunk's button's accessible name: "Stage lines 40 to 46" (`range` as the hunk's header has it, "Lines 40 to 46"). */
+export const hunkActionName = (action: HunkAction, range: string): string => `${HUNK_ACTION_LABELS[action]} ${inSentence(range)}`;
+/** A file's button's accessible name: "Revert all of cart.css". */
+export const fileActionName = (action: HunkAction, name: string): string => `${HUNK_ACTION_LABELS[action]} all of ${name}`;
+/** After a revert, with its Undo: "Reverted lines 40 to 46 in cart.css." (a whole file: "Reverted all of cart.css."). */
+export const revertedText = (name: string, range?: string): string => (range === undefined ? `Reverted all of ${name}.` : `Reverted ${inSentence(range)} in ${name}.`);
+/** In place of a This turn hunk's Revert once it was reverted while the panel is open (the snapshots still show it). */
+export const HUNK_REVERTED_LABEL = 'Reverted';
+/** After an Undo. */
+export const PUT_BACK_TEXT = 'Put back.';
+export const UNDO_LABEL = 'Undo';
 /** A diff over {@link MAX_DIFF_FILE_BYTES}. */
 export const DIFF_TOO_LARGE_TEXT = 'This change is too large to show here.';
 /** A binary file in a diff. */
 export const DIFF_BINARY_TEXT = 'Binary file changed';
-/** Revert's one confirmation. */
-export const REVERT_CONFIRM_TEXT = "Revert this change? These lines go back to how they were. Ogden can't undo this.";
+/** Revert's one confirmation: its title, its consequence, and both as one line (8.5: undoable right after, while Changes is open). */
+export const REVERT_CONFIRM_TITLE = 'Revert this change?';
+export const REVERT_CONFIRM_DESCRIPTION = 'These lines go back to how they were. You can undo it right after, while Changes is open.';
+export const REVERT_CONFIRM_TEXT = `${REVERT_CONFIRM_TITLE} ${REVERT_CONFIRM_DESCRIPTION}`;
 /** The worktree chat's commit button and its line. */
 export const COMMIT_WORKTREE_LABEL = 'Commit these changes';
 export const WORKTREE_NEVER_PUSHED_TEXT = 'Never pushed. Merge it yourself when ready.';
@@ -206,7 +265,7 @@ export const COMMIT_NEEDS_WORKTREE_MESSAGE = 'Only a chat that works in its own 
 export const COMMIT_NOTHING_MESSAGE = 'There are no changes to commit.';
 /** The project's `.git` file points at no standard linked worktree or submodule, so the views and Commit refuse (409 `invalid_operation`; user decision 2026-11-01, AD-37). */
 export const GIT_POINTER_UNUSUAL_MESSAGE = "Ogden can't read this project's git: its .git file points somewhere unusual.";
-/** A hunk action before story 8.5 ships them (501 `not_implemented`). */
+/** A hunk action or Undo on a port without them (501 `not_implemented`). */
 export const HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE = "Ogden Agents can't stage, unstage or revert a change yet.";
 /** The Workbench's Changes panel (story 8.4). */
 export const WORKBENCH_CHANGES_LABEL = 'Changes';

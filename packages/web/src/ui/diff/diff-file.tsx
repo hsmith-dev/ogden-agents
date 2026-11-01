@@ -325,6 +325,7 @@ export interface DiffFileProps {
 /** One file's section. */
 export function DiffFile({ data, open, onToggle, layout, slots }: DiffFileProps) {
   const { file, hunks } = data;
+  const fileActions = slots.fileActions?.(file);
   const bodyId = useId();
   const language = useMemo(() => languageFor(file.path), [file.path]);
   const columns = layout === 'split' ? 6 : 4;
@@ -412,10 +413,13 @@ export function DiffFile({ data, open, onToggle, layout, slots }: DiffFileProps)
           {FILE_CHANGE_WORDS[file.change]}
         </span>
         {counts}
-        <span className="ml-auto flex items-center gap-1 empty:hidden">{slots.fileActions?.(file)}</span>
+        {fileActions === undefined || fileActions === null || fileActions === false ? null : <span className="ml-auto flex flex-wrap items-center gap-1">{fileActions}</span>}
         <button
           type="button"
-          className={cn('ml-auto inline-flex size-(--control-height) shrink-0 items-center justify-center rounded-md text-foreground hover:bg-accent [&_svg]:size-(--icon)', slots.fileActions !== undefined && 'ml-0')}
+          className={cn(
+            'ml-auto inline-flex size-(--control-height) shrink-0 items-center justify-center rounded-md text-foreground hover:bg-accent [&_svg]:size-(--icon)',
+            fileActions !== undefined && fileActions !== null && fileActions !== false && 'ml-0',
+          )}
           aria-expanded={open}
           aria-controls={bodyId}
           aria-label={file.path}

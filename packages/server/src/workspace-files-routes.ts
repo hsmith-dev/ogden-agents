@@ -39,7 +39,8 @@ import {
   EDITOR_NONE_FOUND_TEXT,
   EDITOR_UNAVAILABLE_MESSAGE,
   GIT_POINTER_UNUSUAL_MESSAGE,
-  HUNK_OUTDATED_TEXT,
+  HUNK_CHANGED_SINCE_TEXT,
+  HUNK_OUTDATED_MESSAGES,
   SessionId,
   WORKSPACE_PATH_HARD_LINK_MESSAGE,
   WORKSPACE_PATH_NOT_FOUND_MESSAGE,
@@ -82,12 +83,13 @@ export function workbenchRefusal(log: Logger, what: string): (c: Context, error:
     if (error instanceof PathProtectedError) return apiError(c, 403, 'path_protected', error.message === WORKSPACE_PATH_HARD_LINK_MESSAGE ? WORKSPACE_PATH_HARD_LINK_MESSAGE : WORKSPACE_PATH_PROTECTED_MESSAGE);
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', WORKSPACE_PATH_NOT_FOUND_MESSAGE);
     if (error instanceof AgentMidTurnError) return apiError(c, 409, 'agent_mid_turn', AGENT_MID_TURN_MESSAGE);
-    if (error instanceof HunkOutdatedError) return apiError(c, 409, 'hunk_outdated', HUNK_OUTDATED_TEXT);
+    // The view's own sentence (This turn's, the other views', an undo's), one of the fixed ones.
+    if (error instanceof HunkOutdatedError) return apiError(c, 409, 'hunk_outdated', HUNK_OUTDATED_MESSAGES.includes(error.message) ? error.message : HUNK_CHANGED_SINCE_TEXT);
     // Core's own plain message (never a path).
     if (error instanceof InvalidOperationError) return apiError(c, 409, 'invalid_operation', error.message);
     // The project's `.git` file points somewhere unusual (AD-37): the fixed sentence, never the path.
     if (error instanceof VcsError && error.message === GIT_POINTER_UNUSUAL_MESSAGE) return apiError(c, 409, 'invalid_operation', GIT_POINTER_UNUSUAL_MESSAGE);
-    // A lane not shipped yet (hunk actions before 8.5): core's own plain message.
+    // A lane the port doesn't have (hunk actions and undo on a port without them): core's own plain message.
     if (error instanceof NotImplementedError) return apiError(c, 501, 'not_implemented', error.message);
     if (error instanceof EditorUnavailableError) return apiError(c, 409, 'editor_unavailable', error.message === EDITOR_NONE_FOUND_TEXT ? EDITOR_NONE_FOUND_TEXT : EDITOR_UNAVAILABLE_MESSAGE);
     // Never the path or the reason's text, which could name it.

@@ -5,8 +5,11 @@
  * and the turns list has both; a project that is no repo runs its turns
  * and records none; a fixture worktree chat's Commit these changes makes
  * one commit on its own branch with no hook run, nothing pushed and the
- * main checkout unchanged; nothing to commit is 409. No path or diff is in
- * an event or a log line.
+ * main checkout unchanged; nothing to commit is 409. Story 8.5: a hunk
+ * action and an undo are refused 409 `agent_mid_turn` while the fake agent
+ * works in the project; then one hunk is staged, the other reverted and
+ * put back by Undo, a stale id is 409 `hunk_outdated`. No path or diff is
+ * in an event or a log line.
  */
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -20,8 +23,11 @@ import {
   ChangesResponse,
   chatWorktreeBranch,
   CommitWorktreeResponse,
+  AGENT_MID_TURN_MESSAGE,
   FileDiffResponse,
   GIT_POINTER_UNUSUAL_MESSAGE,
+  HUNK_CHANGED_SINCE_TEXT,
+  HunkActionResponse,
   SessionResponse,
   TurnsResponse,
   WorkspaceResponse,
@@ -104,9 +110,68 @@ describe('workbench changes on git (story 8.4)', () => {
     // No diff or file content in the log, nor in the turns' events.
     expect(lines.join('\n')).not.toContain('first secret line');
     expect(JSON.stringify(recorded(server, sesId))).not.toContain('a.txt');
-    // Hunk actions are 8.5's.
-    const hunk = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceChangesHunks, { wsId }), { action: 'stage', view: 'unstaged', path: 'a.txt' });
-    expect(hunk.status).toBe(501);
+  });
+
+  it('refuses a hunk action and an undo while the fake agent works in the folder; then stages one hunk, reverts the other and undoes it', async () => {
+    const { server, tab, wsId, repo, markers, lines } = await setUp();
+    const numbered = (changes: Record<number, string> = {}) => `${Array.from({ length: 20 }, (_, index) => changes[index + 1] ?? `line ${index + 1}`).join('\n')}\n`;
+    writeFileSync(join(repo, 'list.txt'), numbered());
+    git(repo, 'add', 'list.txt');
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'list');
+    writeFileSync(join(repo, 'list.txt'), numbered({ 2: 'secret two', 18: 'secret eighteen' }));
+    const diffOf = async () =>
+      FileDiffResponse.parse(await (await request(server, tab, 'GET', `${apiPath(API_ROUTES.workspaceChangesFile, { wsId })}?${new URLSearchParams({ view: 'unstaged', path: 'list.txt' })}`)).json()).hunks;
+    const hunks = await diffOf();
+    expect(hunks).toHaveLength(2);
+    const hunk = (body: Record<string, unknown>) => request(server, tab, 'POST', apiPath(API_ROUTES.workspaceChangesHunks, { wsId }), body);
+    const undo = (body: Record<string, unknown>) => request(server, tab, 'POST', apiPath(API_ROUTES.workspaceChangesHunksUndo, { wsId }), body);
+    const indexBefore = readFileSync(join(repo, '.git', 'index')).toString('base64');
+
+    // A chat of this project is mid-turn: both are refused, and nothing changes.
+    const sesId = SessionResponse.parse(await (await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceSessions, { wsId }), {})).json()).session.id;
+    const done = join(markers, 'turn-done');
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId, sesId }), { text: `wait ${done}` })).status).toBe(202);
+    await waitFor(() => server.core.entities.getSession(sesId)?.state === 'working', 'working', 20_000);
+    for (const refused of [await hunk({ action: 'stage', view: 'unstaged', path: 'list.txt', hunkId: hunks[0]!.id }), await undo({ undo: 'a'.repeat(32), path: 'list.txt', view: 'unstaged' })]) {
+      expect(refused.status).toBe(409);
+      expect(ApiErrorBody.parse(await refused.json()).error).toEqual({ code: 'agent_mid_turn', message: AGENT_MID_TURN_MESSAGE });
+    }
+    expect(readFileSync(join(repo, '.git', 'index')).toString('base64')).toBe(indexBefore);
+    expect(readFileSync(join(repo, 'list.txt'), 'utf8')).toBe(numbered({ 2: 'secret two', 18: 'secret eighteen' }));
+    writeFileSync(done, '');
+    await waitFor(() => server.core.entities.getSession(sesId)?.state === 'idle', 'idle', 20_000);
+
+    // Stage the first: the index holds it, the folder is unchanged.
+    const staged = await hunk({ action: 'stage', view: 'unstaged', path: 'list.txt', hunkId: hunks[0]!.id });
+    expect(staged.status).toBe(200);
+    expect(HunkActionResponse.parse(await staged.json())).toEqual({ file: expect.objectContaining({ path: 'list.txt', additions: 1, deletions: 1 }) });
+    expect(git(repo, 'show', ':list.txt')).toBe(numbered({ 2: 'secret two' }));
+    // An id shown before the stage is stale now.
+    const stale = await hunk({ action: 'revert', view: 'unstaged', path: 'list.txt', hunkId: hunks[1]!.id });
+    expect(stale.status).toBe(409);
+    expect(ApiErrorBody.parse(await stale.json()).error).toEqual({ code: 'hunk_outdated', message: HUNK_CHANGED_SINCE_TEXT });
+    // Revert the other, read again: the folder only lacks it, the index is as staged.
+    const [left] = await diffOf();
+    const reverted = await hunk({ action: 'revert', view: 'unstaged', path: 'list.txt', hunkId: left!.id });
+    expect(reverted.status).toBe(200);
+    const body = HunkActionResponse.parse(await reverted.json());
+    expect(body).toEqual({ file: null, undo: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect(readFileSync(join(repo, 'list.txt'), 'utf8')).toBe(numbered({ 2: 'secret two' }));
+    expect(git(repo, 'show', ':list.txt')).toBe(numbered({ 2: 'secret two' }));
+    // Undo puts it back, once.
+    const putBack = await undo({ undo: body.undo, path: 'list.txt', view: 'unstaged' });
+    expect(putBack.status).toBe(200);
+    expect(HunkActionResponse.parse(await putBack.json()).file).toMatchObject({ path: 'list.txt' });
+    expect(readFileSync(join(repo, 'list.txt'), 'utf8')).toBe(numbered({ 2: 'secret two', 18: 'secret eighteen' }));
+    expect((await undo({ undo: body.undo, path: 'list.txt', view: 'unstaged' })).status).toBe(404);
+    // A refused path and a client patch are refused before git runs.
+    expect((await hunk({ action: 'revert', view: 'unstaged', path: '.git/config', hunkId: 'h1' })).status).toBe(403);
+    expect((await hunk({ action: 'revert', view: 'unstaged', path: 'list.txt', hunkId: 'h1', patch: 'diff --git a/x b/x' })).status).toBe(400);
+    expect(readdirSync(markers).filter((name) => name !== 'turn-done')).toEqual([]);
+    // No diff line, path or undo id in the log or an event.
+    expect(lines.join('\n')).not.toMatch(/secret (two|eighteen)|list\.txt/);
+    expect(lines.join('\n')).not.toContain(body.undo!);
+    expect(JSON.stringify(server.core.events.readAfter(0))).not.toMatch(/secret (two|eighteen)|list\.txt/);
   });
 
   it('runs turns in a project that is no repository, recording none; its views are empty', async () => {

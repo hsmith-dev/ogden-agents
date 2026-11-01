@@ -4,7 +4,7 @@
  * launch link comes from the shared server's handshake, with its launcher
  * token, exactly as `npx ogden-agents` asks for one.
  */
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { launchLink as handshakeLink } from '../support.js';
 
 /** Where the page's boot script keeps this tab's token (sessionStorage). */
@@ -66,13 +66,30 @@ export const settingsNavOf = (page: Page) => page.getByRole('navigation', { name
 /**
  * Opens Settings from the sidebar footer (it lands on Appearance), then
  * follows each named link in the settings nav in turn: a group, then one of
- * its pages ('Advanced', 'Welcome').
+ * its pages ('Advanced', 'Tools').
  */
 export async function openFromSettings(page: Page, ...links: string[]): Promise<void> {
   await settingsLinkOf(page).click();
   await expect(page).toHaveURL(/\/settings\/appearance$/);
   for (const name of links) await settingsNavOf(page).getByRole('link', { name, exact: true }).click();
 }
+
+/**
+ * Opens the sidebar footer's Help menu (epic 26, 26.5) and chooses `item`
+ * ('Keyboard shortcuts', 'Add the app shortcut', 'Welcome').
+ */
+export async function openFromHelp(page: Page, item: string): Promise<void> {
+  await sidebarOf(page).getByTestId('help-menu').click();
+  await page.getByRole('menu').getByRole('menuitem', { name: item, exact: true }).click();
+}
+
+/**
+ * The status rows among `rows` of chats with `agent` (epic 26): a one-line
+ * row shows only the agent's mark, so its name is read from the accessible
+ * name ("<chat>, <State>, <Agent>, <activity>", or "<Agent> on <model>").
+ */
+export const rowsWithAgent = (rows: Locator, agent: string): Locator =>
+  rows.and(rows.page().locator(`[aria-label*=${JSON.stringify(`, ${agent}, `)}], [aria-label*=${JSON.stringify(`, ${agent} on `)}]`));
 
 /** Fails when the page scrolls sideways (no horizontal overflow at the current width). */
 export async function expectNoHorizontalOverflow(page: Page): Promise<void> {

@@ -10,6 +10,7 @@
 import { expect, test } from '@playwright/test';
 import { fakeSecondAgent, SECOND_AGENT } from '../support.js';
 import { startChat, withChatServer } from './chat-server.js';
+import { rowsWithAgent } from './tab.js';
 
 test('a Claude Code chat and a second agent chat side by side in one project, each named by its agent', async ({ page }) => {
   const second = await fakeSecondAgent();
@@ -56,8 +57,8 @@ test('a Claude Code chat and a second agent chat side by side in one project, ea
       // The status sidebar names each chat's agent.
       const rows = page.getByTestId('status-row');
       await expect(rows).toHaveCount(2);
-      await expect(rows.filter({ hasText: SECOND_AGENT.displayName })).toHaveCount(1);
-      await expect(rows.filter({ hasText: 'Claude Code' })).toHaveCount(1);
+      await expect(rowsWithAgent(rows, SECOND_AGENT.displayName)).toHaveCount(1);
+      await expect(rowsWithAgent(rows, 'Claude Code')).toHaveCount(1);
 
       // The Claude Code chat still reaches Claude Code (the fake agent standing in, with no name of its own).
       await page.goto(claude.url);

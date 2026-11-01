@@ -548,36 +548,62 @@ export function SidebarEarlier({ count, className, children, ...props }: Compone
 export interface SidebarStatusRowProps extends Omit<SidebarMenuButtonProps, 'asChild' | 'tooltip' | 'tooltipAlways' | 'title' | 'children'> {
   state: SessionState;
   title: string;
-  /** Under the title: the agent and the state word ("Claude Code, working"). */
-  caption: string;
-  /** More for the tooltip only, after the state word (the chat's model, story 11). */
+  /** The agent's plain name ("Claude Code"): its mark ends the row, the name is in the tooltip. */
+  agent: string;
+  /** The last activity in words ("5 min ago"), for the tooltip and accessible name only. */
+  activity: string;
+  /** In place of the agent's name in the tooltip: the agent and its model ("Claude Code on Opus", story 11). */
   detail?: string | undefined;
-  /** The relative time shown right-aligned ("5m"), and the moment it stands for. */
-  time?: { label: string; dateTime: string } | undefined;
   /** The link the row is (a router Link with no children); the row fills it. */
   children: ReactElement<{ children?: ReactNode }>;
 }
 
+/** The first letter of an agent's plain name, its mark (DESIGN.md forbids vendor logos); empty for no name. */
+export function agentMonogram(agent: string): string {
+  return ([...agent.trim()][0] ?? '').toLocaleUpperCase();
+}
+
 /**
- * A session row (DESIGN.md Status row): glyph, one-line title, caption in
- * muted-foreground, relative time in tabular caption. `waiting` adds the
- * signal rail on the left. In the rail only the glyph shows; the title and
- * state word are the accessible name and the tooltip.
+ * An agent's monochrome mark (DESIGN.md Status row): its name's first letter
+ * in caption medium, centred in a compact-icon-size box with a hairline
+ * border, in muted-foreground. Decorative: the name is said elsewhere. The
+ * letter is generated content, not text, so the row's visible text stays
+ * the start of its accessible name (WCAG 2.5.3, Label in Name).
  */
-export function SidebarStatusRow({ state, title, caption, detail, time, className, children, ...props }: SidebarStatusRowProps) {
-  const word = STATE_WORDS[state];
+export function AgentMark({ agent, className, ...props }: ComponentProps<'span'> & { agent: string }) {
+  return (
+    <span
+      data-slot="agent-mark"
+      data-letter={agentMonogram(agent)}
+      aria-hidden
+      className={cn(
+        'inline-flex size-(--icon-size-compact) shrink-0 items-center justify-center rounded-sm border border-current text-caption leading-none font-medium text-muted-foreground',
+        'before:content-[attr(data-letter)]',
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+/**
+ * A session row (DESIGN.md Status row, one line from epic 26): glyph, the
+ * chat name truncated at one line, and the agent's mark at the end. The
+ * state word, agent and last activity are the accessible name and the
+ * tooltip ("Chat, Working, Claude Code, 5 min ago"). `waiting` adds the
+ * signal rail on the left. In the rail only the glyph shows.
+ */
+export function SidebarStatusRow({ state, title, agent, activity, detail, className, children, ...props }: SidebarStatusRowProps) {
+  const name = `${title}, ${STATE_WORDS[state]}, ${detail ?? agent}, ${activity}`;
   return (
     <SidebarMenuButton
       asChild
-      tooltip={detail === undefined ? `${title}: ${word}` : `${title}: ${word}, ${detail}`}
+      tooltip={name}
+      tooltipAlways
       // Not `data-state`: the tooltip trigger sets that one.
       data-session-state={state}
-      aria-label={detail === undefined ? `${title}, ${caption}` : `${title}, ${caption}, ${detail}`}
-      className={cn(
-        'h-auto min-h-(--row-height) py-1',
-        state === 'waiting' && 'border-l-(length:--rail-row) border-l-signal',
-        className,
-      )}
+      aria-label={name}
+      className={cn(state === 'waiting' && 'border-l-(length:--rail-row) border-l-signal', className)}
       {...props}
     >
       {cloneElement(
@@ -585,15 +611,10 @@ export function SidebarStatusRow({ state, title, caption, detail, time, classNam
         undefined,
         <>
           <StateGlyph state={state} labelMode="none" />
-          <span className="flex min-w-0 flex-1 flex-col md:max-lg:sr-only">
-            <bdi className="truncate">{title}</bdi>
-            <span className="truncate text-caption text-muted-foreground">{caption}</span>
+          <span className="min-w-0 flex-1 truncate text-left md:max-lg:sr-only">
+            <bdi>{title}</bdi>
           </span>
-          {time === undefined ? null : (
-            <time dateTime={time.dateTime} className="shrink-0 self-start text-caption tabular-nums text-muted-foreground md:max-lg:hidden">
-              {time.label}
-            </time>
-          )}
+          <AgentMark agent={agent} className="md:max-lg:hidden" />
         </>,
       )}
     </SidebarMenuButton>

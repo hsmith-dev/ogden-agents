@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { NeedsYouGroup, needsYouGlyph, type NeedsYouItem } from '../src/shell/needs-you-group';
-import { SidebarProvider, SidebarStatusRow, SidebarWorkspaceGroup } from '../src/ui/sidebar';
+import { agentMonogram, SidebarProvider, SidebarStatusRow, SidebarWorkspaceGroup } from '../src/ui/sidebar';
 import { TooltipProvider } from '../src/ui/tooltip';
 
 /** Renders `node` inside a router that knows the session route, so its links get their hrefs. */
@@ -124,7 +124,7 @@ describe('workspace groups and status rows (DESIGN.md Workspace group and Status
         link={<Link to="/w/$wsId" params={{ wsId: 'ws_b' }} activeOptions={{ exact: true }} />}
         settingsLink={<Link to="/w/$wsId/settings" params={{ wsId: 'ws_b' }} />}
       >
-        <SidebarStatusRow state="waiting" title="Chat" caption="Claude Code, waiting for you" time={{ label: '5m', dateTime: '2026-09-30T11:55:00.000Z' }}>
+        <SidebarStatusRow state="waiting" title="Chat" agent="Claude Code" activity="5 min ago">
           <Link to="/w/$wsId/s/$sesId" params={{ wsId: 'ws_b', sesId: 'ses_b' }} />
         </SidebarStatusRow>
       </SidebarWorkspaceGroup>,
@@ -177,16 +177,40 @@ describe('workspace groups and status rows (DESIGN.md Workspace group and Status
     expect(inChat).toContain('data-current="true"');
   });
 
-  it('a row links to its session, with title and state as its accessible name, a tooltip in the rail, and the signal rail when waiting', async () => {
+  it('a row is one line linking to its session: glyph, name and agent mark; state, agent and activity are its name and tooltip; the signal rail when waiting', async () => {
     const html = await group(false);
     const row = /<a[^>]*data-slot="sidebar-menu-button"[^>]*>([\s\S]*?)<\/a>/.exec(html)!;
     expect(row[0]).toContain('href="/w/ws_b/s/ses_b"');
-    expect(row[0]).toContain('aria-label="Chat, Claude Code, waiting for you"');
+    expect(row[0]).toContain('aria-label="Chat, Waiting for you, Claude Code, 5 min ago"');
     expect(row[0]).toContain('data-session-state="waiting"');
     expect(row[0]).toMatch(/border-l-signal/);
-    // The glyph alone in the rail: the text column is visually hidden there.
+    // One line at row height: no auto height, no caption, no time.
+    expect(row[0]).toMatch(/class="[^"]*\bh-\(--row-height\)/);
+    expect(row[0]).not.toMatch(/\bh-auto\b/);
+    expect(row[1]).not.toContain('<time');
+    expect(row[1]).not.toContain('text-caption text-muted-foreground">Claude Code');
+    // The glyph alone in the rail: the name is visually hidden there, the mark hidden.
     expect(row[1]).toMatch(/data-slot="state-glyph" data-state="waiting" aria-hidden="true"/);
-    expect(row[1]).toMatch(/md:max-lg:sr-only[^>]*><bdi class="truncate">Chat<\/bdi>/);
-    expect(row[1]).toMatch(/<time datetime="2026-09-30T11:55:00.000Z"[^>]*tabular-nums[^>]*>5m<\/time>/i);
+    expect(row[1]).toMatch(/md:max-lg:sr-only[^>]*><bdi>Chat<\/bdi><\/span>/);
+    expect(row[1]).toMatch(/<span data-slot="agent-mark" data-letter="C" aria-hidden="true" class="[^"]*md:max-lg:hidden[^"]*"><\/span>$/);
+  });
+});
+
+describe('a status row names the agent (epic 26, 26.5)', () => {
+  it("marks it by its plain name's first letter, any agent, and no letter while it is not known", () => {
+    expect(agentMonogram('Claude Code')).toBe('C');
+    expect(agentMonogram('Codex')).toBe('C');
+    expect(agentMonogram('  grok helper')).toBe('G');
+    expect(agentMonogram('')).toBe('');
+  });
+
+  it('says the agent on its model in place of the agent; an agent not known shows its plain name\'s letter', async () => {
+    const html = await renderInRouter(
+      <SidebarStatusRow state="working" title="Fix it" agent="The agent" activity="3 hr ago" detail="Claude Code on Opus">
+        <Link to="/w/$wsId/s/$sesId" params={{ wsId: 'ws_b', sesId: 'ses_b' }} />
+      </SidebarStatusRow>,
+    );
+    expect(html).toContain('aria-label="Fix it, Working, Claude Code on Opus, 3 hr ago"');
+    expect(html).toMatch(/data-slot="agent-mark" data-letter="T" aria-hidden="true"/);
   });
 });

@@ -34,7 +34,7 @@ import { zip } from '../../packages/adapters/test/archives.ts';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { API_ROUTES, requestQuit } from '../support.js';
 import { startChat } from '../e2e/chat-server.js';
-import { expectConnected, landConnected, storedToken } from '../e2e/tab.js';
+import { expectConnected, landConnected, rowsWithAgent, storedToken } from '../e2e/tab.js';
 import { bmadServer, uvReady, waitForExit, type BmadServer, type Launched } from './installed.js';
 
 const servers: BmadServer[] = [];
@@ -181,8 +181,8 @@ test('two agents at once in a Simple project: picker, own keys only, Antigravity
     await say(page, 'Claude Code', 'whoami');
     await expect(replies(page).last()).toContainText('agent=default');
     const rows = page.getByTestId('status-row');
-    await expect(rows.filter({ hasText: 'Antigravity' })).toHaveCount(1);
-    await expect(rows.filter({ hasText: 'Claude Code' })).toHaveCount(1);
+    await expect(rowsWithAgent(rows, 'Antigravity')).toHaveCount(1);
+    await expect(rowsWithAgent(rows, 'Claude Code')).toHaveCount(1);
     await page.goto(agyUrl);
     await expect(state(page)).toHaveAttribute('data-state', 'waiting');
     await card(page).getByRole('button', { name: 'Allow once' }).click();

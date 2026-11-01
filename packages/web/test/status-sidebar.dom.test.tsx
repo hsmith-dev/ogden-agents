@@ -35,6 +35,8 @@ vi.mock('../src/shell/sidebar-data', () => ({
 vi.mock('@/workspaces/add-project-dialog', () => ({ AddProjectDialog: ({ open }: { open: boolean }) => (open ? <div role="dialog" aria-label="Add project" /> : null) }));
 vi.mock('../src/shell/new-tab-button', () => ({ NewTabButton: () => null }));
 vi.mock('../src/shell/quit-button', () => ({ QuitButton: () => null }));
+// Help (26.5) has its own tests (app-shortcut-once.dom.test.tsx).
+vi.mock('../src/shell/help-menu', () => ({ HelpMenu: () => null }));
 vi.mock('../src/shell/server-status', () => ({ ServerStatus: () => null }));
 // An empty project's Start a chat row (backlog story 2) has its own tests (start-chat.dom.test.tsx); here it is a stand-in.
 vi.mock('../src/shell/sidebar-start-chat', () => ({ SidebarStartChat: () => null }));

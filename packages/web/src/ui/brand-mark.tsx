@@ -20,9 +20,8 @@ export function Wordmark({ asChild = false, className, children, ...props }: Wor
       className={cn('flex min-w-0 items-center gap-2 rounded-md text-label font-semibold text-foreground no-underline', className)}
       {...props}
     >
-      <span aria-hidden className="grid size-(--control-height) shrink-0 place-items-center rounded-md bg-primary text-label text-primary-foreground">
-        O
-      </span>
+      {/* The initial is generated content, so the visible text stays inside the accessible name (WCAG 2.5.3). */}
+      <span aria-hidden className="grid size-(--control-height) shrink-0 place-items-center rounded-md bg-primary text-label text-primary-foreground before:content-['O']" />
       <Slot.Slottable>{children}</Slot.Slottable>
       <span aria-hidden className="truncate md:max-lg:sr-only">
         Ogden Agents

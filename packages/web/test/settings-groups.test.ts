@@ -22,14 +22,14 @@ describe('settings groups (epic 26, E26-R7)', () => {
       const owners = SETTINGS_GROUPS.filter((g) => g.pages.some((p) => path === p.to || path.startsWith(`${p.to}/`)));
       expect(owners, path).toHaveLength(1);
     }
-    // Every page in the table is a real route (or Welcome, which lives outside settings until Help exists).
-    for (const page of SETTINGS_GROUPS.flatMap((g) => g.pages)) expect([...paths, '/welcome']).toContain(page.to);
+    // Every page in the table is a real settings route; Welcome lives in Help (26.5).
+    for (const page of SETTINGS_GROUPS.flatMap((g) => g.pages)) expect(paths).toContain(page.to);
   });
 
   it('a sub-page makes its group current and itself the current page', () => {
     expect(settingsGroupFor('/settings/mcp')?.id).toBe('advanced');
     expect(currentSettingsPage('/settings/mcp')?.label).toBe('MCP servers');
-    expect(settingsGroupFor('/settings/mcp')?.pages.map((p) => p.label)).toEqual(['Tools', 'Developer tools', 'MCP servers', 'About', 'Welcome']);
+    expect(settingsGroupFor('/settings/mcp')?.pages.map((p) => p.label)).toEqual(['Tools', 'Developer tools', 'MCP servers', 'About']);
     expect(settingsGroupFor('/settings/builds')?.id).toBe('projects');
   });
 

@@ -4,7 +4,7 @@
  * 1): a fresh data folder's launch link lands on Welcome; signing in moves
  * it on by itself; a first project; the app shortcut offered once; then the
  * project's empty Chats. Finishing or skipping is kept in the data folder
- * (a skip is checked across a restart), and Settings → Welcome brings it back.
+ * (a skip is checked across a restart), and Help → Welcome brings it back.
  *
  * Claude Code is the fake ACP agent, whose `--cli` runs the fake login
  * program; the browser's visits to `https://claude.ai/**` go to that
@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { API_ROUTES, launchLink, makeDataDir, removeDataDir, startServer, type RunningServer, type StartOptions } from '../support.js';
-import { openFromSettings, storedToken } from './tab.js';
+import { openFromHelp, storedToken } from './tab.js';
 
 const WORKSPACE_URL = /\/w\/(ws_[0-9A-Z]{26})$/;
 
@@ -116,8 +116,8 @@ async function signInAndAddProject(page: Page, context: BrowserContext, beforeAd
   await dialog.getByRole('button', { name: 'Open this folder' }).click();
 }
 
-async function openWelcomeFromSettings(page: Page) {
-  await openFromSettings(page, 'Advanced', 'Welcome');
+async function openWelcomeFromHelp(page: Page) {
+  await openFromHelp(page, 'Welcome');
   await expect(page).toHaveURL(/\/welcome$/);
 }
 
@@ -161,8 +161,8 @@ test('a first run: Welcome, sign in, a project, the shortcut once, then Chats', 
     await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
     await expect(page).toHaveURL(`${server.url}/`);
 
-    // Settings → Welcome opens it again with the agent as it is now: no moving on by itself.
-    await openWelcomeFromSettings(page);
+    // Help → Welcome opens it again with the agent as it is now: no moving on by itself.
+    await openWelcomeFromHelp(page);
     await expect(headline(page)).toHaveText('Pick the agent that will do the work.');
     await expect(card(page).getByTestId('agent-state')).toContainText('Installed, signed in');
     await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();
@@ -175,7 +175,7 @@ test('a first run: Welcome, sign in, a project, the shortcut once, then Chats', 
   });
 });
 
-test('Skip for now marks Welcome done for good, across a restart; Settings → Welcome brings it back', async ({ page }) => {
+test('Skip for now marks Welcome done for good, across a restart; Help → Welcome brings it back', async ({ page }) => {
   await withWelcomeServer(page, async ({ server, dataDir, restart }) => {
     await land(page, server.launchUrl, '/welcome');
     await expect(headline(page)).toHaveText('Pick the agent that will do the work.');
@@ -197,7 +197,7 @@ test('Skip for now marks Welcome done for good, across a restart; Settings → W
     await expect(page.getByTestId('workspace-empty')).toBeVisible();
     await expect(page).toHaveURL(`${again.url}/`);
 
-    await openWelcomeFromSettings(page);
+    await openWelcomeFromHelp(page);
     await expect(headline(page)).toHaveText('Pick the agent that will do the work.');
     await expect(card(page).getByTestId('agent-state')).toContainText('Installed, needs sign-in');
     await expect(offerNotice(page)).toHaveCount(0);

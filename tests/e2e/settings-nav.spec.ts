@@ -62,7 +62,9 @@ test.describe('settings nav at 1440 px', () => {
     // The current group's row is selected text, not a second link to one of its pages.
     await expect(settingsNavOf(page).locator('[data-selected="true"]')).toHaveText('Advanced');
     await expect(navLink(page, 'Advanced')).toHaveCount(0);
-    for (const name of ['Tools', 'Developer tools', 'MCP servers', 'About', 'Welcome']) await expect(navLink(page, name)).toBeVisible();
+    for (const name of ['Tools', 'Developer tools', 'MCP servers', 'About']) await expect(navLink(page, name)).toBeVisible();
+    // Welcome lives in Help now (26.5).
+    await expect(navLink(page, 'Welcome')).toHaveCount(0);
     await expect(current(page)).toHaveText(['MCP servers']);
     // Another group's pages are folded away.
     await expect(navLink(page, 'Builds')).toHaveCount(0);

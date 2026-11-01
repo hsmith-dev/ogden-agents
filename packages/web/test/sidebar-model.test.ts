@@ -1,7 +1,7 @@
 import type { CoreEvent, Session, SessionState, Workspace } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { applyEvent, emptyStore, type EventStoreState } from '../src/events/event-store';
-import { buildSidebar, diffForAnnouncements, EARLIER_AFTER_MS, holdOrder, relativeTime, type SidebarModel } from '../src/shell/sidebar-model';
+import { activityWords, buildSidebar, diffForAnnouncements, EARLIER_AFTER_MS, holdOrder, type SidebarModel } from '../src/shell/sidebar-model';
 
 /** Every chat here is Claude Code's (epic 6: the name comes from the agent list). */
 const CLAUDE = () => 'Claude Code';
@@ -243,14 +243,16 @@ describe('diffForAnnouncements (EXPERIENCE.md Accessibility Floor)', () => {
   });
 });
 
-describe('relativeTime', () => {
-  it('is short: now, minutes, hours, days', () => {
-    expect(relativeTime(ago(20_000), NOW)).toBe('now');
-    expect(relativeTime(ago(5 * MINUTE), NOW)).toBe('5m');
-    expect(relativeTime(ago(3 * 60 * MINUTE), NOW)).toBe('3h');
-    expect(relativeTime(ago(49 * 60 * MINUTE), NOW)).toBe('2d');
-    // A clock a little behind the server's never shows a negative time.
-    expect(relativeTime(ago(-MINUTE), NOW)).toBe('now');
+describe('activityWords (epic 26, Status row)', () => {
+  it('says the last activity in words: just now, minutes, hours, days', () => {
+    expect(activityWords(ago(0), NOW)).toBe('just now');
+    expect(activityWords(ago(20_000), NOW)).toBe('just now');
+    expect(activityWords(ago(5 * MINUTE), NOW)).toBe('5 min ago');
+    expect(activityWords(ago(3 * 60 * MINUTE), NOW)).toBe('3 hr ago');
+    expect(activityWords(ago(25 * 60 * MINUTE), NOW)).toBe('1 day ago');
+    expect(activityWords(ago(2 * 24 * 60 * MINUTE), NOW)).toBe('2 days ago');
+    // A clock a little behind the server's never says a time to come.
+    expect(activityWords(ago(-MINUTE), NOW)).toBe('just now');
   });
 });
 

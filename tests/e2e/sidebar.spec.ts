@@ -47,7 +47,7 @@ test('two busy projects: both groups show their states, Needs you names the requ
     await landConnected(tab, await launchLink(server.url, dataDir));
 
     await expect(groupOf(tab, working).getByTestId('status-row')).toHaveAttribute('data-session-state', 'working');
-    await expect(groupOf(tab, working).getByTestId('status-row')).toHaveAccessibleName('hold, Claude Code, working');
+    await expect(groupOf(tab, working).getByTestId('status-row')).toHaveAccessibleName(/^hold, Working, Claude Code, (just now|\d+ min ago)$/);
     await expect(groupOf(tab, asking).getByTestId('status-row')).toHaveAttribute('data-session-state', 'waiting');
     const needsYou = sidebarOf(tab).getByTestId('needs-you');
     // The chat is named after its first message (backlog story 12).
@@ -106,7 +106,7 @@ test('a request in another project is announced once, and the rail shows it as a
     const rail = sidebarOf(page).getByTestId('needs-you-rail');
     await expect(rail).toBeVisible();
     await expect(rail).toHaveAccessibleName('Needs you, 1');
-    await expect(groupOf(page, asking).getByRole('link', { name: 'hello, Claude Code, waiting for you' })).toBeVisible();
+    await expect(groupOf(page, asking).getByRole('link', { name: /^hello, Waiting for you, Claude Code, / })).toBeVisible();
     // Each project is a folder icon in the rail, named and opening it (backlog story 13: the drop-down never showed in the rail).
     const railProject = groupOf(page, other).getByRole('link', { name: basename(other), exact: true });
     await expect(railProject).toBeVisible();

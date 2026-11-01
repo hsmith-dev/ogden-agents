@@ -14,7 +14,7 @@ export type SettingsGroupId = 'agents' | 'projects' | 'appearance' | 'notificati
 
 export interface SettingsPage {
   label: string;
-  /** The page's route (Welcome is the one outside `/settings` until Help exists, 26.5). */
+  /** The page's route, under `/settings` (Welcome lives in Help, 26.5). */
   to: string;
 }
 
@@ -53,8 +53,6 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
       { label: 'Developer tools', to: '/settings/dev-tools' },
       { label: 'MCP servers', to: '/settings/mcp' },
       { label: 'About', to: '/settings/about' },
-      // Until Help exists (26.5 moves it there).
-      { label: 'Welcome', to: '/welcome' },
     ],
   },
 ];

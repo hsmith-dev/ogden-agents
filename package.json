@@ -55,6 +55,7 @@
   },
   "devDependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.84.0",
+    "@axe-core/playwright": "^4.14.0",
     "@ogden-agents/server": "workspace:*",
     "@playwright/test": "^1.63.0",
     "@testing-library/dom": "^10.4.2",

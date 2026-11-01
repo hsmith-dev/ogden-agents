@@ -444,12 +444,17 @@ export function diffForAnnouncements(previous: SidebarModel, next: SidebarModel)
   return { polite, assertive };
 }
 
-/** How long ago, short and tabular: "now", "5m", "3h", "2d" (DESIGN.md Status row). */
-export function relativeTime(iso: string, now: number): string {
+/**
+ * The last activity in words, for a status row's tooltip and accessible name
+ * (DESIGN.md Status row, epic 26): "just now", "5 min ago", "3 hr ago",
+ * "1 day ago", "2 days ago". A moment in the future reads "just now".
+ */
+export function activityWords(iso: string, now: number): string {
   const minutes = Math.floor(Math.max(0, now - time(iso)) / 60_000);
-  if (minutes < 1) return 'now';
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? '1 day ago' : `${days} days ago`;
 }

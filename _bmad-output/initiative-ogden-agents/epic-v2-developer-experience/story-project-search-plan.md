@@ -95,10 +95,10 @@ The project root is the git worktree `/Users/harrisonsmith/Library/Caches/ogden-
 
 ## Deferred (for the sweep)
 
-- A tracked file symlink into an ignored folder is searched under the link's name (row 4); nothing refused leaks.
-- A folder swapped for a link between its check and `opendir` could list outside entries; candidates are re-checked, no leak (row 15; as 8.1 row 20).
-- `.git/info/exclude`, global excludes and `core.ignorecase` are not read; `.gitignore` matching is case sensitive.
-- A search queued behind two others starts its 5 s deadline when it gets a slot (up to about 10 s overall).
+- A tracked file symlink into an ignored folder is searched under the link's name (row 4); nothing refused leaks. (8.12: logged in `deferred-work.md`.)
+- A folder swapped for a link between its check and `opendir` could list outside entries; candidates are re-checked, no leak (row 15; as 8.1 row 20). (8.12: logged in `deferred-work.md`.)
+- `.git/info/exclude`, global excludes and `core.ignorecase` are not read; `.gitignore` matching is case sensitive. (8.12: logged in `deferred-work.md`.)
+- A search queued behind two others starts its 5 s deadline when it gets a slot (up to about 10 s overall). (8.12: logged in `deferred-work.md`.)
 
 ## Plan Change Log
 

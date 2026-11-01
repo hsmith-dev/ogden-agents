@@ -97,8 +97,8 @@ The server matches names as a contiguous substring of the path (case insensitive
 
 ## Deferred (for the sweep)
 
-- Run tests in the palette waits for Problems (epic 8 entry 9), which is not built yet.
-- On a worktree chat the palette's Files searches the project root, not the chat's worktree (the Workbench passes `session`; the palette does not).
+- Run tests in the palette waits for Problems (epic 8 entry 9), which is not built yet. (8.12: logged in `deferred-work.md`.)
+- On a worktree chat the palette's Files searches the project root, not the chat's worktree (the Workbench passes `session`; the palette does not). (8.12: fixed (the palette names the worktree chat on screen in the search and the file it opens; `packages/web/src/workbench/chat-folder.ts`).)
 
 ## Verification
 

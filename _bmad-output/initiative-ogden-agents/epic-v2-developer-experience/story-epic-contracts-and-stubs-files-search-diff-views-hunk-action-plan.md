@@ -101,10 +101,10 @@ The project root is the git worktree `/Users/harrisonsmith/Library/Caches/ogden-
 
 ## Deferred (for the sweep)
 
-- Check order differs: the files routes now parse the path before resolving the project (unknown project with a malformed path is 400), while core's files and editor use-cases resolve the project first (404). Pick one order.
-- 27.3 should check a chat's `worktreePath` lies in its chat-worktrees folder at creation; today core checks only that it is absolute, and the adapter only that it is strictly inside the data folder.
-- `session.created` carries the absolute `worktreePath` (as the Session does); the no-path rule is enforced only on this story's four events.
-- The architecture git-command check exempts `packages/core/src/remote-worktree-sync.ts` (CAP-24, pre-existing).
+- Check order differs: the files routes now parse the path before resolving the project (unknown project with a malformed path is 400), while core's files and editor use-cases resolve the project first (404). Pick one order. (8.12: logged in `deferred-work.md`.)
+- 27.3 should check a chat's `worktreePath` lies in its chat-worktrees folder at creation; today core checks only that it is absolute, and the adapter only that it is strictly inside the data folder. (8.12: logged in `deferred-work.md`.)
+- `session.created` carries the absolute `worktreePath` (as the Session does); the no-path rule is enforced only on this story's four events. (8.12: logged in `deferred-work.md`.)
+- The architecture git-command check exempts `packages/core/src/remote-worktree-sync.ts` (CAP-24, pre-existing). (8.12: logged in `deferred-work.md`.)
 
 ## Plan Change Log
 

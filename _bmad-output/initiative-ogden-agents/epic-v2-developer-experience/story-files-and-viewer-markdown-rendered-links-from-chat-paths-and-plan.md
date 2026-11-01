@@ -110,11 +110,11 @@ Pass 1 (2026-11-01; lenses: quick, security-links). Verdicts: high 1, medium 3, 
 
 ## Deferred (for the sweep)
 
-- A path in `_emphasis_` is never linked: candidates come from raw text, rendering asks after emphasis is split (row 10).
-- The viewer opens as the Workbench Files page; the side panel beside the chat at `xl` (EXPERIENCE.md Path links) is not built.
-- Links in tool-call rows, search results and Problems rows (EXPERIENCE.md Path links) go through `PathLink` when those surfaces are built or touched; tool rows are not linked yet.
-- An absolute path inside the project in a reply (`/Users/me/proj/src/a.ts`) stays plain text; mapping it to a relative path would need the project's real path in the client.
-- `Cmd/Ctrl` with click to open in the editor, and Open in editor in the viewer header, wait for 8.10.
+- A path in `_emphasis_` is never linked: candidates come from raw text, rendering asks after emphasis is split (row 10). (8.12: logged in `deferred-work.md`.)
+- The viewer opens as the Workbench Files page; the side panel beside the chat at `xl` (EXPERIENCE.md Path links) is not built. (8.12: logged in `deferred-work.md`.)
+- Links in tool-call rows, search results and Problems rows (EXPERIENCE.md Path links) go through `PathLink` when those surfaces are built or touched; tool rows are not linked yet. (8.12: Problems rows link through `PathLink` (8.9) and search results open the viewer (8.8); tool-call rows are logged in `deferred-work.md`.)
+- An absolute path inside the project in a reply (`/Users/me/proj/src/a.ts`) stays plain text; mapping it to a relative path would need the project's real path in the client. (8.12: logged in `deferred-work.md`.)
+- `Cmd/Ctrl` with click to open in the editor, and Open in editor in the viewer header, wait for 8.10. (8.12: done by 8.10.)
 
 ## Design Notes
 

@@ -91,14 +91,14 @@ Project root is the worktree `/Users/harrisonsmith/Library/Caches/ogden-agents-d
 
 ## Deferred (for the sweep)
 
-- Windows `.cmd`/`.bat` shims (`npm`, `pnpm`, `yarn` on Windows) are refused in plain words, so package.json scripts don't run on Windows yet; resolving npm's `npm-cli.js` through `node.exe` is the likely fix (E8-R11).
-- Check-then-use gap (security review 4): core checks the script binding, then the package manager reads `package.json` itself a moment later; an edit in that window runs unconfirmed text. Can't be closed while npm reads the file; a re-check after start that kills on a mismatch would narrow it.
-- AD-38 should say plainly that a detected `package.json` script runs through the package manager's own shell (Ogden never starts one itself); architecture note for the user.
-- Windows: after the main process exits normally, `taskkill /T` can't walk to grandchildren it left (security review 7, Windows half).
-- Go test failures print paths relative to the package folder, so a nested package's link can point at a file that isn't there.
-- Run history lives in memory only and is gone after a server restart.
-- `node -e`, `python -c`, `npx -y` stay allowed: the user typed and confirmed them and no shell interprets them; the refusal reasons don't promise more.
-- The list response returns a command's and script's text unmasked (the user's own settings, needed for exact-text confirmation); only the draft and output are masked.
+- Windows `.cmd`/`.bat` shims (`npm`, `pnpm`, `yarn` on Windows) are refused in plain words, so package.json scripts don't run on Windows yet; resolving npm's `npm-cli.js` through `node.exe` is the likely fix (E8-R11). (8.12: logged in `deferred-work.md`.)
+- Check-then-use gap (security review 4): core checks the script binding, then the package manager reads `package.json` itself a moment later; an edit in that window runs unconfirmed text. Can't be closed while npm reads the file; a re-check after start that kills on a mismatch would narrow it. (8.12: logged in `deferred-work.md`.)
+- AD-38 should say plainly that a detected `package.json` script runs through the package manager's own shell (Ogden never starts one itself); architecture note for the user. (8.12: logged in `deferred-work.md`.)
+- Windows: after the main process exits normally, `taskkill /T` can't walk to grandchildren it left (security review 7, Windows half). (8.12: logged in `deferred-work.md`.)
+- Go test failures print paths relative to the package folder, so a nested package's link can point at a file that isn't there. (8.12: logged in `deferred-work.md`.)
+- Run history lives in memory only and is gone after a server restart. (8.12: logged in `deferred-work.md`.)
+- `node -e`, `python -c`, `npx -y` stay allowed: the user typed and confirmed them and no shell interprets them; the refusal reasons don't promise more. (8.12: logged in `deferred-work.md`.)
+- The list response returns a command's and script's text unmasked (the user's own settings, needed for exact-text confirmation); only the draft and output are masked. (8.12: logged in `deferred-work.md`.)
 
 ## Plan Change Log
 

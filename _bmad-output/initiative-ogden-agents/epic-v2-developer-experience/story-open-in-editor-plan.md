@@ -117,12 +117,12 @@ Pass 1 (2026-11-01; lenses: quick, security). Verdicts: high 1, medium 3, low 6,
 
 ## Deferred (for the sweep)
 
-- Check-then-use gap (S2): `locate` then the editor opens by name a moment later; an agent that swaps a parent folder for a symlink in between gets an outside file shown in the user's editor. A re-check just before spawn would only narrow it.
-- `pane-launchers/detect.ts` `probe` (pre-existing) has S1's shape: the server PATH unfiltered and the temp folder as cwd, and an unchecked `ComSpec`.
-- Review's Open in editor opens the project's copy of a file, not the build worktree's; a file the build added is "Couldn't open" (D1).
-- A file on a remote machine ("This file is on build-box.", EXPERIENCE.md) is not built: a remote chat's file opens nothing special.
-- Windows: the `.cmd` shim path and real `cmd.exe` quoting are unit-tested with a simulated platform only; the e2e suite has run on macOS here.
-- One hidden status region per path link in a long chat; one shared announcer would be lighter.
+- Check-then-use gap (S2): `locate` then the editor opens by name a moment later; an agent that swaps a parent folder for a symlink in between gets an outside file shown in the user's editor. A re-check just before spawn would only narrow it. (8.12: logged in `deferred-work.md`.)
+- `pane-launchers/detect.ts` `probe` (pre-existing) has S1's shape: the server PATH unfiltered and the temp folder as cwd, and an unchecked `ComSpec`. (8.12: fixed (`packages/adapters/src/program-launch.ts`: absolute PATH folders only, the home folder else the filesystem root as working folder, `cmd.exe` from a drive-letter `ComSpec` only).)
+- Review's Open in editor opens the project's copy of a file, not the build worktree's; a file the build added is "Couldn't open" (D1). (8.12: logged in `deferred-work.md`.)
+- A file on a remote machine ("This file is on build-box.", EXPERIENCE.md) is not built: a remote chat's file opens nothing special. (8.12: logged in `deferred-work.md`.)
+- Windows: the `.cmd` shim path and real `cmd.exe` quoting are unit-tested with a simulated platform only; the e2e suite has run on macOS here. (8.12: logged in `deferred-work.md`.)
+- One hidden status region per path link in a long chat; one shared announcer would be lighter. (8.12: logged in `deferred-work.md`.)
 
 ## Design Notes
 

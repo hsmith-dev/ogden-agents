@@ -5,20 +5,27 @@
  * stands in for the real one; the real fake programs run in the server tests.
  */
 import { PaneLauncher } from '@ogden-agents/shared';
-import { describe, expect, it } from 'vitest';
-import { createPaneLaunchers, detectLauncher, PANE_LAUNCHERS, SHELL_LAUNCHER, type DetectSystem } from '../src/index.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createPaneLaunchers, detectLauncher, nodeDetectSystem, PANE_LAUNCHERS, SHELL_LAUNCHER, type DetectSystem } from '../src/index.js';
+import { plantedProgram, type PlantedProgram } from './planted-program.js';
 
 const SENTINELS = { ANTHROPIC_API_KEY: 'sk-ant-planted', OPENAI_API_KEY: 'sk-planted', GH_TOKEN: 'ghp_planted', NPM_TOKEN: 'npm_planted' };
 const byId = (id: string) => PANE_LAUNCHERS.find((launcher) => launcher.id === id)!;
 
-function computer(files: string[], opts: { platform?: NodeJS.Platform; env?: Record<string, string>; failing?: string[]; probed?: Array<{ path: string; env: Record<string, string> }> } = {}): DetectSystem {
+interface Probed {
+  path: string;
+  env: Record<string, string>;
+  cwd: string;
+}
+
+function computer(files: string[], opts: { platform?: NodeJS.Platform; env?: Record<string, string>; failing?: string[]; probed?: Probed[] } = {}): DetectSystem {
   const platform = opts.platform ?? 'darwin';
   return {
     platform,
     env: opts.env ?? { PATH: '/usr/bin:/opt/bin', HOME: '/home/u', ...SENTINELS },
     runnable: (path) => files.includes(path),
-    async probe(path, env) {
-      opts.probed?.push({ path, env });
+    async probe(path, { env, cwd }) {
+      opts.probed?.push({ path, env, cwd });
       return opts.failing?.includes(path) ? { ok: false } : { ok: true, version: `${path.split(/[\\/]/).pop()} 9.9.9` };
     },
   };
@@ -68,7 +75,7 @@ describe('detection looks, and never installs (E16-R5)', () => {
   });
 
   it('runs only the version request, under the allowlist: none of the server\'s secrets reaches it', async () => {
-    const probed: Array<{ path: string; env: Record<string, string> }> = [];
+    const probed: Probed[] = [];
     await detectLauncher(byId('grok'), computer(['/usr/bin/grok'], { probed }));
     expect(probed).toHaveLength(1);
     for (const name of Object.keys(SENTINELS)) expect(probed[0]!.env, name).not.toHaveProperty(name);
@@ -78,6 +85,19 @@ describe('detection looks, and never installs (E16-R5)', () => {
   it('ignores a PATH folder that is not absolute, so nothing in the folder Ogden runs in stands in for a program', async () => {
     const system = computer(['./claude', 'bin/claude'], { env: { PATH: './:bin:', HOME: '/home/u' } });
     expect((await detectLauncher(byId('claude-code'), system)).state).toBe('not_found');
+  });
+
+  it("hands the version request only the absolute PATH folders, and runs it in the home folder, else the filesystem's root, never the temp folder (8.12)", async () => {
+    const probed: Probed[] = [];
+    await detectLauncher(byId('codex'), computer(['/usr/bin/codex'], { env: { PATH: ':/usr/bin:.:rel/bin:', HOME: '/home/u' }, probed }));
+    expect(probed.map(({ env, cwd }) => [env.PATH, cwd])).toEqual([['/usr/bin', '/home/u']]);
+    probed.length = 0;
+    await detectLauncher(byId('codex'), computer(['/usr/bin/codex'], { env: { PATH: '/usr/bin', HOME: 'rel/home' }, probed }));
+    expect(probed.map(({ cwd }) => cwd)).toEqual(['/']);
+    probed.length = 0;
+    const win = { Path: 'C:\\bin;;.;rel', PATHEXT: '.EXE', SystemRoot: 'C:\\Windows' };
+    await detectLauncher(byId('codex'), computer(['C:\\bin\\codex.exe'], { platform: 'win32', env: win, probed }));
+    expect(probed.map(({ env, cwd }) => [env.Path, cwd])).toEqual([['C:\\bin', 'C:\\Windows']]);
   });
 
   it('Windows: tries each PATHEXT, matches names without case, expands %VARS%, and finds an npm .cmd shim', async () => {
@@ -94,7 +114,7 @@ describe('detection looks, and never installs (E16-R5)', () => {
   });
 
   it('a variable that is not set means no candidate: nothing is tried at the root of the drive', async () => {
-    const probed: Array<{ path: string; env: Record<string, string> }> = [];
+    const probed: Probed[] = [];
     const system = computer(['/.local/bin/claude', '\\.local\\bin\\claude.exe'], { env: { PATH: '/usr/bin' }, probed });
     expect((await detectLauncher(byId('claude-code'), system)).state).toBe('not_found');
     expect(probed).toEqual([]);
@@ -164,4 +184,23 @@ describe('the launchers port', () => {
     expect(await port.command('shell', [])).toMatchObject({ ok: false, code: 'unknown_launcher' });
     expect(await port.command('nope', [])).toMatchObject({ ok: false, code: 'unknown_launcher' });
   });
+});
+
+describe.skipIf(process.platform === 'win32')('the real version request on this computer (8.12)', () => {
+  const planted: PlantedProgram[] = [];
+  afterEach(() => {
+    for (const one of planted.splice(0)) one.remove();
+  });
+
+  for (const kind of ['empty', 'relative'] as const) {
+    it(`never runs a program planted behind ${kind === 'empty' ? 'an empty' : 'a relative'} PATH entry, even in the folder it runs in`, async () => {
+      const fixture = plantedProgram('claude', 'claude 2.0.0');
+      planted.push(fixture);
+      // The home folder (where the request runs) holds the planted helper; the found program runs a bare `helper`.
+      const system: DetectSystem = { ...nodeDetectSystem, env: { PATH: fixture.paths[kind], HOME: fixture.work } };
+      const found = await detectLauncher(byId('claude-code'), system);
+      expect(found).toMatchObject({ state: 'found', path: `${fixture.bin}/claude`, version: 'claude 2.0.0' });
+      expect(fixture.ran()).toBe(false);
+    });
+  }
 });

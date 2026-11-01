@@ -10,6 +10,7 @@
  * resolved path, so an edit or a removal outside Ogden Agents is always
  * re-checked.
  */
+import { absolutePathFolders } from '../program-launch.js';
 import { accessSync, constants, statSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 import type { LinkedCommandSpec } from '@ogden-agents/shared';
@@ -120,7 +121,9 @@ type Found = { file: string } | { script: string } | undefined;
 
 /**
  * An already-absolute program resolved directly; a bare name (no path
- * separator) searched on `env`'s `PATH`, in `PATHEXT` order on Windows. On
+ * separator) searched on the absolute folders of `env`'s `PATH` only (an
+ * empty or relative entry would mean the server's own folder;
+ * `program-launch.ts`, 8.12), in `PATHEXT` order on Windows. On
  * Windows only a `.exe` or `.com` counts (epic 21 audit): an npm shim, a
  * `.cmd` or a `.bat` can't be started without a shell, so it is reported as
  * a script rather than resolved to something every start would fail on. A
@@ -139,8 +142,7 @@ function resolveProgram(
     if (!isExecutable(program)) return undefined;
     return startable(program) ? { file: program } : { script: program };
   }
-  const pathValue = lookupEnv(env, 'PATH', windows) ?? '';
-  const dirs = pathValue.split(paths.delimiter).filter((dir) => dir !== '');
+  const dirs = absolutePathFolders(lookupEnv(env, 'PATH', windows), windows ? 'win32' : 'linux');
   const extensions = windows ? windowsExtensions(env) : [''];
   let script: string | undefined;
   for (const dir of dirs) {

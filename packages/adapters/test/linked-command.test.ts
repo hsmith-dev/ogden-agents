@@ -74,6 +74,16 @@ describe('resolveLinkedCommand', () => {
     expect(seen).toEqual(['/usr/bin/codex-acp', '/usr/local/bin/codex-acp']);
   });
 
+  it('searches only the absolute PATH folders: a program behind an empty or relative entry is never found (8.12)', () => {
+    const planted = new Set(['codex-acp', 'rel/codex-acp', './codex-acp']);
+    expect(resolveLinkedCommand({ command: 'codex-acp' }, { PATH: ':rel:.:' }, { platform: 'linux', isExecutable: (file) => planted.has(file) }).ok).toBe(false);
+    const result = resolveLinkedCommand({ command: 'codex-acp' }, { PATH: ':rel:/usr/bin' }, { platform: 'linux', isExecutable: (file) => planted.has(file) || file === '/usr/bin/codex-acp' });
+    expect(result).toEqual({ ok: true, resolved: { command: '/usr/bin/codex-acp', args: [] } });
+    // Windows: a drive-letter folder only (no folder relative to the current drive's root).
+    const win = resolveLinkedCommand({ command: 'grok' }, { Path: '\\tools;rel;C:\\bin' }, { platform: 'win32', isExecutable: (file) => file.endsWith('grok.EXE') });
+    expect(win).toEqual({ ok: true, resolved: { command: 'C:\\bin\\grok.EXE', args: [] } });
+  });
+
   it('refuses a bare name found on no PATH directory', () => {
     const result = resolveLinkedCommand({ command: 'no-such-thing' }, { PATH: '/usr/bin' }, { platform: 'linux', isExecutable: () => false });
     expect(result.ok).toBe(false);

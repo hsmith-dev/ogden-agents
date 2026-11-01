@@ -13,6 +13,7 @@ import { Composer } from '@/chat/composer';
 import { chatDraftKey } from '@/chat/drafts';
 import { HandoffDialog } from '@/chat/handoff-dialog';
 import { onBeforeChatDetailChange, setChatDetail, useChatDetail } from '@/chat/detail-level';
+import { NewChatButton } from '@/chat/new-chat-button';
 import { CONTINUE_WITH_ANOTHER_AGENT, SessionMenu } from '@/chat/session-menu';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
@@ -554,6 +555,8 @@ export function SessionPage() {
             onSwitch={switchTo}
           />
         ) : null}
+        {/* New chat in one step (epic 26, E26-R2): the project's new-chat draft. */}
+        <NewChatButton wsId={wsId} />
         {session.data !== undefined ? (
           <SessionMenu
             detail={detail}

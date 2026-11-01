@@ -78,13 +78,14 @@ test("a new chat preselects the project's default, set in one tab and followed b
       await page.keyboard.press('Escape');
       await expect(picker).toHaveAttribute('data-agent', SECOND_AGENT.agentId);
 
-      // New chat starts with the project's default.
+      // New chat opens the draft on the project's default; its first message starts the chat with it.
       await page.getByTestId('new-chat').click();
-      await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
-      await expect(page.getByTestId('session-agent')).toHaveText(SECOND_AGENT.displayName);
+      await expect(page).toHaveURL(/\/w\/[^/]+\/new$/);
       const composer = page.getByRole('textbox', { name: `Message ${SECOND_AGENT.displayName}` });
       await composer.fill('whoami');
       await composer.press('Enter');
+      await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
+      await expect(page.getByTestId('session-agent')).toHaveText(SECOND_AGENT.displayName);
       await expect(page.getByTestId('message-agent').last()).toContainText(`agent=${SECOND_AGENT.agentId}`);
 
       // The mode picker offers only this agent's modes: Auto is there, unavailable, with the reason.

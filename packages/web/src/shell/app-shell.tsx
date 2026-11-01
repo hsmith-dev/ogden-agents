@@ -7,6 +7,7 @@ import { TourController } from '@/tour/tour-controller';
 import { AppShortcutOffer } from './app-shortcut-offer';
 import { LiveAnnouncer } from './live-announcer';
 import { NeedsYouKeys } from './needs-you-keys';
+import { NewChatKeys } from './new-chat-keys';
 import { OpenOgdenAgents } from './open-ogden-agents';
 import { ServerStopped } from './server-stopped';
 import { SidebarDataProvider } from './sidebar-data';
@@ -33,6 +34,8 @@ export function AppShell() {
         <LiveAnnouncer />
         {/* `g y` opens the next Needs you row (epic 26). */}
         <NeedsYouKeys />
+        {/* `g n` and the desktop app's File > New Chat open the project's new-chat draft (epic 26). */}
+        <NewChatKeys />
         {/* A desktop notification and a sound for each new need (backlog story 8). */}
         <AttentionNotifier />
         {/* Developer mode is the server's (permission modes): this tab's copy follows it. */}

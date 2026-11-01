@@ -1,4 +1,5 @@
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect } from '@tanstack/react-router';
+import { newChatSearch, type NewChatSearch } from './chat/new-chat';
 import { HomePage } from './routes/home-page';
 import { NotFoundPage } from './routes/not-found-page';
 import { SettingsLayout } from './settings/settings-layout';
@@ -129,6 +130,14 @@ const workspaceChatsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-chats-page'), 'WorkspaceChatsPage'),
 });
 
+/** A project's new-chat draft (epic 26, E26-R2), `/w/:wsId/new`: `?agent=` and `?machine=` are the picks it opens with. */
+const workspaceNewChatRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/new',
+  validateSearch: (search: Record<string, unknown>): NewChatSearch => newChatSearch(search),
+  component: lazyRouteComponent(() => import('./routes/new-chat-page'), 'NewChatPage'),
+});
+
 /** A workspace's settings (stories 2.5 and 2.8), `/w/:wsId/settings`. */
 const workspaceSettingsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -203,6 +212,7 @@ const routeTree = rootRoute.addChildren([
   homeRoute,
   welcomeRoute,
   workspaceChatsRoute,
+  workspaceNewChatRoute,
   workspaceSettingsRoute,
   workspacePlanRoute,
   workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),

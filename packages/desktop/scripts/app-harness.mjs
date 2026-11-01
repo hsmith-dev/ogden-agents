@@ -3,7 +3,7 @@
 // file; everything else is observed from outside: the data folder, the server log and the OS
 // process list. Nothing here touches the user's real data folder or any real agent.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -28,12 +28,12 @@ export function installNsis(installer, dir) {
   return exe;
 }
 
-/** A fresh working folder with its own data folder, report file and quit file paths. */
+/** A fresh working folder with its own data folder, report file, quit file and menu file paths. */
 export function newWorkspace(prefix = 'ogden-desktop-') {
   const root = process.env.OGDEN_DESKTOP_WORK ? process.env.OGDEN_DESKTOP_WORK : mkdtempSync(join(tmpdir(), prefix));
   const data = join(root, 'data');
   mkdirSync(data, { recursive: true });
-  return { root, data, report: join(root, 'report.jsonl'), quitFile: join(root, 'quit') };
+  return { root, data, report: join(root, 'report.jsonl'), quitFile: join(root, 'quit'), menuFile: join(root, 'menu') };
 }
 
 export function readReport(file) {
@@ -62,6 +62,7 @@ export function launchApp(exe, ws, extraEnv = {}) {
       OGDEN_AGENTS_DATA_DIR: ws.data,
       OGDEN_DESKTOP_TEST_REPORT: ws.report,
       OGDEN_DESKTOP_TEST_QUIT_FILE: ws.quitFile,
+      OGDEN_DESKTOP_TEST_MENU_FILE: ws.menuFile,
       ...extraEnv,
     },
   });
@@ -143,6 +144,14 @@ export function serverLog(ws) {
 export function writeQuit(ws) {
   mkdirSync(dirname(ws.quitFile), { recursive: true });
   writeFileSync(ws.quitFile, 'quit\n');
+}
+
+/** Chooses a menu item by its id (`new_chat`) through the shell's own menu handler, as a click or its accelerator would. */
+export function chooseMenu(ws, id) {
+  mkdirSync(dirname(ws.menuFile), { recursive: true });
+  // Renamed into place, so the shell never reads it half written.
+  writeFileSync(`${ws.menuFile}.part`, `${id}\n`);
+  renameSync(`${ws.menuFile}.part`, ws.menuFile);
 }
 
 /** The app's own processes (the shell, by its program name), for waiting until one scenario's app is fully gone. */

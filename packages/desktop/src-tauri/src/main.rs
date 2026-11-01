@@ -13,6 +13,7 @@
 //   OGDEN_DESKTOP_TEST_REPORT    append JSON lines of what the shell did to this file
 //   OGDEN_DESKTOP_TEST_QUIT_FILE quit through the normal quit path when this file appears
 //   OGDEN_DESKTOP_TEST_CONFIRM   answer the "agents are working" question: `quit` or `keep`
+//   OGDEN_DESKTOP_TEST_MENU_FILE choose the menu item this file names (its id, e.g. `new_chat`) when it appears
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod report;
@@ -73,6 +74,20 @@ fn main() {
                         // Re-armed if the user (the test) said to keep working.
                         let _ = std::fs::remove_file(&file);
                         ui::request_quit(&h, "test-quit-file");
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                });
+            }
+            if let Some(file) = std::env::var_os("OGDEN_DESKTOP_TEST_MENU_FILE") {
+                let h = handle.clone();
+                std::thread::spawn(move || loop {
+                    let path = PathBuf::from(&file);
+                    if let Ok(id) = std::fs::read_to_string(&path) {
+                        // Only once per file: a file that can't be removed is not chosen again every 250 ms.
+                        if std::fs::remove_file(&path).is_ok() {
+                            // Through the menu's own handler, as a click or the accelerator would go.
+                            ui::on_menu(&h, id.trim());
+                        }
                     }
                     std::thread::sleep(Duration::from_millis(250));
                 });

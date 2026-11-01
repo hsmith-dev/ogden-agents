@@ -40,12 +40,13 @@ test('a simple project shows only Chats in its header on both pages, two chats w
     await expect(page.getByTestId('chat-list')).toBeVisible();
     await expectChatsTabOnly(page);
 
-    // A second chat.
+    // A second chat: New chat opens the draft (epic 26), and its first message starts the chat.
     await page.getByTestId('new-chat').click();
-    await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/`));
-    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+    await expect(page).toHaveURL(new RegExp(`/w/${wsId}/new$`));
     await expectChatsTabOnly(page);
     await send(page, 'second question');
+    await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/`));
+    await expectChatsTabOnly(page);
     await expect(page.getByTestId('message-agent')).toContainText('Hello from the fake agent.');
     await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
 

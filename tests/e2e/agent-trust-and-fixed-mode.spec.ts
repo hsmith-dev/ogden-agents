@@ -11,8 +11,10 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { fakeFixedModeAgent } from '../support.js';
+import { apiPath } from '../../packages/shared/src/api.ts';
+import { API_ROUTES, fakeFixedModeAgent } from '../support.js';
 import { startChat, withChatServer } from './chat-server.js';
+import { storedToken } from './tab.js';
 
 const AGENT = { agentId: 'fixed-agent', displayName: 'Fixed Agent' } as const;
 
@@ -51,9 +53,23 @@ test('an agent that needs the project trusted: the picker offers Trust, a change
       await page.getByTestId('script-trust-allow').click();
       await expect(page.getByTestId('script-trust-prompt')).toBeHidden();
 
-      // A new chat with it: Auto chosen before the first message reaches the agent, then shown as fixed.
+      // Trusted, New chat opens the draft with it (epic 26).
       await page.getByTestId('new-chat').click();
-      await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
+      await expect(page).toHaveURL(new RegExp(`/w/${claude.wsId}/new\\?agent=${AGENT.agentId}$`));
+      await expect(page.getByTestId('agent-unavailable')).toHaveCount(0);
+
+      // A chat with it, made by the API (the draft has no mode choice before its first message yet, epic 27):
+      // Auto chosen before the first message reaches the agent, then shown as fixed.
+      const origin = new URL(page.url()).origin;
+      const token = await storedToken(page);
+      const created = await fetch(`${origin}${apiPath(API_ROUTES.workspaceSessions, { wsId: claude.wsId })}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'chat', agentId: AGENT.agentId }),
+      });
+      expect(created.status).toBe(201);
+      const { session } = (await created.json()) as { session: { id: string } };
+      await page.goto(`${origin}/w/${claude.wsId}/s/${session.id}`);
       await expect(page.getByTestId('session-agent')).toHaveText(AGENT.displayName);
       await page.getByTestId('permission-mode-picker').click();
       await page.getByTestId('permission-mode-auto').click();

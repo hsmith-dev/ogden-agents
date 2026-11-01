@@ -51,6 +51,12 @@
   --diff-add-strong: #b9e0c7;
   --diff-remove: #fae6e3;
   --diff-remove-strong: #f1c3bd;
+  --diff-gutter-foreground: #4e554f;
+  --syntax-keyword: #2841a7;
+  --syntax-string: #1c613e;
+  --syntax-number: #962e26;
+  --syntax-type: #225579;
+  --syntax-comment: #4e554f;
   --terminal: #101311;
   --terminal-foreground: #dce2dc;
 
@@ -206,6 +212,12 @@
     --diff-add-strong: #1e4a2e;
     --diff-remove: #2d1815;
     --diff-remove-strong: #5a2620;
+    --diff-gutter-foreground: #b1b9b2;
+    --syntax-keyword: #9fb1f8;
+    --syntax-string: #69ca95;
+    --syntax-number: #ed9a90;
+    --syntax-type: #86bbcc;
+    --syntax-comment: #b1b9b2;
     --terminal: #0a0c0b;
     --terminal-foreground: #dce2dc;
     --elevation-float: 0 0 0 1px #262c27, 0 8px 24px rgba(0, 0, 0, 0.45);
@@ -249,6 +261,12 @@
   --diff-add-strong: #1e4a2e;
   --diff-remove: #2d1815;
   --diff-remove-strong: #5a2620;
+  --diff-gutter-foreground: #b1b9b2;
+  --syntax-keyword: #9fb1f8;
+  --syntax-string: #69ca95;
+  --syntax-number: #ed9a90;
+  --syntax-type: #86bbcc;
+  --syntax-comment: #b1b9b2;
   --terminal: #0a0c0b;
   --terminal-foreground: #dce2dc;
   --elevation-float: 0 0 0 1px #262c27, 0 8px 24px rgba(0, 0, 0, 0.45);

@@ -1,8 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ArrowsLeftRight, ChatCircle, House, Stop } from '@phosphor-icons/react';
 import type { PermissionMode } from '@ogden-agents/shared';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
 import { agentNameOf, cancelSession, CHAT_AGENTS_QUERY_KEY, ChatApiError, UNKNOWN_AGENT_NAME, fetchSession, sendMessage, setPermissionMode, setSessionModel, switchDriver } from '@/chat/chat-api';
@@ -34,6 +34,7 @@ import { ReadOnlyBanner } from '@/terminal/read-only-banner';
 import { TerminalPanel } from '@/terminal/terminal-panel';
 import { conversationProps, TerminalPane } from '@/terminal/terminal-pane';
 import { focusComposer, useSessionDriver } from '@/terminal/use-session-driver';
+import { needsYouOpenCount, subscribeNeedsYouOpened } from '@/shell/needs-you-target';
 import { Banner } from '@/ui/banner';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
@@ -364,6 +365,25 @@ export function SessionPage() {
     card?.scrollIntoView?.({ block: 'center' });
     card?.focus({ preventScroll: true });
   }, [waitingFor, terminalDrives]);
+
+  // A Needs you row (epic 26) names its permission card in the hash: scroll to and focus it once per
+  // navigation, as soon as that card is pending. A card already answered leaves a plain session open;
+  // not while the terminal drives (nothing in the read-only conversation takes focus).
+  const linked = useRouterState({ select: (router) => ({ hash: router.location.hash, key: router.location.state.__TSR_key ?? router.location.state.key ?? router.location.href }), structuralSharing: true });
+  // Each open counts, the same row again too: the router pushes no new entry for the URL already shown.
+  const opens = useSyncExternalStore(subscribeNeedsYouOpened, needsYouOpenCount, needsYouOpenCount);
+  const focusedLink = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const openKey = `${linked.key}|${opens}`;
+    if (terminalDrives || !linked.hash.startsWith('permission-') || focusedLink.current === openKey) return;
+    const requestId = linked.hash.slice('permission-'.length);
+    if (!view.pendingPermissions.some((permission) => permission.requestId === requestId)) return;
+    const card = document.getElementById(linked.hash);
+    if (card === null) return;
+    focusedLink.current = openKey;
+    card.scrollIntoView?.({ block: 'center' });
+    card.focus({ preventScroll: true });
+  }, [linked, opens, view.pendingPermissions, terminalDrives]);
 
   if (session.error instanceof ChatApiError && session.error.status === 404) {
     return (

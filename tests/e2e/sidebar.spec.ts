@@ -51,9 +51,13 @@ test('two busy projects: both groups show their states, Needs you names the requ
     await expect(groupOf(tab, asking).getByTestId('status-row')).toHaveAttribute('data-session-state', 'waiting');
     const needsYou = sidebarOf(tab).getByTestId('needs-you');
     // The chat is named after its first message (backlog story 12).
-    await expect(needsYou.getByTestId('needs-you-item')).toHaveText(`Waiting for you${basename(asking)}, permission: Claude Code wants to run npm test`);
+    // What, then where (epic 26): the request in full, then the project and chat.
+    await expect(needsYou.getByTestId('needs-you-item')).toHaveAccessibleName(`Claude Code wants to run npm test, in ${basename(asking)}, permission`);
+    await expect(needsYou.getByTestId('needs-you-what')).toHaveText('Claude Code wants to run npm test');
+    await expect(needsYou.getByTestId('needs-you-where')).toHaveText(`${basename(asking)}, permission`);
     await expect(tab).toHaveTitle('(1) Ogden Agents');
-    await expect(needsYou.getByTestId('needs-you-item')).toHaveAttribute('href', /\/w\/ws_[0-9A-Z]{26}\/s\/ses_[0-9A-Z]{26}$/);
+    // A permission row opens its chat on its card.
+    await expect(needsYou.getByTestId('needs-you-item')).toHaveAttribute('href', /\/w\/ws_[0-9A-Z]{26}\/s\/ses_[0-9A-Z]{26}#permission-[^/]+$/);
 
     // Answer the request from another tab. This tab (on the home page) sees the chat go working, then
     // idle: its first announcements after the backlog. The backlog itself was never announced.
@@ -93,7 +97,7 @@ test('a request in another project is announced once, and the rail shows it as a
     await second.close();
 
     await expect(page.getByTestId('needs-you-announcement')).toHaveText('Claude Code is waiting for you: run npm test');
-    await expect(sidebarOf(page).getByTestId('needs-you-item')).toHaveText(`Waiting for you${basename(asking)}, hello: Claude Code wants to run npm test`);
+    await expect(sidebarOf(page).getByTestId('needs-you-item')).toHaveAccessibleName(`Claude Code wants to run npm test, in ${basename(asking)}, hello`);
     // Nothing takes focus: not the sidebar, not Needs you.
     expect(await page.evaluate(() => document.activeElement?.closest('[data-slot="sidebar"]') ?? null)).toBeNull();
 
@@ -110,7 +114,7 @@ test('a request in another project is announced once, and the rail shows it as a
     await railProject.click();
     await expect(page).toHaveURL(/\/w\/ws_[0-9A-Z]{26}$/);
     await rail.click();
-    await expect(page).toHaveURL(askingChat);
+    await expect(page).toHaveURL(new RegExp(`^${askingChat}#permission-`));
     await expect(page.getByTestId('permission-card')).toBeVisible();
   });
 });

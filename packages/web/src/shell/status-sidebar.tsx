@@ -28,6 +28,7 @@ import { Text } from '@/ui/typography';
 import { STATE_WORDS } from '@/ui/state-glyph';
 import { AddProjectDialog } from '@/workspaces/add-project-dialog';
 import { NeedsYouGroup } from './needs-you-group';
+import { markNeedsYouOpened, needsYouTarget } from './needs-you-target';
 import { NewTabButton } from './new-tab-button';
 import { QuitButton } from './quit-button';
 import { ServerStatus } from './server-status';
@@ -181,12 +182,10 @@ function StatusSidebarBody() {
           onOpenFirst={
             first === undefined
               ? undefined
-              : () =>
-                  void (first.paneId !== undefined
-                    ? navigate({ to: '/w/$wsId/terminals' as never, params: { wsId: first.wsId } as never })
-                    : first.reviewRef === undefined
-                      ? navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: first.wsId, sesId: first.sesId } })
-                      : navigate({ to: '/w/$wsId/review/$ref', params: { wsId: first.wsId, ref: first.reviewRef } }))
+              : () => {
+                  markNeedsYouOpened(first.id);
+                  void navigate(needsYouTarget(first));
+                }
           }
         />
         <SidebarGroup aria-labelledby={projectsId}>

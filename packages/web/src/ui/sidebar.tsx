@@ -600,6 +600,67 @@ export function SidebarStatusRow({ state, title, caption, detail, time, classNam
   );
 }
 
+export interface SidebarNeedsRowProps extends Omit<SidebarMenuButtonProps, 'asChild' | 'tooltip' | 'tooltipAlways' | 'title' | 'children'> {
+  /** The kind glyph (a Phosphor icon), drawn at the compact icon size in foreground. */
+  icon: ReactElement;
+  /** Its name, for tests and styling (`permission`, `question`, `review`, `blocked`). */
+  glyph: string;
+  /** Line one: what is needed, clamped to two visual lines and cut only at its end. */
+  what: ReactNode;
+  /** Line two: where (the project and chat), one truncated caption line. */
+  where: ReactNode;
+  /** The row last opened: it keeps the signal rail. */
+  lastOpened?: boolean;
+  /** The link the row is (a router Link with no children); the row fills it. */
+  children: ReactElement<{ children?: ReactNode }>;
+}
+
+/**
+ * A Needs you row (DESIGN.md needs-you-row, epic 26): the kind glyph, then
+ * the what in label foreground and the where in caption muted-foreground,
+ * two spacing units of vertical padding; the row last opened keeps the signal rail.
+ */
+export function SidebarNeedsRow({ icon, glyph, what, where, lastOpened = false, className, children, ...props }: SidebarNeedsRowProps) {
+  return (
+    <SidebarMenuButton
+      asChild
+      data-last-opened={lastOpened || undefined}
+      className={cn('h-auto min-h-(--row-height) items-start border-l-(length:--rail-row) py-2', lastOpened ? 'border-l-signal' : 'border-l-transparent', className)}
+      {...props}
+    >
+      {cloneElement(
+        children,
+        undefined,
+        <>
+          <span data-slot="needs-you-glyph" data-glyph={glyph} aria-hidden className="mt-0.5 flex shrink-0 self-start text-foreground [&>svg]:size-(--icon-size-compact)">
+            {icon}
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col text-left">
+            <span data-testid="needs-you-what" className="line-clamp-2 break-words text-label text-foreground">
+              {what}
+            </span>
+            <span data-testid="needs-you-where" className="truncate text-caption text-muted-foreground">
+              {where}
+            </span>
+          </span>
+        </>,
+      )}
+    </SidebarMenuButton>
+  );
+}
+
+/** "Show 3 more" under a sidebar list (DESIGN.md needs-you-row): a ghost text button in caption. */
+export function SidebarMoreButton({ className, ...props }: ComponentProps<'button'>) {
+  return (
+    <button
+      type="button"
+      data-slot="sidebar-more-button"
+      className={cn('self-start rounded-md px-2 py-1 text-caption text-foreground transition-colors duration-(--motion-fast) ease-standard hover:bg-accent', className)}
+      {...props}
+    />
+  );
+}
+
 /** The workspace area beside the sidebar. */
 export function SidebarInset({ className, ...props }: ComponentProps<'main'>) {
   return <main data-slot="sidebar-inset" className={cn('flex min-w-0 flex-1 flex-col overflow-hidden', className)} {...props} />;

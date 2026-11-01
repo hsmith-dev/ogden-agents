@@ -59,13 +59,13 @@ test('the epic 2 journey on the installed package', async ({ page, context, brow
     await expect(groupOf(page, repoA).getByTestId('status-row')).toHaveAttribute('data-session-state', 'waiting');
     await expect(groupOf(page, repoB).getByTestId('status-row')).toHaveAttribute('data-session-state', 'working');
     const needsYou = sidebarOf(page).getByTestId('needs-you').getByTestId('needs-you-item');
-    await expect(needsYou).toHaveText(`Waiting for you${basename(repoA)}, permission: Claude Code wants to run npm test`);
-    await expect(needsYou).toHaveAttribute('href', new RegExp(`/w/${chatA.wsId}/s/${chatA.sesId}$`));
+    await expect(needsYou).toHaveAccessibleName(`Claude Code wants to run npm test, in ${basename(repoA)}, permission`);
+    await expect(needsYou).toHaveAttribute('href', new RegExp(`/w/${chatA.wsId}/s/${chatA.sesId}#permission-[^/]+$`));
   });
 
   await test.step('3. under the default caution level, npm test runs only after Allow once', async () => {
     await sidebarOf(page).getByTestId('needs-you-item').click();
-    await expect(page).toHaveURL(chatA.url);
+    await expect(page).toHaveURL(new RegExp(`^${chatA.url}#permission-`));
     await expect(page.getByTestId('permission-card')).toContainText('Ask every time');
     await expectHeld(page);
     await page.getByTestId('permission-card').getByRole('button', { name: 'Allow once' }).click();

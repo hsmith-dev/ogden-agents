@@ -268,7 +268,9 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
         const requestId = newRequestId();
         // Resolved before the transaction: it reads the filesystem.
         const owner = entities.getSession(sessionId);
-        const workspace = owner === undefined ? undefined : entities.getWorkspace(owner.workspaceId);
+        const project = owner === undefined ? undefined : entities.getWorkspace(owner.workspaceId);
+        // A worktree chat (27.1) works in its worktree: every path check is against that folder, never the project's checkout.
+        const workspace = project === undefined || owner?.worktreePath == null ? project : { ...project, path: owner.worktreePath, realPath: owner.worktreePath };
         const pathsInside = workspace !== undefined && PATH_KINDS.has(kind) && pathsInsideWorkspace(workspace, request.paths);
         const extraFolders = agentConfigFolders?.() ?? [];
         // AD-40: one check decides whether a command can be ruled at all, and

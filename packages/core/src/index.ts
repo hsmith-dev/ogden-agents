@@ -25,6 +25,7 @@ export * from './build-sessions.js';
 export * from './build-worktrees.js';
 export * from './run-aware-tickets.js';
 export * from './builds.js';
+export * from './chat-worktrees.js';
 export * from './chat.js';
 export * from './core.js';
 export * from './data-dir.js';

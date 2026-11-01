@@ -44,6 +44,8 @@ const fake = vi.hoisted(() => ({
   sendResult: (() => Promise.resolve({ messageId: 'msg_x', queued: false })) as () => Promise<unknown>,
   /** The location's hash, without `#` (a Needs you row names its card there, epic 26). */
   hash: '',
+  /** The chat's own worktree (27.1), or `null` for one in the project's folder. */
+  worktreePath: null as string | null,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -99,7 +101,17 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
   fetchSession: async (): Promise<SessionResponse> => {
     fake.fetches++;
     return {
-      session: { id: 'ses_1', workspaceId: 'ws_1', state: 'idle', driver: fake.driver, adapterRefs: {}, ...(fake.agentId === undefined ? {} : { agentId: fake.agentId }) },
+      session: {
+        id: 'ses_1',
+        workspaceId: 'ws_1',
+        state: 'idle',
+        driver: fake.driver,
+        adapterRefs: {},
+        machineId: null,
+        worktreePath: fake.worktreePath,
+        branch: fake.worktreePath === null ? null : 'ogden/chat/ses_1',
+        ...(fake.agentId === undefined ? {} : { agentId: fake.agentId }),
+      },
       terminal: { available: true },
     } as unknown as SessionResponse;
   },
@@ -200,6 +212,7 @@ beforeEach(() => {
   fake.focused = 0;
   fake.connections = 0;
   fake.sent = [];
+  fake.worktreePath = null;
   fake.agentId = undefined;
   fake.claudeListed = true;
   fake.sendResult = () => Promise.resolve({ messageId: 'msg_x', queued: false });
@@ -437,5 +450,29 @@ describe('a chat whose agent was removed opens read-only (story 21.4)', () => {
     expect(screen.getByTestId('session-action-error').textContent).toBe('This agent was removed.');
     expect(screen.getByTestId('agent-removed-banner')).toBeTruthy();
     expect(screen.queryByTestId('composer')).toBeNull();
+  });
+});
+
+describe('the composer setup row (epic 27, 27.1)', () => {
+  it('has the Agent, Model, Mode and Location chips, and the header has no mode picker', async () => {
+    fake.agentId = 'claude-code';
+    await mount();
+    const row = await screen.findByTestId('setup-row');
+    const header = document.querySelector('header')!;
+    expect(header.querySelector('[data-testid="permission-mode-picker"]')).toBeNull();
+    for (const chip of ['session-agent-chip', 'model-picker', 'permission-mode-picker', 'location-chip']) {
+      expect(row.querySelector(`[data-testid="${chip}"]`), chip).not.toBeNull();
+    }
+    expect(row.querySelector('[data-testid="session-agent-chip"]')!.textContent).toContain('Claude Code');
+    expect(row.querySelector('[data-testid="location-chip"]')!.getAttribute('data-location')).toBe('this_folder');
+  });
+
+  it("shows a worktree chat's place, which can't be changed", async () => {
+    fake.agentId = 'claude-code';
+    fake.worktreePath = '/data/cw/abcdefgh';
+    await mount();
+    const chip = await screen.findByTestId('location-chip');
+    expect(chip.getAttribute('data-location')).toBe('worktree');
+    expect(chip.textContent).toContain('Worktree');
   });
 });

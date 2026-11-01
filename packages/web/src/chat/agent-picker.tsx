@@ -1,8 +1,9 @@
 import type { ChatAgent } from '@ogden-agents/shared';
-import { CaretDown, GearSix, ShieldCheck } from '@phosphor-icons/react';
+import { CaretDown, GearSix, Robot, ShieldCheck } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { Button } from '@/ui/button';
 import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/ui/dropdown-menu';
+import { cn } from '@/ui/utils';
 import { agentAvailability } from './use-chat-agents';
 
 /** The link under the agents when one needs installing or signing in. */
@@ -17,7 +18,7 @@ export const SET_UP_AGENTS = 'Open Settings → Agents';
  * its reason is read, and Settings → Agents is linked below. It applies to
  * new chats only, and it is not shown while the install has a single agent.
  */
-export function AgentPicker({ agents, value, onChange }: { agents: readonly ChatAgent[]; value: string; onChange: (agentId: string) => void }) {
+export function AgentPicker({ agents, value, onChange, className }: { agents: readonly ChatAgent[]; value: string; onChange: (agentId: string) => void; className?: string | undefined }) {
   if (agents.length < 2) return null;
   const current = agents.find((agent) => agent.agentId === value);
   const name = current?.displayName ?? 'Choose an agent';
@@ -27,9 +28,10 @@ export function AgentPicker({ agents, value, onChange }: { agents: readonly Chat
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" data-testid="agent-picker" data-agent={value} aria-label={`Agent for new chats: ${name}`}>
-          <span className="text-muted-foreground">Agent:</span>
-          {name}
+        <Button variant="ghost" size="sm" className={className} data-testid="agent-picker" data-agent={value} aria-label={`Agent for new chats: ${name}`}>
+          {className === undefined ? null : <Robot aria-hidden />}
+          <span className={cn('text-muted-foreground', className !== undefined && 'max-sm:sr-only')}>Agent:</span>
+          <span className="truncate">{name}</span>
           <CaretDown aria-hidden />
         </Button>
       </DropdownMenuTrigger>

@@ -397,6 +397,8 @@ async function listenAndAnnounce({
     buildSessions: core.buildSessions,
     // A plain chat's remote target (CAP-24, epic 19 story 19.7): `Session.machineId`, opened fresh at each agent start.
     remote,
+    // A chat started in its own worktree (27.1): the same git as builds, made in `<data>/cw`.
+    vcs,
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   stopChats.current = (agentId) => chat.stopAgent(agentId);

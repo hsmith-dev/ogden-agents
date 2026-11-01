@@ -58,8 +58,8 @@ export const REVISION = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 export const RUN_BRANCH = /^ogden\/([a-z2-7]{8})\//;
 /** The most bytes of new objects approve imports from one run (a pack held in memory). */
 export const MAX_IMPORT_BYTES = 512 * 1024 * 1024;
-/** A branch name as Ogden makes them, and as git accepts them. */
-export const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+/** A branch name as Ogden makes them, and as git accepts them (`_` for a chat's `ogden/chat/ses_…`, 27.1). */
+export const BRANCH = /^[A-Za-z0-9][A-Za-z0-9_./-]*$/;
 
 export function checkBranch(branch: string): string {
   if (!BRANCH.test(branch) || branch.includes('..') || branch.includes('//') || branch.endsWith('/') || branch.endsWith('.') || branch.endsWith('.lock') || branch.includes('@{')) {

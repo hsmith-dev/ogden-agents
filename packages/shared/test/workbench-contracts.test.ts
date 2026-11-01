@@ -143,3 +143,17 @@ describe('workbench contracts (epic 8 entry 2)', () => {
     }
   });
 });
+
+describe('a chat started in its own worktree (27.1)', () => {
+  it('CreateSessionRequest takes a location, This folder by omission, and refuses Worktree with a remote machine', async () => {
+    const { CreateSessionRequest, CHAT_LOCATIONS } = await import('../src/index.js');
+    expect(CHAT_LOCATIONS).toEqual(['this_folder', 'worktree']);
+    expect(CreateSessionRequest.parse({}).location).toBeUndefined();
+    expect(CreateSessionRequest.parse({ location: 'worktree' }).location).toBe('worktree');
+    expect(CreateSessionRequest.parse({ location: 'worktree', machineId: null }).location).toBe('worktree');
+    const refused = CreateSessionRequest.safeParse({ location: 'worktree', machineId: 'mach_01J9Z3K4M5N6P7Q8R9S0T1V2W3' });
+    expect(refused.success).toBe(false);
+    expect(refused.error?.issues[0]?.path).toEqual(['location']);
+    expect(CreateSessionRequest.safeParse({ location: 'elsewhere' }).success).toBe(false);
+  });
+});

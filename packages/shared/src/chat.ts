@@ -31,6 +31,28 @@ export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequest>;
 export const WorkspaceResponse = z.object({ workspace: Workspace });
 export type WorkspaceResponse = z.infer<typeof WorkspaceResponse>;
 
+/** Where a chat works (27.1, CAP-35): the project's own folder, or its own worktree. */
+export const CHAT_LOCATIONS = ['this_folder', 'worktree'] as const;
+export const ChatLocation = z.enum(CHAT_LOCATIONS);
+export type ChatLocation = z.infer<typeof ChatLocation>;
+
+/** The Location chip's words for each place. */
+export const CHAT_LOCATION_LABELS: Readonly<Record<ChatLocation, string>> = { this_folder: 'This folder', worktree: 'Worktree' };
+/** What each place means, as the Location menu says it. */
+export const CHAT_LOCATION_DESCRIPTIONS: Readonly<Record<ChatLocation, string>> = {
+  this_folder: 'The project folder itself.',
+  worktree: 'A separate copy on its own branch. Changes stay there until you merge them.',
+};
+/** Why Worktree can't be picked with a remote machine (until 27.5). */
+export const CHAT_WORKTREE_REMOTE_TEXT = 'A worktree chat runs on this computer. Choose Local to start one.';
+/** Why a started chat's place can't be changed here. */
+export const CHAT_LOCATION_FIXED_TEXT = "A chat's place is set when it starts.";
+/** The 409 refusals of a worktree chat, in plain sentences. */
+export const CHAT_WORKTREE_NOT_REPO_TEXT = 'A worktree needs this project to be a git repository with a branch checked out that has a commit. Start the chat in This folder.';
+export const CHAT_WORKTREE_NOT_TOP_TEXT = "This project is a folder inside another git repository, so a worktree can't be made for it. Start the chat in This folder.";
+export const CHAT_WORKTREE_FAILED_TEXT = "Ogden Agents couldn't make a worktree for this chat. Try again, or start it in This folder.";
+export const CHAT_WORKTREE_KIND_TEXT = 'Only a chat can start in its own worktree.';
+
 /**
  * `POST /api/v1/workspaces/:wsId/sessions`. Only chat sessions are created
  * this way so far. `agentId` picks the chat's agent (epic 6); omitted, the
@@ -52,6 +74,16 @@ export const CreateSessionRequest = z.object({
    * exists and is reachable is checked when the chat's agent starts, not here.
    */
   machineId: RemoteMachineId.nullable().optional(),
+  /**
+   * Where the chat works (epic 27, 27.1; CAP-35): `this_folder` (omitted:
+   * the project's folder, as before) or `worktree`, a new worktree of the
+   * project's repository on `ogden/chat/<ses>`, made as the chat is created.
+   * A worktree chat runs only on this computer (27.5 brings remote ones).
+   */
+  location: ChatLocation.optional(),
+}).refine((body) => !(body.location === 'worktree' && body.machineId !== undefined && body.machineId !== null), {
+  message: CHAT_WORKTREE_REMOTE_TEXT,
+  path: ['location'],
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
 

@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CoreEvent, SessionId, WorkspaceId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { alwaysAllowRefusal, CAUTION_LEVELS, SKIP_ALL_REFUSAL, TOOL_KINDS, type CautionLevel, type ToolKind } from '@ogden-agents/shared';
+import { alwaysAllowRefusal, CAUTION_LEVELS, chatWorktreeBranch, SKIP_ALL_REFUSAL, TOOL_KINDS, type CautionLevel, type ToolKind } from '@ogden-agents/shared';
 import {
   alwaysAllowPrefixScope,
   alwaysAllowScope,
@@ -24,6 +24,7 @@ import {
   commandPrefix,
   createDecliningPermissions,
   isCaseInsensitivePath,
+  newId,
   NotFoundError,
   PermissionNotPendingError,
   pathsInsideWorkspace,
@@ -521,6 +522,27 @@ describe('file-kind rules stay inside the project (review F1)', () => {
       expect(core.entities.getSession(session.id)?.state).toBe('waiting');
       core.permissions.decide(workspace.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'deny' });
     }
+  });
+
+  it("a worktree chat's paths are checked against its worktree, never the project checkout (27.1)", async () => {
+    const core = openTestCore();
+    const project = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    const checkout = project.realPath ?? project.path;
+    const worktree = tempDir('ogden-agents-cw-');
+    const id = newId('ses');
+    const session = core.entities.createSession({ workspaceId: project.id, kind: 'chat', id, worktreePath: worktree, branch: chatWorktreeBranch(id) });
+    core.entities.setSessionState(session.id, 'working');
+    const edit = (toolCallId: string, paths: string[]) => ({ toolCallId, title: `Edit ${toolCallId}`, kind: 'edit', paths });
+
+    void core.permissions.request(session.id, edit('first', [join(worktree, 'a.ts')]));
+    core.permissions.decide(project.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'allow_always' });
+    expect(await core.permissions.request(session.id, edit('inside', [join(worktree, 'src', 'b.ts')]))).toEqual({ outcome: 'allow_once' });
+    expect(await core.permissions.request(session.id, edit('relative', ['src/c.ts']))).toEqual({ outcome: 'allow_once' });
+
+    const asked = track(core.permissions.request(session.id, edit('checkout', [join(checkout, 'a.ts')])));
+    await flush();
+    expect(asked.decision).toBeUndefined();
+    expect(core.entities.getSession(session.id)?.state).toBe('waiting');
   });
 
   it('a fetch rule stays per kind', async () => {

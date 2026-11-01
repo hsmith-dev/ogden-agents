@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentDescriptorProblems, agentEnvKeys, AgentError, declaredModes, PROTECTED_PATHS, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
+import { PROCESS_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import {
   ANTIGRAVITY_ATTENDED_ONLY_REASON,
   ANTIGRAVITY_DESCRIPTOR,
@@ -211,7 +212,7 @@ describe("Antigravity's chat (fake personality)", () => {
     expect(await reopen({})).toBe('resumed');
     expect(await reopen({ FAKE_ACP_REOPEN_FAIL: 'resume' })).toBe('loaded');
     expect(await reopen({ FAKE_ACP_REOPEN_FAIL: 'resume,load' })).toBe('new');
-  });
+  }, PROCESS_TEST_TIMEOUT_MS);
 
   it('waits out a 17 s start (Windows) without timing out', { timeout: 60_000 }, async () => {
     const started = Date.now();

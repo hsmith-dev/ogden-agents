@@ -109,8 +109,8 @@ Epic name: `tickets.py status` reports only slug and id per epic, so the name is
 
 ## Deferred (for the sweep)
 
-- Developer mode shows the skill name in mono beside a build session's title (EXPERIENCE.md Live run view).
-- The Board heading could show the epic file's own frontmatter `title` once `tickets.py status` (the BMad fork) reports it.
+- Developer mode shows the skill name in mono beside a build session's title (EXPERIENCE.md Live run view). (26.9: logged in `deferred-work.md`.)
+- The Board heading could show the epic file's own frontmatter `title` once `tickets.py status` (the BMad fork) reports it. (26.9: logged in `deferred-work.md`, the BMad fork.)
 
 ## Verification
 

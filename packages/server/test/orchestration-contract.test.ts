@@ -25,11 +25,15 @@ import {
   WorkspaceSettingsResponse,
 } from '@ogden-agents/shared';
 import { Hono } from 'hono';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PROCESS_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import { guardedRouteKeys } from '../src/bmad-pieces.js';
 import { createLogger } from '../src/log.js';
 import { orchestrationRouteKeys, orchestrationRoutes, SHIPPED_ORCHESTRATION } from '../src/orchestration-routes.js';
 import { fullTestApp, send, signIn, startTestServer, tempDataDir, type SignedIn, type TestServer } from './helpers.js';
+
+// Each test starts a server and its agents' processes (test-timeouts.ts): a hang limit, not a measurement.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const UNKNOWN = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 const repos: string[] = [];

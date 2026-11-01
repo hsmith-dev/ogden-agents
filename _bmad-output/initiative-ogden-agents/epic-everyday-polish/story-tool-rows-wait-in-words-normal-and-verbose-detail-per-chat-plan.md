@@ -101,8 +101,8 @@ Held state lives in the fold, not the row, because the permission and the tool c
 
 ## Deferred (for the sweep)
 
-- Verbose "with its input" and command output open: the transcript has neither (title only); needs the adapter to carry `rawInput`/output content.
-- Palette action "Show every step" (26.3 uses `setChatDetail`).
+- Verbose "with its input" and command output open: the transcript has neither (title only); needs the adapter to carry `rawInput`/output content. (26.9: logged in `deferred-work.md`.)
+- Palette action "Show every step" (26.3 uses `setChatDetail`). (26.9: done by 26.3.)
 
 ## Verification
 

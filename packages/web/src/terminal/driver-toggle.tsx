@@ -1,7 +1,7 @@
 import type { SessionDriver } from '@ogden-agents/shared';
 import { ChatCircle, TerminalWindow } from '@phosphor-icons/react';
 import { useId, type ReactNode } from 'react';
-import { modifierShortcutLabel } from '@/shell/keyboard-shortcuts';
+import { modifierShortcutLabel } from '@/ui/platform';
 import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { Text } from '@/ui/typography';

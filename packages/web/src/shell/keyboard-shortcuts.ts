@@ -1,29 +1,15 @@
+import { modifierShortcutLabel } from '@/ui/platform';
+import type { ShortcutTableGroup, ShortcutTableRow } from '@/ui/shortcut-table';
+
 /*
  * The keyboard shortcuts Ogden Agents has (EXPERIENCE.md Keyboard), the one
  * table behind Help's Keyboard shortcuts dialog (epic 26, 26.5). Each row is
  * a shortcut that exists in the code; add a row here when one is added.
  */
 
-export interface KeyboardShortcut {
-  /**
-   * The keys, as the user presses them: each inner list is one key press
-   * (keys held together), the outer list presses made in turn (`g`, then `c`).
-   */
-  keys: readonly (readonly string[])[];
-  /** What it does, in a few plain words. */
-  action: string;
-  /** Where it works, when not everywhere. */
-  where?: string;
-}
-
-export interface KeyboardShortcutGroup {
-  label: string;
-  shortcuts: readonly KeyboardShortcut[];
-}
-
-/** A Cmd/Ctrl chord as this computer writes it (`⌘K` on Apple devices, `Ctrl+K` elsewhere); the one helper, the driver toggle's `⌘.` too. */
-export const modifierShortcutLabel = (key: string, platform: string = typeof navigator === 'undefined' ? '' : navigator.userAgent): string =>
-  /Mac|iPhone|iPad/.test(platform) ? `⌘${key}` : `Ctrl+${key}`;
+/** A shortcut row and a group of them: the shapes Help's `ShortcutTable` renders. */
+export type KeyboardShortcut = ShortcutTableRow;
+export type KeyboardShortcutGroup = ShortcutTableGroup;
 
 /** The groups and their shortcuts, as this computer writes them (`⌘.` on Apple devices, `Ctrl+.` elsewhere). */
 export function keyboardShortcuts(platform?: string): readonly KeyboardShortcutGroup[] {

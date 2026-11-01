@@ -110,10 +110,10 @@ The verify's "smoke opens the draft with the accelerator" is split: the desktop 
 
 ## Deferred (for the sweep)
 
-- Help lists Cmd/Ctrl+N as desktop only (entry 5 builds Help).
-- `g n` and Cmd/Ctrl+N outside a project open the palette on "New chat in..." (entry 3).
-- A failed first send's chat is remembered only while the draft (or the Chats page) stays open, so leaving and returning, or changing agent or machine, can leave that empty chat (review 1; pre-existing pattern).
-- Choosing the permission mode before the first message in the draft (epic 27's setup row); until then the project's default applies.
+- Help lists Cmd/Ctrl+N as desktop only (entry 5 builds Help). (26.9: done by 26.3.)
+- `g n` and Cmd/Ctrl+N outside a project open the palette on "New chat in..." (entry 3). (26.9: done by 26.3.)
+- A failed first send's chat is remembered only while the draft (or the Chats page) stays open, so leaving and returning, or changing agent or machine, can leave that empty chat (review 1; pre-existing pattern). (26.9: logged in `deferred-work.md`, epic 27.)
+- Choosing the permission mode before the first message in the draft (epic 27's setup row); until then the project's default applies. (26.9: logged in `deferred-work.md`, epic 27.)
 
 ## Verification
 

@@ -8,7 +8,7 @@ import { useAppearance } from '@/appearance/appearance-provider';
 import { DETAIL_MENU_WORDS, setChatDetail, useChatDetail, type ChatDetail } from '@/chat/detail-level';
 import { useOpenNewChat } from '@/chat/new-chat';
 import { fetchTickets } from '@/planning/planning-api';
-import { SETTINGS_GLYPHS } from '@/settings/settings-layout';
+import { SETTINGS_GLYPHS } from '@/settings/settings-glyphs';
 import { visibleSettingsGroups, type SettingsGroup } from '@/settings/settings-groups';
 import { markNeedsYouOpened, needsYouTarget, nextNeedsYou, lastNeedsYouOpened } from '@/shell/needs-you-target';
 import { useSidebarData } from '@/shell/sidebar-data';

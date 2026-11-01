@@ -1,12 +1,9 @@
 import { useDeveloperModeOn } from '@/appearance/appearance-provider';
 import { SettingsContent, SettingsFrame, SettingsNavColumn, SettingsNavGroup, SettingsNavItem, SettingsNavSubItem, SettingsSelectRow } from '@/ui/settings-nav';
-import { Bell, DesktopTower, Folders, Palette, Robot, Sliders, TerminalWindow, type Icon } from '@phosphor-icons/react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useId, type KeyboardEvent } from 'react';
-import { currentSettingsPage, settingsGroupFor, visibleSettingsGroups, type SettingsGlyph } from './settings-groups';
-
-/** Each group's Phosphor glyph (DESIGN.md settings-nav); the command palette's Settings actions use them too. */
-export const SETTINGS_GLYPHS: Record<SettingsGlyph, Icon> = { Robot, Folders, Palette, Bell, TerminalWindow, DesktopTower, Sliders };
+import { SETTINGS_GLYPHS } from './settings-glyphs';
+import { currentSettingsPage, settingsGroupFor, visibleSettingsGroups } from './settings-groups';
 
 /** `↑` and `↓` move focus between the nav's links, stopping at the ends (EXPERIENCE.md Settings navigation). */
 function moveFocus(event: KeyboardEvent<HTMLElement>) {

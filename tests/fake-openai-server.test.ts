@@ -68,6 +68,22 @@ describe('the fake OpenAI-compatible server', () => {
     await expect(fetch(`${url}/v1/models`)).rejects.toThrow();
   });
 
+  it('with slowUntilLooks, holds a SLOW answer until that many more model lists have been answered', async () => {
+    const server = await fake({ slowUntilLooks: 2 });
+    let answered = false;
+    const reply = chat(server, { messages: [{ role: 'user', content: 'SLOW' }] }).then(async (response) => {
+      answered = true;
+      return response.json();
+    });
+    // The POST is logged when it comes; until then a look would not count.
+    await expect.poll(() => server.log.some((entry) => entry.method === 'POST')).toBe(true);
+    await (await fetch(`${server.url}/v1/models`)).json();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(answered).toBe(false);
+    await (await fetch(`${server.url}/v1/models`)).json();
+    expect((await reply).choices[0].message.content).toBe('Hello from the fake model.');
+  });
+
   it('can come back on the same port after a restart', async () => {
     const first = await startFakeServer();
     const port = first.port;

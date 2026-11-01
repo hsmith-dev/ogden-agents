@@ -80,7 +80,7 @@ test('twenty chats at 1440x900 in Compact: every row is one line at row height, 
   // Each row: glyph, the name, the agent's mark; its words are its accessible name.
   const first = rows.first();
   await expect(first).toHaveAccessibleName(/^Chat number \d+, Idle, Claude Code, (just now|\d+ min ago)$/);
-  await expect(first.locator('[data-slot="agent-mark"]')).toHaveAttribute('data-letter', 'C');
+  await expect(first.locator('[data-slot="agent-mark"]')).toHaveAttribute('data-letter', 'CC');
   await expect(first.locator('time')).toHaveCount(0);
 
   const rowHeight = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-height')));

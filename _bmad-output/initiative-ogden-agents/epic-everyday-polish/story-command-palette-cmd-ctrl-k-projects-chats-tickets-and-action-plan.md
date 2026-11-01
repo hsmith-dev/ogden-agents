@@ -99,8 +99,8 @@ context:
 
 ## Deferred (for the sweep)
 
-- On a Mac, Ctrl+K also opens the palette, so text fields lose the system's Ctrl+K (delete to end of line); the palette key could be Cmd only on Apple devices.
-- `new-chat.spec.ts` "the draft first message makes exactly one chat" is flaky under load at the baseline too (the draft stays on `/new` after the send).
+- On a Mac, Ctrl+K also opens the palette, so text fields lose the system's Ctrl+K (delete to end of line); the palette key could be Cmd only on Apple devices. (26.9: fixed; Cmd+K on Apple devices, Ctrl+K elsewhere.)
+- `new-chat.spec.ts` "the draft first message makes exactly one chat" is flaky under load at the baseline too (the draft stays on `/new` after the send). (26.9: fixed at its cause; the URL turns `/new` before the lazily loaded draft page shows, so the test typed into the old chat's composer; it now waits for the draft page.)
 
 ## Plan Change Log
 

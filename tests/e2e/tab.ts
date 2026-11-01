@@ -5,6 +5,7 @@
  * token, exactly as `npx ogden-agents` asks for one.
  */
 import { expect, type Locator, type Page } from '@playwright/test';
+import { isApplePlatform } from '../../packages/web/src/ui/platform.js';
 import { launchLink as handshakeLink } from '../support.js';
 
 /** Where the page's boot script keeps this tab's token (sessionStorage). */
@@ -16,6 +17,15 @@ export const DARK_BG = 'rgb(15, 18, 16)';
 
 /** The sidebar column (md and up), not its sheet copy. */
 export const sidebarOf = (page: Page) => page.locator('aside[data-slot="sidebar"]');
+
+/** Takes focus off whatever has it (the body has it then), so a page-wide key reaches no field. */
+export const blur = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+/**
+ * The command palette's key as the page's own platform reads it: Cmd+K on Apple devices, Ctrl+K elsewhere. Read
+ * from the page, not the host: the Desktop Chrome profile reports a Windows browser on every host.
+ */
+export const paletteKey = async (page: Page) => (isApplePlatform(await page.evaluate(() => navigator.userAgent)) ? 'Meta+k' : 'Control+k');
 
 /** This tab's stored token, or null. */
 export const storedToken = (page: Page) => page.evaluate((key) => sessionStorage.getItem(key), TOKEN_KEY);

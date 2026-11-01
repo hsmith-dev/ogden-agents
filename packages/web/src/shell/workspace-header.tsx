@@ -15,6 +15,7 @@ export function WorkspaceHeader({
   compactOnPhone = false,
   titleHidden = false,
   titleAction,
+  reviewRef,
   children,
 }: {
   title: string;
@@ -24,6 +25,8 @@ export function WorkspaceHeader({
   titleAction?: ReactNode;
   wsId?: string;
   tab?: WorkspaceTabId;
+  /** The review page's ticket (26.6): its own current tab, "Review 1.2". */
+  reviewRef?: string;
   /**
    * Below `sm`, the title is for screen readers only and the current tab
    * names the page, so a header with wide controls (the session's Chat |
@@ -40,7 +43,7 @@ export function WorkspaceHeader({
       </PageTitle>
       {/* Kept at phone width too: with the title hidden there, Rename is still the way to rename from the header. */}
       {titleAction}
-      {wsId === undefined ? null : <WorkspaceTabs wsId={wsId} active={tab} />}
+      {wsId === undefined ? null : <WorkspaceTabs wsId={wsId} active={tab} reviewRef={reviewRef} />}
       {children}
     </PageHeader>
   );

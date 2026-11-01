@@ -1,7 +1,9 @@
 import { PANE_CLOSE, TERMINAL_CLOSE, type Pane, type PaneState, type PaneStatus } from '@ogden-agents/shared';
+import { ArrowClockwise, Play, SquareSplitHorizontal, SquareSplitVertical, X } from '@phosphor-icons/react';
 import type { Terminal } from '@xterm/xterm';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { Text } from '@/ui/typography';
 import { tokenNumber } from '@/ui/tokens';
 import { cn } from '@/ui/utils';
@@ -279,12 +281,12 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
           )}
           {onSplit === undefined ? null : (
             <>
-              <Button variant="outline" size="sm" onClick={() => onSplit(pane.id, 'row')} disabled={splitDisabledReason !== undefined} title={splitDisabledReason} data-testid="pane-split-row">
-                Split right
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => onSplit(pane.id, 'column')} disabled={splitDisabledReason !== undefined} title={splitDisabledReason} data-testid="pane-split-column">
-                Split down
-              </Button>
+              <PaneHeaderButton label={SPLIT_RIGHT_LABEL} refusedReason={splitDisabledReason} onClick={() => onSplit(pane.id, 'row')} data-testid="pane-split-row">
+                <SquareSplitHorizontal aria-hidden />
+              </PaneHeaderButton>
+              <PaneHeaderButton label={SPLIT_DOWN_LABEL} refusedReason={splitDisabledReason} onClick={() => onSplit(pane.id, 'column')} data-testid="pane-split-column">
+                <SquareSplitVertical aria-hidden />
+              </PaneHeaderButton>
             </>
           )}
           {canRestart && state === 'stopped' && pane.launcherId !== 'shell' ? (
@@ -299,13 +301,13 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
             />
           ) : null}
           {canRestart ? (
-            <Button variant="outline" size="sm" onClick={restart} disabled={restarting} data-testid="pane-restart">
-              {state === 'stopped' ? 'Start' : 'Restart'}
-            </Button>
+            <PaneHeaderButton label={state === 'stopped' ? START_LABEL : RESTART_LABEL} onClick={restart} disabled={restarting} data-testid="pane-restart">
+              {state === 'stopped' ? <Play aria-hidden /> : <ArrowClockwise aria-hidden />}
+            </PaneHeaderButton>
           ) : null}
-          <Button variant="outline" size="sm" onClick={() => onClose(pane.id)} data-testid="pane-close">
-            Close
-          </Button>
+          <PaneHeaderButton label={CLOSE_PANE_LABEL} onClick={() => onClose(pane.id)} data-testid="pane-close">
+            <X aria-hidden />
+          </PaneHeaderButton>
         </span>
       </div>
       <div ref={host} data-testid="pane-terminal" data-link={link} className="min-h-24 flex-1 bg-terminal font-mono text-terminal-foreground" />
@@ -315,6 +317,58 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
         </Text>
       )}
     </section>
+  );
+}
+
+const SPLIT_RIGHT_LABEL = 'Split right';
+const SPLIT_DOWN_LABEL = 'Split down';
+const START_LABEL = 'Start';
+const RESTART_LABEL = 'Restart';
+const CLOSE_PANE_LABEL = 'Close pane';
+
+/**
+ * One pane header button (26.6, E26-R6): an icon in the terminal's
+ * foreground, named for screen readers and shown in a tooltip on hover and
+ * keyboard focus. A refused one (`refusedReason`) or a busy one (`disabled`)
+ * stays focusable, marked `aria-disabled`; a refused one's tooltip names the
+ * reason; a click on either does nothing.
+ */
+function PaneHeaderButton({
+  label,
+  refusedReason,
+  onClick,
+  disabled,
+  children,
+  'data-testid': testId,
+}: {
+  label: string;
+  refusedReason?: string | undefined;
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+  'data-testid': string;
+}) {
+  // A refused or busy button stays focusable (its tooltip stays open for the keyboard): aria-disabled and a guarded click, never native disabled.
+  const refused = refusedReason !== undefined;
+  const inert = refused || disabled === true;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="terminal"
+          size="icon"
+          aria-label={label}
+          aria-disabled={inert || undefined}
+          onClick={() => {
+            if (!inert) onClick();
+          }}
+          data-testid={testId}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{refused ? refusedReason : label}</TooltipContent>
+    </Tooltip>
   );
 }
 

@@ -88,6 +88,8 @@ describe('starting a build (story 5.2)', () => {
     const h = await harness();
     const { run, session } = await h.builds.start(h.wsId, { ref: '1.1' });
     expect(session.kind).toBe('build');
+    // Named by its ticket when created (26.6), never by the skill command it is sent.
+    expect(session.autoTitle).toBe('Build 1.1: Build the thing');
     expect(run).toMatchObject({ ticketRef: '1.1', outcome: 'running', sandbox: 'test', baseRevision: REVISION });
     const runShort = run.worktreePath!.split(/[\\/]/).at(-1)!;
     expect(run.branch).toBe(`ogden/${runShort}/1.1-build-the-thing`);

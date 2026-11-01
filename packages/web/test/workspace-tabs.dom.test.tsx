@@ -34,8 +34,8 @@ vi.mock('@tanstack/react-router', () => ({
     fake.navigations.push(options);
     return Promise.resolve();
   },
-  Link: ({ children, to: _to, params: _params, activeOptions: _activeOptions, ...props }: { children: ReactNode; to: string; params: unknown; activeOptions: unknown }) => (
-    <a href="/" {...props}>
+  Link: ({ children, to, params, activeOptions: _activeOptions, ...props }: { children: ReactNode; to: string; params: { wsId: string; ref?: string }; activeOptions: unknown }) => (
+    <a href={to.replace('$wsId', params.wsId).replace('$ref', params.ref ?? '')} {...props}>
       {children}
     </a>
   ),
@@ -75,12 +75,12 @@ async function flush() {
   for (let i = 0; i < 5; i++) await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 }
 
-async function mount() {
+async function mount(props: { active?: 'chats' | 'review'; reviewRef?: string } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <WorkspaceTabs wsId={WS} active="chats" slots={PLAN_FILLED} />
+        <WorkspaceTabs wsId={WS} active={props.active ?? 'chats'} slots={PLAN_FILLED} reviewRef={props.reviewRef} />
       </TooltipProvider>
     </QueryClientProvider>,
   );
@@ -123,6 +123,28 @@ describe('WorkspaceTabs with its queries (story 10.6)', () => {
     await flush();
     expect(client.getQueryData(['workspace-settings', WS])).toBeDefined();
     expect(tabs()).toEqual(['Chats']);
+  });
+});
+
+describe('the review page tab (26.6)', () => {
+  it('the review page adds its own current tab, a link to the page shown; Board is not current', async () => {
+    fake.settings = 'ok';
+    fake.pieces = ['planning', 'board'];
+    fake.boardAvailable = true;
+    await mount({ active: 'review', reviewRef: '1.2' });
+    expect(tabs()).toEqual(['Chats', 'Plan', 'Board', 'Review 1.2']);
+    const review = screen.getByTestId('workspace-tab-review');
+    expect(review.getAttribute('href')).toBe(`/w/${WS}/review/1.2`);
+    expect(review.getAttribute('aria-current')).toBe('page');
+    for (const id of ['chats', 'plan', 'board']) expect(screen.getByTestId(`workspace-tab-${id}`).getAttribute('aria-current'), id).toBeNull();
+    expect(document.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+  });
+
+  it('no review tab elsewhere', async () => {
+    fake.settings = 'ok';
+    await mount();
+    expect(screen.queryByTestId('workspace-tab-review')).toBeNull();
+    expect(screen.getByTestId('workspace-tab-chats').getAttribute('aria-current')).toBe('page');
   });
 });
 

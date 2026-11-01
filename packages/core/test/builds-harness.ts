@@ -363,7 +363,7 @@ export async function harness({
     runner,
     chat: {
       chatAgents: async () => ({ agents: [], defaultAgentId: 'claude-code' }),
-      createChatSession: async (wsId, options) => core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }),
+      createChatSession: async (wsId, options) => core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat', ...(options?.autoTitle === undefined ? {} : { autoTitle: options.autoTitle }) }),
       sendMessage: (_wsId, sessionId, text, options) => {
         if (options?.build !== true) throw new Error('a build session takes only the build prompt');
         if (sendFails.value) throw new Error('the chat refused it');

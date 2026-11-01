@@ -511,7 +511,8 @@ export function SessionPage() {
   return (
     <>
       <WorkspaceHeader
-        title={isBuild ? 'Build' : chatTitle}
+        // A build session shows its name too (26.6): "Build 1.2: <ticket title>", or "Build" before it loads.
+        title={isBuild && shownName === '' ? 'Build' : chatTitle}
         wsId={wsId}
         compactOnPhone={appearance.developerMode}
         titleHidden={!isBuild && rename.editing}

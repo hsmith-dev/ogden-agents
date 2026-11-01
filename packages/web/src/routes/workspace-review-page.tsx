@@ -10,7 +10,7 @@ export function WorkspaceReviewPage() {
   const { wsId, ref } = useParams({ strict: false }) as { wsId: string; ref: string };
   return (
     <>
-      <WorkspaceHeader title={REVIEW_PAGE_TITLE} wsId={wsId} tab="board" />
+      <WorkspaceHeader title={REVIEW_PAGE_TITLE} wsId={wsId} tab="review" reviewRef={ref} />
       <PageBody data-testid="workspace-review-page">
         <PlanPieceGate wsId={wsId} piece="builds">
           <BuildReview wsId={wsId} ticketRef={ref} />

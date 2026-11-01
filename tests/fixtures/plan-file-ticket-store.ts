@@ -23,6 +23,14 @@ export interface PlanFileTicket {
   /** Its entry's checkpoint flags (story 5.4), as `tickets.toml` would hold them. */
   planCheckpoint?: boolean;
   doneCheckpoint?: boolean;
+  /** Its epic's folder slug; by default `epic-<first part of its ref>`. */
+  epic?: string;
+}
+
+/** An epic the tree lists (slug and id), as `tickets.py status` reports it. */
+export interface PlanFileEpic {
+  slug: string;
+  id: number;
 }
 
 /** The state `tickets.py` derives from a plan status. */
@@ -39,7 +47,7 @@ const STATE_OF: Readonly<Record<string, string>> = {
 
 const ROW_DEFAULTS = { tracker_id: '', assignee: '', hitl: false, covers: [] as string[], blocks: [] as Array<string | number> };
 
-export function createPlanFileTicketStore(tickets: readonly PlanFileTicket[]) {
+export function createPlanFileTicketStore(tickets: readonly PlanFileTicket[], options: { epics?: readonly PlanFileEpic[] } = {}) {
   const marks: Array<{ repoPath: string; ref: string; status: string; approve: boolean }> = [];
   const read = (repoPath: string, ticket: PlanFileTicket) => {
     const file = join(repoPath, ...ticket.plan.split('/'));
@@ -51,7 +59,7 @@ export function createPlanFileTicketStore(tickets: readonly PlanFileTicket[]) {
       ...ROW_DEFAULTS,
       ref: ticket.ref,
       id: Number(id),
-      epic: `epic-${epicId}`,
+      epic: ticket.epic ?? `epic-${epicId}`,
       title: ticket.title,
       type: 'story',
       status,
@@ -72,7 +80,7 @@ export function createPlanFileTicketStore(tickets: readonly PlanFileTicket[]) {
   return {
     marks,
     async tree(repoPath: string) {
-      return { tickets: tickets.map((ticket) => read(repoPath, ticket)).map(({ hasPlan: _hasPlan, plan: _plan, ...row }) => row), problems: [], folder: 'initiative-demo', epics: [] };
+      return { tickets: tickets.map((ticket) => read(repoPath, ticket)).map(({ hasPlan: _hasPlan, plan: _plan, ...row }) => row), problems: [], folder: 'initiative-demo', epics: (options.epics ?? []).map((epic) => ({ slug: epic.slug, id: epic.id, status: '', after: [], blocks: [], retrospective: null })) };
     },
     async find(repoPath: string, ref: string) {
       const ticket = find(ref);

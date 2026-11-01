@@ -622,7 +622,7 @@ describe('Board (story 4.9)', () => {
     await settle();
     const epics = screen.getAllByTestId('board-epic');
     expect(epics.map((epic) => epic.getAttribute('data-epic'))).toEqual(['epic-planning-and-board', 'epic-second']);
-    expect(epics[0]!.querySelector('h2')!.textContent).toBe('1Planning and board');
+    expect(epics[0]!.querySelector('h2')!.textContent).toBe('Epic 1: Planning and board');
     const cards = screen.getAllByTestId('ticket-card');
     expect(Object.fromEntries(cards.map((each) => [each.getAttribute('data-ref'), each.getAttribute('data-column')]))).toEqual({
       '1.1': 'in_review',

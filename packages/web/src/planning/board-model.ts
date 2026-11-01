@@ -2,6 +2,7 @@ import {
   BOARD_COLUMN_LABELS,
   BOARD_COLUMNS,
   BOARD_DROPPED_LABEL,
+  BOARD_EPIC_LABEL,
   BOARD_NO_EPIC_TITLE,
   boardBlockedText,
   boardColumnOf,
@@ -46,6 +47,18 @@ export function humanEpicTitle(slug: string): string {
   const words = slug.replace(/^epic-/, '').replace(/[-_]+/g, ' ').trim();
   if (words === '') return slug;
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * An epic's heading on the Board (26.6): "Epic 26: Everyday polish" when the
+ * tree names its id; a slug that is only a number reads "Epic 1"; tickets in
+ * no epic read "Not in an epic"; else the humanized slug alone.
+ */
+export function epicHeading(group: Pick<BoardEpicGroup, 'slug' | 'id' | 'title'>): string {
+  if (group.slug === '') return BOARD_NO_EPIC_TITLE;
+  const numbered = /^\d+$/.test(group.title);
+  if (numbered && (group.id === null || String(group.id) === group.title)) return `${BOARD_EPIC_LABEL} ${group.title}`;
+  return group.id === null ? group.title : `${BOARD_EPIC_LABEL} ${group.id}: ${group.title}`;
 }
 
 /**

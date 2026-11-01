@@ -895,7 +895,8 @@ describe('Hand off from the Location chip (27.4)', () => {
     await openHandOff();
     await flush();
     // Its copy goes: the ignored .env is listed first (user decision 2026-11-01).
-    expect(screen.getAllByTestId('copy-ignored-file').map((item) => item.textContent)).toEqual(['.env']);
+    // Waited for, not flushed: the ignored files are a second read after the dialog opens (slow on a loaded CI runner).
+    expect((await screen.findAllByTestId('copy-ignored-file')).map((item) => item.textContent)).toEqual(['.env']);
     fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
     await flush();
     expect(fake.handOffs).toEqual(['this_folder']);

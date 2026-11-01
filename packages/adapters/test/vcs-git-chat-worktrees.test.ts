@@ -33,6 +33,13 @@ const git = (cwd: string, ...args: string[]) =>
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+// git's worktree list, each path as Node's real path: git for Windows prints `C:/…` with forward slashes.
+const listedWorktrees = (repo: string): string[] =>
+  git(repo, 'worktree', 'list', '--porcelain')
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => realpathSync.native(line.slice('worktree '.length)));
+
 const SES = 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 const SES2 = 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W4';
 const LINK = process.platform === 'win32' ? 'junction' : 'dir';
@@ -148,7 +155,7 @@ describe("vcs-git removes a chat's own worktree (27.3)", () => {
     expect(await vcs.removeWorktree(repo, path, { deleteBranch: `ogden/chat/${SES}`, mergedOnly: true, keepUnmerged: true })).toEqual({ branchKept: false });
     expect(readdirSync(join(repo, '.git', 'worktrees'))).toEqual(['hhhhhhhh']);
     expect(git(users, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe('users-branch');
-    expect(git(repo, 'worktree', 'list', '--porcelain')).toContain(users);
+    expect(listedWorktrees(repo)).toContain(realpathSync.native(users));
     expect(branches(repo)).toEqual([]);
   });
 

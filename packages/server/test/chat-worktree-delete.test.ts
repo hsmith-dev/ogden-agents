@@ -31,6 +31,13 @@ import { removeAfterTest, signIn, startTestServer, tempDataDir, waitFor, type Si
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-c', `core.hooksPath=${join(cwd, '.none')}`, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
+// git's worktree list, each path as Node's real path: git for Windows prints `C:/…` with forward slashes.
+const listedWorktrees = (repo: string): string[] =>
+  git(repo, 'worktree', 'list', '--porcelain')
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => realpathSync.native(line.slice('worktree '.length)));
+
 function request(server: TestServer, tab: SignedIn, method: string, path: string, body?: unknown) {
   return fetch(`${server.url}${path}`, {
     method,
@@ -94,7 +101,7 @@ describe('a worktree chat on the real server (27.3)', () => {
     const read = SessionResponse.parse(await (await request(second.server, second.tab, 'GET', second.sessionPath(session.id))).json()).session;
     expect(read).toMatchObject({ id: session.id, worktreePath: path, branch: chatWorktreeBranch(session.id) });
     expect(existsSync(join(path, 'README.md'))).toBe(true);
-    expect(git(first.repo, 'worktree', 'list', '--porcelain')).toContain(path);
+    expect(listedWorktrees(first.repo)).toContain(realpathSync.native(path));
     expect(existsSync(join(first.repo, '.git', 'worktrees', basename(path)))).toBe(true);
     const started = JSON.parse(await second.send(session.id, 'session-start')) as { cwd: string };
     expect(realpathSync.native(started.cwd)).toBe(path);

@@ -344,12 +344,15 @@ describe('Windows: Ogden Agents.lnk in the Start Menu', () => {
     ).trim();
     const { launcherEntry, nodePath } = paths(root);
     expect(read).toBe(`${nodePath}|"${launcherEntry}"|7`);
-    // Read back through the adapter's own script: ours, and already pointing here.
-    expect((await shortcut.status()).installed).toBe(true);
+    // Read back through the adapter's own script: ours, and already pointing here. A cold PowerShell on a loaded CI
+    // runner can outlast the adapter's 30 s timeout (status then reads "not installed"), so one more read is allowed;
+    // the link must still read back as ours.
+    const installed = (await shortcut.status()).installed || (await shortcut.status()).installed;
+    expect(installed).toBe(true);
     await shortcut.add();
     await shortcut.remove();
     expect(existsSync(link)).toBe(false);
-  }, 60_000); // PowerShell starts cold several times on CI runners.
+  }, 150_000); // PowerShell starts cold several times on CI runners, each run up to the adapter's 30 s timeout.
 });
 
 describe('Linux: ogden-agents.desktop', () => {

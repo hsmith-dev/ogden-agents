@@ -8,7 +8,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { openCore, RESTARTED_REASON } from '@ogden-agents/core';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
 import {
   API_ROUTES,
   ApiErrorBody,
@@ -264,7 +264,8 @@ describe('chat through the fake ACP agent', () => {
 
   it("an agent's process gets that PATH: no empty or relative entry reaches it (27.9)", async () => {
     const real = process.env.PATH ?? '';
-    vi.stubEnv('PATH', `${real}::rel:.`);
+    // Joined by this OS's separator (`;` on Windows), so each is its own entry: an empty one, a relative one, `.`.
+    vi.stubEnv('PATH', [real, '', 'rel', '.'].join(delimiter));
     try {
       const { server, tab } = await startChatServer();
       const { workspace, session } = await openChat(server, tab);
@@ -273,8 +274,7 @@ describe('chat through the fake ACP agent', () => {
       await waitFor(() => reply() !== undefined, 'the reply', 15_000);
       const event = reply()!;
       const started = JSON.parse(event.type === 'session.message_completed' ? event.payload.content : '{}') as { env: Record<string, string> };
-      const separator = process.platform === 'win32' ? ';' : ':';
-      const folders = (started.env.PATH ?? started.env.Path ?? '').split(separator);
+      const folders = (started.env.PATH ?? started.env.Path ?? '').split(delimiter);
       // Exactly the real PATH's absolute folders, in order: the empty and relative ones dropped, every other one kept.
       expect(folders).toEqual(absolutePathFolders(real, process.platform));
       expect(folders.length).toBeGreaterThan(0);

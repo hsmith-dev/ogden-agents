@@ -1,5 +1,6 @@
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { DeveloperModeSync } from '@/appearance/developer-mode';
+import { CommandPalette } from '@/palette/command-palette';
 import { useEventStream } from '@/events/event-stream';
 import { AttentionNotifier } from '@/notifications/attention-notifier';
 import { SidebarInset, SidebarProvider } from '@/ui/sidebar';
@@ -36,6 +37,8 @@ export function AppShell() {
         <NeedsYouKeys />
         {/* `g n` and the desktop app's File > New Chat open the project's new-chat draft (epic 26). */}
         <NewChatKeys />
+        {/* Cmd/Ctrl+K: projects, chats, tickets and actions (epic 26). */}
+        <CommandPalette />
         {/* A desktop notification and a sound for each new need (backlog story 8). */}
         <AttentionNotifier />
         {/* Developer mode is the server's (permission modes): this tab's copy follows it. */}

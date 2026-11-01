@@ -1,5 +1,3 @@
-import { driverShortcutLabel } from '@/terminal/driver-toggle';
-
 /*
  * The keyboard shortcuts Ogden Agents has (EXPERIENCE.md Keyboard), the one
  * table behind Help's Keyboard shortcuts dialog (epic 26, 26.5). Each row is
@@ -23,12 +21,19 @@ export interface KeyboardShortcutGroup {
   shortcuts: readonly KeyboardShortcut[];
 }
 
+/** A Cmd/Ctrl chord as this computer writes it (`⌘K` on Apple devices, `Ctrl+K` elsewhere); the one helper, the driver toggle's `⌘.` too. */
+export const modifierShortcutLabel = (key: string, platform: string = typeof navigator === 'undefined' ? '' : navigator.userAgent): string =>
+  /Mac|iPhone|iPad/.test(platform) ? `⌘${key}` : `Ctrl+${key}`;
+
 /** The groups and their shortcuts, as this computer writes them (`⌘.` on Apple devices, `Ctrl+.` elsewhere). */
 export function keyboardShortcuts(platform?: string): readonly KeyboardShortcutGroup[] {
   return [
     {
       label: 'Go to',
       shortcuts: [
+        { keys: [[modifierShortcutLabel('K', platform)]], action: 'Command palette' },
+        { keys: [['g'], ['n']], action: 'New chat', where: 'In a project; elsewhere opens the palette' },
+        { keys: [[modifierShortcutLabel('N', platform)]], action: 'New chat', where: 'In the desktop app; a browser tab keeps it' },
         { keys: [['g'], ['c']], action: 'Chats', where: 'In a project' },
         { keys: [['g'], ['s']], action: 'Workbench Search', where: 'In a project' },
         { keys: [['g'], ['p']], action: 'Plan', where: 'In a project, with Planning on' },
@@ -54,7 +59,7 @@ export function keyboardShortcuts(platform?: string): readonly KeyboardShortcutG
         { keys: [['1']], action: 'Allow once', where: 'On a permission card' },
         { keys: [['2']], action: 'Always allow', where: 'On a permission card' },
         { keys: [['3']], action: 'Deny', where: 'On a permission card' },
-        { keys: [[driverShortcutLabel(platform)]], action: 'Switch between Chat and Terminal', where: 'In Developer mode' },
+        { keys: [[modifierShortcutLabel('.', platform)]], action: 'Switch between Chat and Terminal', where: 'In Developer mode' },
       ],
     },
   ];

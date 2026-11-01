@@ -102,10 +102,10 @@ Pass 1 (2026-11-01; lens: quick; a first reviewer stalled and was relaunched fre
 
 ## Deferred (for the sweep)
 
-- The transcript's "N review comments" block whose rows link back to the lines (EXPERIENCE.md Line comments) is not built; the sent message shows as plain text.
-- A line's menu and Shift with arrows for a range (EXPERIENCE.md) are not built; ranges come from Shift with click or `C`.
-- EXPERIENCE.md Accessibility still says sending announces "3 comments sent to Claude Code"; Send now opens the chat with the message in its composer, so the announcement belongs to the composer's own send.
-- Comments don't follow the user to another browser (browser storage by design, Design Notes).
+- The transcript's "N review comments" block whose rows link back to the lines (EXPERIENCE.md Line comments) is not built; the sent message shows as plain text. (8.12: logged in `deferred-work.md`.)
+- A line's menu and Shift with arrows for a range (EXPERIENCE.md) are not built; ranges come from Shift with click or `C`. (8.12: logged in `deferred-work.md`.)
+- EXPERIENCE.md Accessibility still says sending announces "3 comments sent to Claude Code"; Send now opens the chat with the message in its composer, so the announcement belongs to the composer's own send. (8.12: logged in `deferred-work.md`.)
+- Comments don't follow the user to another browser (browser storage by design, Design Notes). (8.12: logged in `deferred-work.md`.)
 
 ## Design Notes
 

@@ -89,9 +89,12 @@ const card = (page: Page) => page.getByTestId('agent-card-antigravity');
 test('Install, Sign in with Google, Sign out and Uninstall from Settings: Agents', async ({ page, context }) => {
   test.setTimeout(120_000);
   await withAntigravity(page, async (home) => {
-    // The stand-in Google page: visiting it is the user approving.
+    // The stand-in Google page. The approval (the fake agent's consent file) is given only once the card has shown the
+    // in-progress words: written on the visit, sign-in could finish before the check below looked (CI, 2026-11-01).
+    let visited!: () => void;
+    const googleVisited = new Promise<void>((resolve) => (visited = resolve));
     await context.route('https://accounts.google.com/**', (route) => {
-      writeFileSync(join(home, 'fake-google-consent'), '');
+      visited();
       return route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Google</title><p>Signed in. You can close this tab.</p>' });
     });
 
@@ -108,8 +111,11 @@ test('Install, Sign in with Google, Sign out and Uninstall from Settings: Agents
     if (process.platform === 'win32') {
       // Windows: Antigravity opens the browser itself; the card offers the link.
       await expect(card(page).getByRole('link', { name: 'Open the sign-in page' })).toHaveAttribute('href', /^https:\/\/accounts\.google\.com\//);
-      writeFileSync(join(home, 'fake-google-consent'), '');
+    } else {
+      // Elsewhere the tab the card opened reached Google: the user approves there.
+      await googleVisited;
     }
+    writeFileSync(join(home, 'fake-google-consent'), '');
     await expect(card(page).getByTestId('agent-state')).toContainText('Installed, signed in', { timeout: 30_000 });
 
     await card(page).getByRole('button', { name: 'Sign out' }).click();

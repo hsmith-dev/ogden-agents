@@ -72,6 +72,9 @@ export const DiffLine = z.object({
 });
 export type DiffLine = z.infer<typeof DiffLine>;
 
+/** A unified diff's hunk header (`@@ -a,b +c,d @@`): the old start and count, the new start and count (a count left out is 1). */
+export const UNIFIED_HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
 /** One hunk: its ranges on each side (as a unified diff's `@@` line) and its lines. */
 export const DiffHunk = z.object({
   id: HunkId,

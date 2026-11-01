@@ -13,6 +13,7 @@ import type { SpawnOptions } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditorLauncherNode, EDITORS, nodeEditorSystem, type EditorSystem } from '../src/index.js';
+import { plantedProgram } from './planted-program.js';
 
 interface Spawned {
   file: string;
@@ -27,7 +28,6 @@ function fakeSystem(platform: NodeJS.Platform, files: readonly string[], env: Re
     platform,
     env,
     runnable: (path) => files.includes(path),
-    tmpdir: () => (platform === 'win32' ? 'C:\\Temp' : '/tmp'),
     start(file, args, options) {
       spawned.push({ file, args, options });
       const child = new EventEmitter() as EventEmitter & { unref(): void };
@@ -132,18 +132,21 @@ describe('editor-launcher-node', () => {
     expect(Object.keys(env)).not.toContain('OGDEN_AGENTS_TEST_X');
   });
 
-  it("keeps only absolute PATH folders (empty, '.' and relative dropped; Windows: drive letters), and starts in the home folder, else the temp folder", async () => {
+  it("keeps only absolute PATH folders (empty, '.' and relative dropped; Windows: drive letters), and starts in the home folder, else the filesystem's root, never the temp folder", async () => {
     const posix = fakeSystem('linux', ['/usr/bin/code'], { PATH: ':/usr/bin:.:rel', HOME: '/home/u' });
     await createEditorLauncherNode({ system: posix.system }).open('vscode', '/w/a.ts');
     expect(posix.spawned[0]!.options.env!.PATH).toBe('/usr/bin');
     expect(posix.spawned[0]!.options.cwd).toBe('/home/u');
     const homeless = fakeSystem('linux', ['/usr/bin/code'], { PATH: '/usr/bin', HOME: 'rel/home' });
     await createEditorLauncherNode({ system: homeless.system }).open('vscode', '/w/a.ts');
-    expect(homeless.spawned[0]!.options.cwd).toBe('/tmp');
+    expect(homeless.spawned[0]!.options.cwd).toBe('/');
     const win = fakeSystem('win32', ['C:\\bin\\code.cmd'], { ...WIN_ENV, Path: 'C:\\bin;;.;relative\\bin;\\\\host\\share;\\rooted' });
     await createEditorLauncherNode({ system: win.system }).open('vscode', 'C:\\w\\a.ts');
     expect(win.spawned[0]!.options.env!.Path).toBe('C:\\bin');
     expect(win.spawned[0]!.options.cwd).toBe('C:\\Users\\u');
+    const winHomeless = fakeSystem('win32', ['C:\\bin\\code.cmd'], { Path: 'C:\\bin', PATHEXT: '.CMD', SystemRoot: 'D:\\Win' });
+    await createEditorLauncherNode({ system: winHomeless.system }).open('vscode', 'C:\\w\\a.ts');
+    expect(winHomeless.spawned[0]!.options.cwd).toBe('D:\\Win');
   });
 
   it('takes cmd.exe from ComSpec or SystemRoot only when drive-absolute, else C:\\Windows\\System32\\cmd.exe', async () => {
@@ -192,6 +195,19 @@ describe.skipIf(process.platform === 'win32')('editor-launcher-node on this comp
     },
     env: { PATH: folder, HOME: folder },
   });
+
+  for (const kind of ['empty', 'relative'] as const) {
+    it(`a launcher script's bare name never reaches a program planted behind ${kind === 'empty' ? 'an empty' : 'a relative'} PATH entry in its home (8.12)`, async () => {
+      const fixture = plantedProgram('code', 'opened');
+      folders.push(fixture.root);
+      const record = join(fixture.root, 'argv.txt');
+      writeFileSync(join(fixture.bin, 'code'), `#!/bin/sh\nhelper >/dev/null 2>&1\nprintf '%s\\n' "$@" > "${record}"\n`);
+      const system: EditorSystem = { ...confined(fixture.bin), env: { PATH: fixture.paths[kind], HOME: fixture.work } };
+      expect(await createEditorLauncherNode({ system }).open('vscode', join(fixture.root, 'a.ts'))).toBe('opened');
+      await expect.poll(() => existsSync(record)).toBe(true);
+      expect(fixture.ran()).toBe(false);
+    });
+  }
 
   it('a fake code script records its argv; nothing outside the folder is found', async () => {
     const folder = mkdtempSync(join(tmpdir(), 'ogden-editors-'));

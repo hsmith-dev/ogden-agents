@@ -10,6 +10,7 @@
  * resolved path, so an edit or a removal outside Ogden Agents is always
  * re-checked.
  */
+import { absolutePathFolders } from '../program-launch.js';
 import { accessSync, constants, statSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 import { splitCommandLine, type LinkedCommandSpec } from '@ogden-agents/shared';
@@ -78,7 +79,9 @@ type Found = { file: string } | { script: string } | undefined;
 
 /**
  * An already-absolute program resolved directly; a bare name (no path
- * separator) searched on `env`'s `PATH`, in `PATHEXT` order on Windows. On
+ * separator) searched on the absolute folders of `env`'s `PATH` only (an
+ * empty or relative entry would mean the server's own folder;
+ * `program-launch.ts`, 8.12), in `PATHEXT` order on Windows. On
  * Windows only a `.exe` or `.com` counts (epic 21 audit): an npm shim, a
  * `.cmd` or a `.bat` can't be started without a shell, so it is reported as
  * a script rather than resolved to something every start would fail on. A
@@ -97,8 +100,7 @@ function resolveProgram(
     if (!isExecutable(program)) return undefined;
     return startable(program) ? { file: program } : { script: program };
   }
-  const pathValue = lookupEnv(env, 'PATH', windows) ?? '';
-  const dirs = pathValue.split(paths.delimiter).filter((dir) => dir !== '');
+  const dirs = absolutePathFolders(lookupEnv(env, 'PATH', windows), windows ? 'win32' : 'linux');
   const extensions = windows ? windowsExtensions(env) : [''];
   let script: string | undefined;
   for (const dir of dirs) {
@@ -172,9 +174,8 @@ export type FoundProgram = { ok: true; file: string } | { ok: false; reason: str
 
 /**
  * Finds one program to start with no shell (8.9's Problems runner, AD-38):
- * an absolute path as given, a bare name on `env`'s `PATH`, searching only
- * its absolute entries (an empty or relative entry would mean the server's
- * own folder, or the project's). A relative path with a separator is refused.
+ * an absolute path as given, a bare name on the absolute folders of `env`'s
+ * `PATH` (as every resolution here). A relative path with a separator is refused.
  * On Windows a `.cmd`, `.bat` or npm shim is a script that needs a shell, so
  * it is refused in plain words, never run.
  */
@@ -186,15 +187,7 @@ export function findProgram(program: string, env: Readonly<Record<string, string
   if (program === '') return { ok: false, reason: 'Type the command to run.' };
   const hasSeparator = program.includes('/') || (windows && program.includes('\\'));
   if (hasSeparator && !paths.isAbsolute(program)) return { ok: false, reason: `Give an absolute path for "${program}", or just the program's name if it's on your PATH.` };
-  const pathValue = lookupEnv(env, 'PATH', windows) ?? '';
-  const absoluteOnly = pathValue
-    .split(paths.delimiter)
-    .filter((dir) => dir !== '' && paths.isAbsolute(dir))
-    .join(paths.delimiter);
-  const searched: Record<string, string | undefined> = { ...env };
-  if (windows) for (const name of Object.keys(searched)) if (name.toUpperCase() === 'PATH') delete searched[name];
-  searched.PATH = absoluteOnly;
-  const found = resolveProgram(program, searched, { windows, paths, isExecutable });
+  const found = resolveProgram(program, env, { windows, paths, isExecutable });
   if (found === undefined) return { ok: false, reason: `${program} wasn't found on this computer. Check that it's installed and on your PATH.` };
   if ('script' in found) return { ok: false, script: true, reason: `${paths.basename(found.script)} is a script that Windows can only start through a shell, so Ogden doesn't run it here yet.` };
   return { ok: true, file: found.file };

@@ -163,6 +163,8 @@ test('the sidebar moves between projects, and Delete history is refused while a 
       await expect(page).toHaveURL(new RegExp(`/w/${alpha}/s/ses_[0-9A-Z]{26}$`));
       const sesId = /s\/(ses_[0-9A-Z]{26})$/.exec(page.url())![1]!;
       await expect(other.getByTestId('chat-row')).toHaveCount(1);
+      // Its first turn has ended: the state set by hand below is then the chat's own, not overwritten by that turn ending late.
+      await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
 
       // One chat in beta too, which Delete history on alpha must keep.
       // Keyboard: Tab to the name, Enter opens it.

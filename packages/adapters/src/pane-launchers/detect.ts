@@ -7,16 +7,19 @@
  * and never passes a credential. The path it finds is absolute, and a pane
  * starts exactly that file: a bare name does not start on Windows.
  *
- * A PATH entry that is not absolute is ignored, so nothing in the folder
- * Ogden runs in can stand in for a program.
+ * A PATH entry that is not absolute is ignored, both for the lookup and in
+ * the version request's own environment, and the request runs in the
+ * user's home (else the filesystem's root), never the temp folder
+ * (`program-launch.ts`, 8.12): nothing in a folder another user or a
+ * project can write stands in for a program.
  */
 import { execFile } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { accessSync, constants, statSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 import type { LauncherRefusal, PaneLaunchers } from '@ogden-agents/core';
 import type { PaneDetection, PaneLauncher, PaneLauncherStatus } from '@ogden-agents/shared';
-import { helperEnvironment, WINDOWS_FOLDERS } from '../child-env.js';
+import { WINDOWS_FOLDERS } from '../child-env.js';
+import { absolutePathFolders, envValue, existingFolder, launchEnvironment, platformKey, safeWorkingFolder, windowsCmd } from '../program-launch.js';
 
 /** What detection needs of the computer; replaced in tests. */
 export interface DetectSystem {
@@ -24,8 +27,8 @@ export interface DetectSystem {
   env: Readonly<Record<string, string | undefined>>;
   /** Whether `path` is a file the user can run. */
   runnable(path: string): boolean;
-  /** Runs `path --version` (`.cmd` through `cmd.exe`) and answers its first line, or why not. */
-  probe(path: string, env: Record<string, string>): Promise<{ ok: true; version: string } | { ok: false }>;
+  /** Runs `path --version` (`.cmd` through `cmd.exe`) with `env` in `cwd`, and answers its first line, or why not. */
+  probe(path: string, how: { env: Record<string, string>; cwd: string }): Promise<{ ok: true; version: string } | { ok: false }>;
 }
 
 const PROBE_TIMEOUT_MS = 5_000;
@@ -47,23 +50,21 @@ export const nodeDetectSystem: DetectSystem = {
       return false;
     }
   },
-  probe(path, env) {
+  probe(path, { env, cwd }) {
     return new Promise((resolve) => {
       const win = process.platform === 'win32';
       const shim = win && /\.(cmd|bat)$/i.test(path);
-      // Node refuses to run a .cmd or .bat without a shell; a shim goes through cmd.exe with the whole command in one more pair of quotes.
+      // Node refuses to run a .cmd or .bat without a shell; a shim goes through cmd.exe (no AutoRun, delayed expansion off, as the editor's) with the whole command in one more pair of quotes.
       // A shim's path with a character cmd would read as its own is not run (a Windows file name has no quote, so this is depth, not a hole).
       if (shim && /["%^!\r\n]/.test(path)) {
         resolve({ ok: false });
         return;
       }
-      const comspec = Object.entries(env).find(([key]) => key.toUpperCase() === 'COMSPEC')?.[1];
-      const root = Object.entries(env).find(([key]) => key.toUpperCase() === 'SYSTEMROOT')?.[1] ?? 'C:\\Windows';
-      const file = shim ? (comspec ?? win32.join(root, 'System32', 'cmd.exe')) : path;
-      const args = shim ? ['/d', '/s', '/c', `""${path}" --version"`] : ['--version'];
+      const file = shim ? windowsCmd(env) : path;
+      const args = shim ? ['/d', '/s', '/v:off', '/c', `""${path}" --version"`] : ['--version'];
       try {
-        // Run away from any project: the program's own working folder is a neutral one.
-        const child = execFile(file, args, { env, cwd: tmpdir(), timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', windowsHide: true, windowsVerbatimArguments: shim, maxBuffer: 64 * 1024 }, (error, stdout) => {
+        // Run away from any project and from the shared temp folder: the user's home, else the filesystem's root.
+        const child = execFile(file, args, { env, cwd: existingFolder(cwd, env, process.platform), timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', windowsHide: true, windowsVerbatimArguments: shim, maxBuffer: 64 * 1024 }, (error, stdout) => {
           clearTimeout(hard);
           if (error) resolve({ ok: false });
           else resolve({ ok: true, version: String(stdout).trim().split(/\r?\n/, 1)[0]?.slice(0, 80) ?? '' });
@@ -82,12 +83,10 @@ export const nodeDetectSystem: DetectSystem = {
   },
 };
 
-/** The environment of the version request: the allowlist, plus the Windows folders a shim needs. Never a key. */
+/** The environment of the version request: the allowlist, plus the Windows folders a shim needs, PATH only its absolute folders. Never a key. */
 function probeEnvironment(system: DetectSystem): Record<string, string> {
-  return helperEnvironment(system.platform === 'win32' ? WINDOWS_FOLDERS : [], system.env, system.platform);
+  return launchEnvironment(system.platform === 'win32' ? WINDOWS_FOLDERS : [], system.env, system.platform);
 }
-
-const platformKey = (platform: NodeJS.Platform): 'darwin' | 'linux' | 'win32' => (platform === 'win32' ? 'win32' : platform === 'darwin' ? 'darwin' : 'linux');
 
 /**
  * An executable entry as the places to try: a bare name on each PATH folder
@@ -98,11 +97,10 @@ export function candidatesFor(entry: string, system: Pick<DetectSystem, 'platfor
   const win = system.platform === 'win32';
   const path = win ? win32 : posix;
   const env = system.env;
-  const lookup = (name: string) => Object.entries(env).find(([key]) => (win ? key.toUpperCase() === name.toUpperCase() : key === name))?.[1];
+  const lookup = (name: string) => envValue(env, name, system.platform);
   if (/^[A-Za-z0-9._-]+$/.test(entry)) {
     // Only absolute folders (on Windows with a drive letter: no network share and no folder relative to the current drive's root).
-    const unquoted = (dir: string) => (win ? dir.replace(/^"(.*)"$/, '$1') : dir);
-    const dirs = (lookup('PATH') ?? '').split(win ? ';' : ':').map(unquoted).filter((dir) => dir !== '' && (win ? /^[A-Za-z]:[\\/]/.test(dir) : path.isAbsolute(dir)));
+    const dirs = absolutePathFolders(lookup('PATH'), system.platform);
     const exts = win ? (lookup('PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map((ext) => ext.toLowerCase()) : [''];
     return dirs.flatMap((dir) => exts.map((ext) => path.join(dir, `${entry}${ext}`)));
   }
@@ -127,13 +125,14 @@ export interface Detected extends PaneDetection {
 export async function detectLauncher(launcher: PaneLauncher, system: DetectSystem = nodeDetectSystem): Promise<Detected> {
   if (launcher.kind === 'shell') return { launcherId: launcher.id, state: 'found' };
   const env = probeEnvironment(system);
+  const cwd = safeWorkingFolder(env, system.platform);
   const entries = launcher.executables[platformKey(system.platform)];
   // The first candidate that answers wins; one that is there but silent (a stale shim) does not hide a working one further on.
   let silent: string | undefined;
   for (const entry of entries) {
     for (const candidate of candidatesFor(entry, system)) {
       if (!system.runnable(candidate)) continue;
-      const answer = await system.probe(candidate, env);
+      const answer = await system.probe(candidate, { env, cwd });
       if (answer.ok) return { launcherId: launcher.id, state: 'found', path: candidate, ...(answer.version === '' ? {} : { version: answer.version }) };
       silent ??= candidate;
     }

@@ -1129,8 +1129,8 @@ const WORKBENCH_REQUEST_SCHEMAS = [
   'ProjectCommandInput',
 ] as const;
 
-/** The Workbench's route files in the server. */
-const WORKBENCH_ROUTE_FILE = /(^|[\\/])packages[\\/]server[\\/]src[\\/](?:workspace-files-routes|workbench-routes)\.ts$/;
+/** The Workbench's route files in the server (and their shared refusals). */
+const WORKBENCH_ROUTE_FILE = /(^|[\\/])packages[\\/]server[\\/]src[\\/](?:workspace-files-routes|workbench-routes|workbench-refusal)\.ts$/;
 /** Where no git and no child process may appear. */
 const NO_GIT_AREA = /(^|[\\/])packages[\\/](?:core|shared|web)[\\/]src[\\/]/;
 /**
@@ -1181,7 +1181,7 @@ describe('epic 8 entry 2: Workbench paths are workspace-relative and no git runs
 
   it('core, shared, the web and the Workbench route files load no child_process and name no git command', () => {
     const files = loadWorkspaceSources();
-    expect(files.filter((file) => WORKBENCH_ROUTE_FILE.test(file.path))).toHaveLength(2);
+    expect(files.filter((file) => WORKBENCH_ROUTE_FILE.test(file.path))).toHaveLength(3);
     expect(findWorkbenchProcessViolations(files)).toEqual([]);
   });
 

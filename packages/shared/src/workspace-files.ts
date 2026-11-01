@@ -145,8 +145,6 @@ export const WORKSPACE_SEARCH_MAX_PREVIEW = 240;
 export const WORKSPACE_SEARCH_MAX_FILES = 20_000;
 /** The longest one search runs, in milliseconds; past this it answers `truncated`. */
 export const WORKSPACE_SEARCH_TIMEOUT_MS = 5_000;
-/** Files over this many bytes (and binary files) are skipped by a text search. */
-export const WORKSPACE_SEARCH_MAX_FILE_BYTES = MAX_WORKSPACE_FILE_BYTES;
 
 /** **Text** searches file contents; **File names** matches paths. */
 export const WorkspaceSearchMode = z.enum(['text', 'names']);

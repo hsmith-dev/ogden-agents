@@ -110,13 +110,13 @@ Pass 1 (2026-11-01; lenses: quick, security). Verdicts: high 4, medium 5, low 6,
 
 ## Deferred (for the sweep)
 
-- A turn whose start snapshot timed out or failed records nothing, so This turn shows the previous turn; a "not recorded" marker needs an event contract change (review #13).
-- Turn counts stop at `MAX_CHANGED_FILES` (1000) files; a `--shortstat` count would be exact (review #14).
-- The snapshot store under `<data>/snapshots` is never cleaned and holds full copies of non-ignored files, `.env` included; retention and GC belong with 27.x retention (review #15).
-- With filter drivers disabled, git-lfs files show as changed against their pointers in Unstaged and This turn; an allowlist of known-safe drivers (or `--attr-source` once the minimum git is 2.40) would fix it.
-- Filter names are read, then blanked on the next call: an agent that adds a filter between the two calls could still race one run.
-- The Changes panel opens in the Workbench, not as a sheet beside the chat; the session header's Changes count is not built; terminal-driven turns get no snapshots.
-- Unstaged copies the index for every request, once per file diff (up to 100 per panel load).
+- A turn whose start snapshot timed out or failed records nothing, so This turn shows the previous turn; a "not recorded" marker needs an event contract change (review #13). (8.12: logged in `deferred-work.md`.)
+- Turn counts stop at `MAX_CHANGED_FILES` (1000) files; a `--shortstat` count would be exact (review #14). (8.12: logged in `deferred-work.md`.)
+- The snapshot store under `<data>/snapshots` is never cleaned and holds full copies of non-ignored files, `.env` included; retention and GC belong with 27.x retention (review #15). (8.12: logged in `deferred-work.md`.)
+- With filter drivers disabled, git-lfs files show as changed against their pointers in Unstaged and This turn; an allowlist of known-safe drivers (or `--attr-source` once the minimum git is 2.40) would fix it. (8.12: logged in `deferred-work.md`.)
+- Filter names are read, then blanked on the next call: an agent that adds a filter between the two calls could still race one run. (8.12: logged in `deferred-work.md`.)
+- The Changes panel opens in the Workbench, not as a sheet beside the chat; the session header's Changes count is not built; terminal-driven turns get no snapshots. (8.12: logged in `deferred-work.md`.)
+- Unstaged copies the index for every request, once per file diff (up to 100 per panel load). (8.12: logged in `deferred-work.md`.)
 
 ## Design Notes
 

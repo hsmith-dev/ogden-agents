@@ -1,11 +1,11 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import { CodeBlock } from './code-block';
-import { inline, type InlineContext, type MarkdownVariant } from './markdown-inline';
+import { inline, type InlineContext, type MarkdownLinks, type MarkdownVariant } from './markdown-inline';
 import { parseBlocks, withoutFrontmatter, type Align, type Block } from './markdown-parse';
 import { cn } from './utils';
 
 export { splitCodeSpans, withoutFrontmatter } from './markdown-parse';
-export { safeHref, type MarkdownVariant } from './markdown-inline';
+export { pathTokens, safeHref, UNSAFE_CHARACTERS, type FileTarget, type MarkdownLinks, type MarkdownVariant } from './markdown-inline';
 
 /**
  * Markdown, read-only and safe: the one renderer for the document sheet
@@ -16,7 +16,10 @@ export { safeHref, type MarkdownVariant } from './markdown-inline';
  * Raw HTML shows as the text it is, an image is never loaded, and a leading
  * YAML frontmatter block is hidden. Links follow the variant (see
  * `markdown-inline.tsx`): text only in a document; in the chat, http, https
- * and mailto addresses open in a new tab and any other is text.
+ * and mailto addresses open in a new tab and any other is text. A markdown
+ * file in the Workbench (`file`, 8.7) follows the chat's link rules with a
+ * document's soft breaks and hidden frontmatter; with `links`, a confirmed
+ * file of the project links to the viewer (see `markdown-inline.tsx`).
  * No dependency: everything else stays plain text.
  */
 
@@ -172,20 +175,23 @@ export interface MarkdownProps extends Omit<ComponentProps<'div'>, 'children'> {
   variant?: MarkdownVariant;
   /** The text is still arriving: it is parsed again at most every {@link STREAMING_RENDER_MS}. */
   streaming?: boolean;
+  /** Links to the Workbench viewer for confirmed files (8.7); keep it the same object while its confirmed set is unchanged. */
+  links?: MarkdownLinks | undefined;
 }
 
 /** Renders `source` as the safe subset this file describes. */
-export function Markdown({ source, variant = 'document', streaming = false, className, ...props }: MarkdownProps) {
+export function Markdown({ source, variant = 'document', streaming = false, links, className, ...props }: MarkdownProps) {
   // While streaming, parsed at most every 100 ms, and at low priority so typing stays quick.
   const text = useDeferredValue(useStreamedSource(source, streaming));
   // One cache per message: an unchanged line keeps its elements as more text arrives.
-  const context = useMemo<InlineContext>(() => ({ variant, cache: new Map(), cachedChars: 0 }), [variant]);
+  // A new confirmed set of viewer links starts a new cache: a line's elements depend on it.
+  const context = useMemo<InlineContext>(() => ({ variant, links, cache: new Map(), cachedChars: 0 }), [variant, links]);
   const cut = markdownCut(text);
   const head = text.slice(0, cut);
   const rest = text.slice(cut);
   // Parsed once per text: the session view re-renders on every event. Frontmatter is a document's
   // (4.7); a reply that opens with a rule keeps everything after it.
-  const blocks = useMemo(() => parseBlocks((variant === 'document' ? withoutFrontmatter(head) : head).split(/\r?\n/)), [head, variant]);
+  const blocks = useMemo(() => parseBlocks((variant === 'chat' ? head : withoutFrontmatter(head)).split(/\r?\n/)), [head, variant]);
   const rendered = useMemo(() => renderBlocks(blocks, context), [blocks, context]);
   return (
     <div data-slot="markdown" data-variant={variant} className={cn('relative flex min-w-0 flex-col gap-3 text-body text-foreground', className)} {...props}>

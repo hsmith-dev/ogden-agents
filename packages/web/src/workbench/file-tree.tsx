@@ -21,12 +21,14 @@ export interface FileTreeProps {
   onSelect: (entry: WorkspaceFileEntry) => void;
   /** Folders open at first (the selected file's ancestors, for a link to it). */
   initiallyOpen?: readonly string[];
+  /** A worktree chat's id: the tree is of its worktree (8.2's root). */
+  session?: string | undefined;
 }
 
 /** The root's rows sit at no indent. */
 const ROOT_DEPTH = 0;
 
-export function FileTree({ wsId, selected, onSelect, initiallyOpen = [] }: FileTreeProps) {
+export function FileTree({ wsId, selected, onSelect, initiallyOpen = [], session }: FileTreeProps) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(initiallyOpen));
   const toggle = (path: string) =>
     setOpen((current) => {
@@ -37,13 +39,14 @@ export function FileTree({ wsId, selected, onSelect, initiallyOpen = [] }: FileT
     });
   return (
     <nav aria-label={WORKBENCH_FILES_LABEL} data-testid="file-tree" className="min-w-0">
-      <FolderChildren wsId={wsId} path="" depth={ROOT_DEPTH} open={open} toggle={toggle} selected={selected} onSelect={onSelect} />
+      <FolderChildren wsId={wsId} session={session} path="" depth={ROOT_DEPTH} open={open} toggle={toggle} selected={selected} onSelect={onSelect} />
     </nav>
   );
 }
 
 interface FolderProps {
   wsId: string;
+  session: string | undefined;
   path: string;
   depth: number;
   open: ReadonlySet<string>;
@@ -52,8 +55,8 @@ interface FolderProps {
   onSelect: (entry: WorkspaceFileEntry) => void;
 }
 
-function FolderChildren({ wsId, path, depth, open, toggle, selected, onSelect }: FolderProps) {
-  const folder = useWorkspaceFolder(wsId, path);
+function FolderChildren({ wsId, session, path, depth, open, toggle, selected, onSelect }: FolderProps) {
+  const folder = useWorkspaceFolder(wsId, path, { session });
   if (folder.isPending) {
     return (
       <div className="flex flex-col gap-0.5" data-testid="file-tree-loading">
@@ -82,7 +85,7 @@ function FolderChildren({ wsId, path, depth, open, toggle, selected, onSelect }:
       ) : (
         <RowList>
           {entries.map((entry) => (
-            <TreeRow key={entry.path} wsId={wsId} entry={entry} depth={depth} open={open} toggle={toggle} selected={selected} onSelect={onSelect} />
+            <TreeRow key={entry.path} wsId={wsId} session={session} entry={entry} depth={depth} open={open} toggle={toggle} selected={selected} onSelect={onSelect} />
           ))}
         </RowList>
       )}
@@ -98,7 +101,7 @@ function FolderChildren({ wsId, path, depth, open, toggle, selected, onSelect }:
 /** A row's indent for its depth, from the spacing tokens. */
 const indent = (depth: number) => ({ paddingInlineStart: `calc(var(--space-4) * ${depth} + var(--space-2))` });
 
-function TreeRow({ wsId, entry, depth, open, toggle, selected, onSelect }: Omit<FolderProps, 'path'> & { entry: WorkspaceFileEntry }) {
+function TreeRow({ wsId, session, entry, depth, open, toggle, selected, onSelect }: Omit<FolderProps, 'path'> & { entry: WorkspaceFileEntry }) {
   const folder = entry.kind === 'folder';
   const expandable = folder && !entry.protected;
   const isOpen = expandable && open.has(entry.path);
@@ -119,7 +122,7 @@ function TreeRow({ wsId, entry, depth, open, toggle, selected, onSelect }: Omit<
         <span className="min-w-0 truncate">{entry.name}</span>
         {entry.protected ? <span className="sr-only">, protected</span> : null}
       </Row>
-      {isOpen ? <FolderChildren wsId={wsId} path={entry.path} depth={depth + 1} open={open} toggle={toggle} selected={selected} onSelect={onSelect} /> : null}
+      {isOpen ? <FolderChildren wsId={wsId} session={session} path={entry.path} depth={depth + 1} open={open} toggle={toggle} selected={selected} onSelect={onSelect} /> : null}
     </li>
   );
 }

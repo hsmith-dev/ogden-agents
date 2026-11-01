@@ -626,7 +626,7 @@ export function SessionPage() {
               ) : (
                 view.items.map((item, index) =>
                   item.type === 'message' ? (
-                    <Message key={item.message.messageId} message={item.message} agentName={nameOf(item.message.agentId)} />
+                    <Message key={item.message.messageId} message={item.message} agentName={nameOf(item.message.agentId)} wsId={wsId} sesId={sesId} />
                   ) : item.type === 'tools' ? (
                     <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} detail={detail} />
                   ) : item.type === 'resumed' ? (

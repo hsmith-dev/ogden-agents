@@ -72,10 +72,29 @@ export const WORKBENCH_FILES_LABEL = 'Files';
 
 /** A protected row, selected: said instead of its content, which is never asked for. */
 export const WORKSPACE_FILE_PROTECTED_TEXT = "Protected. Ogden doesn't open this file.";
-/** A binary file. */
-export const WORKSPACE_FILE_BINARY_TEXT = "This file isn't text, so Ogden doesn't show it.";
-/** A file over {@link MAX_WORKSPACE_FILE_BYTES}. */
-export const WORKSPACE_FILE_TOO_LARGE_TEXT = "This file is over 1 MB, so Ogden doesn't show it.";
+/** A binary file (EXPERIENCE.md); the viewer shows its size beside it ({@link fileSizeWords}). */
+export const WORKSPACE_FILE_BINARY_TEXT = "Binary file. Ogden doesn't show its contents.";
+
+/**
+ * A file's size in plain words, in 1024-byte units: `1 byte`, `512 bytes`,
+ * `3.5 KB`, `2 MB`, `2.4 MB`, `1.1 GB` (one decimal, a trailing `.0` dropped).
+ */
+export function fileSizeWords(bytes: number): string {
+  const whole = Math.max(0, Math.floor(bytes));
+  if (whole < 1024) return whole === 1 ? '1 byte' : `${whole} bytes`;
+  const units = ['KB', 'MB', 'GB', 'TB'] as const;
+  let value = whole / 1024;
+  let unit = 0;
+  // Rounded first, so 1023.96 KB reads as 1 MB, not 1024 KB.
+  while (unit < units.length - 1 && Number(value.toFixed(1)) >= 1024) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(1).replace(/\.0$/, '')} ${units[unit]}`;
+}
+
+/** A file over its limit (EXPERIENCE.md): "This file is too large to show here (2.4 MB, limit 1 MB)." */
+export const workspaceFileTooLargeText = (size: number, limit: number = MAX_WORKSPACE_FILE_BYTES): string => `This file is too large to show here (${fileSizeWords(size)}, limit ${fileSizeWords(limit)}).`;
 /** A file that couldn't be read (the fallback when the server gives no message). */
 export const WORKSPACE_FILE_READ_FAILED = "Ogden couldn't open this file";
 /** A folder that couldn't be listed (the fallback when the server gives no message). */
@@ -199,3 +218,38 @@ export const WORKSPACE_SEARCH_CAPPED_TEXT = `Showing the first ${WORKSPACE_SEARC
 export const workspaceSearchNoMatchText = (query: string): string => `No matches for "${query}" in this project.`;
 /** Search isn't built on this server yet (501). */
 export const WORKSPACE_SEARCH_UNAVAILABLE_TEXT = "Search isn't available here yet.";
+
+// ---------------------------------------------------------------------------
+// 8.7: links to the viewer from an agent's reply and a rendered markdown file.
+// ---------------------------------------------------------------------------
+
+/** The most candidate paths one links request may ask about (and one message offers). */
+export const MAX_WORKSPACE_FILE_LINKS = 100;
+
+/**
+ * `POST …/files/links`: which of these paths are files the viewer would
+ * open (inside the project, or the chat's worktree for `session`, and not
+ * refused). Each is a `WorkspaceRelativePath`; at most
+ * {@link MAX_WORKSPACE_FILE_LINKS}.
+ */
+export const WorkspaceFileLinksRequest = z
+  .object({
+    paths: z.array(WorkspaceRelativePath).max(MAX_WORKSPACE_FILE_LINKS),
+    session: SessionId.optional(),
+  })
+  .strict();
+export type WorkspaceFileLinksRequest = z.infer<typeof WorkspaceFileLinksRequest>;
+
+/** The asked paths that are such files, each once, in the order asked: no real path, size or content. */
+export const WorkspaceFileLinksResponse = z.object({ found: z.array(WorkspaceRelativePath).max(MAX_WORKSPACE_FILE_LINKS) }).strict();
+export type WorkspaceFileLinksResponse = z.infer<typeof WorkspaceFileLinksResponse>;
+
+/** The viewer's Copy path button, and its feedback. */
+export const WORKSPACE_FILE_COPY_PATH_LABEL = 'Copy path';
+export const WORKSPACE_FILE_COPIED_TEXT = 'Copied';
+export const WORKSPACE_FILE_COPY_FAILED_TEXT = "Couldn't copy";
+/** A rendered markdown file's switch to its numbered lines, and back. */
+export const WORKSPACE_FILE_SHOW_SOURCE_LABEL = 'Show source';
+export const WORKSPACE_FILE_SHOW_RENDERED_LABEL = 'Rendered';
+/** A link to the viewer: its accessible name and title. */
+export const workspaceFileLinkTitle = (path: string, line?: number): string => (line === undefined ? `Open ${path}` : `Open ${path} at line ${line}`);

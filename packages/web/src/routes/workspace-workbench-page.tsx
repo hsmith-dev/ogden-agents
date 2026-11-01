@@ -11,18 +11,21 @@ const EXACT = { exact: true, includeSearch: true } as const;
 
 /**
  * `/w/:wsId/workbench`: the project's Workbench (AD-36, AD-37). Files: the
- * project's tree and one file read-only, the selected file in `?path=`.
- * Changes (`?panel=changes`, story 8.4): the view in `?view=`, for the chat
- * in `?session=` on the turn in `?turn=`; a chat's Review changes opens it
- * on This turn.
+ * project's tree and one file read-only, the selected file in `?path=` (a
+ * `file:line` link's line in `?line=`, a worktree chat's folder by
+ * `?session=`). Changes (`?panel=changes`, story 8.4): the view in `?view=`,
+ * for the chat in `?session=` on the turn in `?turn=`; a chat's Review
+ * changes opens it on This turn.
  */
 export function WorkspaceWorkbenchPage() {
   const { wsId } = useParams({ strict: false }) as { wsId: string };
   const search = useSearch({ strict: false }) as WorkbenchSearch;
   const navigate = useNavigate();
   const changes = search.panel === 'changes';
-  const keptFiles = search.path === undefined ? {} : { path: search.path };
-  const keptChanges: WorkbenchSearch = { panel: 'changes', ...(search.session === undefined ? {} : { session: search.session }) };
+  const kept = search.session === undefined ? {} : { session: search.session };
+  // The Files tab keeps the file and the chat's worktree; choosing another file drops the line.
+  const keptFiles: WorkbenchSearch = { ...(search.path === undefined ? {} : { path: search.path }), ...kept };
+  const keptChanges: WorkbenchSearch = { panel: 'changes', ...kept };
   return (
     <>
       <WorkspaceHeader title={WORKBENCH_PAGE_TITLE} wsId={wsId} tab="workbench" />
@@ -51,7 +54,13 @@ export function WorkspaceWorkbenchPage() {
             }
           />
         ) : (
-          <WorkbenchFiles wsId={wsId} path={search.path} onSelect={(path) => void navigate({ to: '/w/$wsId/workbench', params: { wsId }, search: { path } })} />
+          <WorkbenchFiles
+            wsId={wsId}
+            path={search.path}
+            line={search.line}
+            session={search.session}
+            onSelect={(path) => void navigate({ to: '/w/$wsId/workbench', params: { wsId }, search: { path, ...kept } })}
+          />
         )}
       </PageBody>
     </>

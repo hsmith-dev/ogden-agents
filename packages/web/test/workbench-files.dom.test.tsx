@@ -15,8 +15,8 @@ import {
   WORKSPACE_FILE_MASKED_TEXT,
   WORKSPACE_FILE_NONE_SELECTED_TEXT,
   WORKSPACE_FILE_PROTECTED_TEXT,
-  WORKSPACE_FILE_TOO_LARGE_TEXT,
   WORKSPACE_PATH_HARD_LINK_MESSAGE,
+  workspaceFileTooLargeText,
   type WorkspaceFileResponse,
   type WorkspaceFolderResponse,
 } from '@ogden-agents/shared';
@@ -143,7 +143,7 @@ describe('Workbench Files', () => {
     expect(screen.getByTestId('code-view-path').textContent).toBe('docs/x.md');
     for (const [name, testId, text] of [
       ['img.png', 'file-binary', WORKSPACE_FILE_BINARY_TEXT],
-      ['big.log', 'file-too-large', WORKSPACE_FILE_TOO_LARGE_TEXT],
+      ['big.log', 'file-too-large', workspaceFileTooLargeText(2_000_000, 1_048_576)],
       ['empty.txt', 'file-empty', WORKSPACE_FILE_EMPTY_TEXT],
     ] as const) {
       fireEvent.click(screen.getByTestId(`file-row-${name}`));

@@ -190,26 +190,30 @@ const workspaceTerminalsRoute = createRoute({
 
 /**
  * The Workbench's search: `?path=` is the file the Files panel shows (AD-36);
- * `?panel=changes` opens Changes (story 8.4) on `?view=`, for the chat
- * `?session=` (This turn, and its worktree's Commit) on its turn `?turn=`.
+ * `?line=` a `file:line` link's line (8.7), only with a path; `?session=` a
+ * chat whose worktree the Files panel shows (8.2's root), and for Changes the
+ * chat (This turn, and its worktree's Commit); `?panel=changes` opens Changes
+ * (story 8.4) on `?view=`, on the chat's turn `?turn=`.
  */
 export interface WorkbenchSearch {
   path?: string;
+  line?: number;
   panel?: 'changes';
   view?: ChangesView;
   session?: string;
   turn?: string;
 }
 
-/** The Workbench's search as given, keeping only what it understands. */
+/** The Workbench's search as the router keeps it, keeping only what it understands: a malformed line, view, session or turn is left out. */
 export function workbenchSearch(search: Record<string, unknown>): WorkbenchSearch {
-  const text = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
-  const path = text(search.path);
+  const path = typeof search.path === 'string' && search.path !== '' ? search.path : undefined;
+  const line = typeof search.line === 'number' ? search.line : typeof search.line === 'string' && /^\d{1,9}$/.test(search.line) ? Number(search.line) : undefined;
   const view = ChangesView.safeParse(search.view);
   const session = SessionId.safeParse(search.session);
   const turn = TurnId.safeParse(search.turn);
   return {
     ...(path === undefined ? {} : { path }),
+    ...(path !== undefined && line !== undefined && Number.isSafeInteger(line) && line >= 1 ? { line } : {}),
     ...(search.panel === 'changes' ? { panel: 'changes' as const } : {}),
     ...(view.success ? { view: view.data } : {}),
     ...(session.success ? { session: session.data } : {}),

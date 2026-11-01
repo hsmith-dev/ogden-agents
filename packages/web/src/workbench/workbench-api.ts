@@ -9,34 +9,43 @@ import { tabAuth } from '@/auth/tab-token';
  * closes (`gcTime: 0`); it never travels in an event.
  */
 
-/** `GET /api/v1/workspaces/:wsId/files?path=`: one folder (`''` the root). */
-export async function fetchWorkspaceFolder(wsId: string, path: string, auth: Auth = tabAuth): Promise<WorkspaceFolderResponse> {
-  const query = path === '' ? '' : `?${new URLSearchParams({ path }).toString()}`;
-  const json = await call(auth, `${apiPath(API_ROUTES.workspaceFiles, { wsId })}${query}`, {}, WORKSPACE_FOLDER_READ_FAILED);
+/** `?path=&session=` with only the values given (`''` for neither). */
+function filesQuery(path: string, session: string | undefined): string {
+  const params = new URLSearchParams();
+  if (path !== '') params.set('path', path);
+  if (session !== undefined) params.set('session', session);
+  const query = params.toString();
+  return query === '' ? '' : `?${query}`;
+}
+
+/** `GET /api/v1/workspaces/:wsId/files?path=&session=`: one folder (`''` the root), of the chat's worktree for `session`. */
+export async function fetchWorkspaceFolder(wsId: string, path: string, session?: string, auth: Auth = tabAuth): Promise<WorkspaceFolderResponse> {
+  const json = await call(auth, `${apiPath(API_ROUTES.workspaceFiles, { wsId })}${filesQuery(path, session)}`, {}, WORKSPACE_FOLDER_READ_FAILED);
   return WorkspaceFolderResponse.parse(json);
 }
 
-/** `GET /api/v1/workspaces/:wsId/files/content?path=`: one file, read-only. */
-export async function fetchWorkspaceFile(wsId: string, path: string, auth: Auth = tabAuth): Promise<WorkspaceFileResponse> {
-  const json = await call(auth, `${apiPath(API_ROUTES.workspaceFileContent, { wsId })}?${new URLSearchParams({ path }).toString()}`, {}, WORKSPACE_FILE_READ_FAILED);
+/** `GET /api/v1/workspaces/:wsId/files/content?path=&session=`: one file, read-only. */
+export async function fetchWorkspaceFile(wsId: string, path: string, session?: string, auth: Auth = tabAuth): Promise<WorkspaceFileResponse> {
+  const json = await call(auth, `${apiPath(API_ROUTES.workspaceFileContent, { wsId })}${filesQuery(path, session)}`, {}, WORKSPACE_FILE_READ_FAILED);
   return WorkspaceFileResponse.parse(json);
 }
 
 /** The query key of one folder's listing, shared by the tree and the viewer. */
-export const workspaceFolderKey = (wsId: string, path: string) => ['workspace-folder', wsId, path] as const;
+export const workspaceFolderKey = (wsId: string, path: string, session?: string) => ['workspace-folder', wsId, path, session ?? ''] as const;
 
 /**
  * One folder's listing (a folder row is listed when first opened, never when
  * protected). `reuse`: the viewer's look-up of its file's row takes the
- * tree's listing as it is, never asking for it again on mount.
+ * tree's listing as it is, never asking for it again on mount. `session`:
+ * the chat's worktree (8.2's root), when it has one.
  */
-export function useWorkspaceFolder(wsId: string, path: string, { reuse = false }: { reuse?: boolean } = {}) {
-  return useQuery({ queryKey: workspaceFolderKey(wsId, path), queryFn: () => fetchWorkspaceFolder(wsId, path), retry: false, ...(reuse ? { refetchOnMount: false } : {}) });
+export function useWorkspaceFolder(wsId: string, path: string, { reuse = false, session }: { reuse?: boolean; session?: string | undefined } = {}) {
+  return useQuery({ queryKey: workspaceFolderKey(wsId, path, session), queryFn: () => fetchWorkspaceFolder(wsId, path, session), retry: false, ...(reuse ? { refetchOnMount: false } : {}) });
 }
 
 /** One file's content; only while `enabled` (never for a protected row). */
-export function useWorkspaceFile(wsId: string, path: string, enabled: boolean) {
-  return useQuery({ queryKey: ['workspace-file', wsId, path], queryFn: () => fetchWorkspaceFile(wsId, path), enabled, retry: false, staleTime: 0, gcTime: 0 });
+export function useWorkspaceFile(wsId: string, path: string, enabled: boolean, session?: string) {
+  return useQuery({ queryKey: ['workspace-file', wsId, path, session ?? ''], queryFn: () => fetchWorkspaceFile(wsId, path, session), enabled, retry: false, staleTime: 0, gcTime: 0 });
 }
 
 /** The folder that holds `path` (`''` for a root entry). */

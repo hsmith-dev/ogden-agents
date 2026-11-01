@@ -56,3 +56,29 @@ export async function openConnected(page: Page, path = '/', link?: string): Prom
   await landConnected(page, launch);
   if (path !== '/') await page.goto(new URL(launch).origin + path);
 }
+
+/** The sidebar footer's Settings link (epic 26, E26-R7), not a project's settings gear. */
+export const settingsLinkOf = (page: Page) => sidebarOf(page).getByRole('link', { name: 'Settings', exact: true });
+
+/** The grouped settings nav beside every settings page (md and up). */
+export const settingsNavOf = (page: Page) => page.getByRole('navigation', { name: 'Settings', exact: true });
+
+/**
+ * Opens Settings from the sidebar footer (it lands on Appearance), then
+ * follows each named link in the settings nav in turn: a group, then one of
+ * its pages ('Advanced', 'Welcome').
+ */
+export async function openFromSettings(page: Page, ...links: string[]): Promise<void> {
+  await settingsLinkOf(page).click();
+  await expect(page).toHaveURL(/\/settings\/appearance$/);
+  for (const name of links) await settingsNavOf(page).getByRole('link', { name, exact: true }).click();
+}
+
+/** Fails when the page scrolls sideways (no horizontal overflow at the current width). */
+export async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(scrollWidth, 'page scrolls horizontally').toBeLessThanOrEqual(clientWidth);
+}

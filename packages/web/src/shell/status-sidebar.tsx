@@ -1,10 +1,7 @@
-import { useDeveloperModeOn } from '@/appearance/appearance-provider';
-import { Bell, Desktop, FolderSimplePlus, GearSix, HandWaving, Hammer, Info, Package, PaintBrush, Plus, Robot, TerminalWindow, Wrench } from '@phosphor-icons/react';
-import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { GearSix, Plus } from '@phosphor-icons/react';
+import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useChatRename } from '@/chat/chat-name';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
 import {
   Sidebar,
   SidebarContent,
@@ -21,7 +18,6 @@ import {
   SidebarStatusRow,
   SidebarText,
   SidebarWorkspaceGroup,
-  useSidebar,
 } from '@/ui/sidebar';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
@@ -243,7 +239,7 @@ function StatusSidebarBody() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        <SettingsMenu />
+        <SettingsLink />
         <NewTabButton />
         <QuitButton />
         <ServerStatus />
@@ -333,96 +329,15 @@ const SessionRow = memo(function SessionRow({
   );
 });
 
-/** Settings sections: Agents (9.1), Appearance, New projects (10.4), Notifications (backlog story 8; webhooks join it with builds) and Tools, and Welcome again (9.5). */
-function SettingsMenu() {
-  const { setSheetOpen } = useSidebar();
-  // Terminals settings are Developer mode's (epic 16): a simple user never sees the entry (AD-21).
-  const developerMode = useDeveloperModeOn();
+/** Settings: one link to the grouped settings pages (epic 26, E26-R7), current on any of them. */
+function SettingsLink() {
+  const onSettings = useRouterState({ select: (state) => state.location.pathname === '/settings' || state.location.pathname.startsWith('/settings/') });
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <SidebarMenuButton data-testid="settings-menu" tooltip="Settings" onClick={(event) => event.preventDefault()}>
-          <GearSix aria-hidden />
-          <SidebarLabel>Settings</SidebarLabel>
-        </SidebarMenuButton>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start">
-        <DropdownMenuLabel>Settings</DropdownMenuLabel>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/agents">
-            <Robot aria-hidden />
-            Agents
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/appearance">
-            <PaintBrush aria-hidden />
-            Appearance
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to={'/settings/dev-tools' as '/settings/tools'} data-testid="settings-dev-tools">
-            <Package aria-hidden />
-            Developer tools
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to={'/settings/remote-machines' as '/settings/tools'} data-testid="settings-remote-machines">
-            <Desktop aria-hidden />
-            Remote machines
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/new-projects">
-            <FolderSimplePlus aria-hidden />
-            {NEW_PROJECTS_SETTINGS_LABEL}
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/builds">
-            <Hammer aria-hidden />
-            Builds
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/notifications">
-            <Bell aria-hidden />
-            Notifications
-          </Link>
-        </DropdownMenuItem>
-        {developerMode ? (
-          <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-            <Link to={'/settings/terminals' as '/settings/tools'} data-testid="settings-terminals">
-              <TerminalWindow aria-hidden />
-              Terminals
-            </Link>
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to={'/settings/mcp' as '/settings/tools'}>
-            <Wrench aria-hidden />
-            MCP Servers
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/tools">
-            <Wrench aria-hidden />
-            Tools
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/about">
-            <Info aria-hidden />
-            About
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/welcome">
-            <HandWaving aria-hidden />
-            Welcome
-          </Link>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <SidebarMenuButton asChild isActive={onSettings} tooltip="Settings">
+      <Link to="/settings" data-testid="settings-link">
+        <GearSix aria-hidden />
+        <SidebarLabel>Settings</SidebarLabel>
+      </Link>
+    </SidebarMenuButton>
   );
 }

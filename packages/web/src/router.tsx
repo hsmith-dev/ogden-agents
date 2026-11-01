@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect } from '@tanstack/react-router';
 import { HomePage } from './routes/home-page';
 import { NotFoundPage } from './routes/not-found-page';
+import { SettingsLayout } from './settings/settings-layout';
 import { AppShell } from './shell/app-shell';
 
 /*
@@ -19,6 +20,8 @@ const homeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', comp
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings',
+  // The grouped settings nav around every settings page (epic 26, E26-R7).
+  component: SettingsLayout,
   beforeLoad: ({ location }) => {
     if (location.pathname.replace(/\/$/, '') === '/settings') throw redirect({ to: '/settings/appearance' });
   },

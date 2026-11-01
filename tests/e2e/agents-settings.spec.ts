@@ -21,7 +21,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
 import { makeDataDir, removeDataDir, serverModule, startServer, type RunningServer, type StartOptions } from '../support.js';
 import { send, startChat } from './chat-server.js';
-import { openConnected } from './tab.js';
+import { openConnected, openFromSettings } from './tab.js';
 
 async function withAgentsServer(page: Page, env: Record<string, string>, extra: StartOptions, body: (server: RunningServer, loginState: string) => Promise<void>) {
   const dataDir = makeDataDir();
@@ -55,10 +55,9 @@ test('Sign in with your account opens the sign-in tab, and the card reaches Inst
   await routeSignInPage(context);
   // The CLI's own browser opening suppressed: the page opens the tab itself.
   await withAgentsServer(page, {}, { claudeCliBrowser: 'true' }, async () => {
-    // Reached from the sidebar's Settings menu.
+    // Reached from the sidebar's Settings link and the settings nav.
     await page.goto(new URL('/', page.url()).href);
-    await page.locator('aside[data-slot="sidebar"]').getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('menuitem', { name: 'Agents' }).click();
+    await openFromSettings(page, 'Agents');
     await expect(page).toHaveURL(/\/settings\/agents$/);
     await expect(card(page).getByRole('heading', { name: 'Claude Code', level: 2 })).toBeVisible();
     await expect(card(page).getByTestId('agent-state')).toContainText('Installed, needs sign-in');

@@ -130,6 +130,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 21.7 (refactor sweep): a removed custom agent's id can stay in the install-wide team roster default file; clear it on remove or ignore it on read. From the 21.3 audit. (log: "The install-wide team roster default (a file, not the database) can still name a removed custom agent's id")
 - 21.7 (refactor sweep): make the fake OpenCode honour Ogden's permission config so the Local build row proves every tool call asks. From the 21.6 review. (log: "The fake OpenCode asks on every tool call whatever Ogden's permission config says")
 - 14.11 (live check): The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model. From 14.9 review. (log: "The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model")
+- 26.5 (Help menu): move Welcome out of the settings nav (Advanced's last sub-link) into Help, and drop it from `SETTINGS_GROUPS`. From 26.7 design. (log: "Welcome stays as the settings nav's last Advanced sub-link until Help exists")
 
 ## Log
 
@@ -1051,3 +1052,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-bring-your-own-agent/story-attended-builds-with-the-local-model-plan.md`
   summary: The fake OpenCode asks on every tool call whatever Ogden's permission config says, so the Local build row cannot fail on a lost `ask`.
   evidence: 21.6 review finding 1: `tests/fixtures/fake-opencode.mjs` ignores `OPENCODE_CONFIG`'s `permission` block; `playBuildTurn` always asks unless `editsInsideWithoutAsking`. Make the fake honour the block and add a case where it says `allow`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-settings-with-grouped-navigation-plan.md`
+  summary: Welcome stays as the settings nav's last Advanced sub-link until Help exists (26.5 adds the Help menu and moves it there).
+  evidence: 26.7 Design Notes; `packages/web/src/settings/settings-groups.ts` (`SETTINGS_GROUPS`, Advanced's `/welcome` page). Welcome is not a `/settings` route, so the nav and phone select link to it but never wrap it.

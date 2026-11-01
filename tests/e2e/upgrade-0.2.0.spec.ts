@@ -17,7 +17,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { BMAD_NEW_PROJECTS_LINK, BMAD_OFFER_NOT_NOW, BMAD_OFFER_TEXT, BMAD_PIECES, BMAD_REPO_HAS_BMAD_TEXT } from '../../packages/shared/src/bmad.ts';
 import { createDataFolder020 } from '../fixtures/data-folder-0.2.0.js';
 import { startServer } from '../support.js';
-import { openConnected, sidebarOf } from './tab.js';
+import { openConnected, openFromSettings, sidebarOf } from './tab.js';
 
 /** Opens the project's chats page and waits until its detection has been answered. */
 async function openChats(page: Page, origin: string, wsId: string): Promise<void> {
@@ -116,8 +116,7 @@ test('a 0.2.0 data folder: everything kept, every project Simple, no Welcome que
       expect(server.core.events.readAfter(lastSeq).map((event) => event.type)).toEqual(['session.renamed', 'session.renamed', 'server.started', 'workspace.bmad_offer_dismissed']);
 
       // Settings → Welcome: an existing user with projects is never asked the first-project question.
-      await sidebar.getByRole('button', { name: 'Settings' }).click();
-      await page.getByRole('menuitem', { name: 'Welcome' }).click();
+      await openFromSettings(page, 'Advanced', 'Welcome');
       await expect(page).toHaveURL(/\/welcome$/);
       // The agent step: an API key (kept in memory, its check a stub) makes the agent ready, and Welcome moves on.
       const card = page.getByTestId('agent-card-claude-code');

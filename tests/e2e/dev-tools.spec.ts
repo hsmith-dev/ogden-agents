@@ -11,7 +11,7 @@
 import { expect, test, type Browser } from '@playwright/test';
 import type { DevToolDescriptor, DevToolDetection, DevToolRunResult, DevToolsPort } from '@ogden-agents/server';
 import { API_ROUTES, makeDataDir, removeDataDir, startServer, type RunningServer } from '../support.js';
-import { openConnected, storedToken } from './tab.js';
+import { openConnected, openFromSettings, storedToken } from './tab.js';
 
 /** A stub catalog of one tool, driven by hand: never execs to detect, never runs without the server's own confirmed call. */
 function stubDevTools(seed: DevToolDescriptor[] = [{ id: 'gcloud', label: 'Google Cloud CLI', source: 'seed', executables: ['gcloud'], installCommand: 'curl -sSL https://sdk.cloud.google.com | bash -s -- --disable-prompts' }]) {
@@ -51,9 +51,7 @@ async function withServer(browser: Browser, devToolsPort: DevToolsPort, body: (p
 test('Settings > Developer tools shows real detected state, and Install shows the exact command and runs it only on confirmation, with no terminal', async ({ browser }) => {
   const stub = stubDevTools();
   await withServer(browser, stub.port, async (page) => {
-    const sidebar = page.locator('aside[data-slot="sidebar"]');
-    await sidebar.getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('menuitem', { name: 'Developer tools' }).click();
+    await openFromSettings(page, 'Advanced', 'Developer tools');
     await expect(page).toHaveURL(/\/settings\/dev-tools$/);
     await expect(page.getByRole('heading', { name: 'Developer tools', level: 1 })).toBeVisible();
 

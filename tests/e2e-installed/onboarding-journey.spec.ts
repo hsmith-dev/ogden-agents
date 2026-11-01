@@ -34,7 +34,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { FIRST_PROJECT_QUESTION } from '../../packages/shared/src/bmad.ts';
 import { API_ROUTES, requestQuit } from '../support.js';
 import { send } from '../e2e/chat-server.js';
-import { expectConnected, sidebarOf, storedToken } from '../e2e/tab.js';
+import { expectConnected, openFromSettings, storedToken } from '../e2e/tab.js';
 import { launch, onboardingServer, waitForExit, type Launched, type OnboardingServer } from './installed.js';
 
 /** An offline install of the fixture: slower on Windows runners. */
@@ -193,8 +193,7 @@ test('a first run on the installed package: Welcome, Install, sign in, a project
 
   await test.step('4b. Settings → Welcome → Continue: the question is not asked again', async () => {
     const workspace = page.url();
-    await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('menuitem', { name: 'Welcome' }).click();
+    await openFromSettings(page, 'Advanced', 'Welcome');
     await expect(page).toHaveURL(`${launched.url}/welcome`);
     await expect(headline(page)).toHaveText('Pick the agent that will do the work.');
     // Opened from Settings it doesn't move on by itself: Continue, once the agent shows signed in.

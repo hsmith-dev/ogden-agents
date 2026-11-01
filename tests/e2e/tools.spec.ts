@@ -8,7 +8,7 @@
 import { expect, test, type Browser } from '@playwright/test';
 import type { DetectedToolStatus, ToolchainPort, ToolProgress } from '@ogden-agents/server';
 import { API_ROUTES, makeDataDir, removeDataDir, serverModule, startServer, type RunningServer } from '../support.js';
-import { openConnected } from './tab.js';
+import { openConnected, openFromSettings } from './tab.js';
 
 /** A stub port whose install waits for the test to let it finish. */
 function stubToolchain(initial: DetectedToolStatus, outcome: 'ok' | 'hash_mismatch', ToolchainError: typeof import('@ogden-agents/server').ToolchainError) {
@@ -61,11 +61,8 @@ test('Install in Settings > Tools downloads with progress and ends ready, with n
   const { ToolchainError } = await serverModule();
   const stub = stubToolchain({ state: 'missing' }, 'ok', ToolchainError);
   await withServer(browser, stub.port, async (page) => {
-    // Reached from the sidebar's Settings menu.
-    const sidebar = page.locator('aside[data-slot="sidebar"]');
-    await sidebar.getByRole('button', { name: 'Settings' }).click();
-    // Exact: "Developer tools" (CAP-25) is a separate menu item whose name also contains "tools".
-    await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
+    // Reached from the sidebar's Settings link and the settings nav: Advanced, then its Tools page.
+    await openFromSettings(page, 'Advanced', 'Tools');
     await expect(page).toHaveURL(/\/settings\/tools$/);
     await expect(page.getByRole('heading', { name: 'Tools', level: 1 })).toBeVisible();
 

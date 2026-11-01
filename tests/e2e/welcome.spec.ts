@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { API_ROUTES, launchLink, makeDataDir, removeDataDir, startServer, type RunningServer, type StartOptions } from '../support.js';
-import { sidebarOf, storedToken } from './tab.js';
+import { openFromSettings, storedToken } from './tab.js';
 
 const WORKSPACE_URL = /\/w\/(ws_[0-9A-Z]{26})$/;
 
@@ -117,8 +117,7 @@ async function signInAndAddProject(page: Page, context: BrowserContext, beforeAd
 }
 
 async function openWelcomeFromSettings(page: Page) {
-  await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
-  await page.getByRole('menuitem', { name: 'Welcome' }).click();
+  await openFromSettings(page, 'Advanced', 'Welcome');
   await expect(page).toHaveURL(/\/welcome$/);
 }
 

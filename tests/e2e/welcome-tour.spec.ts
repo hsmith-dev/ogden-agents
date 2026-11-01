@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { makeDataDir, removeDataDir, startServer, type RunningServer, type StartOptions } from '../support.js';
-import { sidebarOf } from './tab.js';
+import { openFromSettings, sidebarOf } from './tab.js';
 
 const WORKSPACE_CHATS_URL = /\/w\/(ws_[0-9A-Z]{26})$/;
 const WORKSPACE_PLAN_URL = /\/w\/(ws_[0-9A-Z]{26})\/plan$/;
@@ -178,8 +178,7 @@ test.describe('the guided tour', () => {
       await tourCard(page).getByRole('button', { name: 'Skip tour' }).click();
       await expect(page.getByTestId('tour-overlay')).toHaveCount(0);
 
-      await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
-      await page.getByRole('menuitem', { name: 'Appearance' }).click();
+      await openFromSettings(page, 'Appearance');
       await expect(page).toHaveURL(/\/settings\/appearance$/);
       await page.getByTestId('replay-tour').click();
 

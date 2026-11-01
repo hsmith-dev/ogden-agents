@@ -55,7 +55,7 @@ import {
 import { apiPath, TEST_ROUTES } from '../../packages/shared/src/api.ts';
 import { API_ROUTES, launchLink, requestQuit } from '../support.js';
 import { send } from '../e2e/chat-server.js';
-import { expectConnected, landConnected, sidebarOf, storedToken } from '../e2e/tab.js';
+import { expectConnected, landConnected, openFromSettings, storedToken } from '../e2e/tab.js';
 import { bmadServer, waitForExit, type BmadServer, type Launched } from './installed.js';
 
 const servers: BmadServer[] = [];
@@ -152,8 +152,7 @@ async function expectChatsTabOnly(page: Page) {
 
 /** Opens Settings → New projects from the sidebar. */
 async function openNewProjects(page: Page) {
-  await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
-  await page.getByRole('menuitem', { name: NEW_PROJECTS_SETTINGS_LABEL }).click();
+  await openFromSettings(page, 'Projects', NEW_PROJECTS_SETTINGS_LABEL);
   await expect(page).toHaveURL(/\/settings\/new-projects$/);
 }
 

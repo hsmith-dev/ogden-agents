@@ -22,6 +22,7 @@ const fake = vi.hoisted(() => ({
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => () => Promise.resolve(),
   useParams: () => ({ wsId: fake.wsId }),
+  useRouterState: ({ select }: { select: (state: { location: { pathname: string } }) => unknown }) => select({ location: { pathname: '/' } }),
   Link: ({ children, to, params, activeOptions: _activeOptions, ...props }: { children?: ReactNode; to: string; params?: Record<string, string>; activeOptions?: unknown }) => (
     <a href={Object.entries(params ?? {}).reduce((path, [key, value]) => path.replace(`$${key}`, value), to)} {...props}>
       {children}

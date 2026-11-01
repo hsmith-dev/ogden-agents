@@ -1,4 +1,14 @@
-import { API_ROUTES, apiPath, WORKSPACE_FILE_READ_FAILED, WORKSPACE_FOLDER_READ_FAILED, WorkspaceFileResponse, WorkspaceFolderResponse } from '@ogden-agents/shared';
+import {
+  API_ROUTES,
+  apiPath,
+  WORKSPACE_FILE_READ_FAILED,
+  WORKSPACE_FOLDER_READ_FAILED,
+  WORKSPACE_SEARCH_FAILED_TEXT,
+  WorkspaceFileResponse,
+  WorkspaceFolderResponse,
+  WorkspaceSearchResponse,
+  type WorkspaceSearchMode,
+} from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
 import { call, type Auth } from '@/api/http';
 import { tabAuth } from '@/auth/tab-token';
@@ -46,6 +56,48 @@ export function useWorkspaceFolder(wsId: string, path: string, { reuse = false, 
 /** One file's content; only while `enabled` (never for a protected row). */
 export function useWorkspaceFile(wsId: string, path: string, enabled: boolean, session?: string) {
   return useQuery({ queryKey: ['workspace-file', wsId, path, session ?? ''], queryFn: () => fetchWorkspaceFile(wsId, path, session), enabled, retry: false, staleTime: 0, gcTime: 0 });
+}
+
+/** What the Search panel asks for (8.8). */
+export interface WorkspaceSearchParams {
+  q: string;
+  mode: WorkspaceSearchMode;
+  matchCase: boolean;
+  regex: boolean;
+  session?: string | undefined;
+}
+
+/**
+ * `GET /api/v1/workspaces/:wsId/files/search?q=&mode=&matchCase=&regex=&session=`
+ * (8.8): `mode`, `matchCase` and `regex` only when not their defaults.
+ * `signal` cancels it (the server then stops searching).
+ */
+export async function fetchWorkspaceSearch(wsId: string, { q, mode, matchCase, regex, session }: WorkspaceSearchParams, signal?: AbortSignal, auth: Auth = tabAuth): Promise<WorkspaceSearchResponse> {
+  const params = new URLSearchParams({ q });
+  if (mode !== 'text') params.set('mode', mode);
+  if (matchCase) params.set('matchCase', 'true');
+  if (regex) params.set('regex', 'true');
+  if (session !== undefined) params.set('session', session);
+  const json = await call(auth, `${apiPath(API_ROUTES.workspaceFileSearch, { wsId })}?${params}`, signal === undefined ? {} : { signal }, WORKSPACE_SEARCH_FAILED_TEXT);
+  return WorkspaceSearchResponse.parse(json);
+}
+
+/**
+ * The Search panel's results, only while `q` is not empty. A new query
+ * cancels the last one's request; results are never kept once the panel
+ * stops showing them (`gcTime: 0`), and a refusal (501 included) is the
+ * query's error, never retried.
+ */
+export function useWorkspaceSearch(wsId: string, params: WorkspaceSearchParams) {
+  return useQuery({
+    queryKey: ['workspace-search', wsId, params.q, params.mode, params.matchCase, params.regex, params.session ?? ''],
+    queryFn: ({ signal }) => fetchWorkspaceSearch(wsId, params, signal),
+    enabled: params.q !== '',
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
 }
 
 /** The folder that holds `path` (`''` for a root entry). */

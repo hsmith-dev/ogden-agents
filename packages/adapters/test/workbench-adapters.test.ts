@@ -89,7 +89,8 @@ describe('workspace-files-node: a chat worktree root (epic 8 entry 2)', () => {
     expect(await port.locate!(root, '.git/config')).toEqual(PROTECTED);
     expect(await port.locate!(root, 'src')).toEqual(NOT_FOUND);
     expect(await port.locate!(root, 'gone.ts')).toEqual(NOT_FOUND);
-    expect(port.search).toBeUndefined();
+    // 8.8 built it.
+    expect(port.search).toBeTypeOf('function');
     const outside = tempDir('ogden-wb-out-');
     writeFileSync(join(outside, 'secret'), 'S');
     try {

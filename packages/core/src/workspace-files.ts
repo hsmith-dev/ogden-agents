@@ -22,6 +22,7 @@ import {
   WorkspaceSearchQuery,
   WORKSPACE_PATH_HARD_LINK_MESSAGE,
   WORKSPACE_PATH_PROTECTED_MESSAGE,
+  WORKSPACE_SEARCH_INVALID_REGEX_TEXT,
   WORKSPACE_SEARCH_MAX_MATCHES,
   WORKSPACE_SEARCH_MAX_PREVIEW,
   type WorkspaceFileResponse,
@@ -78,9 +79,12 @@ export interface WorkspaceFiles {
    * Project search (8.8): `query` checked against `WorkspaceSearchQuery`
    * ({@link ValidationError}), the answer clamped to
    * `WORKSPACE_SEARCH_MAX_MATCHES` matches (`truncated` past it) and each
-   * preview to `WORKSPACE_SEARCH_MAX_PREVIEW`. Absent when the port can't search.
+   * preview to `WORKSPACE_SEARCH_MAX_PREVIEW`. A `regex` query that doesn't
+   * compile is {@link ValidationError} with the shared sentence. `signal`
+   * (the client's request) stops the search when it goes away. Absent when
+   * the port can't search.
    */
-  search?(workspaceId: unknown, query: unknown): Promise<WorkspaceSearchResponse>;
+  search?(workspaceId: unknown, query: unknown, signal?: AbortSignal): Promise<WorkspaceSearchResponse>;
   /** The absolute real path of an allowed file, for the editor launcher only; the same refusals as {@link read}. Absent when the port can't locate. */
   locate?(workspaceId: unknown, path: unknown, session?: unknown): Promise<string>;
   /**
@@ -177,7 +181,7 @@ export function createWorkspaceFiles({ entities, port }: WorkspaceFilesOptions):
   };
   const search = port.search?.bind(port);
   if (search !== undefined) {
-    files.search = async (workspaceId, query) => {
+    files.search = async (workspaceId, query, signal) => {
       const parsed = WorkspaceSearchQuery.safeParse(query);
       // The workspace and the chat are checked first: an unknown one is 404 whatever the query.
       const root = rootOf(workspaceId, (query as { session?: unknown } | null | undefined)?.session);
@@ -185,8 +189,9 @@ export function createWorkspaceFiles({ entities, port }: WorkspaceFilesOptions):
         const message = 'That search is not one Ogden can run.';
         throw new ValidationError(message, parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })));
       }
-      const { q, mode, matchCase } = parsed.data;
-      const found = await search(root.path, { q, mode, matchCase }, root.kind);
+      const { q, mode, matchCase, regex } = parsed.data;
+      if (regex && !compiles(q, matchCase)) throw new ValidationError(WORKSPACE_SEARCH_INVALID_REGEX_TEXT, [{ path: ['q'], message: WORKSPACE_SEARCH_INVALID_REGEX_TEXT }]);
+      const found = await search(root.path, { q, mode, matchCase, regex, ...(signal === undefined ? {} : { signal }) }, root.kind);
       const clamped = clampSearchFiles(found.files);
       return { files: clamped.files, truncated: found.truncated || clamped.truncated, limit: WORKSPACE_SEARCH_MAX_MATCHES };
     };
@@ -221,6 +226,16 @@ export function createWorkspaceFiles({ entities, port }: WorkspaceFilesOptions):
     };
   }
   return files;
+}
+
+/** Whether `pattern` compiles as a search's regular expression (`u`, and `i` unless Match case). Compiling never runs it. */
+function compiles(pattern: string, matchCase: boolean): boolean {
+  try {
+    new RegExp(pattern, matchCase ? 'u' : 'iu');
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** How many paths {@link WorkspaceFiles.exists} locates at once. */

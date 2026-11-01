@@ -1,5 +1,5 @@
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect } from '@tanstack/react-router';
-import { ChangesView, SessionId, TurnId } from '@ogden-agents/shared';
+import { ChangesView, SessionId, TurnId, WORKSPACE_SEARCH_MAX_QUERY, WorkspaceSearchMode } from '@ogden-agents/shared';
 import { newChatSearch, type NewChatSearch } from './chat/new-chat';
 import { HomePage } from './routes/home-page';
 import { NotFoundPage } from './routes/not-found-page';
@@ -193,15 +193,21 @@ const workspaceTerminalsRoute = createRoute({
  * `?line=` a `file:line` link's line (8.7), only with a path; `?session=` a
  * chat whose worktree the Files panel shows (8.2's root), and for Changes the
  * chat (This turn, and its worktree's Commit); `?panel=changes` opens Changes
- * (story 8.4) on `?view=`, on the chat's turn `?turn=`.
+ * (story 8.4) on `?view=`, on the chat's turn `?turn=`; `?panel=search`
+ * opens Search (8.8) with its query `?q=` (at most 200 characters) and
+ * `?mode=`, `?matchCase=`, `?regex=`.
  */
 export interface WorkbenchSearch {
   path?: string;
   line?: number;
-  panel?: 'changes';
+  panel?: 'changes' | 'search';
   view?: ChangesView;
   session?: string;
   turn?: string;
+  q?: string;
+  mode?: WorkspaceSearchMode;
+  matchCase?: boolean;
+  regex?: boolean;
 }
 
 /** The Workbench's search as the router keeps it, keeping only what it understands: a malformed line, view, session or turn is left out. */
@@ -211,13 +217,21 @@ export function workbenchSearch(search: Record<string, unknown>): WorkbenchSearc
   const view = ChangesView.safeParse(search.view);
   const session = SessionId.safeParse(search.session);
   const turn = TurnId.safeParse(search.turn);
+  // The router reads `?q=12` as a number: kept as the text typed.
+  const q = typeof search.q === 'string' ? search.q : typeof search.q === 'number' || typeof search.q === 'boolean' ? String(search.q) : undefined;
+  const mode = WorkspaceSearchMode.safeParse(search.mode);
+  const on = (value: unknown) => value === true || value === 'true';
   return {
     ...(path === undefined ? {} : { path }),
     ...(path !== undefined && line !== undefined && Number.isSafeInteger(line) && line >= 1 ? { line } : {}),
-    ...(search.panel === 'changes' ? { panel: 'changes' as const } : {}),
+    ...(search.panel === 'changes' ? { panel: 'changes' as const } : search.panel === 'search' ? { panel: 'search' as const } : {}),
     ...(view.success ? { view: view.data } : {}),
     ...(session.success ? { session: session.data } : {}),
     ...(turn.success ? { turn: turn.data } : {}),
+    ...(q !== undefined && q !== '' && q.length <= WORKSPACE_SEARCH_MAX_QUERY ? { q } : {}),
+    ...(mode.success ? { mode: mode.data } : {}),
+    ...(on(search.matchCase) ? { matchCase: true } : {}),
+    ...(on(search.regex) ? { regex: true } : {}),
   };
 }
 

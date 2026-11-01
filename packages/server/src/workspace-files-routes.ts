@@ -7,8 +7,10 @@
  *
  * - `GET /workspaces/:wsId/files?path=&session=` → `WorkspaceFolderResponse`.
  * - `GET /workspaces/:wsId/files/content?path=&session=` → `WorkspaceFileResponse`.
- * - `GET /workspaces/:wsId/files/search?q=&mode=&matchCase=&session=` →
- *   `WorkspaceSearchResponse` (epic 8 entry 2; 501 until the port can search, 8.8).
+ * - `GET /workspaces/:wsId/files/search?q=&mode=&matchCase=&regex=&session=` →
+ *   `WorkspaceSearchResponse` (8.8; 501 when the port can't search). The
+ *   request's signal stops the search when the client goes away; neither
+ *   the query nor a result is logged.
  * - `POST /workspaces/:wsId/files/links` `WorkspaceFileLinksRequest` →
  *   `WorkspaceFileLinksResponse` (8.7): which candidate paths are files the
  *   viewer would open, and nothing else (501 until the port can locate).
@@ -171,14 +173,17 @@ export function registerWorkspaceFilesRoutes(app: Hono, { workspaceFiles, log }:
   }
   app.get(API_ROUTES.workspaceFileSearch, async (c) => {
     try {
-      const { q, mode, matchCase, session } = c.req.query();
+      const { q, mode, matchCase, regex, session } = c.req.query();
+      /** `true` and `false` as booleans; anything else as given, which the schema refuses. */
+      const flag = (value: string) => (value === 'true' ? true : value === 'false' ? false : value);
       const query = {
         ...(q === undefined ? {} : { q }),
         ...(mode === undefined ? {} : { mode }),
-        ...(matchCase === undefined ? {} : { matchCase: matchCase === 'true' ? true : matchCase === 'false' ? false : matchCase }),
+        ...(matchCase === undefined ? {} : { matchCase: flag(matchCase) }),
+        ...(regex === undefined ? {} : { regex: flag(regex) }),
         ...(session === undefined ? {} : { session }),
       };
-      return c.json(WorkspaceSearchResponse.parse(await search(c.req.param('wsId'), query)), 200, NO_STORE);
+      return c.json(WorkspaceSearchResponse.parse(await search(c.req.param('wsId'), query, c.req.raw.signal)), 200, NO_STORE);
     } catch (error) {
       return refusal(c, error);
     }

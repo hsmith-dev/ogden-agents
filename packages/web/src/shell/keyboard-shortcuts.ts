@@ -30,6 +30,7 @@ export function keyboardShortcuts(platform?: string): readonly KeyboardShortcutG
       label: 'Go to',
       shortcuts: [
         { keys: [['g'], ['c']], action: 'Chats', where: 'In a project' },
+        { keys: [['g'], ['s']], action: 'Workbench Search', where: 'In a project' },
         { keys: [['g'], ['p']], action: 'Plan', where: 'In a project, with Planning on' },
         { keys: [['g'], ['b']], action: 'Board', where: 'In a project, with the Board on' },
         { keys: [['g'], ['r']], action: 'Runs', where: 'In a project, with Builds on' },

@@ -22,7 +22,7 @@ import { eq } from 'drizzle-orm';
 import { apiKeySecretName } from './agent-setup-types.js';
 import type { Database } from './db/database.js';
 import { customAgents } from './db/schema.js';
-import { NotFoundError, SecretsUnavailableError, ValidationError } from './errors.js';
+import { NotFoundError, refuseInvalid, secretsUnavailable, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { SecretStorePort } from './secret-store-port.js';
 
@@ -65,11 +65,6 @@ const viewOf = (row: Row): CustomAgent => ({ agentId: row.agentId, displayName: 
 
 export function createCustomAgents({ db, events, secrets, now = () => new Date() }: CustomAgentsOptions): CustomAgents {
   const { orm } = db;
-  const refuse = (error: { issues: Array<{ path: PropertyKey[]; message: string }> }, fallback: string): never => {
-    const issue = error.issues[0];
-    throw new ValidationError(issue?.message ?? fallback, error.issues.map((each) => ({ path: each.path, message: each.message })));
-  };
-  const unavailable = (error: unknown): SecretsUnavailableError => (error instanceof SecretsUnavailableError ? error : new SecretsUnavailableError(undefined, { cause: 'unexpected' }));
   const checkId = (agentId: AgentId) => {
     if (!AgentIdSchema.safeParse(agentId).success) throw new ValidationError('invalid agent id', [{ path: ['agentId'], message: 'not an agent id' }]);
   };
@@ -85,14 +80,14 @@ export function createCustomAgents({ db, events, secrets, now = () => new Date()
     try {
       await secrets.set(apiKeySecretName(agentId), key.value);
     } catch (error) {
-      throw unavailable(error);
+      throw secretsUnavailable(error);
     }
   };
   const dropKey = async (agentId: AgentId) => {
     try {
       await secrets.delete(apiKeySecretName(agentId));
     } catch (error) {
-      throw unavailable(error);
+      throw secretsUnavailable(error);
     }
   };
 
@@ -118,7 +113,7 @@ export function createCustomAgents({ db, events, secrets, now = () => new Date()
       try {
         value = await secrets.get(apiKeySecretName(agentId));
       } catch (error) {
-        throw unavailable(error);
+        throw secretsUnavailable(error);
       }
       return value === undefined ? undefined : { envName: row.keyEnvName, value };
     },
@@ -126,7 +121,7 @@ export function createCustomAgents({ db, events, secrets, now = () => new Date()
     async create(agentId, request) {
       checkId(agentId);
       const parsed = CustomAgentCreateRequest.safeParse(request);
-      if (!parsed.success) return refuse(parsed.error, 'That agent can not be added.');
+      if (!parsed.success) return refuseInvalid(parsed.error, 'That agent can not be added.');
       const input = parsed.data;
       if (rowOf(agentId) !== undefined) throw new ValidationError(`${agentId} is already added`, [{ path: ['agentId'], message: 'already added' }]);
       // The key first: where the keychain can't hold it, nothing is added (AD-16).
@@ -150,7 +145,7 @@ export function createCustomAgents({ db, events, secrets, now = () => new Date()
     async update(agentId, request) {
       const before = existing(agentId);
       const parsed = CustomAgentUpdateRequest.safeParse(request);
-      if (!parsed.success) return refuse(parsed.error, 'Choose something to change.');
+      if (!parsed.success) return refuseInvalid(parsed.error, 'Choose something to change.');
       const input = parsed.data;
       // A new key is kept before the row names it (the old one read first, to put back if the row can't change);
       // a removed one goes only after the row stops naming it.
@@ -161,7 +156,7 @@ export function createCustomAgents({ db, events, secrets, now = () => new Date()
           try {
             previousKey = await secrets.get(apiKeySecretName(agentId));
           } catch (error) {
-            throw unavailable(error);
+            throw secretsUnavailable(error);
           }
         }
         await setKey(agentId, newKey);

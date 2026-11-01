@@ -313,7 +313,7 @@ import { join } from 'node:path';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { isBuildPrompt, playBuildTurn } from './fake-build-turn.mjs';
+import { isBuildPrompt, isInside, playBuildTurn } from './fake-build-turn.mjs';
 
 // FAKE_ACP_PID_FILE=<file>: its pid, written first thing (before any other switch), so a test can check it is gone after a failed start.
 if (process.env.FAKE_ACP_PID_FILE) writeFileSync(process.env.FAKE_ACP_PID_FILE, `${process.pid}\n`);
@@ -810,7 +810,11 @@ async function runPrompt(params, client, session) {
     }
     // The skill as an agent runs it: a slash command, or Codex's `$name` (epic 17); the turn is shared with `fake-opencode.mjs`.
     if (isBuildPrompt(text)) {
-      return playBuildTurn({ acp, client, sessionId: params.sessionId, text, cwd: session.opened.cwd ?? process.cwd(), mode: session.mode, openedAdditionalDirectories: session.opened.additionalDirectories, editsInsideWithoutAsking: CODEX && session.mode === 'workspace-write' });
+      const cwd = session.opened.cwd ?? process.cwd();
+      // Codex in `workspace-write` (epic 17), as the real sandbox: an edit inside the workspace (or an added directory) needs no card.
+      const sandboxed = CODEX && session.mode === 'workspace-write';
+      const decide = (path) => (sandboxed && isInside(path, [cwd, ...(session.opened.additionalDirectories ?? [])]) ? 'allow' : 'ask');
+      return playBuildTurn({ acp, client, sessionId: params.sessionId, text, cwd, mode: session.mode, openedAdditionalDirectories: session.opened.additionalDirectories, decide });
     }
     if (text === 'context') {
       await say(client, params.sessionId, `session=${params.sessionId} via=${session.via} primed=${primed}`);

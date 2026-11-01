@@ -31,7 +31,7 @@ import {
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
 } from '@ogden-agents/adapters';
-import { agentEnvKeys, AgentSetupError, CoreError, createAgentSetup, createLocalModels, type AgentPort, type AgentTerminalResume, type Core, type LocalEndpoints, type LocalModelInfo } from '@ogden-agents/core';
+import { agentEnvKeys, AgentSetupError, CoreError, createAgentSetup, createLocalModels, keptAgentFlags, type AgentPort, type AgentTerminalResume, type Core, type LocalEndpoints, type LocalModelInfo } from '@ogden-agents/core';
 import { modelDescription, type AgentId } from '@ogden-agents/shared';
 import { agentHomeDir, checkAgentWiring, describedLike, type AgentWiring } from './agent-wiring.js';
 import { antigravityWiring, type AntigravityPorts } from './antigravity-wiring.js';
@@ -252,7 +252,8 @@ export function wireAgents({ options, dataDir, log, hooks, core, customKeyEnv = 
     get permissionModes() {
       return agent.permissionModes;
     },
-    ...(agent.modeFixedAtStart === true ? { modeFixedAtStart: true } : {}),
+    // Its mode fixed at start, and what Build and the remote check read (21.6: a Local chat or build naming a remote machine is refused).
+    ...keptAgentFlags(agent),
     startSession: async (input) => agent.startSession({ ...input, env: await preparedEnv(agentId, input.env) }),
     reopenSession: async (input) => agent.reopenSession({ ...input, env: await preparedEnv(agentId, input.env) }),
     listAuthMethods: (input) => agent.listAuthMethods(input),

@@ -284,6 +284,12 @@ export interface Team {
    * `settings.team_roster_default_changed` appended when it changed. {@link ValidationError} for a roster that breaks a rule.
    */
   setDefault(roster: unknown): Promise<{ roster: RosterView; stored: TeamRoster }>;
+  /**
+   * Clears every role of the roster new projects start with that names `agentId` (a removed agent, epic 21), so a later agent
+   * given the same id never takes the role silently; `settings.team_roster_default_changed` is appended when one was cleared.
+   * Returns whether the default changed. A project's own roster is left as it is (it keeps the id reserved).
+   */
+  forgetAgent(agentId: AgentId): boolean;
 }
 
 export interface TeamOptions {
@@ -364,6 +370,16 @@ export function createTeam({ db, events, chat, endpoints, tests, defaults }: Tea
         events.append({ type: 'settings.team_roster_default_changed', workspaceId: null, streamId: SETTINGS_STREAM, payload: { orchestrationRoster: next, previousOrchestrationRoster: previous } });
       }
       return defaultView();
+    },
+    forgetAgent(agentId) {
+      const previous = defaults.get().orchestrationRoster;
+      if (previous === undefined) return false;
+      const names = (assignee: TeamAssignee | null) => assignee?.kind === 'agent' && assignee.agentId === agentId;
+      if (!TEAM_ROLES.some((role) => names(previous[role]))) return false;
+      const cleared = Object.fromEntries(TEAM_ROLES.map((role) => [role, names(previous[role]) ? null : previous[role]])) as TeamRoster;
+      const next = defaults.setRoster(cleared);
+      events.append({ type: 'settings.team_roster_default_changed', workspaceId: null, streamId: SETTINGS_STREAM, payload: { orchestrationRoster: next, previousOrchestrationRoster: previous } });
+      return true;
     },
   };
 }

@@ -365,6 +365,8 @@ async function listenAndAnnounce({
   // ports and the descriptors as a wired agent does; the stored ones are registered now, before chats and builds.
   // Bound to `chat.stopAgent` once the chat exists, below.
   const stopChats: { current: ((agentId: AgentId) => void) | undefined } = { current: undefined };
+  // Bound to `team.forgetAgent` once the team exists, below.
+  const forgetInTeamDefault: { current: ((agentId: AgentId) => void) | undefined } = { current: undefined };
   const customAgents = createCustomAgentsWiring({
     store: core.customAgents(secrets),
     agents,
@@ -376,6 +378,7 @@ async function listenAndAnnounce({
     isAgentIdInUse: (agentId) => core.entities.isAgentIdInUse(agentId),
     log,
     stopChats,
+    forgetInTeamDefault,
   });
   await customAgents.load();
   /** A session's agent id: its own, else (stored before agents could be chosen) Claude Code's. */
@@ -485,6 +488,9 @@ async function listenAndAnnounce({
   const managers = core.createManagerSource({ endpoints: () => localEndpoints, port: localModelPort, tests: managerTests });
   // The team roster (15.5): who takes each role, over the chat's agents, the endpoints, the manager tests and the new project defaults.
   const team = core.createTeam({ chat, endpoints: () => localEndpoints, tests: managerTests, defaults: newProjectDefaults });
+  forgetInTeamDefault.current = (agentId) => {
+    team.forgetAgent(agentId);
+  };
   // The install's mode default and run limits (15.8), beside the defaults for new projects; a new run takes the limits as they are then.
   const orchestrationDefaults = core.createOrchestrationDefaults({ defaults: newProjectDefaults });
   const orchestrationRuns = core.createOrchestration({

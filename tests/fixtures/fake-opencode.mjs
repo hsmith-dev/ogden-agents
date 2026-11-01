@@ -14,6 +14,14 @@
 //   XDG_DATA_HOME     where its session store lives (`opencode/fake-sessions.json`,
 //                     standing in for `opencode.db`), so a session resumes across processes
 //   HOME              an empty folder: `~/.claude/skills` and `~/.agents/skills` are read from it
+//   permission        the config's `permission` block, as OpenCode honours it: `bash` for the chat's
+//                     shell command, `edit` for a build's write, and `external_directory` first for a
+//                     write outside the session's folder; each `ask` (a card), `allow` (no card) or
+//                     `deny` (refused with no card). A key it lacks takes OpenCode's own default
+//                     (`bash` and `edit` allow, `external_directory` ask).
+//
+// The test switch FAKE_OPENCODE_PERMISSION (JSON, such as `{"edit":"allow"}`) is merged over the
+// config's `permission`, as if the config said it: a test proves Ogden's config is what asks.
 //
 // What it speaks (spike 14.1): `initialize` (OpenCode 1.18.34, `loadSession`, session
 // capabilities close, fork, list and resume, one auth method `opencode-login` that is
@@ -21,8 +29,8 @@
 // the config) and `mode` (`build`, `plan`), and no `modes`; `session/set_config_option`;
 // `session/list`; `session/resume` and `session/load` (an unknown id answers -32603
 // "OpenCode service failure"); `session/prompt` as a streamed chat completion with one
-// `bash` tool; `session/cancel`; `session/close`. A shell command arrives as a permission
-// request with options `allow_once:once`, `allow_always:always`, `reject_once:reject`;
+// `bash` tool; `session/cancel`; `session/close`. A shell command (with `permission.bash`
+// `ask`, as Ogden's config sets it) arrives as a permission request with options `allow_once:once`, `allow_always:always`, `reject_once:reject`;
 // an allowed one "runs" (never really: the result is `ran(<option id>): <command>`), a rejected one
 // answers "The user rejected permission to use this specific tool call."
 //
@@ -46,7 +54,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
-import { isBuildPrompt, playBuildTurn } from './fake-build-turn.mjs';
+import { isBuildPrompt, isInside, playBuildTurn } from './fake-build-turn.mjs';
 
 if (process.env.FAKE_OPENCODE_EXIT_AT_START === '1') process.exit(3);
 
@@ -73,6 +81,14 @@ function readConfig() {
   return JSON.parse(readFileSync(file, 'utf8'));
 }
 const providerOf = (config) => config.provider?.ogden;
+/** OpenCode's own permission defaults, for a key the config does not set. */
+const PERMISSION_DEFAULTS = { bash: 'allow', edit: 'allow', external_directory: 'ask' };
+/** What the config says for `tool` (`ask`, `allow` or `deny`), with FAKE_OPENCODE_PERMISSION over it and OpenCode's default under it. */
+const permissionOf = (config, tool) => {
+  const override = process.env.FAKE_OPENCODE_PERMISSION ? JSON.parse(process.env.FAKE_OPENCODE_PERMISSION) : {};
+  const value = { ...PERMISSION_DEFAULTS, ...(config.permission ?? {}), ...override }[tool];
+  return value === 'allow' || value === 'deny' ? value : 'ask';
+};
 /** `{env:NAME}` as OpenCode reads it, else the literal. */
 const keyOf = (provider) => {
   const raw = provider?.options?.apiKey;
@@ -238,7 +254,12 @@ async function runPrompt(params, client, session) {
   }
   if (isBuildPrompt(text) && skillsSeen(session.cwd).includes('project-agents:bmad-build-auto')) {
     // The build skill, from the worktree's `.agents/skills` (epic 21 story 21.6): the same build the other fake agents play.
-    return playBuildTurn({ acp, client, sessionId, text, cwd: session.cwd, mode: undefined, openedAdditionalDirectories: session.opened?.additionalDirectories });
+    // As OpenCode: a write outside the session's folder needs `external_directory` first, then `edit` as any write does.
+    const decide = (path) => {
+      const outside = isInside(path, [session.cwd]) ? 'allow' : permissionOf(config, 'external_directory');
+      return outside === 'allow' ? permissionOf(config, 'edit') : outside;
+    };
+    return playBuildTurn({ acp, client, sessionId, text, cwd: session.cwd, mode: undefined, openedAdditionalDirectories: session.opened?.additionalDirectories, decide });
   }
   if (text.startsWith('/')) {
     // A slash command is a skill only if the harness lists it (spike 14.1: skills are listed as commands).
@@ -267,6 +288,12 @@ async function runPrompt(params, client, session) {
           continue;
         }
         const toolCall = { toolCallId: call.id, title: 'bash', kind: 'execute', rawInput: args };
+        const decided = permissionOf(config, 'bash');
+        if (decided !== 'ask') {
+          await update(client, sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: decided === 'allow' ? 'completed' : 'failed' });
+          session.messages.push({ role: 'tool', tool_call_id: call.id, content: decided === 'allow' ? `ran(config): ${args.command}` : 'The user has specified a rule which prevents you from using this specific tool call.' });
+          continue;
+        }
         await update(client, sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
         const answer = await client.request('session/request_permission', {
           sessionId,

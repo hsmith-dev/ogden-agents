@@ -8,8 +8,8 @@
  */
 import { createCustomAgent, customAgentDescriptor, probeCustomAgent } from '@ogden-agents/adapters';
 import { NotFoundError, type AgentDescriptor, type AgentPort, type CustomAgents as CustomAgentStore, type MutableAgentRegistry } from '@ogden-agents/core';
-import type { AgentId, CustomAgent } from '@ogden-agents/shared';
-import type { CustomAgents } from './custom-agent-routes.js';
+import type { AgentId, CustomAgent, CustomAgentKeyInput } from '@ogden-agents/shared';
+import { UNSAVED_TEST_ID, type CustomAgents } from './custom-agent-routes.js';
 import type { Logger } from './log.js';
 
 export interface CustomAgentsWiringOptions {
@@ -26,14 +26,14 @@ export interface CustomAgentsWiringOptions {
   log: Logger;
   /** Stops every running chat turn of an agent (core's `chat.stopAgent`); bound once the chat exists, after this wiring. */
   stopChats?: { current: ((agentId: AgentId) => void) | undefined };
+  /** Clears every role of the new projects' roster default that names an agent (core's `team.forgetAgent`); bound once the team exists, after this wiring. */
+  forgetInTeamDefault?: { current: ((agentId: AgentId) => void) | undefined };
   /** How long Test waits for `initialize` (default {@link TEST_TIMEOUT_MS}). */
   testTimeoutMs?: number;
 }
 
 /** How long Test waits for an agent to answer `initialize`: shorter than a chat start, since someone is watching the button. */
-export const TEST_TIMEOUT_MS = 20_000;
-/** The environment Test starts an unsaved command with: no stored agent can have this id (a slug never has two dashes in a row). */
-const UNSAVED_TEST_ID = 'custom--test';
+const TEST_TIMEOUT_MS = 20_000;
 
 export interface CustomAgentsWiring extends CustomAgents {
   /** Registers every stored custom agent; one that can't be registered, or whose key can't be read, is logged and skipped or keyless. */
@@ -76,6 +76,17 @@ export function createCustomAgentsWiring(options: CustomAgentsWiringOptions): Cu
     queue = run.catch(() => {});
     return run;
   };
+  /** The key typed in a request, as its agent's chat environment gets it: under its own variable only. */
+  const keyEnvOf = (apiKey: CustomAgentKeyInput) => ({ [apiKey.envName]: apiKey.value });
+  /** Test: `commandLine` started once with `env`, its notes logged with `fields`. */
+  const probe = (displayName: string, commandLine: string, env: Readonly<Record<string, string>>, fields: Record<string, unknown>) =>
+    probeCustomAgent({
+      displayName,
+      commandLine,
+      env,
+      onDiagnostic: (message, extra) => log.info(`agent: ${message}`, { ...fields, test: true, ...extra }),
+      startTimeoutMs: options.testTimeoutMs ?? TEST_TIMEOUT_MS,
+    });
   /** Reads the agent's key into its chat environment (none: removed from it). */
   const loadKey = async (agentId: AgentId) => {
     const key = await store.key(agentId);
@@ -98,7 +109,7 @@ export function createCustomAgentsWiring(options: CustomAgentsWiringOptions): Cu
           await store.remove(agentId).catch(() => {});
           throw error;
         }
-        if (request.apiKey !== undefined) keyEnv.set(agentId, { [request.apiKey.envName]: request.apiKey.value });
+        if (request.apiKey !== undefined) keyEnv.set(agentId, keyEnvOf(request.apiKey));
         return agent;
       }),
 
@@ -124,30 +135,17 @@ export function createCustomAgentsWiring(options: CustomAgentsWiringOptions): Cu
           throw error;
         }
         if (request.apiKey === null) keyEnv.delete(agentId);
-        else if (request.apiKey !== undefined) keyEnv.set(agentId, { [request.apiKey.envName]: request.apiKey.value });
+        else if (request.apiKey !== undefined) keyEnv.set(agentId, keyEnvOf(request.apiKey));
         return agent;
       }),
 
-    test: (request) =>
-      probeCustomAgent({
-        displayName: 'This agent',
-        commandLine: request.commandLine,
-        // A chat's environment (AD-16), and the typed key under its variable only.
-        env: { ...chatEnv(UNSAVED_TEST_ID), ...(request.apiKey === undefined ? {} : { [request.apiKey.envName]: request.apiKey.value }) },
-        onDiagnostic: (message, fields) => log.info(`agent: ${message}`, { test: true, ...fields }),
-        startTimeoutMs: options.testTimeoutMs ?? TEST_TIMEOUT_MS,
-      }),
+    // A chat's environment (AD-16), and the typed key under its variable only.
+    test: (request) => probe('This agent', request.commandLine, { ...chatEnv(UNSAVED_TEST_ID), ...(request.apiKey === undefined ? {} : keyEnvOf(request.apiKey)) }, {}),
 
     async testSaved(agentId) {
       const agent = store.get(agentId);
       if (agent === undefined) throw new NotFoundError('custom agent', agentId);
-      return probeCustomAgent({
-        displayName: agent.displayName,
-        commandLine: agent.commandLine,
-        env: chatEnv(agentId),
-        onDiagnostic: (message, fields) => log.info(`agent: ${message}`, { agentId, test: true, ...fields }),
-        startTimeoutMs: options.testTimeoutMs ?? TEST_TIMEOUT_MS,
-      });
+      return probe(agent.displayName, agent.commandLine, chatEnv(agentId), { agentId });
     },
 
     remove: (agentId) =>
@@ -164,6 +162,12 @@ export function createCustomAgentsWiring(options: CustomAgentsWiringOptions): Cu
           options.stopChats?.current?.(agentId);
         } catch (error) {
           log.warn("a removed custom agent's chats could not all be stopped", { agentId, code: error instanceof Error ? error.name : 'unexpected' });
+        }
+        // The new projects' roster default is a file, not one of the id's keepers: a role naming it is cleared, so a later agent given the same id never takes it.
+        try {
+          options.forgetInTeamDefault?.current?.(agentId);
+        } catch (error) {
+          log.warn("a removed custom agent's roles in the default team could not be cleared", { agentId, code: error instanceof Error ? error.name : 'unexpected' });
         }
       }),
 

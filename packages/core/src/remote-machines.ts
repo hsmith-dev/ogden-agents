@@ -36,7 +36,7 @@ import {
 import { eq } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { remoteMachines } from './db/schema.js';
-import { ConfirmationRequiredError, NotFoundError, SecretsUnavailableError, ValidationError } from './errors.js';
+import { ConfirmationRequiredError, NotFoundError, refuseInvalid, secretsUnavailable, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import { newId } from './ids.js';
 import { RemoteHostError, type RemoteHostPort } from './remote-host-port.js';
@@ -85,13 +85,6 @@ type Change = (typeof REMOTE_MACHINE_CHANGES)[number];
 export function createRemoteMachines({ db, events, secrets, hosts, now = () => new Date() }: RemoteMachinesOptions): RemoteMachines {
   const { orm } = db;
 
-  const refuse = (error: { issues: Array<{ path: PropertyKey[]; message: string }> }, fallback: string): never => {
-    const issue = error.issues[0];
-    throw new ValidationError(issue?.message ?? fallback, error.issues.map((each) => ({ path: each.path, message: each.message })));
-  };
-
-  const unavailable = (error: unknown): SecretsUnavailableError => (error instanceof SecretsUnavailableError ? error : new SecretsUnavailableError(undefined, { cause: 'unexpected' }));
-
   const usable = (row: unknown): RemoteMachine | undefined => {
     const parsed = RemoteMachineSchema.safeParse(row);
     return parsed.success ? parsed.data : undefined;
@@ -125,7 +118,7 @@ export function createRemoteMachines({ db, events, secrets, hosts, now = () => n
 
     add(request) {
       const parsed = AddRemoteMachineRequest.safeParse(request);
-      if (!parsed.success) return refuse(parsed.error, 'That machine can not be added.');
+      if (!parsed.success) return refuseInvalid(parsed.error, 'That machine can not be added.');
       const input = parsed.data;
       if (all().length >= MAX_REMOTE_MACHINES) throw new ValidationError(`You can keep up to ${MAX_REMOTE_MACHINES} machines. Remove one first.`, []);
       const id = newId('mach');
@@ -152,7 +145,7 @@ export function createRemoteMachines({ db, events, secrets, hosts, now = () => n
 
     rename(id, request) {
       const parsed = RenameRemoteMachineRequest.safeParse(request);
-      if (!parsed.success) return refuse(parsed.error, 'Choose a name for the machine.');
+      if (!parsed.success) return refuseInvalid(parsed.error, 'Choose a name for the machine.');
       rowOf(id); // NotFoundError before the write when there is no such machine.
       return events.transaction(() => {
         orm.update(remoteMachines).set({ label: parsed.data.label }).where(eq(remoteMachines.id, id)).run();
@@ -177,7 +170,7 @@ export function createRemoteMachines({ db, events, secrets, hosts, now = () => n
 
     async confirmHostKey(id, request) {
       const parsed = ConfirmHostKeyRequest.safeParse(request);
-      if (!parsed.success) return refuse(parsed.error, 'That host key can not be confirmed.');
+      if (!parsed.success) return refuseInvalid(parsed.error, 'That host key can not be confirmed.');
       if (parsed.data.confirm !== true) throw new ConfirmationRequiredError('Confirm the host key fingerprint to use this machine.');
       const before = rowOf(id);
       const live = await hosts.checkHostKey({ host: before.host, port: before.port, username: before.username });
@@ -198,7 +191,7 @@ export function createRemoteMachines({ db, events, secrets, hosts, now = () => n
       try {
         await secrets.set(remoteMachineSshSecretName(id), keypair.privateKey);
       } catch (error) {
-        throw unavailable(error);
+        throw secretsUnavailable(error);
       }
       try {
         return events.transaction(() => {

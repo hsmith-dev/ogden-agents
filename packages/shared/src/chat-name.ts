@@ -63,9 +63,24 @@ export function autoChatName(text: string, max = AUTO_CHAT_NAME_MAX): string | n
   return `${kept.trimEnd()}…`;
 }
 
+/**
+ * A build session named before 26.6 kept its first prompt, the build skill's
+ * command (`/bmad-build-auto ticket 1.2`, or Codex's `$bmad-build-auto ticket
+ * 1.2 <note>`). Read-side only: the stored name is never rewritten.
+ */
+const LEGACY_BUILD_COMMAND = /^[/$]bmad-build-auto ticket ([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?:\s|…|$)/;
+
+/** The automatic name as shown: a legacy build command reads "Build 1.2" (the ticket's title isn't known here). */
+const shownAutoTitle = (autoTitle: string): string => {
+  const legacy = LEGACY_BUILD_COMMAND.exec(autoTitle);
+  return legacy === null ? autoTitle : `Build ${legacy[1]}`;
+};
+
 /** The name a chat shows: the user's, else the automatic one, else "New chat". */
 export function chatName(session: { title?: string | null | undefined; autoTitle?: string | null | undefined }): string {
-  return session.title ?? session.autoTitle ?? NEW_CHAT_NAME;
+  if (session.title !== null && session.title !== undefined) return session.title;
+  if (session.autoTitle !== null && session.autoTitle !== undefined) return shownAutoTitle(session.autoTitle);
+  return NEW_CHAT_NAME;
 }
 
 /**

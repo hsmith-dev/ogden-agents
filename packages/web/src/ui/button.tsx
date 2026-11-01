@@ -4,7 +4,8 @@ import type { ComponentProps } from 'react';
 import { cn } from './utils';
 
 /**
- * Button (DESIGN.md button-primary, -secondary, -outline, -destructive).
+ * Button (DESIGN.md button-primary, -secondary, -outline, -destructive;
+ * `terminal` for icon buttons on the terminal surface).
  * Primary is ink, never colored; one to three words, never wraps.
  */
 export const buttonVariants = cva(
@@ -23,6 +24,8 @@ export const buttonVariants = cva(
         destructive: 'border border-border bg-transparent text-destructive not-aria-disabled:hover:bg-accent',
         ghost: 'bg-transparent text-foreground not-aria-disabled:hover:bg-accent',
         link: 'bg-transparent text-foreground underline-offset-4 not-aria-disabled:hover:underline',
+        /** On the terminal surface (a pane header, 26.6): the terminal's own foreground, a faint fill of it on hover. */
+        terminal: 'bg-transparent text-terminal-foreground not-aria-disabled:hover:bg-terminal-foreground/15',
       },
       size: {
         default: 'h-(--control-height) px-3',

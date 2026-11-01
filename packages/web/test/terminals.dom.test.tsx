@@ -242,6 +242,23 @@ describe('the Terminals page (E16-R3, AD-21)', () => {
     expect((screen.getByTestId('terminals-new') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('every pane header button is an icon with a name and a tooltip (26.6)', async () => {
+    fakes.panes = [pane({ state: 'stopped', status: 'idle' })];
+    await mount();
+    await act(async () => fakes.connections[0]!.handlers.onOpen());
+    const header = screen.getByTestId('pane').querySelectorAll('button:not([data-testid="pane-title"])');
+    const named = [...header].map((button) => button.getAttribute('aria-label'));
+    expect(named).toEqual(['Split right', 'Split down', 'Start', 'Close pane']);
+    for (const button of header) {
+      expect(button.querySelector('svg'), button.getAttribute('aria-label')!).not.toBeNull();
+      expect(button.textContent).toBe('');
+    }
+    // A keyboard user focusing one sees its name in a tooltip.
+    act(() => (screen.getByTestId('pane-close') as HTMLButtonElement).focus());
+    await settle();
+    expect(screen.getAllByRole('tooltip').some((tip) => tip.textContent === 'Close pane')).toBe(true);
+  });
+
   it('Close asks the server to stop the pane and removes it', async () => {
     fakes.panes = [pane()];
     await mount();
@@ -321,7 +338,7 @@ describe('stopped panes after a restart (story 16.7)', () => {
     fireEvent.change(screen.getByTestId('pane-start-args'), { target: { value: '--model big' } });
     fireEvent.click(screen.getByTestId('pane-restart'));
     await settle();
-    expect(screen.getByTestId('pane-restart').textContent).toBe('Start');
+    expect(screen.getByTestId('pane-restart').getAttribute('aria-label')).toBe('Start');
     expect(JSON.parse(fakes.requests.find((r) => r.path.endsWith('/restart'))!.body!)).toEqual({ cols: 80, rows: 24, args: '--model big' });
   });
 
@@ -330,7 +347,7 @@ describe('stopped panes after a restart (story 16.7)', () => {
     await mount();
     await act(async () => fakes.connections[0]!.handlers.onOpen());
     expect(screen.queryByTestId('pane-start-args')).toBeNull();
-    expect(screen.getByTestId('pane-restart').textContent).toBe('Start');
+    expect(screen.getByTestId('pane-restart').getAttribute('aria-label')).toBe('Start');
   });
 });
 
@@ -445,9 +462,21 @@ describe('tabs, splits and the layout (story 16.4)', () => {
     expect(JSON.parse(post.body!)).toMatchObject({ placement: { kind: 'split', paneId: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WA', direction: 'row' } });
     cleanup();
     fakes.panes = Array.from({ length: 8 }, (_, i) => pane({ id: `pan_01J9Z3K4M5N6P7Q8R9S0T1V2W${i}`, title: `T${i}`, state: 'running' }));
+    fakes.layout = { tabs: [{ id: 'ta', title: 'Main', root: { type: 'pane', paneId: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W0' } }], activeTabId: 'ta' };
     await mount();
     expect(screen.getByTestId('terminals-full').textContent).toBe('A project can have 8 terminals open at once. Close one first.');
     expect((screen.getByTestId('terminals-new') as HTMLButtonElement).disabled).toBe(true);
+    // At the limit Split stays focusable (its tooltip names the reason), marked aria-disabled, and a click does nothing.
+    const split = screen.getAllByTestId('pane-split-row')[0]! as HTMLButtonElement;
+    expect(split.getAttribute('aria-disabled')).toBe('true');
+    expect(split.disabled).toBe(false);
+    const before = fakes.requests.filter((r) => r.method === 'POST').length;
+    fireEvent.click(split);
+    await settle();
+    expect(fakes.requests.filter((r) => r.method === 'POST')).toHaveLength(before);
+    act(() => split.focus());
+    await settle();
+    expect(screen.getAllByRole('tooltip').some((tip) => tip.textContent === 'A project can have 8 terminals open at once. Close one first.')).toBe(true);
   });
 
   it('renames a pane from its name and a tab by double click, Enter saves and Escape does not', async () => {

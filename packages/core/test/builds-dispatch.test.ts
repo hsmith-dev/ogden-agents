@@ -50,6 +50,8 @@ describe('limits and the queue (story 5.8)', () => {
     const third = await h.builds.start(h.wsId, { ref: '1.3' });
     expect(third.run).toMatchObject({ outcome: 'running', queuePosition: 1, worktreePath: null, branch: null });
     expect(queue(h)).toEqual([{ runId: third.run.id, ticketRef: '1.3', position: 1 }]);
+    // A queued run's session is named by its ticket too (26.6).
+    expect(third.session.autoTitle).toBe('Build 1.3: Third');
     expect(h.git.calls.filter((call) => call.startsWith('worktree add'))).toHaveLength(2);
     expect(h.sent).toHaveLength(2);
     // Its ticket counts as being built.

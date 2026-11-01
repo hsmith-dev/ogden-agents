@@ -15,7 +15,7 @@ import { Notice } from '@/ui/notice';
 import { Text } from '@/ui/typography';
 import { cn } from '@/ui/utils';
 import type { EpicLookBackControls } from './board-look-back';
-import type { BoardEpicGroup, CardStatus } from './board-model';
+import { epicHeading, type BoardEpicGroup, type CardStatus } from './board-model';
 import { TicketCard } from './ticket-card';
 import type { TicketStatusChoice } from './ticket-status-menu';
 
@@ -58,8 +58,8 @@ function CardList({ wsId, rows, statuses, highlighted, label, onChoose, saving =
 }
 
 /**
- * One epic on the board (story 4.9): its title (with its id in mono when the
- * tree names it), then its seven status columns. At `md` and wider they sit
+ * One epic on the board (story 4.9): its heading (26.6: "Epic 26: Everyday
+ * polish", {@link epicHeading}), then its seven status columns. At `md` and wider they sit
  * side by side in a horizontally scrollable, focusable, labelled region;
  * below `md` the non-empty ones stack as lists under their headings. With the
  * dropped filter on, its dropped tickets follow. Story 7.1: with Retrospectives
@@ -73,9 +73,8 @@ export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlig
   return (
     <section data-testid="board-epic" data-epic={epic.slug} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <Text as="h2" variant="heading" id={headingId} className="flex items-baseline gap-2">
-          {epic.id === null ? null : <span className="font-mono text-mono-compact text-muted-foreground">{epic.id}</span>}
-          <span>{epic.title}</span>
+        <Text as="h2" variant="heading" id={headingId}>
+          {epicHeading(epic)}
         </Text>
         <div className="flex flex-wrap items-center gap-2">
           {retrospective?.verdict == null ? null : (
@@ -137,7 +136,7 @@ export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlig
               <span className="tabular-nums">{rows.length}</span>
             </Text>
             {rows.length === 0 ? null : (
-              <CardList wsId={wsId} rows={rows} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} failures={failures} label={`${epic.title}, ${BOARD_COLUMN_LABELS[column]}`} />
+              <CardList wsId={wsId} rows={rows} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} failures={failures} label={`${epicHeading(epic)}, ${BOARD_COLUMN_LABELS[column]}`} />
             )}
           </div>
         ))}
@@ -148,7 +147,7 @@ export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlig
             {BOARD_DROPPED_LABEL}
           </Text>
           <div className="md:max-w-96">
-            <CardList wsId={wsId} rows={epic.dropped} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} label={`${epic.title}, ${BOARD_DROPPED_LABEL}`} />
+            <CardList wsId={wsId} rows={epic.dropped} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} label={`${epicHeading(epic)}, ${BOARD_DROPPED_LABEL}`} />
           </div>
         </div>
       )}

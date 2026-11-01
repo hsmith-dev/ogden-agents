@@ -83,6 +83,25 @@ describe('the Runs list (story 11.1)', () => {
     expect(screen.getByTestId('runs-queue').textContent).toContain('1.3');
   });
 
+  it('the whole row opens its run (26.6): the title link is stretched over the row, and Review keeps its own target', async () => {
+    state.runs = { runs: [run('A1', '1.1', { outcome: 'verified' }), run('A2', '1.2', { outcome: 'running' })], queue: [] };
+    await mount();
+    const [built, running] = screen.getAllByTestId('run-row');
+    const link = built!.querySelector('[data-testid="run-row-link"]')!;
+    expect(link.getAttribute('href')).toBe(`/w/${WS}/s/ses_01J9Z3K4M5N6P7Q8R9S0T1V2A1`);
+    expect(link.getAttribute('aria-label')).toBe('Open the build 1.1 First thing');
+    expect(link.className).toContain('after:absolute');
+    expect(link.className).toContain('after:inset-0');
+    expect(built!.className).toContain('relative');
+    // The buttons sit above the stretched link, each with its own target.
+    const review = built!.querySelector('[data-testid="run-row-review"]')!;
+    expect(review.getAttribute('href')).toBe(`/w/${WS}/review/1.1`);
+    expect(review.parentElement!.className).toContain('z-10');
+    expect(review.parentElement!.className).toContain('relative');
+    // A ticket with no title still names the build.
+    expect(running!.querySelector('[data-testid="run-row-link"]')?.getAttribute('aria-label')).toBe('Open the build 1.2');
+  });
+
   it('says so when there are no runs, and when they could not be loaded', async () => {
     state.runs = { runs: [], queue: [] };
     await mount();

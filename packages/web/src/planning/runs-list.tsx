@@ -1,4 +1,4 @@
-import { RUN_PHASE_LABELS, RUN_VIEW_LINK_LABEL, RUNS_EMPTY_TEXT, RUNS_LOAD_FAILED, RUNS_PAGE_TITLE, RUNS_QUEUE_TITLE, REVIEW_LINK_LABEL, runPhase, type Run } from '@ogden-agents/shared';
+import { RUN_PHASE_LABELS, RUN_VIEW_LINK_LABEL, RUNS_EMPTY_TEXT, RUNS_LOAD_FAILED, RUNS_PAGE_TITLE, RUNS_QUEUE_TITLE, REVIEW_LINK_LABEL, runPhase, runRowLinkLabel, type Run } from '@ogden-agents/shared';
 import { Link } from '@tanstack/react-router';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
@@ -10,14 +10,30 @@ import { runSentence } from './build-run-panel';
 import { useWorkspaceRuns } from './builds-api';
 import { useTickets } from './planning-api';
 
-/** One run: its ticket, its state, why it stopped (if it did) and a link to its run view, and to its review once it is ready. */
+/**
+ * One run: its ticket, its state, why it stopped (if it did) and a link to its run view, and to its review once it is ready.
+ * The whole row opens the run (26.6): the title is a link stretched over the row; its buttons sit above it and keep their own targets.
+ */
 function RunRow({ wsId, run, title }: { wsId: string; run: Run; title: string | undefined }) {
   const phase = runPhase(run);
   const sentence = run.outcome === 'running' ? null : runSentence(run);
   return (
-    <li className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-card px-3 py-2" data-testid="run-row" data-ref={run.ticketRef} data-phase={phase}>
+    <li
+      className="relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-card px-3 py-2 transition-colors duration-(--motion-fast) ease-standard hover:bg-accent"
+      data-testid="run-row"
+      data-ref={run.ticketRef}
+      data-phase={phase}
+    >
       <span className="font-mono text-mono-compact text-muted-foreground">{run.ticketRef}</span>
-      <span className="min-w-0 flex-1 truncate text-label text-foreground">{title ?? ''}</span>
+      <Link
+        to="/w/$wsId/s/$sesId"
+        params={{ wsId, sesId: run.sessionId }}
+        aria-label={runRowLinkLabel(run.ticketRef, title)}
+        className="min-w-0 flex-1 truncate text-label text-foreground outline-none after:absolute after:inset-0 after:rounded-md focus-visible:after:outline-solid focus-visible:after:outline-(length:--focus-ring-width) focus-visible:after:outline-ring focus-visible:after:outline-offset-(--focus-ring-offset)"
+        data-testid="run-row-link"
+      >
+        {title ?? ''}
+      </Link>
       <Badge variant="outline" data-testid="run-row-phase">
         {RUN_PHASE_LABELS[phase]}
       </Badge>
@@ -26,7 +42,7 @@ function RunRow({ wsId, run, title }: { wsId: string; run: Run; title: string | 
           {sentence}
         </span>
       )}
-      <span className="flex gap-2">
+      <span className="relative z-10 flex gap-2">
         <Button variant="outline" size="sm" asChild>
           <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId: run.sessionId }} data-testid="run-row-open">
             {RUN_VIEW_LINK_LABEL}

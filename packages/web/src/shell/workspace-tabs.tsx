@@ -1,4 +1,4 @@
-import type { BmadPiece, BmadPieceAvailability } from '@ogden-agents/shared';
+import { reviewTabLabel, type BmadPiece, type BmadPieceAvailability } from '@ogden-agents/shared';
 import { Link } from '@tanstack/react-router';
 import { useAppearance } from '@/appearance/appearance-provider';
 import { useTerminalsSettings } from '@/terminal/terminals-settings';
@@ -21,7 +21,8 @@ import { useGoShortcuts } from './use-go-shortcuts';
  * each tab's tooltip (on hover and keyboard focus) shows its keys.
  */
 
-export type WorkspaceTabId = 'chats' | 'plan' | 'board' | 'runs' | 'orchestrate' | 'terminals';
+/** A slot's id, or `review`: the review page's own tab (26.6), shown only on that page and never a slot. */
+export type WorkspaceTabId = 'chats' | 'plan' | 'board' | 'runs' | 'orchestrate' | 'terminals' | 'review';
 
 export interface WorkspaceTabSlot {
   id: WorkspaceTabId;
@@ -80,8 +81,12 @@ export function workspaceTabShortcutKeys(tab: Pick<WorkspaceTabSlot, 'key'>): st
   return ['g', tab.key];
 }
 
-/** The tabs as links; `active` is marked as the current page. `hints` gives each tab a tooltip with its keys (Developer mode). */
-export function WorkspaceTabsView({ wsId, tabs, active, hints = false }: { wsId: string; tabs: readonly VisibleWorkspaceTab[]; active: WorkspaceTabId; hints?: boolean }) {
+/**
+ * The tabs as links; `active` is marked as the current page. `hints` gives each tab a tooltip with its keys (Developer mode).
+ * `reviewRef` (26.6, the review page) adds a last, current tab "Review 1.2" linking to the page shown; no slot is current with it.
+ */
+export function WorkspaceTabsView({ wsId, tabs, active, hints = false, reviewRef }: { wsId: string; tabs: readonly VisibleWorkspaceTab[]; active: WorkspaceTabId; hints?: boolean; reviewRef?: string | undefined }) {
+  const current = (id: WorkspaceTabId) => reviewRef === undefined && id === active;
   return (
     <TabNav label="Project sections" data-testid="workspace-tabs">
       {tabs.map((tab) => {
@@ -91,7 +96,7 @@ export function WorkspaceTabsView({ wsId, tabs, active, hints = false }: { wsId:
             to={tab.to as '/w/$wsId'}
             params={{ wsId }}
             // `active` decides: the router would also mark Chats current on any page below `/w/$wsId`.
-            activeOptions={{ exact: tab.id !== active, includeSearch: false }}
+            activeOptions={{ exact: !current(tab.id), includeSearch: false }}
             data-testid={`workspace-tab-${tab.id}`}
           >
             {tab.label}
@@ -99,14 +104,14 @@ export function WorkspaceTabsView({ wsId, tabs, active, hints = false }: { wsId:
         );
         if (!hints) {
           return (
-            <TabNavItem key={tab.id} current={tab.id === active} asChild>
+            <TabNavItem key={tab.id} current={current(tab.id)} asChild>
               {link}
             </TabNavItem>
           );
         }
         return (
           <Tooltip key={tab.id}>
-            <TabNavItem current={tab.id === active} asChild>
+            <TabNavItem current={current(tab.id)} asChild>
               <TooltipTrigger asChild>{link}</TooltipTrigger>
             </TabNavItem>
             <TooltipContent data-testid={`workspace-tab-hint-${tab.id}`}>
@@ -119,12 +124,19 @@ export function WorkspaceTabsView({ wsId, tabs, active, hints = false }: { wsId:
           </Tooltip>
         );
       })}
+      {reviewRef === undefined ? null : (
+        <TabNavItem current asChild>
+          <Link to="/w/$wsId/review/$ref" params={{ wsId, ref: reviewRef }} data-testid="workspace-tab-review">
+            {reviewTabLabel(reviewRef)}
+          </Link>
+        </TabNavItem>
+      )}
     </TabNav>
   );
 }
 
 /** The project's tabs, from its pieces and this install's: Chats alone until both are known; with their `g` shortcuts. */
-export function WorkspaceTabs({ wsId, active, slots = WORKSPACE_TAB_SLOTS }: { wsId: string; active: WorkspaceTabId; slots?: readonly WorkspaceTabSlot[] }) {
+export function WorkspaceTabs({ wsId, active, slots = WORKSPACE_TAB_SLOTS, reviewRef }: { wsId: string; active: WorkspaceTabId; slots?: readonly WorkspaceTabSlot[]; reviewRef?: string | undefined }) {
   const settings = useWorkspaceSettings(wsId);
   const available = useBmadPieces();
   // A failed refetch keeps the last data: while either query is in error, nothing is known.
@@ -135,5 +147,5 @@ export function WorkspaceTabs({ wsId, active, slots = WORKSPACE_TAB_SLOTS }: { w
   const terminalsSettings = useTerminalsSettings(appearance.developerMode);
   const tabs = visibleWorkspaceTabs(pieces, availability, slots, appearance.developerMode && !terminalsSettings.isPending && terminalsSettings.data?.hidden !== true, !settings.isError && settings.data?.orchestrationEnabled === true);
   useGoShortcuts(wsId, tabs);
-  return <WorkspaceTabsView wsId={wsId} tabs={tabs} active={active} hints={appearance.developerMode} />;
+  return <WorkspaceTabsView wsId={wsId} tabs={tabs} active={active} hints={appearance.developerMode} reviewRef={reviewRef} />;
 }

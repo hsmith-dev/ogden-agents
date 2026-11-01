@@ -28,7 +28,8 @@ import { createWorktreePutAwayStore, type WorktreePutAwayStore } from './worktre
 import { createSnapshotCleanup, createWorktreeRetention, type SnapshotCleanup, type WorktreeRetentionOptions, type WorktreeRetentionSweep } from './worktree-retention.js';
 import { createEditorLaunch, type EditorLaunch } from './editor-launch.js';
 import type { EditorLauncherPort } from './editor-launcher-port.js';
-import type { ChatLocations, Trials, WorktreePorts } from './where-work-runs.js';
+import type { ChatLocations, PortProbePort, Trials, WorktreePorts } from './where-work-runs.js';
+import { createWorktreePorts } from './worktree-ports.js';
 import { createProjectCommands, type ProjectCommandRunner, type ProjectCommands } from './project-commands.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
@@ -126,6 +127,7 @@ export interface Core {
   readonly createWorktreeRetention: (ports: Pick<WorktreeRetentionOptions, 'chat' | 'dataDir' | 'onSkipped'>) => WorktreeRetentionSweep;
   /** The snapshot store's cleanup (27.6) over the server's store port. */
   readonly createSnapshotCleanup: (port: VcsSnapshotStorePort) => SnapshotCleanup;
+  /** A worktree chat's own port (27.7), for `createChat`'s `worktreePorts`; `undefined` without a {@link OpenCoreOptions.portProbe}. */
   readonly worktreePorts: WorktreePorts | undefined;
   readonly trials: Trials | undefined;
   /** Problems (AD-38; 8.9): the project's declared commands, their runs and parsed failures; `undefined` without a {@link OpenCoreOptions.projectCommandRunner} and a files port. */
@@ -229,6 +231,8 @@ export type OpenCoreOptions = OpenDatabaseOptions &
     editorLauncherPort?: EditorLauncherPort;
     /** Runs a project's declared commands (AD-38; 8.9: `project-commands-node`). Absent: no Problems use-case. The server closes it on stop. */
     projectCommandRunner?: ProjectCommandRunner;
+    /** Whether a port on this computer is free (27.7: `port-probe-node`, on `127.0.0.1` only). Absent: no worktree chat is given a port. */
+    portProbe?: PortProbePort;
     /**
      * The repo-relative files the registered agents that need project trust
      * run (their descriptors' `projectFiles`, epic 12, 12.3); the trust is
@@ -320,7 +324,10 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     worktreePutAway,
     createWorktreeRetention: (ports) => createWorktreeRetention({ ...ports, entities, store: worktreePutAway }),
     createSnapshotCleanup: (port) => createSnapshotCleanup({ entities, store: worktreePutAway, port }),
-    worktreePorts: undefined,
+    worktreePorts:
+      options.portProbe === undefined
+        ? undefined
+        : createWorktreePorts({ db, events, sessionEvents, entities, probe: options.portProbe, putAway: (sessionId) => worktreePutAway.get(sessionId) !== undefined }),
     trials: undefined,
     projectCommands:
       options.projectCommandRunner === undefined || options.workspaceFilesPort === undefined

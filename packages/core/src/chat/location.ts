@@ -60,6 +60,7 @@ import { VcsError, type VcsFolder, type VcsMoveChanges } from '../vcs-port.js';
 import { sessionFolder, vcsFolderOf, workspaceFolder } from '../workspace-root.js';
 import type { Agents } from './agents.js';
 import type { ChatContext } from './context.js';
+import { readyCopy, releasePort, stopSetup } from './copy-port.js';
 import { isSameOrInside } from './folder-hold.js';
 import type { Chat } from './types.js';
 import { addChatWorktree, removeUnusedWorktree } from './workspaces.js';
@@ -243,6 +244,8 @@ export function createChatLocation(ctx: ChatContext, deps: Pick<Agents, 'release
       else report(session.id);
       throw error;
     }
+    // Its own port (27.7), then the server's setup in the copy; neither fails the hand-off.
+    await readyCopy(ctx, session.id, { workspaceId: workspace.id, worktreePath: copy.worktreePath });
   };
 
   const toThisFolder = async (workspace: Workspace, session: Session & { worktreePath: string; branch: string }, resumes: boolean): Promise<void> => {
@@ -250,6 +253,8 @@ export function createChatLocation(ctx: ChatContext, deps: Pick<Agents, 'release
     const port = ctx.options.vcsChatWorktree!;
     const project: VcsFolder = { path: repoPath };
     const folder = vcsFolderOf(workspace, session);
+    // Its setup run (27.7) stops first: nothing writes in the copy while its changes move out and it is removed.
+    if (!(await stopSetup(ctx, session.id))) throw new AgentMidTurnError(MID_TURN_MESSAGE);
     let moved: VcsMoveChanges;
     try {
       moved = await port.moveChanges(repoPath, { from: folder, to: project });
@@ -269,6 +274,8 @@ export function createChatLocation(ctx: ChatContext, deps: Pick<Agents, 'release
       report(session.id, error);
       throw error;
     }
+    // Working in this folder: its port goes back (27.7).
+    await releasePort(ctx, session.id);
     if (moved.leftBehind > 0) {
       report(session.id);
       return;
@@ -280,7 +287,11 @@ export function createChatLocation(ctx: ChatContext, deps: Pick<Agents, 'release
     chatLocation(workspaceId, sessionId): SessionLocation {
       const session = getSession(workspaceId, sessionId);
       if (session.machineId !== null) return { kind: 'remote', machineId: session.machineId };
-      if (session.worktreePath !== null && session.branch !== null) return { kind: 'worktree', branch: session.branch, port: null, putAway: ctx.options.worktreePutAway?.get(session.id) !== undefined };
+      if (session.worktreePath !== null && session.branch !== null) {
+        const putAway = ctx.options.worktreePutAway?.get(session.id) !== undefined;
+        // The setup run is the server's (`createChatLocations` adds it); the chat knows none.
+        return { kind: 'worktree', branch: session.branch, port: putAway ? null : (ctx.options.worktreePorts?.portOf(session.id) ?? null), setup: null, putAway };
+      }
       return { kind: 'this_folder' };
     },
 

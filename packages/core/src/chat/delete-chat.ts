@@ -37,6 +37,7 @@ import { withinTimeout } from '../turn-snapshots.js';
 import { vcsFolderOf, workspaceFolder } from '../workspace-root.js';
 import type { Agents } from './agents.js';
 import type { ChatContext } from './context.js';
+import { stopSetup } from './copy-port.js';
 import type { Chat } from './types.js';
 
 /** How long a deleted chat's agent and terminal may take to exit before its copy is removed anyway. */
@@ -110,17 +111,18 @@ export function createChatDeletion(ctx: ChatContext, deps: Pick<Agents, 'drop'> 
     return { sessionId: session.id, path: session.worktreePath, branch: session.branch, deleteBranch: await isMerged(workspaceFolder(workspace), session.branch) };
   };
 
-  /** Ends the deleted chat's live agent and terminal (the rows are gone: nothing restarts them). */
-  const stopLive = (sessionId: SessionId): void => {
+  /** Ends the deleted chat's live agent and terminal (the rows are gone: nothing restarts them), and its setup run (27.7, forgotten); whether that stopped in time. */
+  const stopLive = (sessionId: SessionId): Promise<boolean> => {
     const entry = live.get(sessionId);
     if (entry !== undefined) drop(sessionId, entry);
+    return stopSetup(ctx, sessionId, { forget: true });
   };
 
   /** Removes the copy once its agent and terminal exited (bounded); a failure is reported and leaves it. */
-  const removeCopy = async (repoPath: string, copy: Copy, terminalStopped: Promise<void>): Promise<{ removed: boolean; branchKept: boolean }> => {
-    // Windows: a folder an agent still has as its cwd can't be removed; one still running there keeps its copy (reported).
-    const exited = await withinTimeout(Promise.all([droppedAgents.get(copy.sessionId), terminalStopped]).then(() => true), stopBeforeRemovalMs);
-    if (exited !== true) {
+  const removeCopy = async (repoPath: string, copy: Copy, terminalStopped: Promise<void>, setupStopped: Promise<boolean>): Promise<{ removed: boolean; branchKept: boolean }> => {
+    // Windows: a folder an agent (or its setup run) still has as its cwd can't be removed; one still running there keeps its copy (reported).
+    const [exited, setupDone] = await Promise.all([withinTimeout(Promise.all([droppedAgents.get(copy.sessionId), terminalStopped]).then(() => true), stopBeforeRemovalMs), setupStopped]);
+    if (exited !== true || !setupDone) {
       report(copy.sessionId, 'remove');
       return { removed: false, branchKept: true };
     }
@@ -169,14 +171,14 @@ export function createChatDeletion(ctx: ChatContext, deps: Pick<Agents, 'drop'> 
         if (session.worktreePath !== before.worktreePath || session.updatedAt !== before.updatedAt || session.state !== before.state) throw new AgentMidTurnError(DELETE_CHAT_MID_TURN_MESSAGE);
         const branchKept = session.branch !== null && copy?.deleteBranch !== true;
         entities.deleteChatSession(sessionId, { worktreeRemoved: copy !== undefined, branchKept });
-        stopLive(sessionId);
+        const setupStopped = stopLive(sessionId);
         const terminalStopped = stopTerminal(sessionId).catch(() => undefined);
         if (copy === undefined) {
           // A tampered row (a copy outside `<data>/cw`, or `<data>/cw` a link): its rows are gone, nothing outside is touched.
           if (session.worktreePath !== null) report(sessionId, 'outside_data');
           return { sessionId, worktreeRemoved: false, branchKept };
         }
-        const removed = await removeCopy(repoPath, copy, terminalStopped);
+        const removed = await removeCopy(repoPath, copy, terminalStopped, setupStopped);
         return { sessionId, worktreeRemoved: removed.removed, branchKept: removed.branchKept };
       };
       // A plain chat touches no git; a worktree chat's copy is read and removed with the repo's other git work serialized.
@@ -197,11 +199,12 @@ export function createChatDeletion(ctx: ChatContext, deps: Pick<Agents, 'drop'> 
       const finish = (sessions: readonly Session[]) => {
         const { deletedEvents, deletedSessions, deletedRuns } = entities.deleteWorkspaceHistory(workspaceId);
         const stopped = new Map<SessionId, Promise<void>>();
+        const setups = new Map<SessionId, Promise<boolean>>();
         for (const session of sessions) {
-          stopLive(session.id);
+          setups.set(session.id, stopLive(session.id));
           stopped.set(session.id, stopTerminal(session.id).catch(() => undefined));
         }
-        return { counts: { deletedEvents, deletedSessions, deletedRuns }, stopped };
+        return { counts: { deletedEvents, deletedSessions, deletedRuns }, stopped, setups };
       };
       const first = current();
       if (!first.some((session) => session.worktreePath !== null)) return finish(first).counts;
@@ -223,12 +226,12 @@ export function createChatDeletion(ctx: ChatContext, deps: Pick<Agents, 'drop'> 
           if (!discard) throw new UncommittedChangesError(HISTORY_UNCOMMITTED_CHANGES_MESSAGE);
           planned.set(session.id, { sessionId: session.id, path: session.worktreePath, branch: session.branch, deleteBranch: false });
         }
-        const { counts, stopped } = finish(sessions);
+        const { counts, stopped, setups } = finish(sessions);
         for (const session of sessions) {
           if (session.worktreePath !== null && !planned.has(session.id)) report(session.id, 'outside_data');
         }
         for (const copy of planned.values()) {
-          if (sessions.some((session) => session.id === copy.sessionId)) await removeCopy(repoPath, copy, stopped.get(copy.sessionId) ?? Promise.resolve());
+          if (sessions.some((session) => session.id === copy.sessionId)) await removeCopy(repoPath, copy, stopped.get(copy.sessionId) ?? Promise.resolve(), setups.get(copy.sessionId) ?? Promise.resolve(true));
         }
         return counts;
       });

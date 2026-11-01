@@ -4,7 +4,7 @@
  * instance each, never copied or spread: the modules' identity checks rely on
  * it) and `closing`, read as `ctx.closing` at each use, never copied.
  */
-import type { AgentId, AgentModel, PermissionMode, Session, SessionId, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import { isWorktreePort, WORKTREE_PORT_ENV, type AgentId, type AgentModel, type PermissionMode, type Session, type SessionId, type Workspace, type WorkspaceId } from '@ogden-agents/shared';
 import { monotonicFactory } from 'ulid';
 import { AgentError, unregisteredAgent, type AgentPort, type AgentRegistry, type AgentSessionModels, type ProtectedPaths } from '../agent-port.js';
 import { agentConfigFolders } from '../agent-descriptor.js';
@@ -111,9 +111,24 @@ export function createChatContext(options: ChatOptions): ChatContext {
     return (session === undefined ? undefined : agents.get(agentIdOf(session))) ?? missing;
   };
   const withAgentId = (session: Session): Session => (session.agentId === undefined ? { ...session, agentId: agents.legacyAgentId } : session);
+  /** A local chat in its own copy holding a port (27.7): that port; else none. */
+  const portOf = (session: Session): number | undefined => {
+    if (session.kind !== 'chat' || session.machineId !== null || session.worktreePath === null) return undefined;
+    let port: number | null | undefined;
+    try {
+      port = options.worktreePorts?.portOf(session.id);
+    } catch {
+      return undefined;
+    }
+    return isWorktreePort(port) ? port : undefined;
+  };
   const agentEnv = (sessionId: SessionId): Readonly<Record<string, string>> => {
     const session = entities.getSession(sessionId);
-    return session === undefined ? {} : (options.agentEnv?.(agentIdOf(session)) ?? {});
+    if (session === undefined) return {};
+    const env = options.agentEnv?.(agentIdOf(session)) ?? {};
+    const port = portOf(session);
+    // Only the one name, a decimal in the range, on top of the agent's own allowlisted environment.
+    return port === undefined ? env : { ...env, [WORKTREE_PORT_ENV]: String(port) };
   };
   const checkInDelayMs = clampCheckInDelay(options.checkInDelayMs ?? DEFAULT_CHECK_IN_MS);
   const stopGraceMs = options.stopGraceMs ?? STOP_GRACE_MS;

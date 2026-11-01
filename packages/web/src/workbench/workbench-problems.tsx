@@ -32,6 +32,7 @@ import {
   type ProjectCommandInput,
   type ProjectCommandRun,
   type ProjectCommandsResponse,
+  WORKTREE_SETUP_COMMAND_ID,
 } from '@ogden-agents/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
@@ -136,8 +137,8 @@ export function WorkbenchProblems({ wsId }: WorkbenchProblemsProps) {
   return <ProblemsBody wsId={wsId} data={commands.data} />;
 }
 
-/** The trust prompt: Problems runs the project's own commands. */
-function ProblemsTrust({ wsId, onTrusted }: { wsId: string; onTrusted: () => void }) {
+/** The trust prompt: Problems (and the worktree setup command, 27.7) runs the project's own commands. `testId` prefixes its test ids. */
+export function ProblemsTrust({ wsId, onTrusted, text = PROBLEMS_UNTRUSTED_TEXT, testId = 'problems-trust' }: { wsId: string; onTrusted: () => void; text?: string; testId?: string }) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -158,18 +159,18 @@ function ProblemsTrust({ wsId, onTrusted }: { wsId: string; onTrusted: () => voi
     );
   };
   return (
-    <div className="flex min-w-0 flex-col gap-2" data-testid="problems-trust">
+    <div className="flex min-w-0 flex-col gap-2" data-testid={testId}>
       <Notice
         action={
-          <Button data-testid="problems-trust-allow" aria-disabled={busy || undefined} onClick={allow}>
+          <Button data-testid={`${testId}-allow`} aria-disabled={busy || undefined} onClick={allow}>
             {PROJECT_TRUST_ALLOW}
           </Button>
         }
       >
-        <span>{PROBLEMS_UNTRUSTED_TEXT}</span>
+        <span>{text}</span>
       </Notice>
       {error === undefined ? null : (
-        <Text variant="caption" role="alert" data-testid="problems-trust-error">
+        <Text variant="caption" role="alert" data-testid={`${testId}-error`}>
           {error}
         </Text>
       )}
@@ -206,8 +207,10 @@ function ProblemsBody({ wsId, data }: { wsId: string; data: ProjectCommandsRespo
       setSaving(false);
     }
   };
+  // Every declared command is saved back as it is; the worktree setup command (27.7) is Workspace settings' own, never shown here.
   const kept = data.declared.map(keptInput);
-  const changed = data.declared.filter((command) => command.source === 'package_json' && !command.confirmed);
+  const shown = data.declared.filter((command) => command.id !== WORKTREE_SETUP_COMMAND_ID);
+  const changed = shown.filter((command) => command.source === 'package_json' && !command.confirmed);
   const offered = notNow ? [] : data.offered;
 
   return (
@@ -276,13 +279,13 @@ function ProblemsBody({ wsId, data }: { wsId: string; data: ProjectCommandsRespo
           {saveError}
         </Text>
       )}
-      {data.declared.length === 0 ? (
+      {shown.length === 0 ? (
         <Text variant="caption" data-testid="problems-empty">
           {PROBLEMS_NO_COMMANDS_TEXT}
         </Text>
       ) : (
         <ul className="m-0 flex min-w-0 list-none flex-col gap-4 p-0" data-testid="problems-commands">
-          {data.declared.map((command) => (
+          {shown.map((command) => (
             <CommandRow key={command.id} wsId={wsId} command={command} onFinished={announce} />
           ))}
         </ul>
@@ -290,7 +293,7 @@ function ProblemsBody({ wsId, data }: { wsId: string; data: ProjectCommandsRespo
       <AddCommand
         saving={saving}
         onAdd={(name, text) => {
-          const id = commandIdFor(name, new Set(data.declared.map((command) => command.id)));
+          const id = commandIdFor(name, new Set([WORKTREE_SETUP_COMMAND_ID, ...data.declared.map((command) => command.id)]));
           return save([...kept, { id, label: name, command: text, source: 'settings', confirmedText: text }]);
         }}
       />

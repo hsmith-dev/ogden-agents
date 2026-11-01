@@ -18,6 +18,7 @@ import type { TerminalPort, TerminalProcess } from '../terminal-port.js';
 import type { VcsChatWorktreePort, VcsPort, VcsWorkingTreePort } from '../vcs-port.js';
 import type { WorktreePutAwayStore } from '../worktree-put-away-store.js';
 import type { TurnSnapshots } from '../turn-snapshots.js';
+import type { WorktreePorts } from '../where-work-runs.js';
 
 export interface ChatOptions {
   entities: Entities;
@@ -155,6 +156,27 @@ export interface ChatOptions {
    * throw is caught.
    */
   onChatWorktreeAdded?: ((sessionId: SessionId) => void) | undefined;
+  /**
+   * A worktree chat's own port (27.7, `core.worktreePorts`): given when its
+   * copy is made, handed off to or restored, and given back when the copy is
+   * put away or handed back. The chat's agent and its terminal get it as
+   * `PORT`. Absent: no chat has a port.
+   */
+  worktreePorts?: Pick<WorktreePorts, 'assign' | 'release' | 'portOf'> | undefined;
+  /**
+   * Called once a chat's new copy is ready (27.7): made, handed off to or
+   * restored, after its port was given (`null` when none was free or
+   * there is no {@link worktreePorts}). The server runs the project's setup
+   * command there; never awaited. A throw is caught.
+   */
+  onChatWorktreeReady?: ((sessionId: SessionId, copy: { workspaceId: WorkspaceId; worktreePath: string; port: number | null }) => void) | undefined;
+  /**
+   * Stops the chat's setup run in its copy, if still going, and resolves once
+   * it finished (27.7, `ProjectCommands.stopSetup`): awaited, bounded by
+   * {@link stopBeforeRemovalMs}, before the copy is put away, handed back or
+   * deleted (`forget`: a deleted chat). Absent: nothing to stop.
+   */
+  stopChatSetup?: ((sessionId: SessionId, options?: { forget?: boolean }) => Promise<void>) | undefined;
   /**
    * Each prompt's snapshots (AD-37; story 8.4, `core.turnSnapshots`): taken
    * just before a prompt goes out and once it settled, each waited for at

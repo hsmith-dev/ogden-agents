@@ -54,6 +54,7 @@ import { Text } from '@/ui/typography';
 import { fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
 import { PutAwayNotice } from '@/worktrees/put-away-notice';
 import { usePutAwayWorktrees } from '@/worktrees/worktree-retention';
+import { WorktreeCopyStatus } from '@/worktrees/worktree-copy-status';
 
 /** How close to the bottom (px) still counts as at the bottom, for auto-scroll. */
 const AT_BOTTOM_PX = 48;
@@ -609,6 +610,8 @@ export function SessionPage() {
             <TooltipContent data-testid="worktree-badge-hint">{WORKTREE_BADGE_TOOLTIP_TEXT}</TooltipContent>
           </Tooltip>
         ) : null}
+        {/* Its copy's own port and the project's setup run there (27.7). */}
+        {branch !== null && !isBuild ? <WorktreeCopyStatus wsId={wsId} sesId={sesId} /> : null}
         {/* A remote chat's machine (27.5): it stays on that machine. */}
         {machineId !== null && !isBuild ? <MachineBadge data-testid="machine-badge">{chatOnMachineText(machineName)}</MachineBadge> : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}

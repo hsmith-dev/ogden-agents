@@ -33,6 +33,7 @@ import { serializedByRepo } from '../repo-serialization.js';
 import { workspaceFolder } from '../workspace-root.js';
 import type { Models } from './model.js';
 import type { ChatContext } from './context.js';
+import { readyCopy } from './copy-port.js';
 import type { Chat } from './types.js';
 
 /** A readiness that never refuses: no port, or one that failed ("can't tell" never refuses a chat). */
@@ -372,6 +373,8 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Models, 'initialMo
         await discardChatWorktree(ctx, worktreeRepo, worktree);
         throw error;
       }
+      // Its own port (27.7), then the server's setup in the copy (never awaited); neither fails the creation.
+      await readyCopy(ctx, created.id, { workspaceId, worktreePath: worktree.worktreePath });
       // One more chat worktree: the retention sweep runs, sparing this one (27.6).
       try {
         ctx.options.onChatWorktreeAdded?.(created.id);

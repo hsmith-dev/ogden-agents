@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, createProjectCommandsNode, createWorkspaceFilesNode, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, createPortProbeNode, createProjectCommandsNode, createWorkspaceFilesNode, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
@@ -224,6 +224,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       // The Workbench's Changes (AD-37, story 8.4): the user's git, no hook, snapshots in the data folder.
       vcsWorkingTreePort: createServerWorkingTree(options, dataDir),
       projectCommandRunner,
+      // A worktree chat's own port (27.7): probed free on 127.0.0.1 only.
+      portProbe: options.portProbe ?? createPortProbeNode(),
       agentConfigFolders: () => agentConfigFolders(descriptors.current),
       agentProjectFiles: () => agentProjectFiles(descriptors.current),
       projectFilesFingerprint,
@@ -445,6 +447,22 @@ async function listenAndAnnounce({
     worktreePutAway: core.worktreePutAway,
     // One more chat worktree (made, or restored): the sweep runs, sparing it.
     onChatWorktreeAdded: (sessionId) => sweepRef.current?.(sessionId),
+    // A worktree chat's own port (27.7), given to its agent and terminal as PORT.
+    worktreePorts: core.worktreePorts,
+    // Its setup run stops before its copy is put away, handed back or deleted (27.7).
+    stopChatSetup: (sessionId, stopOptions) => core.projectCommands?.stopSetup(sessionId, stopOptions) ?? Promise.resolve(),
+    // A new copy (made, handed off to, restored): the project's setup command runs there with its port, in the background.
+    onChatWorktreeReady: (sessionId, copy) => {
+      if (copy.port === null && core.worktreePorts !== undefined) log.warn('a worktree chat was given no port', { sessionId });
+      const commands = core.projectCommands;
+      if (commands === undefined) return;
+      void commands.runSetup({ sessionId, workspaceId: copy.workspaceId, cwd: copy.worktreePath, port: copy.port }).then(
+        (run) => {
+          if (run !== undefined) log.info('a worktree setup started', { sessionId, runId: run.id });
+        },
+        () => log.warn('a worktree setup could not start', { sessionId }),
+      );
+    },
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   stopChats.current = (agentId) => chat.stopAgent(agentId);
@@ -586,7 +604,8 @@ async function listenAndAnnounce({
     workspaceChanges: core.workspaceChanges,
     editorLaunch: core.editorLaunch,
     // A chat's Location and its hand-off (27.4): the chat's own, its ids and body parsed here.
-    chatLocations: createChatLocations(chat),
+    // A worktree chat's Location carries its copy's setup run (27.7).
+    chatLocations: createChatLocations(chat, { setupOf: (sessionId) => core.projectCommands?.setupOf(sessionId) ?? null }),
     // Problems (AD-38; 8.9): only in a trusted project, only the confirmed text.
     projectCommands: core.projectCommands,
     notifications,

@@ -66,7 +66,7 @@ describe('where work runs routes in-process, with stand-in use-cases', () => {
     const sesId = newId('ses');
     const tryId = newId('try');
     const calls: string[] = [];
-    const worktree: SessionLocationResponse = { location: { kind: 'worktree', branch: chatWorktreeBranch(sesId), port: 41_000, putAway: false } };
+    const worktree: SessionLocationResponse = { location: { kind: 'worktree', branch: chatWorktreeBranch(sesId), port: 41_000, setup: null, putAway: false } };
     const session = core.entities.createSession({ workspaceId: core.entities.ensureWorkspace(tempDataDir()).id, kind: 'chat' });
     let handOff: () => Promise<{ session: typeof session }> = async () => ({ session });
     let restore: () => Promise<RestoreWorktreeResponse> = async () => ({ ...worktree, restored: 'newer' });
@@ -126,7 +126,7 @@ describe('where work runs routes in-process, with stand-in use-cases', () => {
     const location = await hono.request(apiPath(API_ROUTES.sessionLocation, { wsId, sesId }));
     expect(location.status).toBe(200);
     expect(location.headers.get('cache-control')).toBe('no-store');
-    expect(await location.json()).toEqual({ location: { kind: 'worktree', branch: chatWorktreeBranch(sesId), port: 41_000, putAway: false } });
+    expect(await location.json()).toEqual({ location: { kind: 'worktree', branch: chatWorktreeBranch(sesId), port: 41_000, setup: null, putAway: false } });
     expect((await json('POST', apiPath(API_ROUTES.sessionLocation, { wsId, sesId }), { to: 'this_folder' })).status).toBe(200);
     const ignored = await hono.request(apiPath(API_ROUTES.sessionWorktreeIgnoredFiles, { wsId, sesId }));
     expect(ignored.headers.get('cache-control')).toBe('no-store');
@@ -160,7 +160,7 @@ describe('where work runs routes in-process, with stand-in use-cases', () => {
     await expectError(await json('POST', handOff, { to: 'this_folder' }), 409, 'agent_mid_turn');
     const restore = apiPath(API_ROUTES.sessionWorktreeRestore, { wsId, sesId });
     // Where the copy went comes back with the chat's place.
-    expect(await (await json('POST', restore, {})).json()).toEqual({ location: { kind: 'worktree', branch: chatWorktreeBranch(sesId), port: 41_000, putAway: false }, restored: 'newer' });
+    expect(await (await json('POST', restore, {})).json()).toEqual({ location: { kind: 'worktree', branch: chatWorktreeBranch(sesId), port: 41_000, setup: null, putAway: false }, restored: 'newer' });
     setRestore(async () => {
       throw new RestoreFailedError('gone', 'branch_missing');
     });

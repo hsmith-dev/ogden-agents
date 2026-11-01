@@ -88,7 +88,7 @@ describe('Hand off on the real server (27.4)', () => {
     expect(readFileSync(join(copy, 'notes.md'), 'utf8')).toBe('from the agent\n');
     expect(existsSync(join(kit.repo, 'notes.md'))).toBe(false);
     expect(git(kit.repo, 'status', '--porcelain')).toBe('');
-    expect(SessionLocationResponse.parse(await (await request(kit.server, kit.tab, 'GET', kit.location(session.id))).json())).toEqual({ location: { kind: 'worktree', branch, port: null, putAway: false } });
+    expect(SessionLocationResponse.parse(await (await request(kit.server, kit.tab, 'GET', kit.location(session.id))).json())).toEqual({ location: { kind: 'worktree', branch, port: 41_000, setup: null, putAway: false } });
     expect(await kit.cwdOf(session.id)).toBe(copy);
 
     const back = await kit.move(session.id, { to: 'this_folder' });

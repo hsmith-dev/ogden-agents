@@ -20,8 +20,11 @@ export function agent() {
   let hangClose = false;
   let releaseClose: (() => void) | undefined;
   const cwds: string[] = [];
+  /** Each start's environment, by the cwd it started in. */
+  const envs: Array<{ cwd: string; env: Readonly<Record<string, string>> }> = [];
   const open = (input: StartAgentSession, agentSessionId: string): AgentSession => {
     cwds.push(input.cwd);
+    envs.push({ cwd: input.cwd, env: { ...input.env } });
     const listeners = new Set<(event: AgentEvent) => void>();
     const emit = (event: AgentEvent) => {
       for (const listener of [...listeners]) listener(event);
@@ -69,6 +72,7 @@ export function agent() {
   return {
     port,
     cwds,
+    envs,
     closed: () => closed,
     holdTurns: () => (hold = true),
     release: () => held.shift()?.(),

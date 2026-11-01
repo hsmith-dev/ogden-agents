@@ -17,11 +17,16 @@ import { ChatLocation } from './chat.js';
 import { Session } from './entities.js';
 import { AgentId } from './events-common.js';
 import { PutAwayCause, TcpPort, TRIAL_AGENTS_MAX, TRIAL_AGENTS_MIN, TrialSessionIds, WorktreeRetentionKeep } from './events-where-work-runs.js';
-import { RemoteMachineId, SessionId, TrialId, WorkspaceId, WorktreeSnapshotId } from './ids.js';
+import { ProjectCommandRunId, RemoteMachineId, SessionId, TrialId, WorkspaceId, WorktreeSnapshotId } from './ids.js';
+import { ProjectCommandRunState } from './project-commands.js';
 import { IsoUtcTimestamp } from './time.js';
 
 /** A chat worktree's branch, a name (never a path). */
 const Branch = z.string().min(1).max(255);
+
+/** A worktree chat's latest setup run in its copy (27.7): the run's id (its output is `GET …/project-command-runs/:runId`) and its state. */
+export const WorktreeSetupRun = z.object({ runId: ProjectCommandRunId, state: ProjectCommandRunState }).strict();
+export type WorktreeSetupRun = z.infer<typeof WorktreeSetupRun>;
 
 /**
  * Where a chat works (`GET …/sessions/:sesId/location`): the project's own
@@ -36,6 +41,8 @@ export const SessionLocation = z.discriminatedUnion('kind', [
       branch: Branch,
       /** The copy's own port (27.7), `null` when it has none. */
       port: TcpPort.nullable(),
+      /** The project's setup command's latest run in this copy since the server started (27.7), `null` when none ran. */
+      setup: WorktreeSetupRun.nullable(),
       /** Retention put the copy away: the chat reads only, until Restore. */
       putAway: z.boolean(),
     })
@@ -100,6 +107,43 @@ export type PutAwayWorktreesResponse = z.infer<typeof PutAwayWorktreesResponse>;
 
 /** The ports a worktree's copy is given from, when the project sets none of its own (27.7). Probed free first. */
 export const WORKTREE_PORT_RANGE = { first: 41_000, last: 41_999 } as const;
+/** The one environment name a worktree chat's agent (and its terminal) is given its copy's port under (27.7). */
+export const WORKTREE_PORT_ENV = 'PORT';
+/** Whether `port` is one a worktree's copy can be given. */
+export const isWorktreePort = (port: unknown): port is number => typeof port === 'number' && Number.isInteger(port) && port >= WORKTREE_PORT_RANGE.first && port <= WORKTREE_PORT_RANGE.last;
+
+/** The port beside the branch badge (27.7). */
+export const worktreePortText = (port: number): string => `Port ${port}`;
+/** Its tooltip. */
+export const worktreePortTooltip = (port: number): string => `Runs on port ${port} in this copy`;
+/** The setup run's state beside the branch badge (27.7). */
+export function worktreeSetupStateText(state: ProjectCommandRunState): string {
+  switch (state) {
+    case 'running':
+      return 'Setting up';
+    case 'passed':
+      return 'Set up';
+    case 'failed':
+      return 'Setup failed';
+    case 'stopped':
+      return 'Setup stopped';
+    case 'error':
+      return "Setup couldn't run";
+  }
+}
+/** The setup run's output, from beside the branch badge. */
+export const WORKTREE_SETUP_OUTPUT_TITLE = 'Setup output';
+/** Workspace settings: the project's setup command for each new worktree copy (27.7). */
+export const WORKTREE_SETUP_TITLE = 'Worktree setup';
+export const WORKTREE_SETUP_HINT = "Runs in each new worktree copy, with PORT set to the copy's port. One program and its arguments, no shell.";
+export const WORKTREE_SETUP_COMMAND_LABEL = 'Setup command';
+/** The label the setup command is stored under. */
+export const WORKTREE_SETUP_LABEL = 'Worktree setup';
+export const WORKTREE_SETUP_SAVE_LABEL = 'Save';
+export const WORKTREE_SETUP_REMOVE_LABEL = 'Remove';
+export const WORKTREE_SETUP_SAVED_TEXT = 'Saved. It runs in each new worktree copy.';
+export const WORKTREE_SETUP_REMOVED_TEXT = 'Removed. New copies run nothing.';
+export const WORKTREE_SETUP_UNTRUSTED_TEXT = "A setup command runs this project's own programs, so it needs you to trust this project first.";
 
 /** The longest task one trial takes. */
 export const TRIAL_TEXT_MAX = 20_000;
@@ -329,9 +373,6 @@ export const deleteHistoryConfirmText = (name: string, worktrees: boolean): stri
     : `Deletes every chat in ${name}. This can't be undone.`;
 /** Delete history's confirmation once the server said a copy has uncommitted changes. */
 export const DELETE_HISTORY_UNCOMMITTED_TEXT = "A chat's copy has changes that aren't committed. Deleting the history discards them.";
-
-/** The branch badge's tooltip line when the copy has its own port. */
-export const worktreePortText = (port: number): string => `Runs on port ${port} in this copy`;
 
 /** Try with several agents. */
 export const TRIAL_MENU_LABEL = 'Try with several agents...';

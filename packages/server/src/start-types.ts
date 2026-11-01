@@ -8,7 +8,7 @@ import type { AntigravityPorts } from './antigravity-wiring.js';
 import type { CodexPorts } from './codex-wiring.js';
 import type { GrokPorts } from './grok-wiring.js';
 import type { LocalPorts } from './local-wiring.js';
-import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, ProjectCommandRunner, WorkspaceFilesPort, NotifierPort, PaneLaunchers, RemoteHostPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort, VcsWorkingTreePort, VcsChatWorktreePort, VcsSnapshotStorePort } from '@ogden-agents/core';
+import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, PortProbePort, ProjectCommandRunner, WorkspaceFilesPort, NotifierPort, PaneLaunchers, RemoteHostPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort, VcsWorkingTreePort, VcsChatWorktreePort, VcsSnapshotStorePort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -59,6 +59,8 @@ export interface StartOptions {
   snapshotCleanupDelayMs?: number | undefined;
   /** Override Problems' command runner (tests; AD-38, 8.9). Default: the `project-commands-node` adapter. The server closes it on stop. */
   projectCommandRunner?: ProjectCommandRunner;
+  /** Override how a worktree chat's port is probed free (tests; 27.7). Default: the `port-probe-node` adapter, on `127.0.0.1` only. */
+  portProbe?: PortProbePort;
   /** Override Claude Code's chat agent (tests). Default: the `acp-claude-code` adapter. */
   agent?: AgentPort;
   /**

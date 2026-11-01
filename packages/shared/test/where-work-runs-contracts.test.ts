@@ -56,6 +56,7 @@ import {
   trialKeepConfirmText,
   trialTooltipText,
   worktreePortText,
+  worktreePortTooltip,
   worktreeRetentionLabel,
 } from '../src/index.js';
 
@@ -82,11 +83,14 @@ const EVENTS = [
 describe('where work runs contracts (epic 27 entry 2)', () => {
   it("describes a chat's place without a path", () => {
     expect(SessionLocation.safeParse({ kind: 'this_folder' }).success).toBe(true);
-    expect(SessionLocation.safeParse({ kind: 'worktree', branch: chatWorktreeBranch(SES), port: null, putAway: false }).success).toBe(true);
-    expect(SessionLocation.safeParse({ kind: 'worktree', branch: chatWorktreeBranch(SES), port: 3011, putAway: true }).success).toBe(true);
+    expect(SessionLocation.safeParse({ kind: 'worktree', branch: chatWorktreeBranch(SES), port: null, setup: null, putAway: false }).success).toBe(true);
+    expect(SessionLocation.safeParse({ kind: 'worktree', branch: chatWorktreeBranch(SES), port: 3011, setup: null, putAway: true }).success).toBe(true);
     expect(SessionLocation.safeParse({ kind: 'remote', machineId: 'mach_01J9Z3K4M5N6P7Q8R9S0T1V2W9' }).success).toBe(true);
-    expect(SessionLocation.safeParse({ kind: 'worktree', branch: 'b', port: 0, putAway: false }).success).toBe(false);
-    expect(SessionLocation.safeParse({ kind: 'worktree', branch: 'b', port: null, putAway: false, path: '/data/w' }).success).toBe(false);
+    expect(SessionLocation.safeParse({ kind: 'worktree', branch: 'b', port: 0, setup: null, putAway: false }).success).toBe(false);
+    // The copy's setup run (27.7): its id and state only.
+    expect(SessionLocation.safeParse({ kind: 'worktree', branch: 'b', port: 41_000, setup: { runId: 'pcr_01J9Z3K4M5N6P7Q8R9S0T1V2W9', state: 'running' }, putAway: false }).success).toBe(true);
+    expect(SessionLocation.safeParse({ kind: 'worktree', branch: 'b', port: 41_000, setup: { runId: 'pcr_01J9Z3K4M5N6P7Q8R9S0T1V2W9', state: 'failed', output: 'x' }, putAway: false }).success).toBe(false);
+    expect(SessionLocation.safeParse({ kind: 'worktree', branch: 'b', port: null, setup: null, putAway: false, path: '/data/w' }).success).toBe(false);
     expect(SessionLocation.safeParse({ kind: 'this_folder', path: '/repo' }).success).toBe(false);
     expect(HandOffRequest.safeParse({ to: 'worktree' }).success && HandOffRequest.safeParse({ to: 'this_folder' }).success).toBe(true);
     expect(HandOffRequest.safeParse({ to: 'remote' }).success).toBe(false);
@@ -144,7 +148,8 @@ describe('where work runs contracts (epic 27 entry 2)', () => {
     for (const on of ['saved', 'newer', 'moved', 'gone'] as const) expect(worktreeRestoredText(on, branch)).not.toMatch(/[\u2013\u2014]/);
     expect(restoreBranchMissingText('ogden/fix-login')).toBe("Restore couldn't finish: the branch ogden/fix-login no longer exists. The saved changes are kept.");
     expect(worktreeRetentionLabel(15)).toBe('Keep the last 15 worktrees');
-    expect(worktreePortText(3011)).toBe('Runs on port 3011 in this copy');
+    expect(worktreePortText(41_000)).toBe('Port 41000');
+    expect(worktreePortTooltip(41_000)).toBe('Runs on port 41000 in this copy');
     expect(TRIAL_LINE_TEXT).toBe("Each agent works in its own copy, so none sees the others' changes.");
     expect(trialKeepConfirmText('Codex')).toBe("Keep Codex's result? The other copies are put away; you can restore them.");
     expect(trialTooltipText('Fix the login bug', 1, 3)).toBe('Try: Fix the login bug, 1 of 3');
@@ -194,7 +199,7 @@ describe("a chat worktree's branches (Restore onto a new branch, user decision 2
   });
 
   it("answers Restore with the chat's place and where the copy went", () => {
-    const location = { kind: 'worktree', branch: `ogden/chat/${SES}-restored`, port: null, putAway: false } as const;
+    const location = { kind: 'worktree', branch: `ogden/chat/${SES}-restored`, port: null, setup: null, putAway: false } as const;
     expect(RestoreWorktreeResponse.parse({ location, restored: 'moved' })).toEqual({ location, restored: 'moved' });
     expect(RestoreWorktreeResponse.safeParse({ location }).success).toBe(false);
     expect(RestoreWorktreeResponse.safeParse({ location, restored: 'elsewhere' }).success).toBe(false);

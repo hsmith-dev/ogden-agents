@@ -26,6 +26,7 @@ import {
   StepNotApprovedError,
   StepNotProposedError,
   ValidationError,
+  WorktreePutAwayError,
   type Orchestration,
   type OrchestrationDefaultsUseCase,
   type OrchestrationFeature,
@@ -166,6 +167,8 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
     if (error instanceof BadOrderError) return apiError(c, 409, 'bad_order', error.message);
     if (error instanceof RunNotOpenError) return apiError(c, 409, 'run_not_open', error.message);
     if (error instanceof NoQuestionPendingError) return apiError(c, 409, 'no_question', error.message);
+    // A worker chat whose copy retention put away (27.6) takes nothing until Restore: the chat routes' 409, not a 500 (27.9).
+    if (error instanceof WorktreePutAwayError) return apiError(c, 409, 'worktree_put_away', error.message);
     // The worker chat could not take the instruction (stopping, busy): nothing more was done, and the plain reason is core's.
     if (error instanceof InvalidOperationError || error instanceof SessionBusyError || error instanceof SessionNotIdleError) return apiError(c, 409, 'session_busy', error.message);
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);

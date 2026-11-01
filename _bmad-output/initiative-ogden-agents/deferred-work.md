@@ -2,7 +2,7 @@
 
 ## Open items
 
-Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 2 retrospective, action A7); updated 2026-10-01 by the epic 9 and epic 3 retrospectives, 2026-10-03 by the epic 4 sweep (4.12), 2026-10-04 by the epic 6 sweep (6.9), 2026-10-04 by the maintained-fork story, 2026-10-02 by the epic 10 retrospective, 2026-10-31 by the epic 26 sweep (26.9), and 2026-11-01 by 26.10 and by the epic 8 sweep (8.12). Every entry stays in the log below for history, resolved ones included; an entry that starts with "Resolved:" closes an earlier one. When you add or resolve an entry, update this index too.
+Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 2 retrospective, action A7); updated 2026-10-01 by the epic 9 and epic 3 retrospectives, 2026-10-03 by the epic 4 sweep (4.12), 2026-10-04 by the epic 6 sweep (6.9), 2026-10-04 by the maintained-fork story, 2026-10-02 by the epic 10 retrospective, 2026-10-31 by the epic 26 sweep (26.9), and 2026-11-01 by 26.10, by the epic 8 sweep (8.12) and by the epic 27 sweep (27.9). Every entry stays in the log below for history, resolved ones included; an entry that starts with "Resolved:" closes an earlier one. When you add or resolve an entry, update this index too.
 
 Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim from its Log entry's summary (story 10.8). Log entries are append-only, so the phrase never goes stale; `node scripts/check-provenance.mjs` (CI job Provenance) fails on a line whose phrase is missing or matches no summary, on a line whose phrase a `Resolved:` summary contains (the entry is closed, so the line is stale), and (entry 4.12) on a Log entry added since the base branch that isn't `Resolved:`, contains no index line's phrase, and isn't quoted (`"<part of its summary>"`) by a `Resolved:` summary. A partial close starts `Resolved (…):` and leaves its index line in place.
 
@@ -140,7 +140,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Unowned: A folder with over 5000 entries lists an arbitrary subset in directory order in the Files tab. From 8.1. (log: "A folder with over 5000 entries lists an arbitrary subset")
 - Unowned (TOCTOU, needs a concurrent writer): The Files tab checks a path's folders with lstat, then opens the file: a folder swapped for a link in between could be followed (Node has no `openat` or `O_BENEATH`). From 8.1. (log: "The Files tab checks a path's folders with lstat, then opens the file")
 - Unowned (API consistency): The files routes parse the path before resolving the project (an unknown project with a malformed path is 400), while core's files and editor use-cases resolve the project first (404); pick one order. From 8.2. (log: "The files routes parse the path before resolving the project")
-- Epic 27 (27.3): A chat's `worktreePath` should be checked to lie in its chat-worktrees folder when the chat is created; today core checks only that it is absolute, and the adapter that it is strictly inside the data folder. From 8.2. (log: "A chat's `worktreePath` should be checked to lie in its chat-worktrees folder")
+- Unowned (core): A chat's `worktreePath` should be checked to lie in its chat-worktrees folder when the chat is created; core checks only that it is absolute (the adapter's fence to `<data>/cw` is 27.9's). From 8.2. (log: "A chat's `worktreePath` should be checked to lie in its chat-worktrees folder")
 - Unowned (by decision, log only): `session.created` carries the absolute `worktreePath` (as the Session does); the no-absolute-path rule holds only on the four Workbench events. From 8.2. (log: "`session.created` carries the absolute `worktreePath`")
 - Unowned (by decision, log only): The architecture test's git-command check exempts `packages/core/src/remote-worktree-sync.ts`, which runs git on a remote machine over SSH (CAP-24). From 8.2. (log: "The architecture test's git-command check exempts `packages/core/src/remote-worktree-sync.ts`")
 - Unowned (accessibility): The diff viewer's Side by side reads an unchanged line twice to screen readers (once per side); one label per row pair would read better. From 8.3. (log: "Side by side reads an unchanged line twice to screen readers")
@@ -184,12 +184,33 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Unowned (Windows live check): Open in editor's Windows `.cmd` shim path and real `cmd.exe` quoting are unit-tested with a simulated platform only; the end-to-end suite has run on macOS. From 8.10. (log: "Open in editor's Windows `.cmd` shim path and real `cmd.exe` quoting")
 - Unowned (accessibility): A long chat has one hidden status region per path link; one shared announcer would be lighter. From 8.10. (log: "one hidden status region per path link")
 - Unowned (palette): The command palette has no Run tests action yet; Problems (8.9) is built, so it could run the project's declared test command. From 8.11. (log: "The command palette has no Run tests action yet")
-- User decision (security): Agent chat processes and terminal panes still get the server's PATH with its empty and relative entries (baseEnvironment), so a bare name an agent or a shell runs in the project could resolve to a program planted there; the 8.12 launch rule covers the editor, pane-launcher detection, linked commands and Problems only. From 8.12. (log: "Agent chat processes and terminal panes still get the server's PATH with its empty and relative entries")
 - Unowned (a later sweep): Left by the epic 8 sweep (8.12), recorded rather than fixed: `packages/adapters/src/vcs-git/working-tree.ts` is 763 lines; `dev-tools-catalog` keeps its own copy of `candidatesFor`; `linesOf` is written twice (web `code-view.tsx`, adapters `workspace-files-node`); a path's file name is taken three ways in the web; the three "inside a folder" checks (`vcs-git/checks.ts`, `workspace-files-node`, the server's test confinement) answer slightly different rules; many epic 8 exports are used only in their own module. From 8.12. (log: "Left by the epic 8 sweep (8.12)")
 - Unowned (security, launch rule): The Claude Code lookup (`acp-claude-code/detect.ts` `findClaudeExecutable`) filters PATH with `isAbsolute`, which on Windows keeps root-relative (`\bin`) and share entries the 8.12 launch rule drops. From the 8.12 review. (log: "The Claude Code lookup (`acp-claude-code/detect.ts` `findClaudeExecutable`) filters PATH with `isAbsolute`")
 - Unowned (security, launch rule): The Grok token probe (`setup-grok/token-probe.ts`) starts the Grok binary in the shared temp folder with `baseEnvironment()` (PATH with empty and relative entries); its own private home folder and `launchEnvironment` would follow the 8.12 launch rule. From the 8.12 review. (log: "The Grok token probe (`setup-grok/token-probe.ts`) starts the Grok binary in the shared temp folder")
 - Unowned (Windows, Problems): On Windows a Problems command runs in the project folder, and `CreateProcess` and `cmd.exe` look in the working folder before PATH, so a bare name the command runs in turn could still be one planted in the project; `NoDefaultCurrentDirectoryInExePath` in its environment would close it. From the 8.12 review. (log: "On Windows a Problems command runs in the project folder, and `CreateProcess` and `cmd.exe` look in the working folder before PATH")
 - Unowned (palette): On the Workbench at `?session=` of a worktree chat, the palette's Files searches the project root and opens a file without `session`, because the palette knows only the chat page's chat (`useChatOnScreen`). From the 8.12 review. (log: "the palette's Files searches the project root and opens a file without `session`")
+- Unowned (worktree ports): Terminal panes and Problems runs get no `PORT`: both run in the project folder and belong to no chat; when a pane or a run can target a chat's copy, give it that copy's port. From 27.7. (log: "Terminal panes and Problems runs get no `PORT`")
+- Unowned (macOS, worktree ports): On macOS a port held on the wildcard address can still bind on `127.0.0.1`, so the worktree port probe may call it free. From 27.7. (log: "On macOS a port held on the wildcard address can still bind on `127.0.0.1`")
+- Unowned (worktree ports): A worktree copy's held port isn't probed again after a server restart; a program that took it meanwhile makes the copy's dev server fail to start until the copy is put away or handed back. From 27.7. (log: "held port isn't probed again after a server restart")
+- Product call (worktree setup): A worktree chat's first turn doesn't wait for the project's setup command (a `npm install` may still run); a "Setting up" hold on the composer would need a product call. From 27.7. (log: "first turn doesn't wait for the project's setup command")
+- Unowned (worktree setup): A worktree setup command that didn't run because its `package.json` script changed shows nothing beside the branch badge; it could say so. From 27.7. (log: "setup command that didn't run because its `package.json` script changed")
+- Unowned (hand-off): Agent CLIs in Developer-mode terminal panes in the project folder are not counted as working there, so a hand-off can run beside one. From 27.4. (log: "Agent CLIs in Developer-mode terminal panes in the project folder are not counted as working there")
+- Unowned (hand-off, crash recovery): A server crash between a hand-off's apply and its row write leaves the changes in a copy no row names, with the snapshot ids unlogged; a copy left behind keeps its branch checked out, so the next move to a worktree fails. From 27.4. (log: "A server crash between a hand-off's apply and its row write")
+- Unowned (hand-off): An orchestration dispatch, planning or retrospective start that lands during a hand-off's folder hold fails its step or leaves an empty session. From 27.4. (log: "lands during a hand-off's folder hold fails its step or leaves an empty session")
+- Unowned (hand-off, git-lfs): Changes under a clean/smudge filter (git-lfs) can't be handed off (a false `handoff_conflict`); a copy left behind after moving back keeps the branch checked out, so the next move to a worktree fails with the generic sentence. From 27.4. (log: "Changes under a clean/smudge filter (git-lfs) can't be handed off")
+- Unowned (needs a product call): The Chats list header still has epic 19's machine picker (27.5 decision 3); fold it once the composer draft is the only way to start a chat. From 27.5. (log: "The Chats list header still has epic 19's machine picker")
+- Unowned (trials): The sidebar tooltip's "Try: <task>, 1 of 3" (EXPERIENCE.md) isn't shown: the sidebar reads no trials yet; the session page links to its try instead. From 27.8. (log: "the sidebar reads no trials yet")
+- Unowned (trials): A Try column's latest activity line (EXPERIENCE.md) isn't shown: no such line exists in the web yet; the column shows the state glyph and word. From 27.8. (log: "A Try column's latest activity line")
+- Unowned (trials, if chats get a limit): "Waits for a free slot" (EXPERIENCE.md): chats have no concurrency limit, so no trial chat waits; if a limit is added, trial chats past it should wait with those words. From 27.8. (log: "chats have no concurrency limit, so no trial chat waits")
+- Unowned (trials): A trial copy restored during a Keep is still recorded `put_away`, and Keep's idle check for a put-away other skips busy and switching. From 27.8. (log: "A trial copy restored during a Keep is still recorded `put_away`")
+- Unowned (Delete chat): `workspace.chat_deleted` is written with the planned outcome before the copy goes, so a failed removal or a branch `-d` kept disagrees with the log. From 27.3. (log: "`workspace.chat_deleted` is written with the planned outcome before the copy goes")
+- Unowned (Delete chat): Commits made on a detached HEAD in a chat's copy become unreachable when the chat is deleted. From 27.3. (log: "Commits made on a detached HEAD in a chat's copy")
+- Unowned (Delete chat, put-away): Processes the agent started in a chat's copy (dev servers) may outlive it while the copy is removed, and can still write there between the put-away's last save and the removal. From 27.3. (log: "Processes the agent started in a chat's copy (dev servers) may outlive it")
+- Unowned (web events): The web event store sets no floor for a deleted chat; an in-flight history page can bring its events back. From 27.3. (log: "The web event store sets no floor for a deleted chat")
+- Unowned (cleanup): A chat copy whose removal failed after its rows went (logged `a chat worktree was left in place`) stays in `<data>/cw` with its git record; nothing removes it later. From 27.3. (log: "A chat copy whose removal failed after its rows went")
+- Unowned (Restore): A half put-away copy whose `.git` file went (a crash mid-removal) answers `path_taken` on every Restore; the saved changes are kept but need a repair path. From 27.6. (log: "A half put-away copy whose `.git` file went")
+- Unowned (put-away): The put-away snapshot cleanup runs outside `serializedByRepo`, relying on fresh mtimes, the busy skip and the 24 h grace. From 27.6. (log: "The put-away snapshot cleanup runs outside `serializedByRepo`")
+- Unowned (Restore): Files normalized by `text=auto` come back from Restore with git's line endings, not byte for byte. From 27.6. (log: "Files normalized by `text=auto` come back from Restore")
 
 ## Log
 
@@ -1323,3 +1344,75 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-refactor-sweep-plan.md`
   summary: On the Workbench at `?session=` of a worktree chat, the palette's Files searches the project root and opens a file without `session`, because the palette knows only the chat page's chat (`useChatOnScreen`).
   evidence: 8.12 review (quick lens); `packages/web/src/palette/command-palette.tsx` `useChatOnScreen`, `palette-sources.ts` `useFileItems`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-a-port-per-worktree-plan.md`
+  summary: Terminal panes and Problems runs get no `PORT`: both run in the project folder and belong to no chat; when a pane or a run can target a chat's copy, give it that copy's port.
+  evidence: 27.7 Deferred; `packages/core/src/worktree-ports.ts`. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-a-port-per-worktree-plan.md`
+  summary: On macOS a port held on the wildcard address can still bind on `127.0.0.1`, so the worktree port probe may call it free.
+  evidence: 27.7 Deferred and Design Notes; `packages/adapters/src/port-probe-node`. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-a-port-per-worktree-plan.md`
+  summary: A worktree copy's held port isn't probed again after a server restart; a program that took it meanwhile makes the copy's dev server fail to start until the copy is put away or handed back.
+  evidence: 27.7 Deferred; `packages/core/src/worktree-ports.ts`. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-a-port-per-worktree-plan.md`
+  summary: A worktree chat's first turn doesn't wait for the project's setup command (a `npm install` may still run); a "Setting up" hold on the composer would need a product call.
+  evidence: 27.7 Deferred. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-a-port-per-worktree-plan.md`
+  summary: A worktree setup command that didn't run because its `package.json` script changed shows nothing beside the branch badge; it could say so.
+  evidence: 27.7 Deferred; `packages/core/src/project-commands.ts` `runSetup`. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-hand-off-between-this-folder-and-the-chat-s-worktree-plan.md`
+  summary: Agent CLIs in Developer-mode terminal panes in the project folder are not counted as working there, so a hand-off can run beside one.
+  evidence: 27.4 review 14; `packages/core/src/chat/location.ts` `requireMovable`. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-hand-off-between-this-folder-and-the-chat-s-worktree-plan.md`
+  summary: A server crash between a hand-off's apply and its row write leaves the changes in a copy no row names, with the snapshot ids unlogged; a copy left behind keeps its branch checked out, so the next move to a worktree fails.
+  evidence: 27.4 review pass 2 row 15; no startup sweep exists (27.3 Never). Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-hand-off-between-this-folder-and-the-chat-s-worktree-plan.md`
+  summary: An orchestration dispatch, planning or retrospective start that lands during a hand-off's folder hold fails its step or leaves an empty session.
+  evidence: 27.4 review pass 2 row 16; `packages/core/src/chat/folder-hold.ts`. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-hand-off-between-this-folder-and-the-chat-s-worktree-plan.md`
+  summary: Changes under a clean/smudge filter (git-lfs) can't be handed off (a false `handoff_conflict`); a copy left behind after moving back keeps the branch checked out, so the next move to a worktree fails with the generic sentence.
+  evidence: 27.4 review 15; `packages/adapters/src/vcs-git/working-tree.ts` `moveChanges`. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-location-a-remote-machine-from-the-composer-plan.md`
+  summary: The Chats list header still has epic 19's machine picker (27.5 decision 3); fold it once the composer draft is the only way to start a chat.
+  evidence: 27.5 Deferred; removing a way to start a chat is a product call, not a sweep change. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-try-with-several-agents-one-task-side-by-side-keep-one-plan.md`
+  summary: The sidebar tooltip's "Try: <task>, 1 of 3" (EXPERIENCE.md) isn't shown: the sidebar reads no trials yet; the session page links to its try instead.
+  evidence: 27.8 Deferred; `trialTooltipText` in `packages/shared/src/where-work-runs.ts` is ready for it. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-try-with-several-agents-one-task-side-by-side-keep-one-plan.md`
+  summary: A Try column's latest activity line (EXPERIENCE.md) isn't shown: no such line exists in the web yet; the column shows the state glyph and word.
+  evidence: 27.8 Deferred; `packages/web/src/trials/try-column.tsx`. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-try-with-several-agents-one-task-side-by-side-keep-one-plan.md`
+  summary: "Waits for a free slot" (EXPERIENCE.md): chats have no concurrency limit, so no trial chat waits; if a limit is added, trial chats past it should wait with those words.
+  evidence: 27.8 Deferred (decision 3); 27.9 removed the unused constant. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-try-with-several-agents-one-task-side-by-side-keep-one-plan.md`
+  summary: A trial copy restored during a Keep is still recorded `put_away`, and Keep's idle check for a put-away other skips busy and switching.
+  evidence: 27.8 reviews 7 and 10; `packages/core/src/trials.ts`. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-worktree-chats-with-a-branch-badge-plan.md`
+  summary: `workspace.chat_deleted` is written with the planned outcome before the copy goes, so a failed removal or a branch `-d` kept disagrees with the log.
+  evidence: 27.3 review 12; changing what the event says is outside a sweep (no event payload changes). Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-worktree-chats-with-a-branch-badge-plan.md`
+  summary: Commits made on a detached HEAD in a chat's copy become unreachable when the chat is deleted.
+  evidence: 27.3 review 14. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-worktree-chats-with-a-branch-badge-plan.md`
+  summary: Processes the agent started in a chat's copy (dev servers) may outlive it while the copy is removed, and can still write there between the put-away's last save and the removal.
+  evidence: 27.3 review 15; 27.6 review 9 residual. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-worktree-chats-with-a-branch-badge-plan.md`
+  summary: The web event store sets no floor for a deleted chat; an in-flight history page can bring its events back.
+  evidence: 27.3 review 16; `packages/web/src/events/event-stream`. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-worktree-chats-with-a-branch-badge-plan.md`
+  summary: A chat copy whose removal failed after its rows went (logged `a chat worktree was left in place`) stays in `<data>/cw` with its git record; nothing removes it later.
+  evidence: 27.3 Deferred; no startup sweep (27.3 Never). Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-worktree-retention-and-restore-plan.md`
+  summary: A half put-away copy whose `.git` file went (a crash mid-removal) answers `path_taken` on every Restore; the saved changes are kept but need a repair path.
+  evidence: 27.6 review 21. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-worktree-retention-and-restore-plan.md`
+  summary: The put-away snapshot cleanup runs outside `serializedByRepo`, relying on fresh mtimes, the busy skip and the 24 h grace.
+  evidence: 27.6 review 22. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-worktree-retention-and-restore-plan.md`
+  summary: Files normalized by `text=auto` come back from Restore with git's line endings, not byte for byte.
+  evidence: 27.6 review 23. Logged by the epic 27 sweep (27.9).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-refactor-sweep-plan.md`
+  summary: Resolved: "Agent chat processes and terminal panes still get the server's PATH with its empty and relative entries" (8.12). Agent processes now get only the absolute folders of PATH; terminal panes keep it as it is, by the user's decision.
+  evidence: 27.9: `packages/server/src/start-env.ts` `agentEnvironment` goes through `withAbsolutePath` (`adapters/src/program-launch.ts`), so the agents' git and sandbox processes get it too; tests `server/test/chat.test.ts` (unit and a real fake-agent process) and `adapters/test/terminal-pane.test.ts` (a pane's PATH unchanged).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-refactor-sweep-plan.md`
+  summary: Resolved (the adapter's part, 27.9): "A chat's `worktreePath` should be checked to lie in its chat-worktrees folder". The workspace-files adapter now takes `chatWorktreesRoot` (`<data>/cw`) and refuses a chat-worktree root anywhere else in the data folder; core's check at creation is still only that the path is absolute.
+  evidence: `packages/adapters/src/workspace-files-node/index.ts` `chatRootAllowed`, `packages/server/src/start.ts`; test `adapters/test/workbench-adapters.test.ts`. Every creation path makes the copy in `<data>/cw` (`chat/workspaces.ts` `addChatWorktree`) and each use checks `isChatWorktreePath`.

@@ -22,6 +22,7 @@
  */
 import { createHash } from 'node:crypto';
 import {
+  chatPlaceOf,
   MAX_PROJECT_COMMAND_CHARS,
   MAX_PROJECT_COMMANDS,
   PackageScriptName,
@@ -505,7 +506,7 @@ export function createProjectCommands({ orm, events, entities, trust, files, run
         const { id } = trusted(workspaceId);
         // Only this project's own chat, in its own copy.
         const session = entities.getSession(sessionId);
-        if (session === undefined || session.workspaceId !== id || session.kind !== 'chat' || session.machineId !== null || session.worktreePath !== cwd) return undefined;
+        if (session === undefined || session.workspaceId !== id || session.kind !== 'chat' || chatPlaceOf(session) !== 'worktree' || session.worktreePath !== cwd) return undefined;
         const command = stored(id).find((one) => one.id === WORKTREE_SETUP_COMMAND_ID);
         if (command === undefined) return undefined;
         let argv: string[];

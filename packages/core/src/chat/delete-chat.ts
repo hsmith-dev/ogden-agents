@@ -20,6 +20,7 @@
  */
 import { lstatSync } from 'node:fs';
 import {
+  inOwnWorktree,
   DELETE_CHAT_MID_TURN_MESSAGE,
   DELETE_CHAT_NOT_DELETABLE_TEXT,
   DELETE_CHAT_REMOTE_TEXT,
@@ -66,8 +67,7 @@ export function createChatDeletion(ctx: ChatContext, deps: Pick<Agents, 'drop'> 
   };
 
   /** Whether the session has a worktree that is Ogden's to remove: a direct child of a real `<data>/cw`. */
-  const ownsCopy = (session: Session): session is Session & { worktreePath: string; branch: string } =>
-    session.worktreePath !== null && session.branch !== null && isChatWorktreePath(ctx.options.dataDir, session.worktreePath);
+  const ownsCopy = (session: Session): session is Session & { worktreePath: string; branch: string } => inOwnWorktree(session) && isChatWorktreePath(ctx.options.dataDir, session.worktreePath);
 
   /**
    * Whether the copy has uncommitted changes (staged, unstaged or untracked); one that can't be read counts as changed,

@@ -111,9 +111,9 @@ The draft holds one place: This folder, Worktree, or a machine id, so the old "W
 
 ## Deferred (for the sweep)
 
-- An attended remote build with a local-only agent (the Local model) opens a connection and pushes the repo to the machine before the agent-start refusal; refuse it in `build-start.ts` `validateStart` (and the queued dispatch) with a `build-remote.test.ts` row (review 5).
-- Continue with another agent is not refused for a remote attended build session (the machine is on the Run, not the Session), so Resume pushes and connects for an agent that is then refused; refuse handoff of build sessions or check the run's machine (review 6).
-- The Chats list header still has epic 19's machine picker (decision 3); fold it once the draft is the only way to start a chat.
+- An attended remote build with a local-only agent (the Local model) opens a connection and pushes the repo to the machine before the agent-start refusal; refuse it in `build-start.ts` `validateStart` (and the queued dispatch) with a `build-remote.test.ts` row (review 5). 27.9: fixed (`build-start.ts` `refuseLocalOnly` before the probe; `build-remote.test.ts`).
+- Continue with another agent is not refused for a remote attended build session (the machine is on the Run, not the Session), so Resume pushes and connects for an agent that is then refused; refuse handoff of build sessions or check the run's machine (review 6). 27.9: fixed (Retry and Resume refuse the session's current agent when it is local-only, before any push or connection; `build-remote.test.ts`).
+- The Chats list header still has epic 19's machine picker (decision 3); fold it once the draft is the only way to start a chat. 27.9: logged in `deferred-work.md`.
 
 ## Verification
 

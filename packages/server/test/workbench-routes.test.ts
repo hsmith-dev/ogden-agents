@@ -83,7 +83,8 @@ describe('workbench routes on the real server', () => {
       WorkspaceResponse.parse(await (await fetch(`${server.url}${API_ROUTES.workspaces}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ path }) })).json()).workspace.id;
     const wsId = await create(repo);
     const otherId = await create(tempDataDir());
-    const worktree = join(server.dataDir, 'worktrees', 'chat-1');
+    // A chat's copy lives in `<data>/cw` (27.9: the only part of the data folder a chat's root may be in).
+    const worktree = join(server.dataDir, 'cw', 'abcdefgh');
     mkdirSync(join(worktree, 'src'), { recursive: true });
     writeFileSync(join(worktree, 'src', 'only-here.ts'), 'export {};\n');
     const id = newId('ses');

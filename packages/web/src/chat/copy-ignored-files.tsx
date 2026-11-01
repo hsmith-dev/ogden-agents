@@ -4,7 +4,7 @@ import { useId } from 'react';
 import { fetchCopyIgnoredFiles } from './chat-api';
 
 /** Read each time a confirmation opens: the copy changes under the user. */
-export function useCopyIgnoredFiles(wsId: string, sesId: string, enabled: boolean) {
+function useCopyIgnoredFiles(wsId: string, sesId: string, enabled: boolean) {
   return useQuery({ queryKey: ['copy-ignored-files', wsId, sesId], queryFn: () => fetchCopyIgnoredFiles(wsId, sesId), enabled, retry: false, staleTime: 0, gcTime: 0 });
 }
 

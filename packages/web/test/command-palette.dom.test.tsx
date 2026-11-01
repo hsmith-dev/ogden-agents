@@ -99,7 +99,8 @@ vi.mock('../src/chat/chat-api', async (importOriginal) => ({
   // Slower than the pause in typing, so a search sent before the chat is known would show.
   fetchSession: async () => {
     await new Promise((resolve) => setTimeout(resolve, 400));
-    return { session: { worktreePath: state.worktree } };
+    // A worktree of its own is a path with its branch (27.9: the shared `inOwnWorktree`, as core reads it).
+    return { session: { worktreePath: state.worktree, branch: state.worktree === null ? null : 'ogden/chat/ses_1' } };
   },
 }));
 vi.mock('../src/planning/planning-api', async (importOriginal) => ({

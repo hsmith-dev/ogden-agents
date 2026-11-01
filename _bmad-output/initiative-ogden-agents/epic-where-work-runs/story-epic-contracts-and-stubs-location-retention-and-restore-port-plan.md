@@ -97,7 +97,7 @@ Pass 1 (2026-11-01; lens: quick, fresh subagent given the plan and the diff). Ve
 
 ## Deferred (for the sweep)
 
-- None from this story's review.
+- None from this story's review. 27.9: nothing to dispose of.
 
 ## Design Notes
 

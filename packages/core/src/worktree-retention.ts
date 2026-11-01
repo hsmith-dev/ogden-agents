@@ -20,6 +20,7 @@
  * `SNAPSHOT_GRACE_MS` are kept by the port.
  */
 import {
+  inOwnWorktree,
   PutAwayCause,
   SessionId,
   TURN_SNAPSHOTS_KEPT,
@@ -88,7 +89,7 @@ export function createWorktreeRetention({ entities, store, chat, dataDir, onSkip
     return entities
       .listWorkspaces()
       .flatMap((workspace) => entities.listSessions(workspace.id))
-      .filter((session) => session.kind === 'chat' && session.machineId === null && session.worktreePath !== null && session.branch !== null && !putAway.has(session.id) && isChatWorktreePath(dataDir, session.worktreePath));
+      .filter((session) => session.kind === 'chat' && inOwnWorktree(session) && !putAway.has(session.id) && isChatWorktreePath(dataDir, session.worktreePath));
   };
 
   const sweep = async (spare: SessionId | undefined): Promise<PutAwayWorktree[]> => {

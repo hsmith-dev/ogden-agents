@@ -35,6 +35,7 @@ import {
   HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE,
   HUNK_CHANGED_SINCE_TEXT,
   HUNK_UNSUPPORTED_MESSAGE,
+  inOwnWorktree,
   ChangesQuery,
   CommitWorktreeRequest,
   FileDiffQuery,
@@ -63,7 +64,7 @@ import { serializedByRepo } from './repo-serialization.js';
 import type { SessionEvents } from './session-events.js';
 import type { VcsChangesTarget, VcsHunkResult, VcsWorkingTreePort } from './vcs-port.js';
 import { checkedWorkspacePath, isRefusedWorkspacePath } from './workspace-files.js';
-import { namedSession, resolveWorkspaceRoot, sessionFolder, vcsFolderOf, workspaceFolder } from './workspace-root.js';
+import { localFolderOf, namedSession, resolveWorkspaceRoot, vcsFolderOf, workspaceFolder } from './workspace-root.js';
 import { keptTurns } from './worktree-retention.js';
 
 export interface WorkspaceChanges {
@@ -122,7 +123,7 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
     // A build works in its run's own worktree and a remote chat on its machine: neither is in this folder.
     const busy = entities
       .listSessions(workspace.id)
-      .some((other) => other.kind !== 'build' && other.machineId === null && (other.state === 'working' || other.state === 'waiting') && sessionFolder(workspace, other) === folder);
+      .some((other) => (other.state === 'working' || other.state === 'waiting') && localFolderOf(workspace, other) === folder);
     if (busy) throw new AgentMidTurnError(AGENT_MID_TURN_MESSAGE);
   };
 
@@ -216,7 +217,7 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
     async commit(workspaceId, sessionId, body) {
       const { workspace, session } = sessionOf(workspaceId, sessionId);
       const { message } = parsed(CommitWorktreeRequest, body, 'A commit needs a message.');
-      if (session.worktreePath === null || session.branch === null) throw new InvalidOperationError(COMMIT_NEEDS_WORKTREE_MESSAGE);
+      if (!inOwnWorktree(session)) throw new InvalidOperationError(COMMIT_NEEDS_WORKTREE_MESSAGE);
       // The project folder is never the worktree, so only chats in this worktree can block it.
       if (session.worktreePath === workspaceFolder(workspace)) throw new InvalidOperationError(COMMIT_NEEDS_WORKTREE_MESSAGE);
       const worktreePath = session.worktreePath;

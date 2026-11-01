@@ -18,7 +18,11 @@ import {
   RemoteMachineId as RemoteMachineIdSchema,
   SessionId as SessionIdSchema,
   chatWorktreeBranch,
+  HANDOFF_CHAT_ONLY_TEXT,
+  HANDOFF_MID_TURN_MESSAGE,
+  HANDOFF_REMOTE_TEXT,
   isChatWorktreeBranchOf,
+  localPlaceOf,
   SessionDriver as SessionDriverSchema,
   SessionKind as SessionKindSchema,
   SessionState as SessionStateSchema,
@@ -761,9 +765,9 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
       if (typeof resumes !== 'boolean') throw new ValidationError('invalid resumes', [{ path: ['resumes'], message: 'Whether the agent resumes is true or false.' }]);
       return log.transaction(() => {
         const session = requireSession(id);
-        if (session.kind !== 'chat') throw new InvalidOperationError('Only a chat can move between this folder and its own worktree.');
-        if (session.machineId !== null) throw new InvalidOperationError('A chat on a remote machine stays on that machine.');
-        if (session.state === 'working' || session.state === 'waiting') throw new AgentMidTurnError('The chat moves once its agent has finished.');
+        if (session.kind !== 'chat') throw new InvalidOperationError(HANDOFF_CHAT_ONLY_TEXT);
+        if (session.machineId !== null) throw new InvalidOperationError(HANDOFF_REMOTE_TEXT);
+        if (session.state === 'working' || session.state === 'waiting') throw new AgentMidTurnError(HANDOFF_MID_TURN_MESSAGE);
         if (session.worktreePath === checked.worktreePath && session.branch === checked.branch) return { session, event: undefined };
         const updated: Session = { ...session, worktreePath: checked.worktreePath, branch: checked.branch, updatedAt: now() };
         orm.update(sessions).set({ worktreePath: checked.worktreePath, branch: checked.branch, updatedAt: updated.updatedAt }).where(eq(sessions.id, id)).run();
@@ -771,8 +775,8 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           type: 'session.location_changed',
           payload: {
             sessionId: session.id,
-            location: checked.worktreePath === null ? 'this_folder' : 'worktree',
-            previous: session.worktreePath === null ? 'this_folder' : 'worktree',
+            location: localPlaceOf(checked),
+            previous: localPlaceOf(session),
             branch: checked.branch,
             files,
             resumes,

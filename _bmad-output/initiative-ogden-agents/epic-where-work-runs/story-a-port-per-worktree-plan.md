@@ -103,11 +103,11 @@ Pass 1 (2026-11-01; lens: quick, fresh subagent given the plan and the diff). Ve
 
 ## Deferred (for the sweep)
 
-- Terminal panes and Problems runs get no `PORT`: both run in the project folder and belong to no chat; when a pane or a run can target a chat's copy, give it that copy's port.
-- On macOS a port held on the wildcard address can still bind on `127.0.0.1`, so the probe may call it free (Design Notes).
-- A held port isn't probed again after a server restart; a program that took it meanwhile makes the copy's dev server fail to start until the copy is put away or handed back.
-- The agent's first turn doesn't wait for the setup command (a `npm install` may still run); a "Setting up" hold on the composer would need a product call.
-- A setup command that didn't run because its `package.json` script changed shows nothing beside the badge; it could say so.
+- Terminal panes and Problems runs get no `PORT`: both run in the project folder and belong to no chat; when a pane or a run can target a chat's copy, give it that copy's port. 27.9: logged in `deferred-work.md`.
+- On macOS a port held on the wildcard address can still bind on `127.0.0.1`, so the probe may call it free (Design Notes). 27.9: logged in `deferred-work.md`.
+- A held port isn't probed again after a server restart; a program that took it meanwhile makes the copy's dev server fail to start until the copy is put away or handed back. 27.9: logged in `deferred-work.md`.
+- The agent's first turn doesn't wait for the setup command (a `npm install` may still run); a "Setting up" hold on the composer would need a product call. 27.9: logged in `deferred-work.md`.
+- A setup command that didn't run because its `package.json` script changed shows nothing beside the badge; it could say so. 27.9: logged in `deferred-work.md`.
 
 ## Design Notes
 

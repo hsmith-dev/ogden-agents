@@ -15,6 +15,7 @@ import {
   createChatLocations,
   createOnboarding,
   createRemoteWorktreeSync,
+  chatWorktreesRootOf,
   clampCheckInDelay,
   CoreError,
   openRemoteConnection,
@@ -220,8 +221,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       isAgentRegistered: registeredAgent(options, hooks),
       // Generic developer CLI tools (CAP-25): the real adapter, or a test's own.
       devToolsPort: options.devToolsPort ?? createDevToolsAdapter(),
-      // The Workbench's Files (AD-36): confined to each project, with the home credential and data-folder fences.
-      workspaceFilesPort: options.workspaceFilesPort ?? createWorkspaceFilesNode({ home: homedir(), dataDir }),
+      // The Workbench's Files (AD-36): confined to each project, with the home credential and data-folder fences; a chat's copy only inside `<data>/cw` (27.9).
+      workspaceFilesPort: options.workspaceFilesPort ?? createWorkspaceFilesNode({ home: homedir(), dataDir, chatWorktreesRoot: chatWorktreesRootOf(dataDir) }),
       // The Workbench's Changes (AD-37, story 8.4): the user's git, no hook, snapshots in the data folder.
       vcsWorkingTreePort: createServerWorkingTree(options, dataDir),
       // Open in editor (AD-39; 8.10): a fixed list of editors found on this computer, argv only, no shell; a test run looks only in its own folder.

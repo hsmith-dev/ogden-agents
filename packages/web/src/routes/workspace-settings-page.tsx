@@ -1,4 +1,4 @@
-import { CAUTION_LEVELS, DELETE_AND_DISCARD_LABEL, DELETE_HISTORY_UNCOMMITTED_TEXT, deleteHistoryConfirmText, PERMISSION_MODE_LABELS, type CautionLevel, type PermissionMode, type PermissionRule } from '@ogden-agents/shared';
+import { CAUTION_LEVELS, DELETE_AND_DISCARD_LABEL, inOwnWorktree, DELETE_HISTORY_UNCOMMITTED_TEXT, deleteHistoryConfirmText, PERMISSION_MODE_LABELS, type CautionLevel, type PermissionMode, type PermissionRule } from '@ogden-agents/shared';
 import { House, Trash } from '@phosphor-icons/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
@@ -454,7 +454,7 @@ export function DeleteHistorySection({ wsId, name }: { wsId: string; name: strin
   const [uncommitted, setUncommitted] = useState(false);
   // Whether any chat has its own worktree, read when the dialog opens.
   const sessions = useQuery({ queryKey: ['sessions', wsId], queryFn: () => fetchSessions(wsId), retry: false, enabled: open });
-  const worktrees = sessions.data?.some((session) => (session.worktreePath ?? null) !== null) === true;
+  const worktrees = sessions.data?.some(inOwnWorktree) === true;
   // Until the chats are known the sentence can't name their copies: Confirm waits (a failed read falls back to the 409).
   const known = sessions.data !== undefined || sessions.isError;
 

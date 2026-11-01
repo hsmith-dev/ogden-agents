@@ -15,8 +15,8 @@ import { SessionId, TrialId, WorktreeSnapshotId } from './ids.js';
 
 /** A count of files. */
 const Count = z.number().int().nonnegative();
-/** A chat worktree's branch (`ogden/chat/<ses_…>`): a name, never a path. */
-const Branch = z.string().min(1).max(255);
+/** A chat worktree's branch (`ogden/chat/<ses_…>`): a name, never a path. The one schema the events and `where-work-runs.ts` share. */
+export const WorktreeBranch = z.string().min(1).max(255);
 /** A TCP port. */
 export const TcpPort = z.number().int().min(1).max(65_535);
 
@@ -44,7 +44,7 @@ export const SessionLocationChangedInput = z.object({
       /** Where it worked before. */
       previous: HandOffLocation,
       /** The chat's branch in its new place: its own worktree's, or `null` in this folder. */
-      branch: Branch.nullable(),
+      branch: WorktreeBranch.nullable(),
       /** How many files' uncommitted changes moved with it. */
       files: Count,
       /** Whether the agent restarts in the new folder on its own session (else it starts fresh with the history). */

@@ -6,7 +6,7 @@
  * {@link NotFoundError}, exactly as an unknown project is: neither says
  * which.
  */
-import { SessionId, WorkspaceId, type Session, type Workspace } from '@ogden-agents/shared';
+import { inOwnWorktree, SessionId, WorkspaceId, type Session, type Workspace } from '@ogden-agents/shared';
 import type { Entities } from './entities.js';
 import { NotFoundError } from './errors.js';
 import type { VcsFolder } from './vcs-port.js';
@@ -30,6 +30,16 @@ export const workspaceFolder = (workspace: Workspace): string => workspace.realP
  */
 export const sessionFolder = (workspace: Workspace, session: Session | undefined): string => session?.worktreePath ?? workspaceFolder(workspace);
 
+/**
+ * The folder a local session works in on this computer ({@link sessionFolder}),
+ * or `undefined` for one that works nowhere here: a build (its run's own
+ * worktree) or a remote chat (its machine). The one rule for "the local
+ * sessions in this folder" (27.9): the hand-off's others, the folder hold
+ * and the hunk actions' mid-turn refusal.
+ */
+export const localFolderOf = (workspace: Workspace, session: Session): string | undefined =>
+  session.kind === 'build' || session.machineId !== null ? undefined : sessionFolder(workspace, session);
+
 /** A request body's or query's `session`, unparsed (checked by {@link resolveWorkspaceRoot}). */
 export const namedSession = (value: unknown): unknown => (value as { session?: unknown } | null | undefined)?.session;
 
@@ -40,7 +50,7 @@ export const namedSession = (value: unknown): unknown => (value as { session?: u
  */
 export function vcsFolderOf(workspace: Workspace, session: Session | undefined): VcsFolder {
   // Only a worktree with its branch is pinned; anything less runs in the project, never an unchecked folder.
-  if (session === undefined || session.worktreePath === null || session.branch === null) return { path: workspaceFolder(workspace) };
+  if (session === undefined || !inOwnWorktree(session)) return { path: workspaceFolder(workspace) };
   return { path: sessionFolder(workspace, session), worktree: { repoPath: workspaceFolder(workspace), branch: session.branch } };
 }
 

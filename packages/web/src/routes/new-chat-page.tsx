@@ -1,5 +1,5 @@
 import { House } from '@phosphor-icons/react';
-import { RemoteMachineId, type ChatLocation, type PermissionMode, type Session } from '@ogden-agents/shared';
+import { localPlaceOf, RemoteMachineId, type ChatLocation, type PermissionMode, type Session } from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
@@ -96,7 +96,7 @@ function NewChatDraft({ wsId, search }: { wsId: string; search: NewChatSearch })
       made !== undefined &&
       (agentId === undefined || made.agentId === undefined || made.agentId === agentId) &&
       made.machineId === machine &&
-      (made.worktreePath !== null) === (effectiveLocation === 'worktree') &&
+      localPlaceOf(made) === effectiveLocation &&
       (ownPicks.model === undefined || (made.model ?? null) === ownPicks.model);
     let session = reuse ? made : await createChatSession(wsId, undefined, agentId, ownPicks.model, machine, effectiveLocation);
     firstChat.current = session;
@@ -189,9 +189,9 @@ function NewChatDraft({ wsId, search }: { wsId: string; search: NewChatSearch })
                   value={effectiveLocation}
                   machineId={machine}
                   localOnlyReason={chosen?.localOnly}
-                  onChange={(place) => {
-                    setLocation(place.location);
-                    setPickedMachine(place.machineId);
+                  onChange={(choice) => {
+                    setLocation(choice.location);
+                    setPickedMachine(choice.machineId);
                   }}
                 />
               </>

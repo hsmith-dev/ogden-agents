@@ -12,7 +12,7 @@
  * (`session.port_assigned`, `session.port_released`), which carry the
  * session id and the port only. The row is gone with its session.
  */
-import { WORKTREE_PORT_RANGE, type SessionId } from '@ogden-agents/shared';
+import { chatPlaceOf, WORKTREE_PORT_RANGE, type SessionId } from '@ogden-agents/shared';
 import { and, eq, ne } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { chatWorktreePorts } from './db/schema.js';
@@ -50,7 +50,7 @@ export function createWorktreePorts({ db, events, sessionEvents, entities, probe
   /** A local chat in its own copy, present (not put away). */
   const eligible = (sessionId: SessionId): boolean => {
     const session = entities.getSession(sessionId);
-    return session !== undefined && session.kind === 'chat' && session.machineId === null && session.worktreePath !== null && putAway?.(sessionId) !== true;
+    return session !== undefined && session.kind === 'chat' && chatPlaceOf(session) === 'worktree' && putAway?.(sessionId) !== true;
   };
   /** Whether the probe says the port is free; a probe that throws says no. */
   const free = async (port: number): Promise<boolean> => {

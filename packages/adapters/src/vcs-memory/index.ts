@@ -10,7 +10,7 @@
  * in `badPatches`.
  */
 import { VcsError, type VcsCheck, type VcsDiff, type VcsHead, type VcsPort, type VcsWorktreeGitPaths } from '@ogden-agents/core';
-import { CHAT_WORKTREE_BRANCH_PREFIX, SessionId, type DiffStats } from '@ogden-agents/shared';
+import { CHAT_WORKTREE_BRANCH_PREFIX, chatOfWorktreeBranch, type DiffStats } from '@ogden-agents/shared';
 
 export interface MemoryRepo {
   /** The checked-out branch, or `undefined` for a detached `HEAD` or no commit. */
@@ -155,7 +155,7 @@ export function createMemoryVcs(): MemoryVcs {
       // As `vcs-git` (27.3): a chat's worktree (on `ogden/chat/…`) goes only with its own branch, a valid `ogden/chat/<ses_…>`.
       const recorded = worktrees.get(path)?.branch;
       const chatBranch = (name: string) => name.startsWith(CHAT_WORKTREE_BRANCH_PREFIX);
-      if (branch !== undefined && ((chatBranch(branch) && !SessionId.safeParse(branch.slice(CHAT_WORKTREE_BRANCH_PREFIX.length)).success) || (recorded !== undefined && chatBranch(recorded) && branch !== recorded))) {
+      if (branch !== undefined && ((chatBranch(branch) && chatOfWorktreeBranch(branch) === undefined) || (recorded !== undefined && chatBranch(recorded) && branch !== recorded))) {
         throw new VcsError("That is not this worktree's branch, so it was kept.", { step: 'branch' });
       }
       worktrees.delete(path);

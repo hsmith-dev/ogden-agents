@@ -18,6 +18,7 @@ import {
   RemoteMachineId as RemoteMachineIdSchema,
   SessionId as SessionIdSchema,
   chatWorktreeBranch,
+  isChatWorktreeBranchOf,
   SessionDriver as SessionDriverSchema,
   SessionKind as SessionKindSchema,
   SessionState as SessionStateSchema,
@@ -109,13 +110,13 @@ export interface NewSession {
   id?: SessionId;
   /**
    * The chat's own worktree (AD-8 CAP-33 note): an absolute path, set at
-   * creation; changed afterwards only by Hand off, through
-   * {@link Entities.setSessionWorktree}, which records
-   * `session.location_changed` (user decision 2026-11-01). Given with
-   * {@link branch} or not at all.
+   * creation; changed afterwards only by Hand off, or by a Restore that put
+   * the copy on a new branch, through {@link Entities.setSessionWorktree},
+   * which records `session.location_changed` (user decisions 2026-11-01).
+   * Given with {@link branch} or not at all.
    */
   worktreePath?: string | null;
-  /** The worktree's branch: exactly `ogden/chat/<id>`. Given with {@link worktreePath} or not at all. */
+  /** The worktree's branch: `ogden/chat/<id>` (or a Restore's `ogden/chat/<id>-restored`, `-2`, …). Given with {@link worktreePath} or not at all. */
   branch?: string | null;
 }
 
@@ -398,7 +399,8 @@ function checkedWorktree(id: SessionId, worktreePath: string | null, branch: str
   };
   if (worktreePath === null || branch === null) return issue(worktreePath === null ? 'worktreePath' : 'branch', 'A worktree and its branch are given together.');
   if (typeof worktreePath !== 'string' || worktreePath === '' || worktreePath.includes('\0') || !isAbsolute(worktreePath)) return issue('worktreePath', 'A worktree is an absolute path.');
-  if (branch !== chatWorktreeBranch(id)) return issue('branch', `A chat worktree's branch is ${chatWorktreeBranch(id)}.`);
+  // Its own branch, or one Restore made when that branch had moved or gone (`…-restored`, `-2`, …; user decision 2026-11-01).
+  if (!isChatWorktreeBranchOf(id, branch)) return issue('branch', `A chat worktree's branch is ${chatWorktreeBranch(id)}.`);
   return { worktreePath, branch };
 }
 

@@ -42,8 +42,8 @@ export interface WorktreePutAwayStore {
   listAll(): PutAwayRecord[];
   /** Writes the row and `session.worktree_put_away` in one transaction. */
   insert(input: { sessionId: SessionId; workspaceId: WorkspaceId; branch: string; snapshotTree: string | null; head: string; files: number; cause: PutAwayCause }): PutAwayRecord;
-  /** Removes the row with `session.worktree_restored` in one transaction; `undefined` when there was none. */
-  remove(sessionId: SessionId): PutAwayRecord | undefined;
+  /** Removes the row with `session.worktree_restored` in one transaction, `alongside` (another write, such as the chat's new branch) inside it first; `undefined` when there was none. */
+  remove(sessionId: SessionId, alongside?: () => void): PutAwayRecord | undefined;
   /** The install's cap (the default when never set, or when the stored value is damaged). */
   retention(): WorktreeRetentionSetting;
   /** Sets the cap; appends `settings.worktree_retention_changed` only when it changed. */
@@ -99,10 +99,11 @@ export function createWorktreePutAwayStore({ db, events, sessionEvents, now = ()
       });
     },
 
-    remove(sessionId) {
+    remove(sessionId, alongside) {
       return events.transaction(() => {
         const record = get(sessionId);
         if (record === undefined) return undefined;
+        alongside?.();
         orm.delete(chatWorktreesPutAway).where(eq(chatWorktreesPutAway.id, record.id)).run();
         orm.update(sessions).set({ updatedAt: now() }).where(eq(sessions.id, sessionId)).run();
         sessionEvents.appendSessionEvent(sessionId, { type: 'session.worktree_restored', payload: { sessionId, snapshotId: record.id } });

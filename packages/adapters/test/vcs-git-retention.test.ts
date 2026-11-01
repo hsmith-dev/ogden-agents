@@ -4,8 +4,11 @@
  * new and deleted files; a clean copy saves `null`; a detached HEAD, a merge
  * in progress and a nested repository are refused), its folder removed
  * through `VcsPort.removeWorktree` with the branch kept, then Restore (on
- * its branch, tracked edits unstaged, untracked back, deletions back; the
- * branch gone, moved or the path taken change nothing; a half put-away copy
+ * its branch, tracked edits unstaged, untracked back, deletions back; a
+ * branch moved forward with changes that apply takes the copy at its tip, a
+ * conflicting, rewritten or deleted branch puts it on `…-restored` (`-2`
+ * when taken), an attempt failing partway is rolled back fully; the path
+ * taken changes nothing; a half put-away copy
  * repaired in place), and the store's cleanup (only unreferenced objects
  * past the grace, never through a link, no store removed whole while a
  * project can't be read). The repo's own objects, refs and index never
@@ -39,6 +42,8 @@ const git = (cwd: string, ...args: string[]) =>
 
 const SES = 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 const BRANCH = `ogden/chat/${SES}`;
+/** The branch Restore makes when the chat's branch moved (not cleanly forward) or is gone. */
+const RESTORED = `${BRANCH}-restored`;
 const DAY = 24 * 60 * 60 * 1000;
 /** A store no project maps to. */
 const ORPHAN = '0123456789abcdef';
@@ -100,6 +105,25 @@ const contents = (path: string): Record<string, string> =>
       .map((file) => [file, readFileSync(join(path, file), 'utf8')]),
   );
 
+/** The repo's local branches, sorted. */
+const branches = (repo: string): string[] => git(repo, 'for-each-ref', '--format=%(refname:short)', 'refs/heads').split('\n').filter(Boolean).sort();
+
+/** A commit on `parent` (none: a new root) with `files` set over its tree (`null` deletes); its id. Writes the repo's objects only. */
+function commitOn(repo: string, parent: string | null, files: Record<string, string | null>): string {
+  const index = join(mkdtempSync(join(tmpdir(), 'ogden-agents-ret-idx-')), 'index');
+  dirs.push(join(index, '..'));
+  const env = { ...process.env, GIT_INDEX_FILE: index };
+  const run = (args: string[], input?: string) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd: repo, env, encoding: 'utf8', input });
+  if (parent === null) run(['read-tree', '--empty']);
+  else run(['read-tree', parent]);
+  for (const [file, content] of Object.entries(files)) {
+    if (content === null) run(['update-index', '--force-remove', file]);
+    else run(['update-index', '--add', '--cacheinfo', `100644,${run(['hash-object', '-w', '--stdin'], content).trim()},${file}`]);
+  }
+  const tree = run(['write-tree']).trim();
+  return run(['commit-tree', ...(parent === null ? [] : ['-p', parent]), '-m', 'moved', tree]).trim();
+}
+
 describe('vcs-git saves a chat worktree for a put-away and restores it (27.6)', () => {
   it('saves modified, new and deleted files; Restore brings them back on the branch, unstaged, and the repo is untouched', async () => {
     const { repo, data, vcs, port, head, path, snapshotsRoot } = await setup();
@@ -126,7 +150,7 @@ describe('vcs-git saves a chat worktree for a put-away and restores it (27.6)', 
     git(repo, 'gc', '-q', '--prune=now');
 
     const beforeRestore = repoState(repo);
-    expect(await port.restore(repo, { path, branch: BRANCH, head: saved.head, snapshotTree: saved.snapshotTree })).toBe('restored');
+    expect(await port.restore(repo, { path, branch: BRANCH, head: saved.head, snapshotTree: saved.snapshotTree, newBranch: RESTORED })).toEqual({ branch: BRANCH, on: 'saved' });
     expect(repoState(repo)).toBe(beforeRestore);
     expect(contents(path)).toEqual({ '.gitignore': '.env\n', 'a.txt': 'two\n', 'new.txt': 'new\n' });
     // Cleanup never touches the repo either.
@@ -147,14 +171,14 @@ describe('vcs-git saves a chat worktree for a put-away and restores it (27.6)', 
     expect(repoState(repo)).toBe(before);
   });
 
-  it('saves a clean copy as null with no files, and restores it on the new tip even after the branch moved', async () => {
+  it('saves a clean copy as null with no files, and restores it on the new tip after the branch moved forward', async () => {
     const { repo, vcs, port, head, path } = await setup();
     const saved = await port.saveForPutAway(repo, path, BRANCH);
     expect(saved).toEqual({ snapshotTree: null, head, files: 0 });
     await vcs.removeWorktree(repo, path, {});
     // The branch moves on (a commit made elsewhere).
     git(repo, 'branch', '-f', BRANCH, git(repo, 'commit-tree', '-p', head, '-m', 'later', `${head}^{tree}`).trim());
-    expect(await port.restore(repo, { path, branch: BRANCH, head, snapshotTree: null })).toBe('restored');
+    expect(await port.restore(repo, { path, branch: BRANCH, head, snapshotTree: null, newBranch: RESTORED })).toEqual({ branch: BRANCH, on: 'newer' });
     expect(contents(path)).toEqual({ '.gitignore': '.env\n', 'a.txt': 'one\n', 'gone.txt': 'delete me\n' });
   });
 
@@ -180,28 +204,123 @@ describe('vcs-git saves a chat worktree for a put-away and restores it (27.6)', 
     await expect(nested.port.saveForPutAway(nested.repo, nested.repo, BRANCH)).rejects.toThrow(VcsError);
   });
 
-  it('answers branch_missing, branch_moved and path_taken, changing nothing', async () => {
+  it('answers path_taken, changing nothing', async () => {
     const { repo, vcs, port, head, path } = await setup();
     writeFileSync(join(path, 'a.txt'), 'two\n');
     const saved = await port.saveForPutAway(repo, path, BRANCH);
     await vcs.removeWorktree(repo, path, {});
-
-    // Something else at the path.
     mkdirSync(path);
     writeFileSync(join(path, 'other.txt'), 'mine\n');
-    expect(await port.restore(repo, { path, branch: BRANCH, head, snapshotTree: saved.snapshotTree })).toBe('path_taken');
+    expect(await port.restore(repo, { path, branch: BRANCH, head, snapshotTree: saved.snapshotTree, newBranch: RESTORED })).toBe('path_taken');
     expect(contents(path)).toEqual({ 'other.txt': 'mine\n' });
-    rmSync(path, { recursive: true });
+    // A branch that moved changes nothing at a taken path either.
+    git(repo, 'branch', '-f', BRANCH, commitOn(repo, head, { 'later.txt': 'later\n' }));
+    expect(await port.restore(repo, { path, branch: BRANCH, head, snapshotTree: saved.snapshotTree, newBranch: RESTORED })).toBe('path_taken');
+    expect(contents(path)).toEqual({ 'other.txt': 'mine\n' });
+    expect(branches(repo)).toEqual(['main', BRANCH]);
+  });
 
-    // The branch moved on: the saved changes were made on the commit before.
-    const moved = git(repo, 'commit-tree', '-p', head, '-m', 'later', `${head}^{tree}`).trim();
-    git(repo, 'branch', '-f', BRANCH, moved);
-    expect(await port.restore(repo, { path, branch: BRANCH, head, snapshotTree: saved.snapshotTree })).toBe('branch_moved');
-    expect(existsSync(path)).toBe(false);
+  describe('when the branch moved or went since the put-away (user decision 2026-11-01)', () => {
+    /** A copy with a modified file, a new untracked file and a deleted file, saved and removed. */
+    const putAway = async () => {
+      const kit = await setup();
+      writeFileSync(join(kit.path, 'a.txt'), 'two\n');
+      writeFileSync(join(kit.path, 'new.txt'), 'new\n');
+      rmSync(join(kit.path, 'gone.txt'));
+      const saved = await kit.port.saveForPutAway(kit.repo, kit.path, BRANCH);
+      await kit.vcs.removeWorktree(kit.repo, kit.path, {});
+      const restore = () => kit.port.restore(kit.repo, { path: kit.path, branch: BRANCH, head: saved.head, snapshotTree: saved.snapshotTree, newBranch: RESTORED });
+      return { ...kit, saved, restore };
+    };
+    const SAVED_FILES = { '.gitignore': '.env\n', 'a.txt': 'two\n', 'new.txt': 'new\n' };
 
-    git(repo, 'branch', '-D', BRANCH);
-    expect(await port.restore(repo, { path, branch: BRANCH, head, snapshotTree: saved.snapshotTree })).toBe('branch_missing');
-    expect(existsSync(path)).toBe(false);
+    it('moved forward and the changes apply cleanly: restored on the branch at its newer commit', async () => {
+      const { repo, path, head, restore } = await putAway();
+      const tip = commitOn(repo, head, { 'later.txt': 'later\n' });
+      git(repo, 'branch', '-f', BRANCH, tip);
+      expect(await restore()).toEqual({ branch: BRANCH, on: 'newer' });
+      expect(contents(path)).toEqual({ ...SAVED_FILES, 'later.txt': 'later\n' });
+      expect(git(path, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(BRANCH);
+      expect(git(path, 'rev-parse', 'HEAD').trim()).toBe(tip);
+      expect(git(path, 'status', '--porcelain=v1').split('\n').filter(Boolean).sort()).toEqual([' D gone.txt', ' M a.txt', '?? new.txt']);
+      expect(branches(repo)).toEqual(['main', BRANCH]);
+    });
+
+    it('moved forward with a conflicting change: a new branch at the saved commit, nothing lost', async () => {
+      const { repo, path, head, restore } = await putAway();
+      const tip = commitOn(repo, head, { 'a.txt': 'three\n' });
+      git(repo, 'branch', '-f', BRANCH, tip);
+      expect(await restore()).toEqual({ branch: RESTORED, on: 'moved' });
+      expect(contents(path)).toEqual(SAVED_FILES);
+      expect(git(path, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(RESTORED);
+      expect(git(path, 'rev-parse', 'HEAD').trim()).toBe(head);
+      // The branch's own commit is untouched.
+      expect(git(repo, 'rev-parse', BRANCH).trim()).toBe(tip);
+      expect(git(repo, 'show', `${BRANCH}:a.txt`)).toBe('three\n');
+      expect(branches(repo)).toEqual(['main', BRANCH, RESTORED]);
+    });
+
+    it('moved sideways (history rewritten): a new branch at the saved commit', async () => {
+      const { repo, path, head, restore } = await putAway();
+      // A rewritten root: the saved commit is no longer in the branch's history.
+      const rewritten = commitOn(repo, null, { 'a.txt': 'one\n', 'gone.txt': 'delete me\n', '.gitignore': '.env\n', 'later.txt': 'later\n' });
+      git(repo, 'branch', '-f', BRANCH, rewritten);
+      expect(await restore()).toEqual({ branch: RESTORED, on: 'moved' });
+      expect(contents(path)).toEqual(SAVED_FILES);
+      expect(git(path, 'rev-parse', 'HEAD').trim()).toBe(head);
+      expect(git(repo, 'rev-parse', BRANCH).trim()).toBe(rewritten);
+    });
+
+    it('branch deleted: a new branch at the saved commit', async () => {
+      const { repo, path, head, restore } = await putAway();
+      git(repo, 'branch', '-D', BRANCH);
+      expect(await restore()).toEqual({ branch: RESTORED, on: 'gone' });
+      expect(contents(path)).toEqual(SAVED_FILES);
+      expect(git(path, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(RESTORED);
+      expect(git(path, 'rev-parse', 'HEAD').trim()).toBe(head);
+      expect(git(path, 'status', '--porcelain=v1').split('\n').filter(Boolean).sort()).toEqual([' D gone.txt', ' M a.txt', '?? new.txt']);
+      expect(branches(repo)).toEqual(['main', RESTORED]);
+    });
+
+    it('the -restored name taken: -restored-2, the taken branch untouched', async () => {
+      const { repo, path, head, restore } = await putAway();
+      const other = commitOn(repo, head, { 'other.txt': 'other\n' });
+      git(repo, 'branch', RESTORED, other);
+      git(repo, 'branch', '-D', BRANCH);
+      expect(await restore()).toEqual({ branch: `${RESTORED}-2`, on: 'gone' });
+      expect(contents(path)).toEqual(SAVED_FILES);
+      expect(git(repo, 'rev-parse', RESTORED).trim()).toBe(other);
+      expect(git(path, 'rev-parse', 'HEAD').trim()).toBe(head);
+    });
+
+    it('rolls a newer-commit attempt that fails partway back fully, then restores on a new branch', async () => {
+      const { repo, path, head, restore } = await putAway();
+      // The newer commit ignores the saved untracked file: the merge is clean, but the copy written at the tip
+      // isn't the saved one (git would hide new.txt), so that attempt is undone before the new branch is made.
+      const tip = commitOn(repo, head, { '.gitignore': '.env\nnew.txt\n' });
+      git(repo, 'branch', '-f', BRANCH, tip);
+      expect(await restore()).toEqual({ branch: RESTORED, on: 'moved' });
+      expect(contents(path)).toEqual(SAVED_FILES);
+      expect(git(path, 'rev-parse', 'HEAD').trim()).toBe(head);
+      expect(git(repo, 'rev-parse', BRANCH).trim()).toBe(tip);
+      // Nothing of the undone attempt is left: one worktree record, the chat's only, and no other branch.
+      expect(readdirSync(join(repo, '.git', 'worktrees'))).toEqual(['aaaaaaaa']);
+      expect(git(repo, 'worktree', 'list', '--porcelain').split('\n').filter((line) => line.startsWith('branch '))).toEqual(['branch refs/heads/main', `branch refs/heads/${RESTORED}`]);
+      expect(branches(repo)).toEqual(['main', BRANCH, RESTORED]);
+    });
+
+    it('rolls a new-branch attempt that fails partway back fully: the branch it made goes, the record is kept', async () => {
+      const { repo, path, saved, port, snapshotsRoot } = await putAway();
+      git(repo, 'branch', '-D', BRANCH);
+      // The store loses an object the saved changes need: writing the copy fails after it was made.
+      const store = readdirSync(snapshotsRoot).find((name) => /^[0-9a-f]{16}$/.test(name))!;
+      const id = execFileSync('git', ['--git-dir', join(repo, '.git'), 'ls-tree', saved.snapshotTree!, 'new.txt'], { encoding: 'utf8', env: { ...process.env, GIT_ALTERNATE_OBJECT_DIRECTORIES: join(snapshotsRoot, store, 'objects') } }).split(/\s+/)[2]!;
+      rmSync(join(snapshotsRoot, store, 'objects', id.slice(0, 2), id.slice(2)));
+      await expect(port.restore(repo, { path, branch: BRANCH, head: saved.head, snapshotTree: saved.snapshotTree, newBranch: RESTORED })).rejects.toThrow(VcsError);
+      expect(existsSync(path)).toBe(false);
+      expect(branches(repo)).toEqual(['main']);
+      expect(existsSync(join(repo, '.git', 'worktrees', 'aaaaaaaa'))).toBe(false);
+    });
   });
 
   it('repairs a half put-away copy in place, and replaces the record of one whose folder went but whose record stayed', async () => {
@@ -212,7 +331,7 @@ describe('vcs-git saves a chat worktree for a put-away and restores it (27.6)', 
     // The removal stopped half way: some files gone.
     rmSync(join(inPlace.path, 'a.txt'));
     rmSync(join(inPlace.path, 'new.txt'));
-    expect(await inPlace.port.restore(inPlace.repo, { path: inPlace.path, branch: BRANCH, head: saved.head, snapshotTree: saved.snapshotTree })).toBe('restored');
+    expect(await inPlace.port.restore(inPlace.repo, { path: inPlace.path, branch: BRANCH, head: saved.head, snapshotTree: saved.snapshotTree, newBranch: RESTORED })).toEqual({ branch: BRANCH, on: 'saved' });
     expect(contents(inPlace.path)).toMatchObject({ 'a.txt': 'two\n', 'new.txt': 'new\n' });
 
     const stale = await setup();
@@ -221,7 +340,7 @@ describe('vcs-git saves a chat worktree for a put-away and restores it (27.6)', 
     // The folder went, git's record of it stayed.
     rmSync(stale.path, { recursive: true });
     expect(existsSync(join(stale.repo, '.git', 'worktrees', 'aaaaaaaa'))).toBe(true);
-    expect(await stale.port.restore(stale.repo, { path: stale.path, branch: BRANCH, head: kept.head, snapshotTree: kept.snapshotTree })).toBe('restored');
+    expect(await stale.port.restore(stale.repo, { path: stale.path, branch: BRANCH, head: kept.head, snapshotTree: kept.snapshotTree, newBranch: RESTORED })).toEqual({ branch: BRANCH, on: 'saved' });
     expect(contents(stale.path)).toMatchObject({ 'new.txt': 'new\n' });
   });
 });
@@ -355,7 +474,7 @@ describe('vcs-git retention safety (27.6 review)', () => {
     writeFileSync(join(elsewhere, 'a.txt'), 'my own edit\n');
     symlinkSync(elsewhere, path, LINK);
     await expect(port.saveForPutAway(repo, path, BRANCH)).rejects.toThrow(VcsError);
-    expect(await port.restore(repo, { path, branch: BRANCH, head, snapshotTree: saved.snapshotTree })).toBe('path_taken');
+    expect(await port.restore(repo, { path, branch: BRANCH, head, snapshotTree: saved.snapshotTree, newBranch: RESTORED })).toBe('path_taken');
     expect(readFileSync(join(elsewhere, 'a.txt'), 'utf8')).toBe('my own edit\n');
     void data;
   });
@@ -368,7 +487,7 @@ describe('vcs-git retention safety (27.6 review)', () => {
     rmSync(join(path, 'new.txt'));
     writeFileSync(join(path, 'a.txt'), 'newer edit\n');
     writeFileSync(join(path, 'extra.txt'), 'extra\n');
-    expect(await port.restore(repo, { path, branch: BRANCH, head: saved.head, snapshotTree: saved.snapshotTree })).toBe('restored');
+    expect(await port.restore(repo, { path, branch: BRANCH, head: saved.head, snapshotTree: saved.snapshotTree, newBranch: RESTORED })).toEqual({ branch: BRANCH, on: 'saved' });
     expect(contents(path)).toMatchObject({ 'a.txt': 'newer edit\n', 'new.txt': 'new\n', 'extra.txt': 'extra\n' });
   });
 
@@ -395,7 +514,7 @@ describe('vcs-git retention safety (27.6 review)', () => {
     writeFileSync(join(path, 'new.txt'), 'new\n');
     const saved = await port.saveForPutAway(repo, path, BRANCH);
     rmSync(path, { recursive: true });
-    expect(await port.restore(repo, { path, branch: BRANCH, head: saved.head, snapshotTree: saved.snapshotTree })).toBe('restored');
+    expect(await port.restore(repo, { path, branch: BRANCH, head: saved.head, snapshotTree: saved.snapshotTree, newBranch: RESTORED })).toEqual({ branch: BRANCH, on: 'saved' });
     expect(contents(path)).toMatchObject({ 'new.txt': 'new\n' });
   });
 

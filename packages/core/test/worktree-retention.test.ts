@@ -29,6 +29,8 @@ import {
 import { openTestCore, soleAgent, tempDir } from './helpers.js';
 import { agent, fakeChatWorktree, fakeGit, fakeWorkingTree } from './support/worktree-chat-fakes.js';
 
+type FakeCopies = ReturnType<typeof fakeChatWorktree>;
+
 function setUp(options: { keep?: number } = {}) {
   const core = openTestCore(tempDir('ogden-agents-core-'));
   const dataDir = realpathSync.native(tempDir('ogden-agents-data-'));
@@ -159,7 +161,7 @@ describe('putting a chat worktree away (27.6)', () => {
     expect(kit.core.worktreePutAway.get(session.id)).toBeDefined();
     expect(() => kit.chat.sendMessage(kit.workspace.id, session.id, 'hi')).toThrow(WorktreePutAwayError);
 
-    expect(await kit.chat.restoreWorktree(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch: session.branch, port: null, putAway: false } });
+    expect(await kit.chat.restoreWorktree(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch: session.branch, port: null, putAway: false }, restored: 'saved' });
     expect(kit.core.worktreePutAway.get(session.id)).toBeUndefined();
     expect([...kit.copies.changes(path)]).toEqual(['a.txt']);
   });
@@ -173,7 +175,7 @@ describe('Restore (27.6)', () => {
     const putAway = await kit.chat.putAwayWorktree(session.id, 'retention');
     kit.copies.forget(path);
 
-    expect(await kit.retention.restore(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch, port: null, putAway: false } });
+    expect(await kit.retention.restore(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch, port: null, putAway: false }, restored: 'saved' });
     expect(kit.copies.calls.at(-1)).toBe(`restore ${kit.repo} ${path} ${branch} ${kit.core.worktreePutAway.listAll().length === 0 ? [...kit.copies.snapshots.keys()].at(-1) : ''}`);
     expect([...kit.copies.changes(path)]).toEqual(['a.txt']);
     expect(kit.core.worktreePutAway.get(session.id)).toBeUndefined();
@@ -182,29 +184,70 @@ describe('Restore (27.6)', () => {
     await kit.chat.settled();
   });
 
-  it('refuses, changing nothing and keeping the record, when the branch is gone, has moved or the path is taken', async () => {
+  it('refuses, changing nothing and keeping the record, when the path is taken', async () => {
+    const kit = setUp();
+    const { session, path } = await kit.worktreeChat();
+    kit.copies.changes(path).add('a.txt');
+    await kit.chat.putAwayWorktree(session.id, 'retention');
+    kit.copies.forget(path);
+    kit.copies.takenPaths.add(path);
+    expect(await refusal(kit.chat.restoreWorktree(kit.workspace.id, session.id))).toMatchObject({ reason: 'path_taken' });
+    expect(kit.core.worktreePutAway.get(session.id)).toBeDefined();
+    expect(kit.events().some((event) => event.type === 'session.worktree_restored')).toBe(false);
+  });
+
+  it('a branch moved forward with changes that apply: restored on it at its newer commit, the branch unchanged', async () => {
     const kit = setUp();
     const { session, path, branch } = await kit.worktreeChat();
     kit.copies.changes(path).add('a.txt');
     await kit.chat.putAwayWorktree(session.id, 'retention');
     kit.copies.forget(path);
-
-    kit.copies.missingBranches.add(branch);
-    const missing = await refusal(kit.chat.restoreWorktree(kit.workspace.id, session.id));
-    expect(missing).toBeInstanceOf(RestoreFailedError);
-    expect(missing).toMatchObject({ reason: 'branch_missing', branch });
-    expect(missing?.message).toContain(branch);
-    kit.copies.missingBranches.clear();
-
     kit.copies.heads.set(branch, 'd'.repeat(40));
-    expect(await refusal(kit.chat.restoreWorktree(kit.workspace.id, session.id))).toMatchObject({ reason: 'branch_moved' });
+    kit.copies.forwardBranches.add(branch);
+    expect(await kit.chat.restoreWorktree(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch, port: null, putAway: false }, restored: 'newer' });
+    expect(kit.core.entities.getSession(session.id)?.branch).toBe(branch);
+    expect(kit.events().some((event) => event.type === 'session.location_changed')).toBe(false);
+  });
+
+  it.each([
+    ['moved', (copies: FakeCopies, branch: string): void => void copies.heads.set(branch, 'd'.repeat(40))],
+    ['gone', (copies: FakeCopies, branch: string): void => void copies.missingBranches.add(branch)],
+  ] as const)('a branch %s: the copy on a new branch, made the chat\'s with session.location_changed in the record\'s transaction', async (on, change) => {
+    const kit = setUp();
+    const { session, path, branch } = await kit.worktreeChat();
+    kit.copies.changes(path).add('a.txt');
+    const putAway = await kit.chat.putAwayWorktree(session.id, 'retention');
+    kit.copies.forget(path);
+    change(kit.copies, branch);
+    const restoredBranch = `${branch}-restored`;
+    const before = kit.events().length;
+    expect(await kit.chat.restoreWorktree(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch: restoredBranch, port: null, putAway: false }, restored: on });
+    expect(kit.copies.calls.at(-1)).toContain(`restore ${kit.repo} ${path} ${branch} `);
+    expect([...kit.copies.changes(path)]).toEqual(['a.txt']);
+    expect(kit.core.entities.getSession(session.id)).toMatchObject({ branch: restoredBranch, worktreePath: path });
+    expect(kit.core.worktreePutAway.get(session.id)).toBeUndefined();
+    const added = kit.events().slice(before);
+    expect(added.map((event) => event.type)).toEqual(['session.location_changed', 'session.worktree_restored']);
+    expect(added[0]).toMatchObject({ payload: { sessionId: session.id, location: 'worktree', previous: 'worktree', branch: restoredBranch, files: putAway.files, resumes: true } });
+    // Put away again and restored again: the record names the new branch.
     kit.copies.heads.clear();
+    kit.copies.missingBranches.clear();
+    const again = await kit.chat.putAwayWorktree(session.id, 'retention');
+    expect(again.branch).toBe(restoredBranch);
+  });
 
-    kit.copies.takenPaths.add(path);
-    expect(await refusal(kit.chat.restoreWorktree(kit.workspace.id, session.id))).toMatchObject({ reason: 'path_taken' });
-
+  it('refuses a branch the port names that is not this chat\'s own, keeping the record', async () => {
+    const kit = setUp();
+    const { session, path } = await kit.worktreeChat();
+    kit.copies.changes(path).add('a.txt');
+    await kit.chat.putAwayWorktree(session.id, 'retention');
+    kit.copies.forget(path);
+    const restore = kit.copies.restore;
+    kit.copies.restore = async () => ({ branch: 'main', on: 'moved' });
+    expect(await refusal(kit.chat.restoreWorktree(kit.workspace.id, session.id))).toMatchObject({ reason: 'failed' });
+    kit.copies.restore = restore;
     expect(kit.core.worktreePutAway.get(session.id)).toBeDefined();
-    expect(kit.events().some((event) => event.type === 'session.worktree_restored')).toBe(false);
+    expect(kit.core.entities.getSession(session.id)?.branch).toBe(`ogden/chat/${session.id}`);
   });
 
   it('refuses a chat with nothing put away, and one of another project', async () => {

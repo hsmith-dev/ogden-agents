@@ -212,6 +212,23 @@ export type CommitWorktreeResponse = z.infer<typeof CommitWorktreeResponse>;
 export const CHAT_WORKTREE_BRANCH_PREFIX = 'ogden/chat/';
 /** The branch of the chat `id`'s worktree: `ogden/chat/<ses_…>`. */
 export const chatWorktreeBranch = (id: SessionId): string => `${CHAT_WORKTREE_BRANCH_PREFIX}${id}`;
+/**
+ * The branch a Restore makes when the chat's branch moved (not only forward, or
+ * its saved changes don't apply on the new commit) or is gone (user decision
+ * 2026-11-01): `ogden/chat/<ses_…>-restored`, then `-restored-2`, `-restored-3`
+ * when taken. It becomes the chat's branch (`session.location_changed`).
+ */
+export const restoredChatWorktreeBranch = (id: SessionId): string => `${chatWorktreeBranch(id)}-restored`;
+/** `-restored`, `-restored-2`, … as Restore names them (never `-restored-1`, never a leading zero). */
+const RESTORED_SUFFIX = /-restored(?:-(?:[2-9]|[1-9]\d{1,3}))?$/;
+/** The chat id a chat worktree branch names (`ogden/chat/<ses_…>` or one of its Restore branches), or `undefined` for any other branch. */
+export const chatOfWorktreeBranch = (branch: string): SessionId | undefined => {
+  if (!branch.startsWith(CHAT_WORKTREE_BRANCH_PREFIX)) return undefined;
+  const parsed = SessionId.safeParse(branch.slice(CHAT_WORKTREE_BRANCH_PREFIX.length).replace(RESTORED_SUFFIX, ''));
+  return parsed.success ? parsed.data : undefined;
+};
+/** Whether `branch` is chat `id`'s own: `ogden/chat/<id>` or one of its Restore branches. */
+export const isChatWorktreeBranchOf = (id: SessionId, branch: string): boolean => chatOfWorktreeBranch(branch) === id;
 
 /** Hunk actions and Commit while an agent works in the same folder (disabled). */
 export const agentMidTurnText = (agentName: string): string => `${agentName} is working in this folder. Wait for it to finish, or stop it.`;

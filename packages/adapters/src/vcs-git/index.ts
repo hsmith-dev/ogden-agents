@@ -49,7 +49,7 @@ import {
   type VcsPort,
   type VcsWorktreeGitPaths,
 } from '@ogden-agents/core';
-import { BUILD_BRANCH_PREFIX, CHAT_WORKTREE_BRANCH_PREFIX, MIN_GIT_VERSION, SessionId } from '@ogden-agents/shared';
+import { BUILD_BRANCH_PREFIX, chatOfWorktreeBranch, MIN_GIT_VERSION } from '@ogden-agents/shared';
 import {
   type GitResult, type GitVcsOptions, parseGitVersion, gitVersionAtLeast, REVISION, RUN_BRANCH, MAX_IMPORT_BYTES, checkBranch, checkRevision,
   checkPath, checkRelative, SAFE_CONFIG, realOf, isInside, storeIsPlain
@@ -166,11 +166,9 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     return refuse();
   };
 
-  /** Whether `branch` is the branch a worktree of `kind` named `id` may delete: a run's `ogden/<id>/…`, a chat's `ogden/chat/<ses_…>`. */
+  /** Whether `branch` is the branch a worktree of `kind` named `id` may delete: a run's `ogden/<id>/…`, a chat's `ogden/chat/<ses_…>` (or a Restore's `…-restored`, `-2`, …). */
   const ownBranch = (kind: 'run' | 'chat' | undefined, id: string, branch: string): boolean =>
-    kind === 'chat'
-      ? branch.startsWith(CHAT_WORKTREE_BRANCH_PREFIX) && SessionId.safeParse(branch.slice(CHAT_WORKTREE_BRANCH_PREFIX.length)).success
-      : branch.startsWith(`${BUILD_BRANCH_PREFIX}${id}/`);
+    kind === 'chat' ? chatOfWorktreeBranch(branch) !== undefined : branch.startsWith(`${BUILD_BRANCH_PREFIX}${id}/`);
 
   return {
     check() {

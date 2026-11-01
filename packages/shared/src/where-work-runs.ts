@@ -162,6 +162,28 @@ export const WORKTREE_PUT_AWAY_TEXT = "This chat's copy was put away to save spa
 export const WORKTREE_RESTORE_LABEL = 'Restore';
 export const WORKTREE_RESTORED_TEXT = 'Restored.';
 export const WORKTREE_RESTORE_RETRY_LABEL = 'Try again';
+/**
+ * Where Restore put the copy back (user decision 2026-11-01): `saved` on its
+ * branch at the commit it was put away on; `newer` on its branch at a newer
+ * commit (the branch only moved forward and the saved changes applied
+ * cleanly); `moved` and `gone` on a new branch at the saved commit, the
+ * branch having moved otherwise (or the changes not applying) or being gone.
+ */
+export const RESTORED_ON = ['saved', 'newer', 'moved', 'gone'] as const;
+export const RestoredOn = z.enum(RESTORED_ON);
+export type RestoredOn = z.infer<typeof RestoredOn>;
+/** `POST …/worktree/restore`: the chat's place now, and where the copy went. */
+export const RestoreWorktreeResponse = SessionLocationResponse.extend({ restored: RestoredOn });
+export type RestoreWorktreeResponse = z.infer<typeof RestoreWorktreeResponse>;
+/** Restore's plain sentence for where the copy went, naming the branch it is on now. */
+export const worktreeRestoredText = (on: RestoredOn, branch: string): string =>
+  on === 'saved'
+    ? WORKTREE_RESTORED_TEXT
+    : on === 'newer'
+      ? `Restored on ${branch} at its newer commit.`
+      : on === 'moved'
+        ? `The branch had moved, so this copy is on a new branch: ${branch}.`
+        : `The branch was gone, so this copy is on a new branch: ${branch}.`;
 /** Restore couldn't finish: the branch is gone. */
 export const restoreBranchMissingText = (branch: string): string => `Restore couldn't finish: the branch ${branch} no longer exists. The saved changes are kept.`;
 /** Restore couldn't finish: the branch has commits made since the copy was put away, and the saved changes were made on the commit before them. */

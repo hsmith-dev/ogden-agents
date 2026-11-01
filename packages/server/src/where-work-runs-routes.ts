@@ -12,7 +12,7 @@
 import { HandOffConflictError, NotFoundError, RestoreFailedError, WorktreePutAwayError, type ChatLocations, type Trials, type WorktreeRetention } from '@ogden-agents/core';
 import {
   API_ROUTES,
-  CHAT_WORKTREE_BRANCH_PREFIX,
+  chatOfWorktreeBranch,
   HANDOFF_CONFLICT_MESSAGE,
   HandOffResponse,
   PutAwayWorktreesResponse,
@@ -20,7 +20,7 @@ import {
   RESTORE_PATH_TAKEN_TEXT,
   restoreBranchMissingText,
   restoreBranchMovedText,
-  SessionId,
+  RestoreWorktreeResponse,
   SessionLocationResponse,
   WORKTREE_PUT_AWAY_SEND_MESSAGE,
   TrialResponse,
@@ -36,7 +36,7 @@ import { NO_STORE, workbenchRefusal } from './workspace-files-routes.js';
 function restoreFailedText(error: RestoreFailedError): string {
   if (error.reason === 'path_taken') return RESTORE_PATH_TAKEN_TEXT;
   const branch = error.branch;
-  if (branch === undefined || !branch.startsWith(CHAT_WORKTREE_BRANCH_PREFIX) || !SessionId.safeParse(branch.slice(CHAT_WORKTREE_BRANCH_PREFIX.length)).success) return RESTORE_FAILED_MESSAGE;
+  if (branch === undefined || chatOfWorktreeBranch(branch) === undefined) return RESTORE_FAILED_MESSAGE;
   return error.reason === 'branch_missing' ? restoreBranchMissingText(branch) : restoreBranchMovedText(branch);
 }
 
@@ -102,7 +102,7 @@ export function registerWhereWorkRunsRoutes(app: Hono, { chatLocations, worktree
   } else {
     app.post(API_ROUTES.sessionWorktreeRestore, async (c) => {
       try {
-        return c.json(SessionLocationResponse.parse(await worktreeRetention.restore(c.req.param('wsId'), c.req.param('sesId'))), 200, NO_STORE);
+        return c.json(RestoreWorktreeResponse.parse(await worktreeRetention.restore(c.req.param('wsId'), c.req.param('sesId'))), 200, NO_STORE);
       } catch (error) {
         return refusal(c, error);
       }

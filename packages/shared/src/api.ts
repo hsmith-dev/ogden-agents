@@ -584,9 +584,12 @@ export const API_ROUTES = {
    */
   sessionLocation: `${API_BASE}/workspaces/:wsId/sessions/:sesId/location`,
   /**
-   * `POST` → `SessionLocationResponse` (27.6): brings back a put-away chat
-   * worktree on its branch with its saved changes, appending
-   * `session.worktree_restored`. 409 `restore_failed` (the changes are kept),
+   * `POST` → `RestoreWorktreeResponse` (27.6): brings back a put-away chat
+   * worktree with its saved changes, appending `session.worktree_restored`:
+   * on its branch, at a newer commit when the branch only moved forward and
+   * the changes apply cleanly, else on a new branch `…-restored` at the saved
+   * commit (`session.location_changed` too; user decision 2026-11-01).
+   * 409 `restore_failed` (the changes are kept),
    * `invalid_operation` for a chat with nothing put away.
    */
   sessionWorktreeRestore: `${API_BASE}/workspaces/:wsId/sessions/:sesId/worktree/restore`,

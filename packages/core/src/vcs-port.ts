@@ -10,7 +10,7 @@
  * revision and path passed is core's own (validated before use), never
  * request input.
  */
-import type { ChangedFile, ChangesView, DiffHunk, DiffStats, HunkAction } from '@ogden-agents/shared';
+import type { ChangedFile, ChangesView, DiffHunk, DiffStats, HunkAction, RestoredOn } from '@ogden-agents/shared';
 import { CoreError } from './errors.js';
 
 /** The main checkout's current branch and its commit. */
@@ -282,12 +282,15 @@ export interface VcsPutAway {
 }
 
 /**
- * What Restore did: `branch_missing` (the branch is gone), `branch_moved`
- * (it has a new commit and there are saved changes) and `path_taken`
- * (something else is at the copy's path) change nothing, and the snapshot
+ * What Restore did (user decision 2026-11-01): the copy is back on `branch`,
+ * `on` its saved commit (`saved`), at the branch's newer commit (`newer`:
+ * the branch only moved forward and the saved changes applied cleanly), or
+ * on a new branch at the saved commit because the branch moved otherwise
+ * (or the changes didn't apply: `moved`) or is gone (`gone`). `path_taken`
+ * (something else is at the copy's path) changes nothing, and the snapshot
  * stays kept.
  */
-export type VcsRestoreResult = 'restored' | 'branch_missing' | 'branch_moved' | 'path_taken';
+export type VcsRestoreResult = { branch: string; on: RestoredOn } | 'path_taken';
 
 /** What moving uncommitted changes did: `conflict` (the target has its own changes to `files` of the same files) moves nothing. */
 export interface VcsMoveChanges {
@@ -325,10 +328,17 @@ export interface VcsChatWorktreePort {
    * files over the branch's commit, deletions too, through a temporary
    * index; the real index stays at the commit, so tracked edits come back
    * unstaged. Verified by a fresh snapshot. A copy still at `path` on its
-   * branch (half put away) gets the snapshot in place. `branch_moved` only
-   * when there is a snapshot and the branch is no longer at `head`.
+   * branch (half put away) gets the snapshot in place. When the branch is
+   * no longer at `head` (user decision 2026-11-01): if `head` is an
+   * ancestor of its tip and the saved changes merge with the newer commits
+   * without a conflict, the copy comes back at the tip with them; otherwise,
+   * or when the branch is gone, on a new branch `newBranch` (`-2`, `-3`, …
+   * when taken) made at `head`. Never overwrites or discards: an attempt at
+   * the tip that fails partway is rolled back (the copy it made removed)
+   * before the new branch is tried, and a new branch that fails is removed
+   * with its copy.
    */
-  restore(repoPath: string, input: { path: string; branch: string; head: string; snapshotTree: string | null }): Promise<VcsRestoreResult>;
+  restore(repoPath: string, input: { path: string; branch: string; head: string; snapshotTree: string | null; newBranch: string }): Promise<VcsRestoreResult>;
   /**
    * Hand off (user decision 2026-11-01): moves the uncommitted changes from
    * the folder `from` to the folder `to` (the project folder or the chat's

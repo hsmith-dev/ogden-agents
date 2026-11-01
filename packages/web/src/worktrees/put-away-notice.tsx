@@ -9,9 +9,11 @@ import { useRestoreWorktree } from './worktree-retention';
  * Restore. A Restore that couldn't finish says why in the server's own
  * sentence (the saved changes are kept) and offers Try again. Once restored
  * the list no longer names the chat, so the notice goes and the composer
- * takes messages again.
+ * takes messages again; `onRestored` gets Restore's sentence for where the
+ * copy went (on a newer commit, or on a new branch when the branch moved or
+ * went), which the page shows in its place.
  */
-export function PutAwayNotice({ wsId, sesId, onRestored }: { wsId: string; sesId: string; onRestored?: () => void }) {
+export function PutAwayNotice({ wsId, sesId, onRestored }: { wsId: string; sesId: string; onRestored?: (text: string) => void }) {
   const restore = useRestoreWorktree(wsId);
   const [state, setState] = useState<'idle' | 'restoring' | { error: string }>('idle');
   const failed = typeof state === 'object';
@@ -19,9 +21,9 @@ export function PutAwayNotice({ wsId, sesId, onRestored }: { wsId: string; sesId
     if (state === 'restoring') return;
     setState('restoring');
     restore(sesId).then(
-      () => {
+      (text) => {
         setState('idle');
-        onRestored?.();
+        onRestored?.(text);
       },
       (error: unknown) => setState({ error: error instanceof Error ? error.message : String(error) }),
     );

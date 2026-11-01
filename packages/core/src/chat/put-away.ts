@@ -17,21 +17,27 @@
  * record stays, and Restore re-applies the snapshot in place.
  *
  * Restore holds the chat the same way, asks the port to bring the copy back
- * (it refuses, changing nothing, when the branch is gone, has moved and
- * there are saved changes, or something else is at the path), then removes
- * the record with `session.worktree_restored`.
+ * (it refuses, changing nothing, when something else is at the path), then
+ * removes the record with `session.worktree_restored`. A branch that moved
+ * only forward, with saved changes that apply cleanly on its new commit,
+ * takes the copy there; otherwise, or when it is gone, the port puts the
+ * copy on a new branch `ogden/chat/<ses>-restored` (`-2`, `-3` when taken)
+ * at the saved commit, and that branch becomes the chat's through
+ * `Entities.setSessionWorktree` (`session.location_changed`) in the record's
+ * transaction (user decision 2026-11-01).
  */
 import {
   DELETE_CHAT_MID_TURN_MESSAGE,
   RESTORE_FAILED_MESSAGE,
   RESTORE_PATH_TAKEN_TEXT,
-  restoreBranchMissingText,
-  restoreBranchMovedText,
+  isChatWorktreeBranchOf,
+  restoredChatWorktreeBranch,
   type PutAwayCause,
   type PutAwayWorktree,
+  type RestoredOn,
+  type RestoreWorktreeResponse,
   type Session,
   type SessionId,
-  type SessionLocationResponse,
   type WorkspaceId,
 } from '@ogden-agents/shared';
 import { isChatWorktreePath } from '../chat-worktrees.js';
@@ -190,7 +196,7 @@ export function createPutAway(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { s
     }
   }
 
-  async function restoreNow(workspaceId: WorkspaceId, sessionId: SessionId): Promise<SessionLocationResponse> {
+  async function restoreNow(workspaceId: WorkspaceId, sessionId: SessionId): Promise<RestoreWorktreeResponse> {
     if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
     const store = ctx.options.worktreePutAway;
     const port = ctx.options.vcsChatWorktree;
@@ -201,6 +207,7 @@ export function createPutAway(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { s
     if (!idle(first)) throw new AgentMidTurnError(NOT_IDLE);
     const repoPath = workspaceFolder(ctx.getWorkspace(workspaceId));
     puttingAway.add(sessionId);
+    let restored: { branch: string; on: RestoredOn } | undefined;
     try {
       await serializedByRepo(repoPath, async () => {
         const current = store.get(sessionId);
@@ -208,22 +215,28 @@ export function createPutAway(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { s
         if (!isChatWorktreePath(ctx.options.dataDir, copy.worktreePath)) throw new InvalidOperationError(NOT_A_WORKTREE_CHAT);
         let result;
         try {
-          result = await port.restore(repoPath, { path: copy.worktreePath, branch: current.branch, head: current.head, snapshotTree: current.snapshotTree });
+          // A branch that moved otherwise, or is gone, gets the copy on a new branch named after the chat (never the record's branch, which may itself be one).
+          result = await port.restore(repoPath, { path: copy.worktreePath, branch: current.branch, head: current.head, snapshotTree: current.snapshotTree, newBranch: restoredChatWorktreeBranch(sessionId) });
         } catch {
           // git couldn't (the branch checked out elsewhere, the saved changes gone, the check failed): the record is kept.
           throw new RestoreFailedError(RESTORE_FAILED_MESSAGE, 'failed');
         }
-        if (result === 'branch_missing') throw new RestoreFailedError(restoreBranchMissingText(current.branch), 'branch_missing', current.branch);
-        if (result === 'branch_moved') throw new RestoreFailedError(restoreBranchMovedText(current.branch), 'branch_moved', current.branch);
         if (result === 'path_taken') throw new RestoreFailedError(RESTORE_PATH_TAKEN_TEXT, 'path_taken');
-        // The copy is back (the port verified it): the record goes with its event.
-        store.remove(sessionId);
+        // A branch the port made must be this chat's own (`…-restored`, `-2`, …); the port verified the copy.
+        if (result.branch !== current.branch && !isChatWorktreeBranchOf(sessionId, result.branch)) throw new RestoreFailedError(RESTORE_FAILED_MESSAGE, 'failed');
+        // The copy is back: the record goes with its event, and a new branch becomes the chat's through the one writer
+        // of a chat's place (`session.location_changed`, so history shows it), all in one transaction.
+        const moved = result.branch === copy.branch ? undefined : result.branch;
+        store.remove(sessionId, () => {
+          if (moved !== undefined) entities.setSessionWorktree(sessionId, { worktreePath: copy.worktreePath, branch: moved, files: current.files, resumes: true });
+        });
+        restored = result;
       });
     } finally {
       puttingAway.delete(sessionId);
     }
     added(sessionId);
-    return { location: { kind: 'worktree', branch: copy.branch, port: null, putAway: false } };
+    return { location: { kind: 'worktree', branch: restored!.branch, port: null, putAway: false }, restored: restored!.on };
   }
 
   return methods;

@@ -26,6 +26,7 @@ import type {
   PutAwayWorktree,
   PutAwayWorktreesResponse,
   SessionId,
+  RestoreWorktreeResponse,
   SessionLocationResponse,
   TrialResponse,
   WorktreeRetentionSetting,
@@ -67,12 +68,14 @@ export interface WorktreeRetention {
    */
   putAway(sessionId: SessionId, cause: PutAwayCause): Promise<PutAwayWorktree>;
   /**
-   * Brings a put-away chat worktree back on its branch with its saved
-   * changes, appending `session.worktree_restored`. `RestoreFailedError`
-   * (`branch_missing`, `branch_moved`, `path_taken`) keeps the snapshot;
-   * refused mid-turn.
+   * Brings a put-away chat worktree back with its saved changes, appending
+   * `session.worktree_restored`: on its branch (at a newer commit when it
+   * only moved forward and the changes apply cleanly), else on a new branch
+   * `…-restored` at the saved commit, recorded with `session.location_changed`
+   * (user decision 2026-11-01). `RestoreFailedError` (`path_taken`,
+   * `failed`) keeps the snapshot; refused mid-turn.
    */
-  restore(workspaceId: unknown, sessionId: unknown): Promise<SessionLocationResponse>;
+  restore(workspaceId: unknown, sessionId: unknown): Promise<RestoreWorktreeResponse>;
   /**
    * The sweep: while more chat worktrees exist than the cap, puts away the
    * oldest idle one (`retention`), never one whose chat works or waits.

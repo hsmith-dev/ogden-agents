@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { API_ROUTES, ApiErrorBody, apiPath, PutAwayWorktreesResponse, SessionLocationResponse, SessionResponse, WorkspaceResponse, WorktreeRetentionSetting, type Session, type SessionId } from '@ogden-agents/shared';
+import { API_ROUTES, ApiErrorBody, apiPath, PutAwayWorktreesResponse, RestoreWorktreeResponse, SessionResponse, WorkspaceResponse, WorktreeRetentionSetting, type Session, type SessionId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { removeAfterTest, signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -86,7 +86,7 @@ describe('worktree retention on the real server (27.6)', () => {
     // Restore puts the cap over again: the other one (idle) is put away, sparing the one restored.
     const restored = await kit.restore(first.id);
     expect(restored.status).toBe(200);
-    expect(SessionLocationResponse.parse(await restored.json())).toEqual({ location: { kind: 'worktree', branch: first.branch, port: null, putAway: false } });
+    expect(RestoreWorktreeResponse.parse(await restored.json())).toEqual({ location: { kind: 'worktree', branch: first.branch, port: null, putAway: false }, restored: 'saved' });
     expect(readFileSync(join(first.worktreePath!, 'notes.txt'), 'utf8')).toBe('from the first chat\n');
     expect(git(first.worktreePath!, 'status', '--porcelain')).toBe('?? notes.txt\n');
     await waitFor(() => kit.server.core.worktreePutAway.get(second.id) !== undefined, 'the second copy put away', 20_000);
@@ -97,7 +97,7 @@ describe('worktree retention on the real server (27.6)', () => {
     expect(existsSync(join(first.worktreePath!, 'more.txt'))).toBe(true);
   });
 
-  it('refuses Restore when the branch is gone (409 restore_failed, the record kept), and a setting outside 1 to 100', async () => {
+  it('restores onto a new branch when the branch is gone, recording the move, and refuses a setting outside 1 to 100', async () => {
     const kit = await open();
     expect(WorktreeRetentionSetting.parse(await (await request(kit.server, kit.tab, 'GET', API_ROUTES.worktreeRetention)).json())).toEqual({ keep: 15 });
     for (const keep of [0, 101]) expect((await request(kit.server, kit.tab, 'PUT', API_ROUTES.worktreeRetention, { keep })).status).toBe(400);
@@ -106,14 +106,20 @@ describe('worktree retention on the real server (27.6)', () => {
     expect((await request(kit.server, kit.tab, 'PUT', API_ROUTES.worktreeRetention, { keep: 1 })).status).toBe(200);
     await waitFor(() => kit.server.core.worktreePutAway.get(first.id) !== undefined, 'the first copy put away', 20_000);
     await waitFor(() => !existsSync(first.worktreePath!), 'its folder removed', 20_000);
+    const head = git(kit.repo, 'rev-parse', first.branch!).trim();
     git(kit.repo, 'branch', '-D', first.branch!);
 
-    const failed = await kit.restore(first.id);
-    expect(failed.status).toBe(409);
-    const body = ApiErrorBody.parse(await failed.json()).error;
-    expect(body).toMatchObject({ code: 'restore_failed', details: { reason: 'branch_missing' } });
-    expect(body.message).toContain(first.branch!);
-    expect(kit.server.core.worktreePutAway.get(first.id)).toBeDefined();
-    expect(existsSync(first.worktreePath!)).toBe(false);
+    const restored = await kit.restore(first.id);
+    expect(restored.status).toBe(200);
+    const branch = `${first.branch!}-restored`;
+    expect(RestoreWorktreeResponse.parse(await restored.json())).toEqual({ location: { kind: 'worktree', branch, port: null, putAway: false }, restored: 'gone' });
+    expect(git(first.worktreePath!, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(branch);
+    expect(git(first.worktreePath!, 'rev-parse', 'HEAD').trim()).toBe(head);
+    expect(kit.server.core.worktreePutAway.get(first.id)).toBeUndefined();
+    expect(kit.server.core.entities.getSession(first.id)?.branch).toBe(branch);
+    // History shows the move: `session.location_changed` naming the new branch.
+    expect(kit.server.core.events.readAfter(0).filter((event) => event.type === 'session.location_changed')).toEqual([
+      expect.objectContaining({ payload: expect.objectContaining({ sessionId: first.id, branch, location: 'worktree', previous: 'worktree' }) }),
+    ]);
   });
 });

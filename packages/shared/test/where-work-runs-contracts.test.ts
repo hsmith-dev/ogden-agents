@@ -35,7 +35,11 @@ import {
   WORKTREE_RETENTION_DEFAULT,
   WorktreeRetentionSetting,
   WorktreeSnapshotId,
+  chatOfWorktreeBranch,
   chatWorktreeBranch,
+  restoredChatWorktreeBranch,
+  RestoreWorktreeResponse,
+  worktreeRestoredText,
   handOffConflictText,
   handOffDividerText,
   handOffMidTurnText,
@@ -123,6 +127,12 @@ describe('where work runs contracts (epic 27 entry 2)', () => {
     expect(handOffMidTurnText('Claude Code')).toBe('Move once Claude Code has finished.');
     expect(WORKTREE_PUT_AWAY_TEXT).toBe("This chat's copy was put away to save space.");
     expect(WORKTREE_RESTORED_TEXT).toBe('Restored.');
+    const branch = `ogden/chat/${SES}`;
+    expect(worktreeRestoredText('saved', branch)).toBe('Restored.');
+    expect(worktreeRestoredText('newer', branch)).toBe(`Restored on ${branch} at its newer commit.`);
+    expect(worktreeRestoredText('moved', `${branch}-restored`)).toBe(`The branch had moved, so this copy is on a new branch: ${branch}-restored.`);
+    expect(worktreeRestoredText('gone', `${branch}-restored-2`)).toBe(`The branch was gone, so this copy is on a new branch: ${branch}-restored-2.`);
+    for (const on of ['saved', 'newer', 'moved', 'gone'] as const) expect(worktreeRestoredText(on, branch)).not.toMatch(/[\u2013\u2014]/);
     expect(restoreBranchMissingText('ogden/fix-login')).toBe("Restore couldn't finish: the branch ogden/fix-login no longer exists. The saved changes are kept.");
     expect(worktreeRetentionLabel(15)).toBe('Keep the last 15 worktrees');
     expect(worktreePortText(3011)).toBe('Runs on port 3011 in this copy');
@@ -157,5 +167,21 @@ describe('where work runs contracts (epic 27 entry 2)', () => {
     const [moved, , , , , retention] = EVENTS;
     expect(NewCoreEvent.safeParse({ ...moved, payload: { ...moved.payload, location: 'remote' } }).success).toBe(false);
     expect(NewCoreEvent.safeParse({ ...retention, payload: { keep: 0, previous: 15 } }).success).toBe(false);
+  });
+});
+
+describe("a chat worktree's branches (Restore onto a new branch, user decision 2026-11-01)", () => {
+  it("names the chat's own branch and its Restore branches, nothing else", () => {
+    const own = chatWorktreeBranch(SES as never);
+    expect(restoredChatWorktreeBranch(SES as never)).toBe(`${own}-restored`);
+    for (const branch of [own, `${own}-restored`, `${own}-restored-2`, `${own}-restored-17`]) expect(chatOfWorktreeBranch(branch)).toBe(SES);
+    for (const branch of [`${own}-restored-1`, `${own}-restored-02`, `${own}-other`, `${own}-restored-`, `${own}/x`, 'main', `ogden/chat/ses_bad-restored`, `x${own}`]) expect(chatOfWorktreeBranch(branch)).toBeUndefined();
+  });
+
+  it("answers Restore with the chat's place and where the copy went", () => {
+    const location = { kind: 'worktree', branch: `ogden/chat/${SES}-restored`, port: null, putAway: false } as const;
+    expect(RestoreWorktreeResponse.parse({ location, restored: 'moved' })).toEqual({ location, restored: 'moved' });
+    expect(RestoreWorktreeResponse.safeParse({ location }).success).toBe(false);
+    expect(RestoreWorktreeResponse.safeParse({ location, restored: 'elsewhere' }).success).toBe(false);
   });
 });

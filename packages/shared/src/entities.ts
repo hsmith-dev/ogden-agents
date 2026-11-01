@@ -151,7 +151,7 @@ export const Session = z.object({
    * project folder, and in sessions from before it.
    */
   worktreePath: z.string().min(1).nullable().default(null),
-  /** The worktree's branch, `ogden/chat/<this session's id>`, set with {@link worktreePath}; changed only by Hand off with it; `null` without one. */
+  /** The worktree's branch, `ogden/chat/<this session's id>`, set with {@link worktreePath}; changed only by Hand off with it, or by a Restore onto a new branch (`…-restored`); `null` without one. */
   branch: z.string().min(1).nullable().default(null),
   /** The user's name for the chat (backlog story 12); `null` until they give one. */
   title: z.string().nullable(),

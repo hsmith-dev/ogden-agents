@@ -3,7 +3,7 @@
  * an in-memory `VcsChatWorktreePort` for tests and the hand-off and
  * retention lanes. It runs no git and touches no file. Each folder is a set
  * of changed file names; tests set them (`changes(path)`), mark branches
- * gone (`missingBranches`), moved (`heads`), paths taken (`takenPaths`) and
+ * gone (`missingBranches`), moved (`heads`; both restore on the new branch), paths taken (`takenPaths`) and
  * copies unsafe to put away (`unsafe`), and read the calls. Saving for a
  * put-away keeps the folder's changes under a new tree id (the folder is
  * removed by `VcsPort.removeWorktree`, or `forget`); Restore brings them
@@ -25,9 +25,9 @@ export interface MemoryVcsChatWorktree extends VcsChatWorktreePort {
   forget(path: string): void;
   /** Whether a folder is at `path`. */
   has(path: string): boolean;
-  /** Branches Restore finds gone (`branch_missing`). */
+  /** Branches Restore finds gone (the copy comes back on the new branch, `gone`). */
   readonly missingBranches: Set<string>;
-  /** Each branch's commit when it isn't {@link MEMORY_BRANCH_HEAD} (`branch_moved`). */
+  /** Each branch's commit when it isn't {@link MEMORY_BRANCH_HEAD} (the copy comes back on the new branch, `moved`). */
   readonly heads: Map<string, string>;
   /** Paths Restore finds taken (`path_taken`). */
   readonly takenPaths: Set<string>;
@@ -80,16 +80,17 @@ export function createMemoryVcsChatWorktree(): MemoryVcsChatWorktree {
       snapshots.set(snapshotTree, files);
       return { snapshotTree, head: headOf(branch), files: files.size };
     },
-    async restore(repoPath, { path, branch, head, snapshotTree }): Promise<VcsRestoreResult> {
+    async restore(repoPath, { path, branch, head, snapshotTree, newBranch }): Promise<VcsRestoreResult> {
       calls.push(`restore ${repoPath} ${path} ${branch} ${snapshotTree ?? '-'}`);
-      if (missingBranches.has(branch)) return 'branch_missing';
-      if (snapshotTree !== null && headOf(branch) !== head) return 'branch_moved';
       if (takenPaths.has(path)) return 'path_taken';
       // A folder still there (half put away) gets the snapshot in place.
       const folder = changes(path);
       folder.clear();
       for (const file of snapshotTree === null ? [] : (snapshots.get(snapshotTree) ?? [])) folder.add(file);
-      return 'restored';
+      // No history here: a branch gone or at another commit gets the copy on the new branch at the saved commit.
+      if (missingBranches.has(branch)) return { branch: newBranch, on: 'gone' };
+      if (headOf(branch) !== head) return { branch: newBranch, on: 'moved' };
+      return { branch, on: 'saved' };
     },
     async moveChanges(repoPath, { from, to }): Promise<VcsMoveChanges> {
       calls.push(`moveChanges ${repoPath} ${from} ${to}`);

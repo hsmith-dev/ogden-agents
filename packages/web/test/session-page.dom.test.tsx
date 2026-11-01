@@ -22,6 +22,7 @@ import {
   WORKTREE_BADGE_TOOLTIP_TEXT,
   WORKTREE_PUT_AWAY_COMPOSER_TEXT,
   WORKTREE_PUT_AWAY_TEXT,
+  worktreeRestoredText,
   WORKTREE_RESTORE_LABEL,
   WORKTREE_RESTORE_RETRY_LABEL,
   worktreeBadgeLabel,
@@ -89,6 +90,7 @@ const fake = vi.hoisted(() => ({
   gone: false,
   restores: [] as string[],
   restoreResult: (() => Promise.resolve()) as () => Promise<unknown>,
+  restoredText: 'Restored.',
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -114,6 +116,7 @@ vi.mock('@/worktrees/worktree-retention', () => ({
   useRestoreWorktree: () => async (sesId: string) => {
     fake.restores.push(sesId);
     await fake.restoreResult();
+    return fake.restoredText;
   },
 }));
 vi.mock('@/shell/workspace-header', () => ({ WorkspaceHeader: ({ children }: { children?: ReactNode }) => <header>{children}</header> }));
@@ -303,6 +306,7 @@ beforeEach(() => {
   fake.gone = false;
   fake.restores = [];
   fake.restoreResult = () => Promise.resolve();
+  fake.restoredText = 'Restored.';
   fake.agentId = undefined;
   fake.claudeListed = true;
   fake.sendResult = () => Promise.resolve({ messageId: 'msg_x', queued: false });
@@ -753,6 +757,23 @@ describe("a chat whose copy was put away (27.6)", () => {
     expect(fake.restores).toEqual([SES]);
     // The session is read again once restored.
     expect(fake.fetches).toBeGreaterThan(fetchesBefore);
+  });
+
+  it('says plainly when Restore put the copy on a new branch, once the notice goes', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.putAway = true;
+    const text = worktreeRestoredText('moved', 'ogden/chat/ses_1-restored');
+    fake.restoredText = text;
+    fake.restoreResult = async () => {
+      fake.putAway = false;
+    };
+    await mount();
+    fireEvent.click(await screen.findByTestId('worktree-restore'));
+    await flush();
+    expect(text).toBe('The branch had moved, so this copy is on a new branch: ogden/chat/ses_1-restored.');
+    expect((await screen.findByTestId('worktree-restored')).textContent).toBe(text);
+    expect(screen.queryByTestId('worktree-put-away')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/[\u2013\u2014]/);
   });
 
   it("shows why Restore couldn't finish, with Try again", async () => {

@@ -458,6 +458,8 @@ export function SessionPage() {
 
   // Retention (27.6): a worktree chat whose copy was put away reads only, until Restore. Above every early return (hooks).
   const putAwayList = usePutAwayWorktrees(wsId, { enabled: (session.data?.session.branch ?? null) !== null });
+  /** Where the last Restore here put the copy, in its own sentence (a new branch, a newer commit), until the chat changes. */
+  const [restoredNote, setRestoredNote] = useState<{ sesId: string; text: string } | undefined>(undefined);
   if (session.error instanceof ChatApiError && session.error.status === 404) {
     return (
       <>
@@ -645,7 +647,19 @@ export function SessionPage() {
       {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
       {permissionMode === 'skip_all' && !agentRemoved ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
       {isBuild ? <BuildRunPanel wsId={wsId} run={buildRun.data} /> : null}
-      {putAway ? <PutAwayNotice key={`put-away-${sesId}`} wsId={wsId} sesId={sesId} onRestored={() => void refetchSession()} /> : null}
+      {putAway ? (
+        <PutAwayNotice
+          key={`put-away-${sesId}`}
+          wsId={wsId}
+          sesId={sesId}
+          onRestored={(text) => {
+            setRestoredNote({ sesId, text });
+            void refetchSession();
+          }}
+        />
+      ) : restoredNote?.sesId === sesId ? (
+        <Banner data-testid="worktree-restored">{restoredNote.text}</Banner>
+      ) : null}
       <StartModeNote key={sesId} note={startModeNote} />
       {agentRemoved ? (
         <Banner data-testid="agent-removed-banner">

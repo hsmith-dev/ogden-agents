@@ -3,7 +3,7 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { AgentId, ChatAgent, ChatDeletedResponse, ChatLocation, HandoffPreviewResponse, PermissionMode, PutAwayCause, PutAwayWorktree, RemoteMachineId, SessionLocationResponse, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, ChatAgent, ChatDeletedResponse, ChatLocation, HandoffPreviewResponse, PermissionMode, PutAwayCause, PutAwayWorktree, RemoteMachineId, RestoreWorktreeResponse, SessionLocationResponse, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentModels } from '../agent-models.js';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -445,13 +445,17 @@ export interface Chat {
    */
   putAwayWorktree(sessionId: SessionId, cause: PutAwayCause): Promise<PutAwayWorktree>;
   /**
-   * Restore (27.6): brings the put-away copy back on its branch with its
-   * saved changes, removes the record with `session.worktree_restored`.
-   * `RestoreFailedError` (`branch_missing`, `branch_moved`, `path_taken`)
-   * changes nothing and keeps the record; `InvalidOperationError` for a
-   * chat with nothing put away; `AgentMidTurnError` while it is held.
+   * Restore (27.6): brings the put-away copy back with its saved changes,
+   * removes the record with `session.worktree_restored`: on its branch, at
+   * a newer commit when the branch only moved forward and the changes apply
+   * cleanly, else on a new branch `…-restored` at the saved commit, made the
+   * chat's branch through `Entities.setSessionWorktree` in the same
+   * transaction (`session.location_changed`; user decision 2026-11-01).
+   * `RestoreFailedError` (`path_taken`, `failed`) changes nothing and keeps
+   * the record; `InvalidOperationError` for a chat with nothing put away;
+   * `AgentMidTurnError` while it is held.
    */
-  restoreWorktree(workspaceId: WorkspaceId, sessionId: SessionId): Promise<SessionLocationResponse>;
+  restoreWorktree(workspaceId: WorkspaceId, sessionId: SessionId): Promise<RestoreWorktreeResponse>;
   /** Whether the chat could be put away now: idle, not busy, switching, held or driven by the terminal (27.6). */
   worktreeIdle(sessionId: SessionId): boolean;
   /** Resolves once no put-away or Restore runs (shutdown, 27.6). */

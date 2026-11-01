@@ -2,10 +2,12 @@ import {
   API_ROUTES,
   apiPath,
   PutAwayWorktreesResponse,
-  SessionLocationResponse,
+  RestoreWorktreeResponse,
+  WORKTREE_RESTORED_TEXT,
+  worktreeRestoredText,
   WorktreeRetentionSetting,
   type PutAwayWorktree,
-  type SessionLocationResponse as SessionLocationResponseType,
+  type RestoreWorktreeResponse as RestoreWorktreeResponseType,
   type WorktreeRetentionSetting as WorktreeRetentionSettingType,
 } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -36,9 +38,9 @@ export async function fetchPutAwayWorktrees(wsId: string, auth: Auth = tabAuth):
   return PutAwayWorktreesResponse.parse(await call(auth, apiPath(API_ROUTES.workspacePutAwayWorktrees, { wsId }), {}, "Ogden Agents couldn't load the put-away copies")).worktrees;
 }
 
-/** Restore: the copy back on its branch with its saved changes; a `ChatApiError` (`restore_failed`, its sentence) when it couldn't. */
-export async function restoreWorktree(wsId: string, sesId: string, auth: Auth = tabAuth): Promise<SessionLocationResponseType> {
-  return SessionLocationResponse.parse(await call(auth, apiPath(API_ROUTES.sessionWorktreeRestore, { wsId, sesId }), postJson({}), "Ogden Agents couldn't restore this chat's copy"));
+/** Restore: the copy back with its saved changes, and where it went; a `ChatApiError` (`restore_failed`, its sentence) when it couldn't. */
+export async function restoreWorktree(wsId: string, sesId: string, auth: Auth = tabAuth): Promise<RestoreWorktreeResponseType> {
+  return RestoreWorktreeResponse.parse(await call(auth, apiPath(API_ROUTES.sessionWorktreeRestore, { wsId, sesId }), postJson({}), "Ogden Agents couldn't restore this chat's copy"));
 }
 
 /** The install's cap, following every change. */
@@ -57,11 +59,17 @@ export function usePutAwayWorktrees(wsId: string, { enabled = true, auth = tabAu
   return useQuery({ queryKey: putAwayWorktreesQueryKey(wsId), queryFn: () => fetchPutAwayWorktrees(wsId, auth), retry: false, enabled });
 }
 
-/** Restore, then the list and the chat's session read again. */
+/** Restore's plain sentence for where the copy went: "Restored.", on its branch's newer commit, or on a new branch (user decision 2026-11-01). */
+export function restoredText({ location, restored }: RestoreWorktreeResponseType): string {
+  return location.kind === 'worktree' ? worktreeRestoredText(restored, location.branch) : WORKTREE_RESTORED_TEXT;
+}
+
+/** Restore, then the list and the chat's session read again; the sentence for where the copy went. */
 export function useRestoreWorktree(wsId: string, auth: Auth = tabAuth) {
   const queryClient = useQueryClient();
-  return async (sesId: string): Promise<void> => {
-    await restoreWorktree(wsId, sesId, auth);
+  return async (sesId: string): Promise<string> => {
+    const text = restoredText(await restoreWorktree(wsId, sesId, auth));
     await queryClient.invalidateQueries({ queryKey: putAwayWorktreesQueryKey(wsId) });
+    return text;
   };
 }

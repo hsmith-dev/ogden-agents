@@ -143,6 +143,8 @@ export function fakeChatWorktree() {
   const folders = new Map<string, Set<string>>();
   const snapshots = new Map<string, Set<string>>();
   const missingBranches = new Set<string>();
+  /** Branches whose new commit the saved changes apply on (`newer`); any other moved branch restores on the new branch. */
+  const forwardBranches = new Set<string>();
   const heads = new Map<string, string>();
   const takenPaths = new Set<string>();
   const unsafe = new Set<string>();
@@ -171,19 +173,19 @@ export function fakeChatWorktree() {
       snapshots.set(snapshotTree, files);
       return { snapshotTree, head: headOf(branch), files: files.size };
     },
-    async restore(repoPath, { path, branch, head, snapshotTree }) {
+    async restore(repoPath, { path, branch, head, snapshotTree, newBranch }) {
       calls.push(`restore ${repoPath} ${path} ${branch} ${snapshotTree ?? '-'}`);
-      if (missingBranches.has(branch)) return 'branch_missing';
-      if (snapshotTree !== null && headOf(branch) !== head) return 'branch_moved';
       if (takenPaths.has(path)) return 'path_taken';
       const folder = changes(path);
       folder.clear();
       for (const file of snapshotTree === null ? [] : (snapshots.get(snapshotTree) ?? [])) folder.add(file);
-      return 'restored';
+      if (missingBranches.has(branch)) return { branch: newBranch, on: 'gone' as const };
+      if (headOf(branch) !== head) return { branch: forwardBranches.has(branch) ? branch : newBranch, on: forwardBranches.has(branch) ? ('newer' as const) : ('moved' as const) };
+      return { branch, on: 'saved' as const };
     },
     async moveChanges() {
       throw new VcsError('not here', { step: 'move' });
     },
   };
-  return { ...port, calls, saves, changes, forget: (path: string) => void folders.delete(path), missingBranches, heads, takenPaths, unsafe, snapshots };
+  return { ...port, calls, saves, changes, forget: (path: string) => void folders.delete(path), missingBranches, forwardBranches, heads, takenPaths, unsafe, snapshots };
 }

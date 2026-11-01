@@ -1,4 +1,4 @@
-import { PUT_AWAY_COPIES_DESCRIPTION, PUT_AWAY_COPIES_EMPTY_TEXT, PUT_AWAY_COPIES_TITLE, putAwayFilesText, restoreWorktreeLabel, WORKTREE_RESTORE_LABEL, WORKTREE_RESTORED_TEXT, type PutAwayWorktree } from '@ogden-agents/shared';
+import { PUT_AWAY_COPIES_DESCRIPTION, PUT_AWAY_COPIES_EMPTY_TEXT, PUT_AWAY_COPIES_TITLE, putAwayFilesText, restoreWorktreeLabel, WORKTREE_RESTORE_LABEL, type PutAwayWorktree } from '@ogden-agents/shared';
 import { useState } from 'react';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
@@ -15,13 +15,14 @@ export function PutAwayCopiesView({
   onRestore,
   restoring,
   error,
-  restored = false,
+  restored,
 }: {
   worktrees: readonly PutAwayWorktree[] | undefined;
   onRestore: (worktree: PutAwayWorktree) => void;
   restoring: string | undefined;
   error: string | undefined;
-  restored?: boolean;
+  /** Where the last Restore here put the copy, in its own sentence. */
+  restored?: string | undefined;
 }) {
   return (
     <PageSection title={PUT_AWAY_COPIES_TITLE} data-testid="put-away-section">
@@ -56,9 +57,9 @@ export function PutAwayCopiesView({
           ))}
         </ul>
       )}
-      {restored ? (
+      {restored !== undefined ? (
         <Text variant="caption" role="status" data-testid="put-away-restored">
-          {WORKTREE_RESTORED_TEXT}
+          {restored}
         </Text>
       ) : null}
       {error === undefined ? null : (
@@ -75,18 +76,18 @@ export function PutAwayCopiesSection({ wsId }: { wsId: string }) {
   const list = usePutAwayWorktrees(wsId);
   const restore = useRestoreWorktree(wsId);
   const [restoring, setRestoring] = useState<string | undefined>(undefined);
-  const [restored, setRestored] = useState(false);
+  const [restored, setRestored] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   // Nothing put away, nothing restored here: the section stays out of the way.
-  if ((list.data === undefined || list.data.length === 0) && !restored && error === undefined && !list.isError) return null;
+  if ((list.data === undefined || list.data.length === 0) && restored === undefined && error === undefined && !list.isError) return null;
   const onRestore = (worktree: PutAwayWorktree) => {
     setRestoring(worktree.sessionId);
-    setRestored(false);
+    setRestored(undefined);
     setError(undefined);
     restore(worktree.sessionId).then(
-      () => {
+      (text) => {
         setRestoring(undefined);
-        setRestored(true);
+        setRestored(text);
       },
       (failure: unknown) => {
         setRestoring(undefined);

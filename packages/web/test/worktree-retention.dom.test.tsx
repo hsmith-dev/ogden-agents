@@ -13,6 +13,7 @@ import {
   restoreWorktreeLabel,
   WORKTREE_PUT_AWAY_NOT_KEPT_TEXT,
   WORKTREE_RESTORED_TEXT,
+  worktreeRestoredText,
   type PutAwayWorktree,
 } from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -27,6 +28,7 @@ const fake = vi.hoisted(() => ({
   worktrees: [] as PutAwayWorktree[],
   restores: [] as string[],
   restoreFails: undefined as string | undefined,
+  restoredText: 'Restored.',
 }));
 
 vi.mock('@/shell/workspace-header', () => ({ WorkspaceHeader: ({ title }: { title?: ReactNode }) => <header>{title}</header> }));
@@ -47,6 +49,7 @@ vi.mock('@/worktrees/worktree-retention', async (importOriginal) => {
     useRestoreWorktree: () => async (sesId: string) => {
       fake.restores.push(sesId);
       if (fake.restoreFails !== undefined) throw new ChatApiError(fake.restoreFails, 409, 'restore_failed');
+      return fake.restoredText;
     },
   };
 });
@@ -137,5 +140,12 @@ describe("Workspace settings' Put-away copies (27.6)", () => {
     await flush();
     expect(fake.restores).toEqual([fake.worktrees[0]!.sessionId, fake.worktrees[1]!.sessionId]);
     expect(screen.getByTestId('put-away-restored').textContent).toBe(WORKTREE_RESTORED_TEXT);
+
+    // On a newer commit, or a new branch: the sentence says which.
+    fake.restoredText = worktreeRestoredText('newer', fake.worktrees[0]!.branch);
+    fireEvent.click(screen.getAllByTestId('put-away-restore')[0]!);
+    await flush();
+    expect(screen.getByTestId('put-away-restored').textContent).toBe(`Restored on ${fake.worktrees[0]!.branch} at its newer commit.`);
+    fake.restoredText = 'Restored.';
   });
 });

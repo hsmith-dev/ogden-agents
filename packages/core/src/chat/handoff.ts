@@ -17,7 +17,8 @@
  *
  * Refused, changing nothing: while the terminal drives, while the chat works,
  * waits or switches, for its own agent or an unknown one, and for an agent
- * that can't take a chat in this project now (trust, install, sign-in).
+ * that can't take a chat in this project now (trust, install, sign-in), and,
+ * for a remote chat, an agent tied to this computer (27.5).
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
@@ -31,7 +32,7 @@ import {
   type WorkspaceId,
 } from '@ogden-agents/shared';
 import { declaredModes, handoffBudget, type AgentDescriptor } from '../agent-descriptor.js';
-import { DriverIsTerminalError, HandoffNotPreviewedError, InvalidOperationError, SessionNotIdleError, UnknownAgentError } from '../errors.js';
+import { DriverIsTerminalError, HandoffNotPreviewedError, InvalidOperationError, LocalOnlyAgentError, SessionNotIdleError, UnknownAgentError } from '../errors.js';
 import { buildHandoffBrief, HANDOFF_EVENT_TYPES } from '../handoff-brief.js';
 import type { Agents } from './agents.js';
 import type { Models } from './model.js';
@@ -99,6 +100,9 @@ export function createHandoff(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent
     if (session.state !== 'idle' && session.state !== 'error') throw new SessionNotIdleError('This chat is finished, so it can’t continue with another agent.');
     if (agents.get(agentId) === undefined || agents.describe(agentId) === undefined) throw new UnknownAgentError();
     if (agentId === current) throw new InvalidOperationError(`This chat is already with ${nameOf(current)}.`);
+    // A remote chat stays on its machine, so an agent tied to this computer can't take it (27.5); nothing connects.
+    const localOnly = agents.get(agentId)?.localOnlyReason;
+    if (session.machineId !== null && localOnly !== undefined) throw new LocalOnlyAgentError(localOnly);
     return { session, current };
   };
 

@@ -26,6 +26,7 @@ import {
   FeatureUnavailableError,
   HandoffNotPreviewedError,
   InvalidOperationError,
+  LocalOnlyAgentError,
   MessageNotQueuedError,
   NotFoundError,
   QueueFullError,
@@ -150,6 +151,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (error instanceof UnknownAgentError) return apiError(c, 400, 'agent_unknown', error.message);
     // The agent can't start a chat now (6.3): its plain reason, and what fixes it.
     if (error instanceof AgentNotReadyError) return apiError(c, 409, error.code, error.message, { agentId: error.agentId, action: error.action });
+    // A remote chat for an agent tied to this computer (27.5), created or handed over: the chat's place refuses it; nothing connected.
+    if (error instanceof LocalOnlyAgentError) return apiError(c, 409, 'invalid_operation', error.message);
     if (error instanceof InvalidOperationError || error instanceof ValidationError) {
       return apiError(c, 400, 'invalid_request', error.message);
     }
@@ -179,7 +182,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
   app.post(API_ROUTES.workspaceSessions, limit, async (c) => {
     const scope = ids(c);
     if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
-    // A worktree on a remote machine (27.1, until 27.5) is fields that don't go together: `validation_failed`.
+    // A worktree on a remote machine (27.1, 27.5) is fields that don't go together: `validation_failed`.
     const body = await readBody(c, CreateSessionRequest, { optional: true, issueCode: (path) => (path[0] === 'location' ? 'validation_failed' : undefined) });
     if (!body.ok) return body.response;
     try {

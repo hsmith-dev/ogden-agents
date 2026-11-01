@@ -1,4 +1,4 @@
-import { GitBranch } from '@phosphor-icons/react';
+import { Desktop, GitBranch } from '@phosphor-icons/react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { Slot } from 'radix-ui';
 import type { ComponentProps, ReactNode } from 'react';
@@ -44,5 +44,18 @@ export function BranchBadgeName({ children }: { children: ReactNode }) {
       <GitBranch aria-hidden className="shrink-0" />
       <span className="min-w-0 truncate">{children}</span>
     </>
+  );
+}
+
+/**
+ * A remote chat's machine as a tag (27.5: "on build-box" in its header):
+ * outlined, the machine glyph, the words truncating.
+ */
+export function MachineBadge({ className, children, ...props }: ComponentProps<'span'>) {
+  return (
+    <span data-slot="machine-badge" className={cn(badgeVariants({ variant: 'outline' }), 'max-w-48 min-w-0 shrink justify-start', className)} {...props}>
+      <Desktop aria-hidden className="shrink-0" />
+      <span className="min-w-0 truncate">{children}</span>
+    </span>
   );
 }

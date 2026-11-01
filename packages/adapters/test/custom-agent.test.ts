@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentDescriptorProblems, AgentError, createAgentRegistry, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createCustomAgent, customAgentDescriptor, neverAsksMode, probeCustomAgent, splitCommandLine } from '../src/index.js';
+import { createCustomAgent, CUSTOM_AGENT_LOCAL_ONLY_REASON, customAgentDescriptor, neverAsksMode, probeCustomAgent, splitCommandLine } from '../src/index.js';
 import { customAgentTestLines, joinCommandLine } from '@ogden-agents/shared';
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
@@ -40,6 +40,11 @@ describe('a custom ACP agent (epic 21 story 21.1)', () => {
     expect(agent.unattendedBuild).toBe(false);
     expect(agent.skillInvocation('bmad-help', 'an idea')).toBe('/bmad-help an idea');
     expect(() => createAgentRegistry([{ descriptor, agent }])).not.toThrow();
+  });
+
+  it('runs only on this computer (27.5): its port carries the local only reason core refuses a remote chat with', () => {
+    expect(createCustomAgent({ descriptor, commandLine: 'anything' }).localOnlyReason).toBe(CUSTOM_AGENT_LOCAL_ONLY_REASON);
+    expect(CUSTOM_AGENT_LOCAL_ONLY_REASON).not.toMatch(/[\u2013\u2014]/);
   });
 
   it('resolves an absolute command at start and streams a reply', async () => {

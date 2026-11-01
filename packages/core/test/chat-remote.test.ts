@@ -9,10 +9,24 @@
  * `tests/e2e/remote-target.spec.ts`'s job.
  */
 import { realpathSync } from 'node:fs';
-import { createChat, newId, RemoteHostError, type AgentError, type AgentEvent, type AgentPort, type AgentSession, type Core, type RemoteHostConnection, type StartAgentSession } from '../src/index.js';
+import {
+  createAgentRegistry,
+  createChat,
+  LocalOnlyAgentError,
+  newId,
+  RemoteHostError,
+  type AgentError,
+  type AgentEvent,
+  type AgentPort,
+  type AgentRegistry,
+  type AgentSession,
+  type Core,
+  type RemoteHostConnection,
+  type StartAgentSession,
+} from '../src/index.js';
 import type { SessionId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { openTestCore, soleAgent, tempDir } from './helpers.js';
+import { openTestCore, registered, soleAgent, TEST_AGENT_ID, tempDir } from './helpers.js';
 
 /**
  * An agent that records what it was opened with (`cwd`, `remote`), on either
@@ -78,12 +92,16 @@ function fakeRemote() {
 }
 
 function setUp(core: Core, port: AgentPort, remote?: { connect(machineId: string): Promise<RemoteHostConnection> }) {
+  return setUpWith(core, soleAgent(port), remote);
+}
+
+function setUpWith(core: Core, agents: AgentRegistry, remote?: { connect(machineId: string): Promise<RemoteHostConnection> }) {
   const errors: Array<[SessionId, AgentError]> = [];
   const chat = createChat({
     dataDir: tempDir('ogden-agents-data-'),
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agents: soleAgent(port),
+    agents,
     agentEnv: () => ({}),
     onAgentError: (sessionId, error) => errors.push([sessionId, error]),
     ...(remote === undefined ? {} : { remote }),
@@ -192,7 +210,8 @@ describe('a plain chat targeting a remote machine (CAP-24, epic 19 story 19.7)',
     const port: AgentPort = { ...agent.port, localOnlyReason: 'Runs only on this computer.' };
     const fake = fakeRemote();
     const { chat, workspace, errors } = setUp(core, port, fake.remote);
-    const session = await chat.createChatSession(workspace.id, { machineId: newId('mach') });
+    // A row stored before 27.5 refused the create (planted): the start-time refusal still holds.
+    const session = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', agentId: TEST_AGENT_ID, machineId: newId('mach') });
 
     chat.sendMessage(workspace.id, session.id, 'hello');
     await chat.settled();
@@ -201,6 +220,64 @@ describe('a plain chat targeting a remote machine (CAP-24, epic 19 story 19.7)',
     expect(agent.starts).toEqual([]);
     expect(core.entities.getSession(session.id)!.state).toBe('error');
     expect(errors.map(([, error]) => [error.code, error.message])).toEqual([['agent_unavailable', 'Runs only on this computer.']]);
+  });
+
+  it('refuses to create a remote chat with that agent: no chat, no connection (27.5)', async () => {
+    const core = openTestCore();
+    const agent = recordingAgent();
+    const port: AgentPort = { ...agent.port, localOnlyReason: 'Runs only on this computer.' };
+    const fake = fakeRemote();
+    const { chat, workspace } = setUp(core, port, fake.remote);
+
+    const refused = chat.createChatSession(workspace.id, { machineId: newId('mach') });
+    await expect(refused).rejects.toBeInstanceOf(LocalOnlyAgentError);
+    await expect(refused).rejects.toMatchObject({ code: 'invalid_operation', message: 'Runs only on this computer.' });
+    expect(core.entities.listSessions(workspace.id)).toEqual([]);
+    expect(fake.connects).toEqual([]);
+    expect(agent.starts).toEqual([]);
+  });
+
+  it("lists that agent's reason as localOnly, and no localOnly for any other agent (27.5)", async () => {
+    const core = openTestCore();
+    const local = recordingAgent();
+    const other = recordingAgent();
+    const agents = createAgentRegistry([registered('local-agent', { ...local.port, localOnlyReason: 'Runs only on this computer.' }), registered('other-agent', other.port)]);
+    const { chat } = setUpWith(core, agents, fakeRemote().remote);
+    const listed = await chat.chatAgents();
+    expect(listed.agents.map((each) => [each.agentId, each.localOnly])).toEqual([
+      ['local-agent', 'Runs only on this computer.'],
+      ['other-agent', undefined],
+    ]);
+  });
+
+  it('refuses to hand a remote chat to that agent, changing nothing and connecting nowhere for it (27.5)', async () => {
+    const core = openTestCore();
+    const local = recordingAgent();
+    const other = recordingAgent();
+    const agents = createAgentRegistry([registered('other-agent', other.port), registered('local-agent', { ...local.port, localOnlyReason: 'Runs only on this computer.' })]);
+    const fake = fakeRemote();
+    const { chat, workspace } = setUpWith(core, agents, fake.remote);
+    const machineId = newId('mach');
+    const session = await chat.createChatSession(workspace.id, { agentId: 'other-agent', machineId });
+    chat.sendMessage(workspace.id, session.id, 'hello');
+    await chat.settled();
+    expect(fake.connects).toEqual([machineId]);
+
+    await expect(chat.handoffPreview(workspace.id, session.id, 'local-agent')).rejects.toBeInstanceOf(LocalOnlyAgentError);
+    await expect(chat.handOff(workspace.id, session.id, { agentId: 'local-agent', brief: '', message: 'go on', previewToken: 'x' })).rejects.toBeInstanceOf(LocalOnlyAgentError);
+    expect(core.entities.getSession(session.id)!.agentId).toBe('other-agent');
+    expect(fake.connects).toEqual([machineId]);
+    expect(local.starts).toEqual([]);
+  });
+
+  it('a local chat can still be handed to that agent (27.5)', async () => {
+    const core = openTestCore();
+    const local = recordingAgent();
+    const other = recordingAgent();
+    const agents = createAgentRegistry([registered('other-agent', other.port), registered('local-agent', { ...local.port, localOnlyReason: 'Runs only on this computer.' })]);
+    const { chat, workspace } = setUpWith(core, agents, fakeRemote().remote);
+    const session = await chat.createChatSession(workspace.id, { agentId: 'other-agent' });
+    await expect(chat.handoffPreview(workspace.id, session.id, 'local-agent')).resolves.toMatchObject({ agent: { agentId: 'local-agent' } });
   });
 
   it('a local chat with that agent is unchanged (21.6)', async () => {

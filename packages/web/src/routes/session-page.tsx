@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ArrowsLeftRight, ChatCircle, House, Stop } from '@phosphor-icons/react';
-import { DELETE_CHAT_NOT_DELETABLE_TEXT, DELETE_CHAT_REMOTE_TEXT, DELETE_CHAT_TERMINAL_TEXT, deleteChatBusyText, WORKTREE_BADGE_TOOLTIP_TEXT, worktreeBadgeLabel, type PermissionMode } from '@ogden-agents/shared';
+import { chatOnMachineText, DELETE_CHAT_NOT_DELETABLE_TEXT, DELETE_CHAT_REMOTE_TEXT, DELETE_CHAT_TERMINAL_TEXT, deleteChatBusyText, WORKTREE_BADGE_TOOLTIP_TEXT, worktreeBadgeLabel, type PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
@@ -40,7 +40,8 @@ import { TerminalPanel } from '@/terminal/terminal-panel';
 import { conversationProps, TerminalPane } from '@/terminal/terminal-pane';
 import { focusComposer, useSessionDriver } from '@/terminal/use-session-driver';
 import { needsYouOpenCount, subscribeNeedsYouOpened } from '@/shell/needs-you-target';
-import { BranchBadge, BranchBadgeName } from '@/ui/badge';
+import { useRemoteMachines } from '@/remote-machines/remote-machines-api';
+import { BranchBadge, BranchBadgeName, MachineBadge } from '@/ui/badge';
 import { Banner } from '@/ui/banner';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
@@ -448,6 +449,11 @@ export function SessionPage() {
     card.focus({ preventScroll: true });
   }, [linked, opens, view.pendingPermissions, terminalDrives]);
 
+  // A remote chat's machine (27.5), named in its header; a machine removed since is "a remote machine".
+  const machineId = session.data?.session.machineId ?? null;
+  const machines = useRemoteMachines();
+  const machineName = machineId === null ? undefined : machines.data?.find((each) => each.id === machineId)?.label;
+
   if (session.error instanceof ChatApiError && session.error.status === 404) {
     return (
       <>
@@ -574,6 +580,8 @@ export function SessionPage() {
             <TooltipContent data-testid="worktree-badge-hint">{WORKTREE_BADGE_TOOLTIP_TEXT}</TooltipContent>
           </Tooltip>
         ) : null}
+        {/* A remote chat's machine (27.5): it stays on that machine. */}
+        {machineId !== null && !isBuild ? <MachineBadge data-testid="machine-badge">{chatOnMachineText(machineName)}</MachineBadge> : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
         {driverShown ? (
           <DriverToggle
@@ -869,9 +877,9 @@ export function SessionPage() {
                   changing={modeChanging}
                   onChoose={(mode, confirmed) => changeMode(mode, confirmed)}
                 />
-                {/* A remote chat's place is its machine (27.5 adds it to this chip). */}
-                {session.data === undefined || (session.data.session.machineId ?? null) !== null ? null : (
-                  <LocationChip value={(session.data.session.worktreePath ?? null) === null ? 'this_folder' : 'worktree'} branch={branch} />
+                {/* A remote chat's place is its machine (27.5). */}
+                {session.data === undefined ? null : (
+                  <LocationChip value={(session.data.session.worktreePath ?? null) === null ? 'this_folder' : 'worktree'} machineId={machineId} branch={branch} />
                 )}
               </>
             }

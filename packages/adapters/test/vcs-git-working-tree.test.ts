@@ -7,16 +7,21 @@
  * hook run and the main checkout unchanged, a tampered worktree refused,
  * and the snapshot store's guarantees: never a link out of the data folder,
  * never the repo's index, refs or objects, tree ids only, and git's
- * environment only the allowlist and git's own.
+ * environment only the allowlist and git's own. Story 8.5's hunk actions
+ * on the same fixtures: stage, unstage and revert of one hunk or a whole
+ * file, This turn's revert, an added and a deleted file, stale ids, Undo,
+ * the files refused, a project in a subfolder, a chat worktree, unquoted
+ * paths, and no filter or hook run, the repo's other files byte for byte
+ * unchanged.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VcsError, type VcsFolder } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createGitWorkingTree } from '../src/index.js';
-import { parseHunks } from '../src/vcs-git/working-tree.js';
+import { parseHunks, splitPatch } from '../src/vcs-git/working-tree.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -45,7 +50,7 @@ const repoState = (repo: string) => ({
 });
 
 /** A repo on `main` with one commit and an ignore rule, a data folder, and the working tree adapter over it. */
-function setup({ env }: { env?: () => Readonly<Record<string, string>> } = {}) {
+function setup({ env, now }: { env?: () => Readonly<Record<string, string>>; now?: () => number } = {}) {
   const repo = temp('ogden-agents-wt-repo-');
   const data = temp('ogden-agents-wt-data-');
   const markers = temp('ogden-agents-wt-markers-');
@@ -67,7 +72,7 @@ function setup({ env }: { env?: () => Readonly<Record<string, string>> } = {}) {
   }
   const allowlist = () => ({ PATH: process.env.PATH ?? '', HOME: data, GIT_CONFIG_GLOBAL: emptyConfig, GIT_CONFIG_NOSYSTEM: '1', ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot ?? '' } : {}) });
   const snapshotsRoot = join(data, 'snapshots');
-  const vcs = createGitWorkingTree({ hooksDir: join(data, 'tools', 'git-hooks-none'), env: env ?? allowlist, snapshotsRoot });
+  const vcs = createGitWorkingTree({ hooksDir: join(data, 'tools', 'git-hooks-none'), env: env ?? allowlist, snapshotsRoot, now });
   return { repo, data, markers, vcs, snapshotsRoot, folder: { path: repo } as VcsFolder, allowlist };
 }
 
@@ -426,5 +431,368 @@ describe('parseHunks', () => {
     ]);
     expect(hunks.map((hunk) => hunk.id)).toEqual([expect.stringMatching(/^h1-[0-9a-f]{10}$/), expect.stringMatching(/^h2-[0-9a-f]{10}$/)]);
     expect(parseHunks(patch).map((hunk) => hunk.id)).toEqual(hunks.map((hunk) => hunk.id));
+  });
+});
+
+/** Twenty numbered lines, with `changes` (1-based line: new text) made. */
+const numbered = (changes: Record<number, string> = {}): string => `${Array.from({ length: 20 }, (_, index) => changes[index + 1] ?? `line ${index + 1}`).join('\n')}\n`;
+
+/** Every file of the working tree but `.git`, with its bytes. */
+const treeBytes = (dir: string): Record<string, string> =>
+  Object.fromEntries(
+    filesUnder(dir)
+      .filter((path) => path !== '.git' && !path.startsWith(`.git/`) && !path.startsWith('.git\\'))
+      .map((path) => [path, readFileSync(join(dir, path)).toString('base64')]),
+  );
+
+describe('vcs-git working tree: hunk actions (story 8.5)', () => {
+  /** The fixture with `list.txt` committed, then edited at lines 2 and 18 (two hunks), and its Unstaged ids. */
+  async function twoHunks(options: Parameters<typeof setup>[0] = {}) {
+    const fixture = setup(options);
+    const { repo, vcs, folder } = fixture;
+    writeFileSync(join(repo, 'list.txt'), numbered());
+    git(repo, 'add', 'list.txt');
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'list');
+    writeFileSync(join(repo, 'list.txt'), numbered({ 2: 'TWO', 18: 'EIGHTEEN' }));
+    const hunks = (await vcs.fileDiff(folder, { view: 'unstaged' }, 'list.txt'))!.hunks;
+    expect(hunks).toHaveLength(2);
+    return { ...fixture, hunks };
+  }
+  const index = (repo: string, path: string) => git(repo, 'show', `:${path}`);
+  const onDisk = (repo: string, path: string) => readFileSync(join(repo, path), 'utf8');
+
+  it('stages the first hunk and reverts the second: the index holds only the first, the folder only lacks the second, nothing else changes, no hook runs', async () => {
+    const { repo, vcs, folder, hunks, markers } = await twoHunks();
+    const others = treeBytes(repo);
+    delete others['list.txt'];
+    expect(await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'stage', path: 'list.txt', hunkId: hunks[0]!.id })).toEqual({ outcome: 'applied' });
+    expect(index(repo, 'list.txt')).toBe(numbered({ 2: 'TWO' }));
+    // The folder is unchanged; Unstaged keeps the second hunk only, with the id it had.
+    expect(onDisk(repo, 'list.txt')).toBe(numbered({ 2: 'TWO', 18: 'EIGHTEEN' }));
+    const left = (await vcs.fileDiff(folder, { view: 'unstaged' }, 'list.txt'))!.hunks;
+    expect(left.map((hunk) => hunk.lines.filter((line) => line.kind === 'add').map((line) => line.text))).toEqual([['EIGHTEEN']]);
+    const reverted = await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'revert', path: 'list.txt', hunkId: left[0]!.id });
+    expect(reverted).toEqual({ outcome: 'applied', undo: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect(index(repo, 'list.txt')).toBe(numbered({ 2: 'TWO' }));
+    expect(onDisk(repo, 'list.txt')).toBe(numbered({ 2: 'TWO' }));
+    const after = treeBytes(repo);
+    delete after['list.txt'];
+    expect(after).toEqual(others);
+    expect(readdirSync(markers)).toEqual([]);
+  });
+
+  it('unstages one of two staged hunks, leaving the folder; reverts the first of two Unstaged hunks, leaving the index', async () => {
+    const { repo, vcs, folder, hunks } = await twoHunks();
+    git(repo, 'add', 'list.txt');
+    const staged = (await vcs.fileDiff(folder, { view: 'staged' }, 'list.txt'))!.hunks;
+    expect(staged.map((hunk) => hunk.id)).toEqual(hunks.map((hunk) => hunk.id));
+    expect(await vcs.applyHunk!(folder, { target: { view: 'staged' }, action: 'unstage', path: 'list.txt', hunkId: staged[1]!.id })).toEqual({ outcome: 'applied' });
+    expect(index(repo, 'list.txt')).toBe(numbered({ 2: 'TWO' }));
+    expect(onDisk(repo, 'list.txt')).toBe(numbered({ 2: 'TWO', 18: 'EIGHTEEN' }));
+    // Back to two unstaged hunks: revert the first, the index untouched.
+    git(repo, 'reset', '-q', '--', 'list.txt');
+    const before = readFileSync(join(repo, '.git', 'index')).toString('base64');
+    const result = await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'revert', path: 'list.txt', hunkId: hunks[0]!.id });
+    expect(result.outcome).toBe('applied');
+    expect(onDisk(repo, 'list.txt')).toBe(numbered({ 18: 'EIGHTEEN' }));
+    expect(readFileSync(join(repo, '.git', 'index')).toString('base64')).toBe(before);
+  });
+
+  it("reverts one of a turn's two hunks in the folder; one edited since is outdated and the file untouched", async () => {
+    const { repo, vcs, folder } = setup();
+    writeFileSync(join(repo, 'list.txt'), numbered());
+    const startTree = (await vcs.snapshot(folder))!;
+    writeFileSync(join(repo, 'list.txt'), numbered({ 2: 'TWO', 18: 'EIGHTEEN' }));
+    const endTree = (await vcs.snapshot(folder))!;
+    const target = { view: 'turn' as const, startTree, endTree };
+    const hunks = (await vcs.fileDiff(folder, target, 'list.txt'))!.hunks;
+    expect(hunks).toHaveLength(2);
+    // The second hunk edited since the turn: nothing is written.
+    writeFileSync(join(repo, 'list.txt'), numbered({ 2: 'TWO', 18: 'EIGHTEEN!' }));
+    expect(await vcs.applyHunk!(folder, { target, action: 'revert', path: 'list.txt', hunkId: hunks[1]!.id })).toEqual({ outcome: 'outdated' });
+    expect(onDisk(repo, 'list.txt')).toBe(numbered({ 2: 'TWO', 18: 'EIGHTEEN!' }));
+    // The first still applies; the second stays as the user left it.
+    expect((await vcs.applyHunk!(folder, { target, action: 'revert', path: 'list.txt', hunkId: hunks[0]!.id })).outcome).toBe('applied');
+    expect(onDisk(repo, 'list.txt')).toBe(numbered({ 18: 'EIGHTEEN!' }));
+    // This turn's view is the snapshots': a second revert of the same hunk no longer applies.
+    expect(await vcs.applyHunk!(folder, { target, action: 'revert', path: 'list.txt', hunkId: hunks[0]!.id })).toEqual({ outcome: 'outdated' });
+  });
+
+  it("stages an untracked file as added; brings back a file the turn deleted, unless it was made again since", async () => {
+    const { repo, vcs, folder } = setup();
+    writeFileSync(join(repo, 'new.ts'), 'one\ntwo\n');
+    const [added] = (await vcs.fileDiff(folder, { view: 'unstaged' }, 'new.ts'))!.hunks;
+    expect(await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'stage', path: 'new.ts', hunkId: added!.id })).toEqual({ outcome: 'applied' });
+    expect(git(repo, 'diff', '--cached', '--name-status').trim()).toBe('A\tnew.ts');
+    expect(index(repo, 'new.ts')).toBe('one\ntwo\n');
+    const startTree = (await vcs.snapshot(folder))!;
+    rmSync(join(repo, 'README.md'));
+    const endTree = (await vcs.snapshot(folder))!;
+    const target = { view: 'turn' as const, startTree, endTree };
+    const diff = (await vcs.fileDiff(folder, target, 'README.md'))!;
+    expect(diff.file.change).toBe('deleted');
+    writeFileSync(join(repo, 'README.md'), 'made again\n');
+    expect(await vcs.applyHunk!(folder, { target, action: 'revert', path: 'README.md', hunkIds: diff.hunks.map((hunk) => hunk.id) })).toEqual({ outcome: 'outdated' });
+    expect(onDisk(repo, 'README.md')).toBe('made again\n');
+    rmSync(join(repo, 'README.md'));
+    expect((await vcs.applyHunk!(folder, { target, action: 'revert', path: 'README.md', hunkIds: diff.hunks.map((hunk) => hunk.id) })).outcome).toBe('applied');
+    expect(onDisk(repo, 'README.md')).toBe('# Repo\n');
+  });
+
+  it("applies a whole file only with the ids shown, and a stale id writes nothing", async () => {
+    const { repo, vcs, folder, hunks } = await twoHunks();
+    const indexBefore = readFileSync(join(repo, '.git', 'index')).toString('base64');
+    expect(await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'stage', path: 'list.txt', hunkIds: [hunks[0]!.id] })).toEqual({ outcome: 'outdated' });
+    expect(await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'stage', path: 'list.txt', hunkIds: [...hunks.map((hunk) => hunk.id), 'h3-0000000000'] })).toEqual({ outcome: 'outdated' });
+    // The file changed after it was shown: the old ids are stale.
+    writeFileSync(join(repo, 'list.txt'), numbered({ 2: 'TWO!', 18: 'EIGHTEEN' }));
+    expect(await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'stage', path: 'list.txt', hunkId: hunks[0]!.id })).toEqual({ outcome: 'outdated' });
+    expect(await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'revert', path: 'list.txt', hunkIds: hunks.map((hunk) => hunk.id) })).toEqual({ outcome: 'outdated' });
+    expect(readFileSync(join(repo, '.git', 'index')).toString('base64')).toBe(indexBefore);
+    expect(onDisk(repo, 'list.txt')).toBe(numbered({ 2: 'TWO!', 18: 'EIGHTEEN' }));
+    const now = (await vcs.fileDiff(folder, { view: 'unstaged' }, 'list.txt'))!.hunks;
+    expect(await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'stage', path: 'list.txt', hunkIds: now.map((hunk) => hunk.id) })).toEqual({ outcome: 'applied' });
+    expect(index(repo, 'list.txt')).toBe(numbered({ 2: 'TWO!', 18: 'EIGHTEEN' }));
+    expect(await vcs.fileDiff(folder, { view: 'unstaged' }, 'list.txt')).toBeUndefined();
+  });
+
+  it('undoes a revert once, in its own folder and path only; an edited file or an old undo is refused', async () => {
+    let clock = 1_000_000;
+    const { repo, vcs, folder, hunks, data } = await twoHunks({ now: () => clock });
+    const reverted = await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'revert', path: 'list.txt', hunkId: hunks[1]!.id });
+    const undo = reverted.outcome === 'applied' ? reverted.undo! : '';
+    expect(onDisk(repo, 'list.txt')).toBe(numbered({ 2: 'TWO' }));
+    const chat = worktreeChat(repo, data, 'u1');
+    expect(await vcs.undoRevert!(chat.folder, { undo, path: 'list.txt' })).toEqual({ outcome: 'not_found' });
+    expect(await vcs.undoRevert!(folder, { undo, path: 'README.md' })).toEqual({ outcome: 'not_found' });
+    expect(await vcs.undoRevert!(folder, { undo: 'f'.repeat(32), path: 'list.txt' })).toEqual({ outcome: 'not_found' });
+    // Edited where the hunk goes back: nothing is put back, and the undo is kept.
+    writeFileSync(join(repo, 'list.txt'), numbered({ 2: 'TWO', 17: 'x', 18: 'y', 19: 'z' }));
+    expect(await vcs.undoRevert!(folder, { undo, path: 'list.txt' })).toEqual({ outcome: 'outdated' });
+    expect(onDisk(repo, 'list.txt')).toBe(numbered({ 2: 'TWO', 17: 'x', 18: 'y', 19: 'z' }));
+    writeFileSync(join(repo, 'list.txt'), numbered({ 2: 'TWO' }));
+    expect(await vcs.undoRevert!(folder, { undo, path: 'list.txt' })).toEqual({ outcome: 'applied' });
+    expect(onDisk(repo, 'list.txt')).toBe(numbered({ 2: 'TWO', 18: 'EIGHTEEN' }));
+    expect(await vcs.undoRevert!(folder, { undo, path: 'list.txt' })).toEqual({ outcome: 'not_found' });
+    // Kept for 30 minutes only.
+    const again = await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'revert', path: 'list.txt', hunkId: hunks[1]!.id });
+    clock += 31 * 60 * 1000;
+    expect(await vcs.undoRevert!(folder, { undo: again.outcome === 'applied' ? again.undo! : '', path: 'list.txt' })).toEqual({ outcome: 'not_found' });
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a binary file, a link, a submodule and a path under a linked folder, writing nothing', async () => {
+    const { repo, vcs, folder } = setup();
+    const elsewhere = temp('ogden-agents-wt-linked-');
+    writeFileSync(join(repo, 'pixel.png'), Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex'));
+    symlinkSync('/etc/hosts', join(repo, 'hosts-link'));
+    mkdirSync(join(repo, 'linked'));
+    writeFileSync(join(repo, 'linked', 'f.txt'), 'one\n');
+    git(repo, 'add', 'linked/f.txt');
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'linked');
+    rmSync(join(repo, 'linked'), { recursive: true });
+    writeFileSync(join(elsewhere, 'f.txt'), 'outside\n');
+    symlinkSync(elsewhere, join(repo, 'linked'));
+    git(repo, 'update-index', '--add', '--cacheinfo', `160000,${git(repo, 'rev-parse', 'HEAD').trim()},module`);
+    const indexBefore = readFileSync(join(repo, '.git', 'index')).toString('base64');
+    for (const path of ['pixel.png', 'hosts-link']) {
+      expect(await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'stage', path, hunkId: 'h1-0000000000' }), path).toEqual({ outcome: 'unsupported' });
+      expect(await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'revert', path, hunkId: 'h1-0000000000' }), path).toEqual({ outcome: 'unsupported' });
+    }
+    expect(await vcs.applyHunk!(folder, { target: { view: 'staged' }, action: 'unstage', path: 'module', hunkId: 'h1-0000000000' })).toEqual({ outcome: 'unsupported' });
+    expect(await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'revert', path: 'linked/f.txt', hunkId: 'h1-0000000000' })).toEqual({ outcome: 'unsupported' });
+    expect(readFileSync(join(repo, '.git', 'index')).toString('base64')).toBe(indexBefore);
+    expect(readFileSync(join(elsewhere, 'f.txt'), 'utf8')).toBe('outside\n');
+    expect(existsSync(join(repo, 'pixel.png')) && existsSync(join(repo, 'hosts-link'))).toBe(true);
+  });
+
+  it('refuses a parent, absolute or empty path, and an action its view does not offer, before git runs', async () => {
+    const { vcs, folder } = setup();
+    for (const path of ['../x', '/etc/passwd', 'a/../../x', '']) {
+      await expect(vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'revert', path, hunkId: 'h1' }), path).rejects.toBeInstanceOf(VcsError);
+      await expect(vcs.undoRevert!(folder, { undo: 'a'.repeat(32), path }), path).rejects.toBeInstanceOf(VcsError);
+    }
+    await expect(vcs.applyHunk!(folder, { target: { view: 'branch' }, action: 'revert', path: 'a.ts', hunkId: 'h1' })).rejects.toBeInstanceOf(VcsError);
+    await expect(vcs.applyHunk!(folder, { target: { view: 'staged' }, action: 'stage', path: 'a.ts', hunkId: 'h1' })).rejects.toBeInstanceOf(VcsError);
+    // A folder in no repository: nothing to act on.
+    expect(await vcs.applyHunk!({ path: temp('ogden-agents-wt-plain-') }, { target: { view: 'unstaged' }, action: 'stage', path: 'a.ts', hunkId: 'h1' })).toEqual({ outcome: 'not_found' });
+  });
+
+  it.skipIf(process.platform === 'win32')("runs no filter program and no hook, and a .env revert writes only that file", async () => {
+    const { repo, data, markers, vcs, folder } = setup();
+    const marker = join(markers, 'filter');
+    markerScript(join(data, 'filter.sh'), marker);
+    writeFileSync(join(repo, '.env'), numbered());
+    git(repo, 'add', '.env');
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'env');
+    git(repo, 'config', 'filter.evil.clean', join(data, 'filter.sh'));
+    git(repo, 'config', 'filter.evil.smudge', join(data, 'filter.sh'));
+    git(repo, 'config', 'filter.evil.process', join(data, 'filter.sh'));
+    git(repo, 'config', 'filter.evil.required', 'true');
+    writeFileSync(join(repo, '.gitattributes'), '* filter=evil\n');
+    writeFileSync(join(repo, '.env'), numbered({ 2: 'SECRET=two', 18: 'SECRET=eighteen' }));
+    const others = treeBytes(repo);
+    delete others['.env'];
+    const hunks = (await vcs.fileDiff(folder, { view: 'unstaged' }, '.env'))!.hunks;
+    expect((await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'stage', path: '.env', hunkId: hunks[0]!.id })).outcome).toBe('applied');
+    // Ids are numbered in the file's diff: the one left is read again.
+    const [left] = (await vcs.fileDiff(folder, { view: 'unstaged' }, '.env'))!.hunks;
+    const reverted = await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'revert', path: '.env', hunkId: left!.id });
+    expect(reverted.outcome).toBe('applied');
+    expect(await vcs.undoRevert!(folder, { undo: reverted.outcome === 'applied' ? reverted.undo! : '', path: '.env' })).toEqual({ outcome: 'applied' });
+    expect(onDisk(repo, '.env')).toBe(numbered({ 2: 'SECRET=two', 18: 'SECRET=eighteen' }));
+    const after = treeBytes(repo);
+    delete after['.env'];
+    expect(after).toEqual(others);
+    expect(existsSync(marker)).toBe(false);
+    expect(readdirSync(markers)).toEqual([]);
+  });
+
+  it('acts in a project in a subfolder of the repo, in a chat worktree with its own index, and on a path git would quote', async () => {
+    const { repo, data, vcs } = setup();
+    writeFileSync(join(repo, 'src', 'list.txt'), numbered());
+    writeFileSync(join(repo, 'café notes.txt'), numbered());
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'more');
+    // The project is `src`: its paths are relative to it.
+    writeFileSync(join(repo, 'src', 'list.txt'), numbered({ 2: 'TWO', 18: 'EIGHTEEN' }));
+    const sub = { path: join(repo, 'src') };
+    const subHunks = (await vcs.fileDiff(sub, { view: 'unstaged' }, 'list.txt'))!.hunks;
+    expect((await vcs.applyHunk!(sub, { target: { view: 'unstaged' }, action: 'stage', path: 'list.txt', hunkId: subHunks[1]!.id })).outcome).toBe('applied');
+    expect(index(repo, 'src/list.txt')).toBe(numbered({ 18: 'EIGHTEEN' }));
+    // A name with a space and a non-ASCII letter.
+    writeFileSync(join(repo, 'café notes.txt'), numbered({ 2: 'TWO' }));
+    const quoted = (await vcs.fileDiff({ path: repo }, { view: 'unstaged' }, 'café notes.txt'))!.hunks;
+    expect((await vcs.applyHunk!({ path: repo }, { target: { view: 'unstaged' }, action: 'revert', path: 'café notes.txt', hunkId: quoted[0]!.id })).outcome).toBe('applied');
+    expect(onDisk(repo, 'café notes.txt')).toBe(numbered());
+    // A chat's worktree: its own index, the main checkout's untouched.
+    const mainIndex = readFileSync(join(repo, '.git', 'index')).toString('base64');
+    const chat = worktreeChat(repo, data, 'w1');
+    writeFileSync(join(chat.worktree, 'src', 'list.txt'), numbered({ 2: 'TWO', 18: 'EIGHTEEN' }));
+    const chatHunks = (await vcs.fileDiff(chat.folder, { view: 'unstaged' }, 'src/list.txt'))!.hunks;
+    expect((await vcs.applyHunk!(chat.folder, { target: { view: 'unstaged' }, action: 'stage', path: 'src/list.txt', hunkId: chatHunks[0]!.id })).outcome).toBe('applied');
+    expect(git(chat.worktree, 'show', ':src/list.txt')).toBe(numbered({ 2: 'TWO' }));
+    expect(readFileSync(join(repo, '.git', 'index')).toString('base64')).toBe(mainIndex);
+    // A tampered worktree runs nothing.
+    writeFileSync(join(repo, '.git', 'worktrees', 'w1', 'HEAD'), 'ref: refs/heads/main\n');
+    await expect(vcs.applyHunk!(chat.folder, { target: { view: 'unstaged' }, action: 'stage', path: 'src/list.txt', hunkId: chatHunks[1]!.id })).rejects.toBeInstanceOf(VcsError);
+  });
+});
+
+describe('vcs-git working tree: hunk actions, review rows (story 8.5)', () => {
+  const onDisk = (repo: string, path: string) => readFileSync(join(repo, path), 'utf8');
+
+  it("refuses a This turn revert once the turn's lines are in the file twice, or not at all, writing nothing", async () => {
+    const { repo, vcs, folder } = setup();
+    const block = Array.from({ length: 8 }, (_, index) => `same ${index + 1}`);
+    const start = [...block, 'middle 1', 'middle 2', 'middle 3', 'middle 4', 'middle 5', 'middle 6', 'middle 7', ...block];
+    writeFileSync(join(repo, 'twice.txt'), `${start.join('\n')}\n`);
+    const startTree = (await vcs.snapshot(folder))!;
+    const turned = [...start];
+    turned[3] = 'changed by the turn';
+    writeFileSync(join(repo, 'twice.txt'), `${turned.join('\n')}\n`);
+    const endTree = (await vcs.snapshot(folder))!;
+    const target = { view: 'turn' as const, startTree, endTree };
+    const [hunk] = (await vcs.fileDiff(folder, target, 'twice.txt'))!.hunks;
+    // The user moves the turn's block, so its lines are at the end too: two copies.
+    const twice = [...turned.slice(0, 8), 'middle', ...turned.slice(0, 8)];
+    writeFileSync(join(repo, 'twice.txt'), `${twice.join('\n')}\n`);
+    expect(await vcs.applyHunk!(folder, { target, action: 'revert', path: 'twice.txt', hunkId: hunk!.id })).toEqual({ outcome: 'outdated' });
+    expect(onDisk(repo, 'twice.txt')).toBe(`${twice.join('\n')}\n`);
+    // The user deleted the turn's block: Revert must not edit the other, unchanged copy.
+    const deleted = turned.slice(8);
+    writeFileSync(join(repo, 'twice.txt'), `${deleted.join('\n')}\n`);
+    expect(await vcs.applyHunk!(folder, { target, action: 'revert', path: 'twice.txt', hunkId: hunk!.id })).toEqual({ outcome: 'outdated' });
+    expect(onDisk(repo, 'twice.txt')).toBe(`${deleted.join('\n')}\n`);
+    writeFileSync(join(repo, 'twice.txt'), `${turned.join('\n')}\n`);
+    expect((await vcs.applyHunk!(folder, { target, action: 'revert', path: 'twice.txt', hunkId: hunk!.id })).outcome).toBe('applied');
+    expect(onDisk(repo, 'twice.txt')).toBe(`${start.join('\n')}\n`);
+  });
+
+  it('refuses an undo after an edit anywhere in the file, and an undo asked for another view', async () => {
+    const { repo, vcs, folder } = setup();
+    writeFileSync(join(repo, 'list.txt'), numbered());
+    git(repo, 'add', 'list.txt');
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'list');
+    writeFileSync(join(repo, 'list.txt'), numbered({ 2: 'TWO', 18: 'EIGHTEEN' }));
+    const hunks = (await vcs.fileDiff(folder, { view: 'unstaged' }, 'list.txt'))!.hunks;
+    const reverted = await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'revert', path: 'list.txt', hunkId: hunks[1]!.id });
+    const undo = reverted.outcome === 'applied' ? reverted.undo! : '';
+    expect(await vcs.undoRevert!(folder, { undo, path: 'list.txt', view: 'turn' })).toEqual({ outcome: 'not_found' });
+    // An edit far from the hunk's lines: still refused, and nothing written.
+    writeFileSync(join(repo, 'list.txt'), numbered({ 2: 'TWO', 5: 'five, edited' }));
+    expect(await vcs.undoRevert!(folder, { undo, path: 'list.txt', view: 'unstaged' })).toEqual({ outcome: 'outdated' });
+    expect(onDisk(repo, 'list.txt')).toBe(numbered({ 2: 'TWO', 5: 'five, edited' }));
+    writeFileSync(join(repo, 'list.txt'), numbered({ 2: 'TWO' }));
+    expect(await vcs.undoRevert!(folder, { undo, path: 'list.txt', view: 'unstaged' })).toEqual({ outcome: 'applied' });
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps a private file private through a revert and its undo', async () => {
+    const { repo, vcs, folder } = setup();
+    writeFileSync(join(repo, '.env'), numbered());
+    git(repo, 'add', '.env');
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'env');
+    writeFileSync(join(repo, '.env'), numbered({ 2: 'KEY=two' }));
+    chmodSync(join(repo, '.env'), 0o600);
+    const [hunk] = (await vcs.fileDiff(folder, { view: 'unstaged' }, '.env'))!.hunks;
+    const reverted = await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'revert', path: '.env', hunkId: hunk!.id });
+    expect(lstatSync(join(repo, '.env')).mode & 0o777).toBe(0o600);
+    expect(await vcs.undoRevert!(folder, { undo: reverted.outcome === 'applied' ? reverted.undo! : '', path: '.env', view: 'unstaged' })).toEqual({ outcome: 'applied' });
+    expect(lstatSync(join(repo, '.env')).mode & 0o777).toBe(0o600);
+  });
+
+  it('acts on a path holding " b/"', async () => {
+    const { repo, vcs, folder } = setup();
+    mkdirSync(join(repo, 'x b'));
+    writeFileSync(join(repo, 'x b', 'l.txt'), 'one\n');
+    const [hunk] = (await vcs.fileDiff(folder, { view: 'unstaged' }, 'x b/l.txt'))!.hunks;
+    expect(await vcs.applyHunk!(folder, { target: { view: 'unstaged' }, action: 'stage', path: 'x b/l.txt', hunkId: hunk!.id })).toEqual({ outcome: 'applied' });
+    expect(git(repo, 'show', ':x b/l.txt')).toBe('one\n');
+  });
+
+  const caseInsensitive = (() => {
+    const probe = mkdtempSync(join(tmpdir(), 'ogden-agents-wt-case-'));
+    try {
+      writeFileSync(join(probe, 'A'), '');
+      return existsSync(join(probe, 'a'));
+    } finally {
+      rmSync(probe, { recursive: true, force: true });
+    }
+  })();
+
+  it.skipIf(!caseInsensitive)('refuses a path whose name on disk differs only in case, writing nothing', async () => {
+    const { repo, vcs, folder } = setup();
+    writeFileSync(join(repo, 'notes.txt'), numbered());
+    const startTree = (await vcs.snapshot(folder))!;
+    writeFileSync(join(repo, 'notes.txt'), numbered({ 2: 'TWO' }));
+    const endTree = (await vcs.snapshot(folder))!;
+    const target = { view: 'turn' as const, startTree, endTree };
+    const [hunk] = (await vcs.fileDiff(folder, target, 'notes.txt'))!.hunks;
+    rmSync(join(repo, 'notes.txt'));
+    writeFileSync(join(repo, 'Notes.txt'), numbered({ 2: 'TWO' }));
+    expect(await vcs.applyHunk!(folder, { target, action: 'revert', path: 'notes.txt', hunkId: hunk!.id })).toEqual({ outcome: 'unsupported' });
+    expect(readdirSync(repo)).toContain('Notes.txt');
+    expect(onDisk(repo, 'Notes.txt')).toBe(numbered({ 2: 'TWO' }));
+  });
+});
+
+describe('splitPatch', () => {
+  const patch = 'diff --git a/x b/x\nindex 1..2 100644\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n\\ No newline at end of file\n@@ -10 +10,0 @@\n-z\n';
+  it('keeps the header lines a hunk action needs and each hunk with its id', () => {
+    const split = splitPatch(patch, 'x')!;
+    expect(split.header).toEqual(['diff --git a/x b/x', '--- a/x', '+++ b/x']);
+    expect(split.hunks.map((hunk) => hunk.id)).toEqual(parseHunks(patch).map((hunk) => hunk.id));
+    expect(split.hunks[0]!.lines).toEqual(['@@ -1,2 +1,2 @@', ' a', '-b', '+c', '\\ No newline at end of file']);
+  });
+  it('refuses another path in a header, a rename, a link or a submodule, and text that was not UTF-8', () => {
+    expect(splitPatch(patch, 'y')).toBeUndefined();
+    expect(splitPatch(patch.replace('+++ b/x', '+++ b/../etc/passwd'), 'x')).toBeUndefined();
+    const spaced = 'diff --git a/x b/l.txt b/x b/l.txt\n--- a/x b/l.txt\t\n+++ b/x b/l.txt\t\n@@ -1 +1 @@\n-a\n+b\n';
+    expect(splitPatch(spaced, 'x b/l.txt')?.header).toEqual(['diff --git a/x b/l.txt b/x b/l.txt', '--- a/x b/l.txt\t', '+++ b/x b/l.txt\t']);
+    expect(splitPatch(spaced, 'x')).toBeUndefined();
+    expect(splitPatch(patch.replace('index 1..2 100644\n', 'similarity index 90%\nrename from y\nrename to x\n'), 'x')).toBeUndefined();
+    expect(splitPatch(patch.replace('index 1..2 100644\n', 'new file mode 120000\n'), 'x')).toBeUndefined();
+    expect(splitPatch(patch.replace('index 1..2 100644\n', 'deleted file mode 160000\n'), 'x')).toBeUndefined();
+    expect(splitPatch(patch.replace(' a\n', ' \uFFFD\n'), 'x')).toBeUndefined();
+    expect(splitPatch('diff --git a/x b/x\nBinary files a/x and b/x differ\n', 'x')).toBeUndefined();
   });
 });

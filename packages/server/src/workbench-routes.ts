@@ -1,8 +1,8 @@
 /**
  * The Workbench's other routes (AD-36 to AD-39; epic 8 entry 2's contract):
- * the four change views, one file's diff, hunk actions, a chat's turns, a
- * worktree chat's commit, project commands and their runs, and the editor
- * launcher. Behind the gate (AD-15) like every `/api/v1/*` route, on no
+ * the four change views, one file's diff, hunk actions and a revert's
+ * undo (8.5), a chat's turns, a worktree chat's commit, project commands
+ * and their runs, and the editor launcher. Behind the gate (AD-15) like every `/api/v1/*` route, on no
  * paired-device allowlist (AD-34), and not a BMad piece. Each answers 501
  * `not_implemented` until its lane wires its use-case (8.3 to 8.5, 8.9,
  * 8.10, epic 27). Diffs, output and paths are only in `GET` responses with
@@ -62,6 +62,7 @@ export function registerWorkbenchRoutes(app: Hono, { workspaceChanges, projectCo
     app.get(API_ROUTES.workspaceChanges, notImplemented);
     app.get(API_ROUTES.workspaceChangesFile, notImplemented);
     app.post(API_ROUTES.workspaceChangesHunks, notImplemented);
+    app.post(API_ROUTES.workspaceChangesHunksUndo, notImplemented);
     app.get(API_ROUTES.sessionTurns, notImplemented);
     app.post(API_ROUTES.sessionWorktreeCommit, notImplemented);
   } else {
@@ -84,6 +85,16 @@ export function registerWorkbenchRoutes(app: Hono, { workspaceChanges, projectCo
       if ('response' in read) return read.response;
       try {
         return c.json(HunkActionResponse.parse(await workspaceChanges.hunk(c.req.param('wsId'), read.body)), 200, NO_STORE);
+      } catch (error) {
+        return refusal(c, error);
+      }
+    });
+    // 501 while the port has no undo (core's NotImplementedError).
+    app.post(API_ROUTES.workspaceChangesHunksUndo, limit, async (c) => {
+      const read = await readJson(c);
+      if ('response' in read) return read.response;
+      try {
+        return c.json(HunkActionResponse.parse(await workspaceChanges.undo(c.req.param('wsId'), read.body)), 200, NO_STORE);
       } catch (error) {
         return refusal(c, error);
       }

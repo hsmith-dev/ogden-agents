@@ -1104,6 +1104,7 @@ const WORKBENCH_ROUTE_KEYS = [
   'workspaceChanges',
   'workspaceChangesFile',
   'workspaceChangesHunks',
+  'workspaceChangesHunksUndo',
   'sessionTurns',
   'sessionWorktreeCommit',
   'workspaceProjectCommands',
@@ -1122,6 +1123,7 @@ const WORKBENCH_REQUEST_SCHEMAS = [
   'ChangesQuery',
   'FileDiffQuery',
   'HunkActionRequest',
+  'UndoHunkRequest',
   'CommitWorktreeRequest',
   'SetProjectCommandsRequest',
   'ProjectCommandInput',
@@ -1170,7 +1172,7 @@ describe('epic 8 entry 2: Workbench paths are workspace-relative and no git runs
         expect(inner, `${name}.${field}`).toBe(WorkspaceRelativePath);
       }
     }
-    expect(pathFields).toEqual(['WorkspaceFilesQuery.path', 'OpenInEditorRequest.path', 'WorkspaceFileLinksRequest.paths', 'FileDiffQuery.path', 'HunkActionRequest.path']);
+    expect(pathFields).toEqual(['WorkspaceFilesQuery.path', 'OpenInEditorRequest.path', 'WorkspaceFileLinksRequest.paths', 'FileDiffQuery.path', 'HunkActionRequest.path', 'UndoHunkRequest.path']);
     for (const key of WORKBENCH_ROUTE_KEYS) {
       expect(API_ROUTES[key], key).toBeDefined();
       expect(API_ROUTES[key], key).not.toMatch(/:path\b/);

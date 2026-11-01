@@ -8,7 +8,15 @@
  */
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { chatWorktreeBranch, COMMIT_NOTHING_MESSAGE, type ChangedFile, type DiffHunk, type EditorInfo, type SessionId, type WorkspaceId, type WorkspaceSearchFile, WORKSPACE_SEARCH_INVALID_REGEX_TEXT } from '@ogden-agents/shared';
+import {
+  chatWorktreeBranch,
+  COMMIT_NOTHING_MESSAGE,
+  HUNK_CHANGED_SINCE_TEXT,
+  HUNK_OUTDATED_TEXT,
+  HUNK_UNSUPPORTED_MESSAGE,
+  UNDO_OUTDATED_TEXT,
+  WORKSPACE_SEARCH_INVALID_REGEX_TEXT,
+  type ChangedFile, type DiffHunk, type EditorInfo, type SessionId, type WorkspaceId, type WorkspaceSearchFile } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
   AgentMidTurnError,
@@ -19,6 +27,7 @@ import {
   NotFoundError,
   NotImplementedError,
   PathProtectedError,
+  serializedByRepo,
   ValidationError,
   type Core,
   type EditorLauncherPort,
@@ -33,6 +42,7 @@ import { openTestCore, tempDir } from './helpers.js';
 
 const TREE_A = 'a'.repeat(40);
 const TREE_B = 'b'.repeat(40);
+const UNDO = 'd'.repeat(32);
 
 /** A files port that records each call with its root and kind; `search` and `locate` only when asked. */
 function filesPort({ search, locate = true }: { search?: WorkspaceSearchFile[]; locate?: boolean } = {}) {
@@ -69,6 +79,7 @@ const hunk = (id: string): DiffHunk => ({ id, oldStart: 1, oldLines: 1, newStart
 function vcsPort({ files = [file('src/a.ts')], commit = { revision: 'c'.repeat(40), files: 2 } }: { files?: ChangedFile[]; commit?: { revision: string; files: number } | 'nothing' } = {}) {
   const calls: Array<{ op: string; root: string; worktree?: VcsFolder['worktree']; target?: VcsChangesTarget; detail?: string }> = [];
   const outdated = new Set<string>();
+  const unsupported = new Set<string>();
   const at = (folder: VcsFolder) => ({ root: folder.path, ...(folder.worktree === undefined ? {} : { worktree: folder.worktree }) });
   const port: VcsWorkingTreePort = {
     changedFiles: async (folder, target) => {
@@ -80,8 +91,15 @@ function vcsPort({ files = [file('src/a.ts')], commit = { revision: 'c'.repeat(4
       return path === 'src/a.ts' ? { file: file(path), hunks: [hunk('h1')] } : undefined;
     },
     applyHunk: async (folder, input) => {
-      calls.push({ op: 'applyHunk', ...at(folder), target: input.target, detail: `${input.action} ${input.path} ${input.hunkId ?? '*'}` });
-      return input.hunkId !== undefined && outdated.has(input.hunkId) ? 'outdated' : 'applied';
+      calls.push({ op: 'applyHunk', ...at(folder), target: input.target, detail: `${input.action} ${input.path} ${input.hunkId ?? input.hunkIds?.join(',') ?? '*'}` });
+      if (unsupported.has(input.path)) return { outcome: 'unsupported' };
+      if (input.hunkId !== undefined && outdated.has(input.hunkId)) return { outcome: 'outdated' };
+      return input.action === 'revert' ? { outcome: 'applied', undo: UNDO } : { outcome: 'applied' };
+    },
+    undoRevert: async (folder, input) => {
+      calls.push({ op: 'undoRevert', ...at(folder), detail: `${input.undo} ${input.path}` });
+      if (input.undo !== UNDO) return { outcome: 'not_found' };
+      return outdated.has(input.undo) ? { outcome: 'outdated' } : { outcome: 'applied' };
     },
     snapshot: async (folder) => {
       calls.push({ op: 'snapshot', ...at(folder) });
@@ -92,7 +110,7 @@ function vcsPort({ files = [file('src/a.ts')], commit = { revision: 'c'.repeat(4
       return commit;
     },
   };
-  return { port, calls, outdated };
+  return { port, calls, outdated, unsupported };
 }
 
 function project(core: Core) {
@@ -266,6 +284,90 @@ describe('workspace changes (AD-37)', () => {
     vcs.outdated.add('h1');
     await expect(core.workspaceChanges!.hunk(workspace.id, action)).rejects.toBeInstanceOf(HunkOutdatedError);
     await expect(core.workspaceChanges!.hunk(workspace.id, { ...action, view: 'branch' })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('checks for an agent inside the repo lock, so one that starts while the action waits refuses it', async () => {
+    const vcs = vcsPort();
+    const core = openTestCore(undefined, undefined, { vcsWorkingTreePort: vcs.port });
+    const { workspace } = project(core);
+    const chat = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat' });
+    let release!: () => void;
+    const held = serializedByRepo(workspace.realPath ?? workspace.path, () => new Promise<void>((resolve) => (release = resolve)));
+    const action = core.workspaceChanges!.hunk(workspace.id, { action: 'stage', view: 'unstaged', path: 'src/a.ts', hunkId: 'h1' });
+    const undo = core.workspaceChanges!.undo(workspace.id, { undo: UNDO, path: 'src/a.ts', view: 'unstaged' });
+    // Idle when asked; working by the time the lock is free.
+    core.entities.setSessionState(chat.id, 'working');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(vcs.calls.filter((call) => call.op === 'applyHunk' || call.op === 'undoRevert')).toEqual([]);
+    release();
+    await held;
+    await expect(action).rejects.toBeInstanceOf(AgentMidTurnError);
+    await expect(undo).rejects.toBeInstanceOf(AgentMidTurnError);
+    expect(vcs.calls.filter((call) => call.op === 'applyHunk' || call.op === 'undoRevert')).toEqual([]);
+    // And an action waits for the lock: nothing is asked of the port while another holds it.
+    core.entities.setSessionState(chat.id, 'idle');
+    const again = serializedByRepo(workspace.realPath ?? workspace.path, () => new Promise<void>((resolve) => (release = resolve)));
+    const waiting = core.workspaceChanges!.hunk(workspace.id, { action: 'stage', view: 'unstaged', path: 'src/a.ts', hunkId: 'h1' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(vcs.calls.filter((call) => call.op === 'applyHunk')).toEqual([]);
+    release();
+    await again;
+    expect(await waiting).toEqual({ file: file('src/a.ts') });
+  });
+
+  it("says each view's outdated sentence, refuses an unsupported file, and passes a whole file's ids", async () => {
+    const vcs = vcsPort();
+    const core = openTestCore(undefined, undefined, { vcsWorkingTreePort: vcs.port });
+    const { workspace } = project(core);
+    const chat = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat' });
+    const turnId = newId('trn');
+    core.sessionEvents.appendSessionEvent(chat.id, { type: 'session.turn_changes_recorded', payload: { sessionId: chat.id, turnId, startTree: TREE_A, endTree: TREE_B, files: 1, additions: 1, deletions: 1 } });
+    vcs.outdated.add('h1');
+    await expect(core.workspaceChanges!.hunk(workspace.id, { action: 'revert', view: 'turn', session: chat.id, path: 'src/a.ts', hunkId: 'h1' })).rejects.toThrow(new HunkOutdatedError(HUNK_OUTDATED_TEXT));
+    await expect(core.workspaceChanges!.hunk(workspace.id, { action: 'stage', view: 'unstaged', path: 'src/a.ts', hunkId: 'h1' })).rejects.toThrow(new HunkOutdatedError(HUNK_CHANGED_SINCE_TEXT));
+    vcs.unsupported.add('src/a.ts');
+    await expect(core.workspaceChanges!.hunk(workspace.id, { action: 'stage', view: 'unstaged', path: 'src/a.ts', hunkId: 'h2' })).rejects.toThrow(new InvalidOperationError(HUNK_UNSUPPORTED_MESSAGE));
+    vcs.unsupported.clear();
+    // Neither a hunk nor the file's ids: refused before the port is asked.
+    const asked = vcs.calls.length;
+    await expect(core.workspaceChanges!.hunk(workspace.id, { action: 'stage', view: 'unstaged', path: 'src/a.ts' })).rejects.toBeInstanceOf(ValidationError);
+    await expect(core.workspaceChanges!.hunk(workspace.id, { action: 'stage', view: 'unstaged', path: 'src/a.ts', hunkId: 'h2', hunkIds: ['h2'] })).rejects.toBeInstanceOf(ValidationError);
+    expect(vcs.calls).toHaveLength(asked);
+    expect(await core.workspaceChanges!.hunk(workspace.id, { action: 'unstage', view: 'staged', path: 'src/a.ts', hunkIds: ['h2', 'h3'] })).toEqual({ file: file('src/a.ts') });
+    expect(vcs.calls.find((call) => call.op === 'applyHunk' && call.detail === 'unstage src/a.ts h2,h3')).toBeDefined();
+  });
+
+  it("a chat working in another worktree blocks neither a hunk action nor an undo on the project; in its own worktree it blocks both", async () => {
+    const vcs = vcsPort();
+    const core = openTestCore(undefined, undefined, { vcsWorkingTreePort: vcs.port });
+    const { workspace } = project(core);
+    const chat = worktreeChat(core, workspace.id);
+    core.entities.setSessionState(chat.id, 'working');
+    const action = { action: 'revert', view: 'unstaged', path: 'src/a.ts', hunkId: 'h1' };
+    const undo = { undo: UNDO, path: 'src/a.ts', view: 'unstaged' };
+    expect(await core.workspaceChanges!.hunk(workspace.id, action)).toEqual({ file: file('src/a.ts'), undo: UNDO });
+    expect(await core.workspaceChanges!.undo(workspace.id, undo)).toEqual({ file: file('src/a.ts') });
+    const asked = vcs.calls.length;
+    await expect(core.workspaceChanges!.hunk(workspace.id, { ...action, session: chat.id })).rejects.toBeInstanceOf(AgentMidTurnError);
+    await expect(core.workspaceChanges!.undo(workspace.id, { ...undo, session: chat.id })).rejects.toBeInstanceOf(AgentMidTurnError);
+    expect(vcs.calls).toHaveLength(asked);
+  });
+
+  it("answers a revert's undo, and undoes it in the same folder; a gone undo is not found, an edited file outdated", async () => {
+    const vcs = vcsPort();
+    const core = openTestCore(undefined, undefined, { vcsWorkingTreePort: vcs.port });
+    const { workspace } = project(core);
+    expect(await core.workspaceChanges!.hunk(workspace.id, { action: 'revert', view: 'unstaged', path: 'src/a.ts', hunkId: 'h2' })).toEqual({ file: file('src/a.ts'), undo: UNDO });
+    expect(await core.workspaceChanges!.undo(workspace.id, { undo: UNDO, path: 'src/a.ts', view: 'unstaged' })).toEqual({ file: file('src/a.ts') });
+    await expect(core.workspaceChanges!.undo(workspace.id, { undo: 'e'.repeat(32), path: 'src/a.ts', view: 'unstaged' })).rejects.toBeInstanceOf(NotFoundError);
+    vcs.outdated.add(UNDO);
+    await expect(core.workspaceChanges!.undo(workspace.id, { undo: UNDO, path: 'src/a.ts', view: 'unstaged' })).rejects.toThrow(new HunkOutdatedError(UNDO_OUTDATED_TEXT));
+    for (const body of [{ undo: 'nope', path: 'src/a.ts', view: 'unstaged' }, { undo: UNDO, path: 'src/a.ts', view: 'staged' }, { undo: UNDO, path: 'src/a.ts', view: 'turn' }]) {
+      await expect(core.workspaceChanges!.undo(workspace.id, body), JSON.stringify(body)).rejects.toBeInstanceOf(ValidationError);
+    }
+    await expect(core.workspaceChanges!.undo(workspace.id, { undo: UNDO, path: '.git/config', view: 'unstaged' })).rejects.toBeInstanceOf(PathProtectedError);
+    delete (vcs.port as { undoRevert?: unknown }).undoRevert;
+    await expect(core.workspaceChanges!.undo(workspace.id, { undo: UNDO, path: 'src/a.ts', view: 'unstaged' })).rejects.toBeInstanceOf(NotImplementedError);
   });
 
   it("commits a worktree chat's changes, appending counts only; refuses a plain chat and mid-turn", async () => {

@@ -17,15 +17,24 @@
  * Story 8.4: a chat's worktree is given to the port with its repo and
  * branch (`vcsFolderOf`), so git runs there only after the worktree check;
  * only paths `WorkspaceRelativePath` accepts and `isRefusedWorkspacePath`
- * allows are answered; hunk actions are 501 until the port has them (8.5);
- * the commit runs under `serializedByRepo(<project folder>)`, with the
- * snapshots, and nothing to commit is {@link InvalidOperationError}.
+ * allows are answered; the commit runs under `serializedByRepo(<project
+ * folder>)`, with the snapshots, and nothing to commit is
+ * {@link InvalidOperationError}.
+ *
+ * Story 8.5: a hunk action and a revert's undo run under the same
+ * `serializedByRepo(<project folder>)`, with the mid-turn check inside it,
+ * so no snapshot or commit of the repo runs between the check and the
+ * write. The port's outcomes become errors: `outdated` is
+ * {@link HunkOutdatedError} with the view's own sentence, `unsupported`
+ * {@link InvalidOperationError}. Both are 501 while the port lacks them.
  */
 import {
   AGENT_MID_TURN_MESSAGE,
   COMMIT_NEEDS_WORKTREE_MESSAGE,
   COMMIT_NOTHING_MESSAGE,
   HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE,
+  HUNK_CHANGED_SINCE_TEXT,
+  HUNK_UNSUPPORTED_MESSAGE,
   ChangesQuery,
   CommitWorktreeRequest,
   FileDiffQuery,
@@ -33,6 +42,8 @@ import {
   HunkActionRequest,
   MAX_CHANGED_FILES,
   SessionId,
+  UNDO_OUTDATED_TEXT,
+  UndoHunkRequest,
   WorkspaceRelativePath,
   type ChangedFile,
   type ChangesResponse,
@@ -50,7 +61,7 @@ import type { Entities } from './entities.js';
 import { AgentMidTurnError, HunkOutdatedError, InvalidOperationError, NotFoundError, NotImplementedError, ValidationError } from './errors.js';
 import { serializedByRepo } from './repo-serialization.js';
 import type { SessionEvents } from './session-events.js';
-import type { VcsChangesTarget, VcsWorkingTreePort } from './vcs-port.js';
+import type { VcsChangesTarget, VcsHunkResult, VcsWorkingTreePort } from './vcs-port.js';
 import { checkedWorkspacePath, isRefusedWorkspacePath } from './workspace-files.js';
 import { resolveWorkspaceRoot, sessionFolder, vcsFolderOf, workspaceFolder } from './workspace-root.js';
 
@@ -61,6 +72,8 @@ export interface WorkspaceChanges {
   fileDiff(workspaceId: unknown, query: unknown): Promise<FileDiffResponse>;
   /** `HunkActionRequest` → the file as the view has it after. {@link AgentMidTurnError}, {@link HunkOutdatedError}, {@link NotFoundError}. */
   hunk(workspaceId: unknown, body: unknown): Promise<HunkActionResponse>;
+  /** `UndoHunkRequest` → the file as the view has it after. {@link AgentMidTurnError}, {@link HunkOutdatedError}, {@link NotFoundError} (gone, used, or another folder's). */
+  undo(workspaceId: unknown, body: unknown): Promise<HunkActionResponse>;
   /** The chat's recorded turns, newest first. */
   turns(workspaceId: unknown, sessionId: unknown): Promise<TurnsResponse>;
   /** `CommitWorktreeRequest` → the commit. {@link InvalidOperationError} without a worktree, {@link AgentMidTurnError}. */
@@ -112,6 +125,13 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
     if (busy) throw new AgentMidTurnError(AGENT_MID_TURN_MESSAGE);
   };
 
+  /** The port's outcome, or its refusal: `outdated` with `outdatedText`, `unsupported`, `not_found`. */
+  const applied = (result: VcsHunkResult, outdatedText: string): void => {
+    if (result.outcome === 'outdated') throw new HunkOutdatedError(outdatedText);
+    if (result.outcome === 'unsupported') throw new InvalidOperationError(HUNK_UNSUPPORTED_MESSAGE);
+    if (result.outcome === 'not_found') throw new NotFoundError('change', 'requested');
+  };
+
   const sessionOf = (workspaceId: unknown, sessionId: unknown) => {
     if (!SessionId.safeParse(sessionId).success) throw new NotFoundError('session', 'requested');
     const resolved = resolveWorkspaceRoot(entities, workspaceId, sessionId);
@@ -148,20 +168,40 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
 
     async hunk(workspaceId, body) {
       const applyHunk = port.applyHunk;
-      // Hunk actions are 8.5's: until the port has them, nothing is checked or asked.
+      // Without the port's hunk actions nothing is checked or asked.
       if (applyHunk === undefined) throw new NotImplementedError(HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE);
       const { workspace, root, session } = resolveWorkspaceRoot(entities, workspaceId, (body as { session?: unknown } | null | undefined)?.session);
       const path = checkedWorkspacePath((body as { path?: unknown } | null | undefined)?.path, { rootAllowed: false });
       const request = parsed(HunkActionRequest, body, 'That is not a change Ogden can make.');
       const target = targetOf(request.view, session, request.turn);
       if (target === undefined) throw new NotFoundError('change', 'requested');
-      refuseMidTurn(workspace, root.path);
       const folder = vcsFolderOf(workspace, session);
-      const result = await applyHunk.call(port, folder, { target: target.target, action: request.action, path, hunkId: request.hunkId });
-      if (result === 'outdated') throw new HunkOutdatedError(HUNK_OUTDATED_TEXT);
-      if (result === 'not_found') throw new NotFoundError('change', 'requested');
+      // One at a time per project, with the snapshots and the commit; the agent check inside, so none starts between.
+      const result = await serializedByRepo(workspaceFolder(workspace), async () => {
+        refuseMidTurn(workspace, root.path);
+        return applyHunk.call(port, folder, { target: target.target, action: request.action, path, hunkId: request.hunkId, hunkIds: request.hunkIds });
+      });
+      applied(result, request.view === 'turn' ? HUNK_OUTDATED_TEXT : HUNK_CHANGED_SINCE_TEXT);
       const after = await port.fileDiff(folder, target.target, path);
-      return { file: after?.file ?? null };
+      const undo = result.outcome === 'applied' && request.action === 'revert' ? result.undo : undefined;
+      return { file: after === undefined || !shownFile(after.file) ? null : after.file, ...(undo === undefined ? {} : { undo }) };
+    },
+
+    async undo(workspaceId, body) {
+      const undoRevert = port.undoRevert;
+      if (undoRevert === undefined) throw new NotImplementedError(HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE);
+      const { workspace, root, session } = resolveWorkspaceRoot(entities, workspaceId, (body as { session?: unknown } | null | undefined)?.session);
+      const path = checkedWorkspacePath((body as { path?: unknown } | null | undefined)?.path, { rootAllowed: false });
+      const request = parsed(UndoHunkRequest, body, 'That is not a revert Ogden can undo.');
+      const folder = vcsFolderOf(workspace, session);
+      const result = await serializedByRepo(workspaceFolder(workspace), async () => {
+        refuseMidTurn(workspace, root.path);
+        return undoRevert.call(port, folder, { undo: request.undo, path, view: request.view });
+      });
+      applied(result, UNDO_OUTDATED_TEXT);
+      const target = targetOf(request.view, session, undefined);
+      const after = target === undefined ? undefined : await port.fileDiff(folder, target.target, path);
+      return { file: after === undefined || !shownFile(after.file) ? null : after.file };
     },
 
     async turns(workspaceId, sessionId) {

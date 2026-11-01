@@ -31,13 +31,44 @@
  *
  * A file's `tooLarge` in a listing is from its blobs' sizes (either side
  * over `MAX_DIFF_FILE_BYTES`); its diff says so too once the diff itself
- * is over it. No hunk action here (8.5).
+ * is over it.
+ *
+ * Hunk actions (story 8.5): the file's diff in the view, exactly as the
+ * viewer's ids came from it (`DIFF`), is rebuilt with only its `diff
+ * --git`, `new file mode` / `deleted file mode`, `---` and `+++` lines and
+ * the chosen `@@` hunks, and refused unless every header names the path
+ * asked for. It goes to `git apply` on stdin (`--whitespace=nowarn`,
+ * `apply.ignoreWhitespace=no`, no fuzz, never `--3way`, `--unidiff-zero`
+ * or `--reject`), `--check` first, all or nothing: `--cached` to stage
+ * (the real index; Unstaged's temporary one only for reading),
+ * `--cached -R` to unstage, `-R` on the folder alone to revert (never the
+ * index). Only a plain text file (modes 100644 or 100755, or none), not
+ * binary or too large, under folders that are real folders of the view's
+ * folder. A whole-file action names every hunk id the file has now, or is
+ * outdated. A revert's patch is kept in memory under a random undo id,
+ * bound to its folder, path and view and to the file's bytes as the revert
+ * left them (sha256), for `UNDO_KEPT_MS` (at most `MAX_UNDOS_KEPT`);
+ * `undoRevert` applies it forward only onto those same bytes, `--check`
+ * first, and then forgets it. A restart forgets every one. A This turn
+ * revert needs each hunk's lines in the folder's file exactly once. A
+ * write to the folder keeps the file's own permission bits.
  */
-import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
-import { isRealFolder, VcsError, type VcsChangedFiles, type VcsChangesTarget, type VcsFolder, type VcsWorkingTreePort } from '@ogden-agents/core';
-import { GIT_POINTER_UNUSUAL_MESSAGE, MAX_CHANGED_FILES, MAX_DIFF_FILE_BYTES, type ChangedFile, type DiffHunk, type DiffLine } from '@ogden-agents/shared';
+import { isRealFolder, VcsError, type VcsChangedFiles, type VcsChangesTarget, type VcsFolder, type VcsHunkResult, type VcsWorkingTreePort } from '@ogden-agents/core';
+import {
+  GIT_POINTER_UNUSUAL_MESSAGE,
+  HUNK_ACTIONS_BY_VIEW,
+  MAX_CHANGED_FILES,
+  MAX_DIFF_FILE_BYTES,
+  MAX_UNDOS_KEPT,
+  UNDO_KEPT_MS,
+  type ChangedFile,
+  type DiffHunk,
+  type DiffLine,
+  type HunkAction,
+} from '@ogden-agents/shared';
 import { readRegularFile, type RegularFileRead } from '../fs-safe.js';
 import { BRANCH, checkPath, checkRelative, REVISION, realOf, SAFE_CONFIG } from './checks.js';
 import { checkGitPointer, type GitPointer } from './git-pointer.js';
@@ -46,6 +77,8 @@ import { createGitRunner, OUTPUT_TOO_LARGE, type GitRunnerOptions } from './runn
 export interface GitWorkingTreeOptions extends GitRunnerOptions {
   /** `<data>/snapshots`: made if missing; refused (no snapshot, no read of one) when it is a link or not a folder. */
   snapshotsRoot: string;
+  /** The clock a revert's undo is timed by (tests). Default `Date.now`. */
+  now?: (() => number) | undefined;
 }
 
 /** Where git runs for a folder: its cwd, Ogden's pins (a worktree), the repo's shared git folder and the folder's index. */
@@ -77,13 +110,94 @@ const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 const RAW_HEADER = /^:(\d{6}) (\d{6}) ([0-9a-f]+) ([0-9a-f]+) ([A-Z])\d*$/;
 
 /** Config every working-tree call runs with: no network (a promisor remote's lazy fetch), no command for ssh, no split index, no untracked cache. */
-const WORKING_TREE_CONFIG = ['-c', 'protocol.allow=never', '-c', 'core.sshCommand=false', '-c', 'core.splitIndex=false', '-c', 'core.untrackedCache=false'];
+const WORKING_TREE_CONFIG = [
+  '-c',
+  'protocol.allow=never',
+  // Each protocol too: a repo's `protocol.<name>.allow=always` would otherwise win over `protocol.allow`.
+  ...['ext', 'file', 'ssh', 'git', 'http', 'https'].flatMap((name) => ['-c', `protocol.${name}.allow=never`]),
+  '-c',
+  'core.sshCommand=false', '-c', 'core.splitIndex=false', '-c', 'core.untrackedCache=false'];
 
 /** The largest index a temporary copy is made of. */
 const MAX_INDEX_BYTES = 256 * 1024 * 1024;
 
-/** The diff flags every view reads with. */
-const DIFF = ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '--relative'];
+/**
+ * The diff flags every view reads with: git's own diff, never a program's, paths unquoted where git can, blank
+ * context lines kept as a space, 3 lines of context and `a/` `b/` whatever the user's config says, so a hunk
+ * action's patch is the very diff the viewer's ids came from.
+ */
+const DIFF = [
+  '-c',
+  'core.quotePath=false',
+  '-c',
+  'diff.suppressBlankEmpty=false',
+  '--literal-pathspecs',
+  'diff',
+  '--no-ext-diff',
+  '--no-textconv',
+  '--no-color',
+  '--no-renames',
+  '--relative',
+  '--unified=3',
+  '--src-prefix=a/',
+  '--dst-prefix=b/',
+];
+
+/** `git apply` as hunk actions run it: whitespace as it is, never ignored, no fuzz (no `-C`), the patch on stdin. */
+const APPLY = ['-c', 'apply.ignoreWhitespace=no', '-c', 'apply.whitespace=nowarn', 'apply', '--whitespace=nowarn'];
+
+/** The modes a hunk action takes: a regular file, executable or not, or none (added or deleted). */
+const PLAIN_MODES: ReadonlySet<string> = new Set(['100644', '100755', '000000']);
+
+/** The `apply` flags of each action. */
+const APPLY_FLAGS: Readonly<Record<HunkAction, readonly string[]>> = { stage: ['--cached'], unstage: ['--cached', '-R'], revert: ['-R'] };
+
+/** One file's patch split for a hunk action: its kept header lines and each hunk's lines with its id. */
+export interface SplitPatch {
+  header: string[];
+  hunks: Array<{ id: string; lines: string[] }>;
+}
+
+/**
+ * One file's diff (git's own, as `DIFF` prints it) split into the header lines a hunk action keeps and its
+ * hunks with their `parseHunks` ids; `undefined` when it is anything else: another path in a header, a
+ * rename, copy or binary patch, a mode other than a regular file's, a line git doesn't print in a hunk, or
+ * text that wasn't UTF-8 (it would not be written back as it was).
+ */
+export function splitPatch(patch: string, path: string): SplitPatch | undefined {
+  if (patch.includes('\uFFFD')) return undefined;
+  const lines = patch.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  const first = lines.findIndex((line) => line.startsWith('@@ '));
+  if (first <= 0) return undefined;
+  const header: string[] = [];
+  for (const line of lines.slice(0, first)) {
+    if (line.startsWith('index ')) continue;
+    const mode = /^(?:old|new|new file|deleted file) mode (\d{6})$/.exec(line);
+    if (mode !== null && !PLAIN_MODES.has(mode[1]!)) return undefined;
+    // A mode change is left as it is: only the lines move.
+    if (/^(?:old|new) mode /.test(line)) continue;
+    if (mode !== null || line.startsWith('diff --git ') || line.startsWith('--- ') || line.startsWith('+++ ')) header.push(line);
+    else return undefined;
+  }
+  const count = (prefix: string) => header.filter((line) => line.startsWith(prefix)).length;
+  if (!header[0]!.startsWith('diff --git ') || count('diff --git ') !== 1 || count('--- ') !== 1 || count('+++ ') !== 1 || header.length > 4) return undefined;
+  // Each header names exactly this path (git adds a tab after a name with a space): never split at a " b/" inside it.
+  const named = (line: string, prefix: string) => line === `${prefix}${path}` || line === `${prefix}${path}\t`;
+  const minus = header.find((line) => line.startsWith('--- '))!;
+  const plus = header.find((line) => line.startsWith('+++ '))!;
+  if (header[0] !== `diff --git a/${path} b/${path}` || !(minus === '--- /dev/null' || named(minus, '--- a/')) || !(plus === '+++ /dev/null' || named(plus, '+++ b/'))) return undefined;
+  const hunks: SplitPatch['hunks'] = [];
+  for (const line of lines.slice(first)) {
+    if (line.startsWith('@@ ')) hunks.push({ id: '', lines: [line] });
+    else if (/^[ +\-\\]/.test(line)) hunks.at(-1)!.lines.push(line);
+    else return undefined;
+  }
+  const ids = parseHunks(patch).map((hunk) => hunk.id);
+  if (ids.length !== hunks.length) return undefined;
+  hunks.forEach((hunk, index) => (hunk.id = ids[index]!));
+  return { header, hunks };
+}
 
 /** A unified diff's hunks (one file's), each with its lines' numbers; ids `h<n>-<sha1 of the hunk, 10>`. */
 export function parseHunks(patch: string): DiffHunk[] {
@@ -138,6 +252,8 @@ export function parseHunks(patch: string): DiffHunk[] {
 interface RawEntry {
   path: string;
   status: string;
+  oldMode: string;
+  newMode: string;
   oldId: string;
   newId: string;
 }
@@ -153,7 +269,7 @@ function parseListing(out: string): { raw: RawEntry[]; counts: Map<string, { add
     const header = RAW_HEADER.exec(token);
     if (header !== null) {
       const path = tokens[++index] ?? '';
-      if (path !== '') raw.push({ path, status: header[5]!, oldId: header[3]!, newId: header[4]! });
+      if (path !== '') raw.push({ path, status: header[5]!, oldMode: header[1]!, newMode: header[2]!, oldId: header[3]!, newId: header[4]! });
       continue;
     }
     const count = /^(\d+|-)\t(\d+|-)\t(.*)$/s.exec(token);
@@ -367,9 +483,9 @@ export function createGitWorkingTree(options: GitWorkingTreeOptions): VcsWorking
     return sizes;
   };
 
-  /** The view's changed files under `paths` (none: all). */
-  const listed = async (located: Located, spec: ViewSpec, paths: readonly string[]): Promise<{ files: ChangedFile[]; truncated: boolean }> => {
-    if (spec.empty === true) return { files: [], truncated: false };
+  /** The view's changed files under `paths` (none: all), and each one's modes (old, new). */
+  const listed = async (located: Located, spec: ViewSpec, paths: readonly string[]): Promise<{ files: ChangedFile[]; truncated: boolean; modes: Map<string, [string, string]> }> => {
+    if (spec.empty === true) return { files: [], truncated: false, modes: new Map() };
     const out = await must(located.cwd, [...located.flags, ...DIFF, '--no-abbrev', '-z', '--raw', '--numstat', ...spec.args, '--', ...paths], 'read the changes', 64 * 1024 * 1024, spec.env);
     const { raw, counts } = parseListing(out);
     const kept = raw.slice(0, MAX_CHANGED_FILES);
@@ -396,7 +512,7 @@ export function createGitWorkingTree(options: GitWorkingTreeOptions): VcsWorking
         tooLarge: !binary && Math.max(sizeOf(entry, 'old'), sizeOf(entry, 'new')) > MAX_DIFF_FILE_BYTES,
       };
     });
-    return { files, truncated: raw.length > kept.length };
+    return { files, truncated: raw.length > kept.length, modes: new Map(kept.map((entry) => [entry.path, [entry.oldMode, entry.newMode]])) };
   };
 
   /** Runs `read` with the view's spec, cleaning up after; `undefined` when the folder is in no repository or the view has nothing to compare. */
@@ -412,12 +528,170 @@ export function createGitWorkingTree(options: GitWorkingTreeOptions): VcsWorking
     }
   };
 
+  /**
+   * Whether every folder on `path` is a real folder of `cwd` (one not there yet is fine: git makes it), and the
+   * file itself, when `leaf` and it is there, a regular file: never a link out, never a link's target.
+   */
+  const plainPath = (cwd: string, path: string, leaf: boolean): boolean => {
+    const segments = path.split('/');
+    for (let end = 1; end <= segments.length; end++) {
+      if (end === segments.length && !leaf) return true;
+      let stat;
+      try {
+        stat = lstatSync(join(cwd, ...segments.slice(0, end)));
+      } catch {
+        return true;
+      }
+      if (end < segments.length ? !stat.isDirectory() : !stat.isFile()) return false;
+      // On a case-insensitive disk `Notes.txt` answers for `notes.txt`: only the exact name is that file.
+      try {
+        if (!readdirSync(join(cwd, ...segments.slice(0, end - 1))).includes(segments[end - 1]!)) return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  /**
+   * Applies `patch` with the action's flags in the folder's own environment, `--check` first: `false` (nothing
+   * written) when it doesn't apply as it is. The patch's paths are the folder's: `--directory` names the folder
+   * within the repo, since `apply` in a subfolder otherwise skips them (and says so only in its verbose output,
+   * which is checked: a skipped patch is never taken for an applied one).
+   */
+  const applyPatch = async (located: Located, flags: readonly string[], patch: string, path: string): Promise<boolean> => {
+    const prefix = (await must(located.cwd, [...located.flags, 'rev-parse', '--show-prefix'], 'read the repository', undefined, located.env)).replace(/\r?\n$/, '');
+    const args = [...located.flags, ...APPLY, ...flags, ...(prefix === '' ? [] : [`--directory=${prefix}`])];
+    const check = await run(located.cwd, [...args, '--check', '--verbose', '-'], undefined, located.env, patch);
+    if (check.code !== 0) return false;
+    if (/^Skipped patch/m.test(check.stderr) || !/^Checking patch /m.test(check.stderr)) throw new VcsError("git didn't take the change, so nothing was changed.", { step: 'apply' });
+    // A write to the folder recreates the file with git's mode: a file kept private (`.env` at 0600) stays so.
+    const file = join(located.cwd, ...path.split('/'));
+    const before = flags.includes('--cached') ? undefined : statOf(file);
+    await must(located.cwd, [...args, '-'], 'apply the change', undefined, located.env, patch);
+    const after = before === undefined ? undefined : statOf(file);
+    if (before !== undefined && after !== undefined && after.isFile() && (after.mode & 0o7777) !== (before.mode & 0o7777)) chmodSync(file, before.mode & 0o7777);
+    return true;
+  };
+
+  /** The folder's file as it is now: its bytes' sha256 (`absent` when there is none), read without following a link. */
+  const fileHash = (located: Located, path: string): string => {
+    const read = readRegularFile(join(located.cwd, ...path.split('/')), MAX_DIFF_FILE_BYTES * 4);
+    return read === undefined ? 'absent' : createHash('sha256').update(read.bytes).digest('hex');
+  };
+
+  /**
+   * Whether each hunk's new side (its context and added lines, in order) is in the folder's file exactly once, so a
+   * This turn revert can't land on another copy of the same lines after the file was edited.
+   */
+  const onceInFolder = (located: Located, path: string, hunks: SplitPatch['hunks']): boolean => {
+    let read: RegularFileRead | undefined;
+    try {
+      read = readRegularFile(join(located.cwd, ...path.split('/')), MAX_DIFF_FILE_BYTES * 4);
+    } catch {
+      return false;
+    }
+    const lines = read === undefined ? [] : read.bytes.toString('utf8').split('\n').map((line) => line.replace(/\r$/, ''));
+    for (const hunk of hunks) {
+      const block = hunk.lines.slice(1).filter((line) => line[0] === ' ' || line[0] === '+').map((line) => line.slice(1).replace(/\r$/, ''));
+      if (block.length === 0) continue;
+      let found = 0;
+      for (let at = 0; at + block.length <= lines.length && found < 2; at++) if (block.every((line, offset) => lines[at + offset] === line)) found++;
+      if (found !== 1) return false;
+    }
+    return true;
+  };
+
+  const statOf = (file: string) => {
+    try {
+      return lstatSync(file);
+    } catch {
+      return undefined;
+    }
+  };
+
+  const now = options.now ?? Date.now;
+  /** Each revert's patch, by undo id, with its folder and path; oldest first. */
+  const undos = new Map<string, { folder: string; path: string; view: string; patch: string; hash: string; at: number }>();
+  const folderKey = (folder: VcsFolder): string => JSON.stringify([folder.path, folder.worktree?.repoPath ?? null, folder.worktree?.branch ?? null]);
+  const forgetOld = (): void => {
+    for (const [id, kept] of undos) if (now() - kept.at > UNDO_KEPT_MS) undos.delete(id);
+  };
+  const remember = (folder: VcsFolder, path: string, view: string, patch: string, hash: string): string => {
+    forgetOld();
+    while (undos.size >= MAX_UNDOS_KEPT) undos.delete(undos.keys().next().value!);
+    const id = randomBytes(16).toString('hex');
+    undos.set(id, { folder: folderKey(folder), path, view, patch, hash, at: now() });
+    return id;
+  };
+
   return {
+    async applyHunk(folder, { target, action, path, hunkId, hunkIds }): Promise<VcsHunkResult> {
+      checkRelative(path);
+      if (!HUNK_ACTIONS_BY_VIEW[target.view].includes(action)) throw new VcsError("That view doesn't offer that action.", { step: 'apply' });
+      const result = await withView(folder, target, async (located, spec): Promise<VcsHunkResult> => {
+        // Stage and unstage write only the index, but a linked folder is refused for every action alike.
+        if (!plainPath(located.cwd, path, action === 'revert')) return { outcome: 'unsupported' };
+        const listing = await listed(located, spec, [path]);
+        const file = listing.files.find((one) => one.path === path);
+        if (file === undefined) return { outcome: 'outdated' };
+        const modes = listing.modes.get(path);
+        if (file.binary || file.tooLarge || modes === undefined || !modes.every((mode) => PLAIN_MODES.has(mode))) return { outcome: 'unsupported' };
+        let patch: string;
+        try {
+          patch = await must(located.cwd, [...located.flags, ...DIFF, ...spec.args, '--', path], 'read the change', 4 * MAX_DIFF_FILE_BYTES, spec.env);
+        } catch (error) {
+          if (error instanceof VcsError && error.details.code === OUTPUT_TOO_LARGE) return { outcome: 'unsupported' };
+          throw error;
+        }
+        if (Buffer.byteLength(patch, 'utf8') > MAX_DIFF_FILE_BYTES) return { outcome: 'unsupported' };
+        const split = splitPatch(patch, path);
+        if (split === undefined) return { outcome: 'unsupported' };
+        let chosen: SplitPatch['hunks'];
+        if (hunkId !== undefined) chosen = split.hunks.filter((hunk) => hunk.id === hunkId);
+        else {
+          // The whole file only as it was shown: every id it has now, and no other.
+          const ids = new Set(hunkIds ?? []);
+          if (ids.size !== split.hunks.length || split.hunks.some((hunk) => !ids.has(hunk.id))) return { outcome: 'outdated' };
+          chosen = split.hunks;
+        }
+        if (chosen.length === 0) return { outcome: 'outdated' };
+        // The turn's snapshots don't move with the folder: its lines must still be there, once.
+        if (action === 'revert' && target.view === 'turn' && !onceInFolder(located, path, chosen)) return { outcome: 'outdated' };
+        const built = `${[...split.header, ...chosen.flatMap((hunk) => hunk.lines)].join('\n')}\n`;
+        if (!(await applyPatch(located, APPLY_FLAGS[action], built, path))) return { outcome: 'outdated' };
+        return action === 'revert' ? { outcome: 'applied', undo: remember(folder, path, target.view, built, fileHash(located, path)) } : { outcome: 'applied' };
+      });
+      if (result === undefined) return { outcome: 'not_found' };
+      return 'value' in result ? result.value : { outcome: 'outdated' };
+    },
+
+    async undoRevert(folder, { undo, path, view }): Promise<VcsHunkResult> {
+      checkRelative(path);
+      forgetOld();
+      const kept = /^[0-9a-f]{32}$/.test(undo) ? undos.get(undo) : undefined;
+      if (kept === undefined || kept.folder !== folderKey(folder) || kept.path !== path || (view !== undefined && kept.view !== view)) return { outcome: 'not_found' };
+      const located = await locate(folder);
+      if (located === undefined) return { outcome: 'not_found' };
+      if (!plainPath(located.cwd, path, true)) return { outcome: 'unsupported' };
+      // Only onto the file exactly as the revert left it: an edit anywhere since and nothing is put back.
+      let same: boolean;
+      try {
+        same = fileHash(located, path) === kept.hash;
+      } catch {
+        same = false;
+      }
+      if (!same || !(await applyPatch(located, [], kept.patch, path))) return { outcome: 'outdated' };
+      undos.delete(undo);
+      return { outcome: 'applied' };
+    },
+
     async changedFiles(folder, target): Promise<VcsChangedFiles> {
       let base: string | undefined;
       const result = await withView(folder, target, async (located, spec) => {
         base = spec.base;
-        return listed(located, spec, []);
+        const { files, truncated } = await listed(located, spec, []);
+        return { files, truncated };
       });
       if (result === undefined || !('value' in result)) return { files: [], truncated: false };
       return { ...(target.view === 'branch' && base !== undefined ? { base } : {}), ...result.value };

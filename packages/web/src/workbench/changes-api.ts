@@ -7,17 +7,22 @@ import {
   COMMIT_FAILED,
   CommitWorktreeResponse,
   FileDiffResponse,
+  HUNK_ACTION_FAILED,
+  HunkActionResponse,
   TurnsResponse,
   type ChangesView,
+  type HunkActionRequest,
+  type UndoHunkRequest,
 } from '@ogden-agents/shared';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { call, postJson, type Auth } from '@/api/http';
 import { tabAuth } from '@/auth/tab-token';
 
 /**
- * The Workbench's Changes calls (AD-37; story 8.4), sent with this tab's
- * token. A diff is fetched each time it is shown and never kept once the
- * panel closes (`gcTime: 0`); it never travels in an event.
+ * The Workbench's Changes calls (AD-37; stories 8.4 and 8.5), sent with
+ * this tab's token. A diff is fetched each time it is shown and never kept
+ * once the panel closes (`gcTime: 0`); it never travels in an event. A
+ * hunk action names hunk ids only: the patch is the server's own diff.
  */
 
 /** Which view, of which chat's folder (and turn). */
@@ -55,6 +60,21 @@ export async function commitWorktree(wsId: string, sesId: string, message: strin
   return CommitWorktreeResponse.parse(await call(auth, apiPath(API_ROUTES.sessionWorktreeCommit, { wsId, sesId }), postJson({ message }), COMMIT_FAILED));
 }
 
+/** A hunk action's body, its chat and turn as the panel has them (the server checks each). */
+export type HunkActionBody = Omit<HunkActionRequest, 'session' | 'turn'> & { session?: string; turn?: string };
+/** An Undo's body. */
+export type UndoRevertBody = Omit<UndoHunkRequest, 'session'> & { session?: string };
+
+/** `POST …/changes/hunks`: stage, unstage or revert one hunk or the whole file (by the ids shown). */
+export async function postHunkAction(wsId: string, request: HunkActionBody, auth: Auth = tabAuth): Promise<HunkActionResponse> {
+  return HunkActionResponse.parse(await call(auth, apiPath(API_ROUTES.workspaceChangesHunks, { wsId }), postJson(request), HUNK_ACTION_FAILED));
+}
+
+/** `POST …/changes/hunks/undo`: put back what a revert took. */
+export async function postUndoRevert(wsId: string, request: UndoRevertBody, auth: Auth = tabAuth): Promise<HunkActionResponse> {
+  return HunkActionResponse.parse(await call(auth, apiPath(API_ROUTES.workspaceChangesHunksUndo, { wsId }), postJson(request), HUNK_ACTION_FAILED));
+}
+
 const changesKey = (wsId: string, target: ChangesTarget) => ['workspace-changes', wsId, target.view, target.session ?? '', target.turn ?? ''] as const;
 
 /** The view's changed files. */
@@ -85,6 +105,24 @@ export function useCommitWorktree(wsId: string, sesId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (message: string) => commitWorktree(wsId, sesId, message),
+    onSettled: () => client.invalidateQueries({ queryKey: ['workspace-changes', wsId] }),
+  });
+}
+
+/** A hunk action; every view of the project is read again after, applied or refused. */
+export function useHunkAction(wsId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (request: HunkActionBody) => postHunkAction(wsId, request),
+    onSettled: () => client.invalidateQueries({ queryKey: ['workspace-changes', wsId] }),
+  });
+}
+
+/** A revert's Undo; every view of the project is read again after. */
+export function useUndoRevert(wsId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (request: UndoRevertBody) => postUndoRevert(wsId, request),
     onSettled: () => client.invalidateQueries({ queryKey: ['workspace-changes', wsId] }),
   });
 }

@@ -17,7 +17,19 @@ import {
   DIFF_FILES_OPEN,
   EDITOR_NONE_FOUND_TEXT,
   FileDiffQuery,
+  fileActionName,
+  HUNK_ACTION_FAILED,
+  HUNK_CHANGED_SINCE_TEXT,
+  HUNK_UNSUPPORTED_MESSAGE,
   HunkActionRequest,
+  HunkActionResponse,
+  hunkActionName,
+  PUT_BACK_TEXT,
+  REVERT_CONFIRM_TEXT,
+  revertedText,
+  UNDO_GONE_TEXT,
+  UNDO_OUTDATED_TEXT,
+  UndoHunkRequest,
   MAX_CHANGED_FILES,
   MAX_DIFF_FILE_BYTES,
   NewCoreEvent,
@@ -90,7 +102,7 @@ describe('workbench contracts (epic 8 entry 2)', () => {
       expect(WorkspaceFilesQuery.safeParse({ path }).success, path).toBe(false);
       expect(OpenInEditorRequest.safeParse({ path }).success, path).toBe(false);
       expect(FileDiffQuery.safeParse({ view: 'unstaged', path }).success, path).toBe(false);
-      expect(HunkActionRequest.safeParse({ action: 'stage', view: 'unstaged', path }).success, path).toBe(false);
+      expect(HunkActionRequest.safeParse({ action: 'stage', view: 'unstaged', path, hunkId: 'h1' }).success, path).toBe(false);
       expect(ChangedFile.safeParse({ path, change: 'changed', additions: 0, deletions: 0, binary: false, tooLarge: false }).success, path).toBe(false);
       expect(ProblemItem.safeParse({ path, line: 1, message: 'x', format: 'eslint' }).success, path).toBe(false);
     }
@@ -102,12 +114,23 @@ describe('workbench contracts (epic 8 entry 2)', () => {
 
   it("offers each view's actions only, and This turn needs a chat", () => {
     const base = { path: 'a.ts', session: SES };
-    expect(HunkActionRequest.safeParse({ ...base, action: 'revert', view: 'turn', turn: TRN }).success).toBe(true);
+    expect(HunkActionRequest.safeParse({ ...base, action: 'revert', view: 'turn', turn: TRN, hunkId: 'h1' }).success).toBe(true);
     expect(HunkActionRequest.safeParse({ ...base, action: 'stage', view: 'unstaged', hunkId: 'h1' }).success).toBe(true);
-    expect(HunkActionRequest.safeParse({ ...base, action: 'unstage', view: 'staged' }).success).toBe(true);
+    expect(HunkActionRequest.safeParse({ ...base, action: 'unstage', view: 'staged', hunkIds: ['h1', 'h2'] }).success).toBe(true);
     for (const [action, view] of [['stage', 'turn'], ['revert', 'staged'], ['stage', 'branch'], ['revert', 'branch'], ['unstage', 'unstaged']] as const) {
-      expect(HunkActionRequest.safeParse({ ...base, action, view }).success, `${action} ${view}`).toBe(false);
+      expect(HunkActionRequest.safeParse({ ...base, action, view, hunkId: 'h1' }).success, `${action} ${view}`).toBe(false);
     }
+    // One hunk or the file's ids (1 to 1000 of them), never both, never neither; never a patch.
+    for (const extra of [{}, { hunkId: 'h1', hunkIds: ['h1'] }, { hunkIds: [] }, { hunkIds: Array.from({ length: 1001 }, (_, i) => `h${i}`) }, { hunkId: 'h1', patch: 'diff --git' }]) {
+      expect(HunkActionRequest.safeParse({ ...base, action: 'stage', view: 'unstaged', ...extra }).success, JSON.stringify(extra).slice(0, 40)).toBe(false);
+    }
+    const undo = 'a'.repeat(32);
+    expect(UndoHunkRequest.safeParse({ undo, path: 'a.ts', view: 'unstaged' }).success).toBe(true);
+    expect(UndoHunkRequest.safeParse({ undo, path: 'a.ts', view: 'turn', session: SES }).success).toBe(true);
+    for (const body of [{ undo, path: 'a.ts', view: 'turn' }, { undo, path: 'a.ts', view: 'staged' }, { undo: 'A'.repeat(32), path: 'a.ts', view: 'unstaged' }, { undo, path: '../a.ts', view: 'unstaged' }]) {
+      expect(UndoHunkRequest.safeParse(body).success, JSON.stringify(body)).toBe(false);
+    }
+    expect(HunkActionResponse.safeParse({ file: null, undo }).success).toBe(true);
     expect(ChangesQuery.safeParse({ view: 'turn' }).success).toBe(false);
     expect(ChangesQuery.safeParse({ view: 'unstaged', turn: TRN }).success).toBe(false);
     expect(ChangesQuery.safeParse({ view: 'turn', session: SES, turn: TRN }).success).toBe(true);
@@ -139,12 +162,31 @@ describe('workbench contracts (epic 8 entry 2)', () => {
     for (const code of ['agent_mid_turn', 'hunk_outdated', 'editor_unavailable', 'invalid_operation'] as const) expect(API_ERROR_CODES).toContain(code);
     expect(API_ROUTES.workspaceFileSearch).toBe('/api/v1/workspaces/:wsId/files/search');
     expect(API_ROUTES.workspaceChangesHunks).toBe('/api/v1/workspaces/:wsId/changes/hunks');
+    expect(API_ROUTES.workspaceChangesHunksUndo).toBe('/api/v1/workspaces/:wsId/changes/hunks/undo');
+    expect(hunkActionName('stage', 'Lines 40 to 46')).toBe('Stage lines 40 to 46');
+    expect(fileActionName('revert', 'cart.css')).toBe('Revert all of cart.css');
+    expect(revertedText('cart.css', 'Lines 40 to 46')).toBe('Reverted lines 40 to 46 in cart.css.');
+    expect(REVERT_CONFIRM_TEXT).toBe('Revert this change? These lines go back to how they were. You can undo it right after, while Changes is open.');
     expect(API_ROUTES.sessionWorktreeCommit).toBe('/api/v1/workspaces/:wsId/sessions/:sesId/worktree/commit');
     expect(API_ROUTES.editors).toBe('/api/v1/editors');
     expect(agentMidTurnText('Claude Code')).toBe('Claude Code is working in this folder. Wait for it to finish, or stop it.');
     expect(changesEmptyText('branch', 'main')).toBe('This branch matches main.');
     // No em or en dash in a UI string.
-    for (const text of [HUNK_OUTDATED_TEXT, EDITOR_NONE_FOUND_TEXT, WORKSPACE_SEARCH_CAPPED_TEXT]) expect(text).not.toMatch(/[\u2013\u2014]/);
+    for (const text of [
+      HUNK_OUTDATED_TEXT,
+      HUNK_CHANGED_SINCE_TEXT,
+      HUNK_UNSUPPORTED_MESSAGE,
+      UNDO_OUTDATED_TEXT,
+      UNDO_GONE_TEXT,
+      HUNK_ACTION_FAILED,
+      REVERT_CONFIRM_TEXT,
+      PUT_BACK_TEXT,
+      revertedText('a.ts'),
+      EDITOR_NONE_FOUND_TEXT,
+      WORKSPACE_SEARCH_CAPPED_TEXT,
+    ]) {
+      expect(text).not.toMatch(/[\u2013\u2014]/);
+    }
     // Problems (8.9): every text, refusal and built sentence.
     const run = { state: 'failed', exitCode: 1, itemCount: 2 } as const;
     const problems = [

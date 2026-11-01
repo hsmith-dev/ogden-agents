@@ -1,5 +1,6 @@
 import {
   agentMidTurnText,
+  agentStartedHereText,
   CHANGES_DIFFS_FETCHED,
   CHANGES_DIFFS_LOADING_TEXT,
   CHANGES_LOADING_TEXT,
@@ -13,18 +14,36 @@ import {
   COMMIT_MESSAGE_LABEL,
   COMMIT_WORKTREE_LABEL,
   committedText,
+  fileActionName,
+  HUNK_ACTION_LABELS,
+  HUNK_REVERTED_LABEL,
+  HUNK_ACTIONS_BY_VIEW,
+  hunkActionName,
   MAX_COMMIT_MESSAGE_CHARS,
+  PUT_BACK_TEXT,
+  REVERT_CONFIRM_DESCRIPTION,
+  REVERT_CONFIRM_TITLE,
+  revertedText,
   turnPickerText,
+  UNDO_GONE_TEXT,
+  UNDO_LABEL,
   WORKTREE_NEVER_PUSHED_TEXT,
+  type ChangedFile,
   type ChangesView,
+  type DiffHunk,
+  type HunkAction,
   type TurnSummary,
 } from '@ogden-agents/shared';
 import { CaretDown } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useRef, useState } from 'react';
-import { fetchSession } from '@/chat/chat-api';
+import { isApiError } from '@/api/http';
+import { agentNameOf, fetchSession } from '@/chat/chat-api';
+import { useChatAgents } from '@/chat/use-chat-agents';
+import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent } from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
-import { DiffFileList, DiffViewer, type DiffFileData, type DiffViewerHandle } from '@/ui/diff-viewer';
+import { hunkRangeText } from '@/ui/diff/diff-file';
+import { DiffFileList, DiffViewer, type DiffFileData, type DiffSlots, type DiffViewerHandle } from '@/ui/diff-viewer';
 import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
 import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
@@ -32,7 +51,8 @@ import { Skeleton } from '@/ui/skeleton';
 import { Textarea } from '@/ui/textarea';
 import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
 import { Text } from '@/ui/typography';
-import { useChanges, useCommitWorktree, useFileDiffs, useTurns, type ChangesTarget } from './changes-api';
+import { isBusy, useSessions } from '@/workspaces/workspace-api';
+import { useChanges, useCommitWorktree, useFileDiffs, useHunkAction, useTurns, useUndoRevert, type ChangesTarget, type HunkActionBody } from './changes-api';
 
 /** Where the panel goes next: a view, and for This turn the turn picked. */
 export interface ChangesNavigation {
@@ -63,13 +83,22 @@ const timeOf = (at: string): string => new Date(at).toLocaleTimeString([], { hou
  * turn picker for This turn, the view's files (each a button that jumps to
  * its diff) over the shared diff viewer, the first
  * {@link CHANGES_DIFFS_FETCHED} files' diffs fetched, and, for a chat with a
- * worktree of its own, Commit these changes. No hunk action yet (8.5).
+ * worktree of its own, Commit these changes.
+ *
+ * Story 8.5: each hunk and each file has its view's actions (Stage and
+ * Revert in Unstaged, Unstage in Staged, Revert in This turn, none in
+ * Branch); Revert confirms once, then offers Undo while the panel is open.
+ * Every action is disabled while an agent works in the panel's folder (the
+ * chat's worktree, else the project); one that started since the click,
+ * or a hunk that changed since it was shown, is said in the panel and the
+ * diffs are read again.
  */
 export function WorkbenchChanges({ wsId, view, session, turn, onNavigate }: WorkbenchChangesProps) {
   const views = viewsFor(session);
   const asked = view ?? (session === undefined ? 'unstaged' : 'turn');
   const shown: ChangesView = views.includes(asked) ? asked : 'unstaged';
   const target: ChangesTarget = { view: shown, session, turn: shown === 'turn' ? turn : undefined };
+  const actions = useChangesActions(wsId, session);
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="workbench-changes" data-view={shown}>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -93,9 +122,217 @@ export function WorkbenchChanges({ wsId, view, session, turn, onNavigate }: Work
         {shown === 'turn' && session !== undefined ? <TurnPicker wsId={wsId} session={session} turn={turn} onPick={(picked) => onNavigate({ view: 'turn', turn: picked })} /> : null}
       </div>
       {session === undefined ? null : <WorktreeCommit wsId={wsId} sesId={session} />}
-      <ChangesList key={`${shown}\0${session ?? ''}\0${target.turn ?? ''}`} wsId={wsId} target={target} />
+      {actions.panel}
+      <ChangesList key={`${shown}\0${session ?? ''}\0${target.turn ?? ''}`} wsId={wsId} target={target} slotsFor={actions.slotsFor} />
     </div>
   );
+}
+
+/** The name of a file's last segment. */
+const nameOf = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
+
+/**
+ * The agent working in the panel's folder, by name: a local chat (never a
+ * build, never a remote machine's) that is working or waiting in the same
+ * worktree as the panel's chat, or in the project when it has none.
+ */
+function useBusyAgent(wsId: string, session: string | undefined): string | undefined {
+  const { sessions } = useSessions(wsId);
+  const agents = useChatAgents(wsId);
+  if (sessions === undefined) return undefined;
+  const folder = session === undefined ? null : (sessions.find((one) => one.id === session)?.worktreePath ?? null);
+  const busy = sessions.find((one) => one.kind !== 'build' && one.machineId === null && isBusy(one) && (one.worktreePath ?? null) === folder);
+  return busy === undefined ? undefined : agentNameOf(agents.data, busy.agentId ?? undefined);
+}
+
+/** A hunk or file action waiting for Revert's confirmation. */
+interface PendingRevert {
+  target: ChangesTarget;
+  file: ChangedFile;
+  hunk?: DiffHunk | undefined;
+  ids: string[];
+}
+
+/** The last revert, its Undo, and whether it was put back. */
+interface RevertDone {
+  target: ChangesTarget;
+  path: string;
+  /** The hunk ids it reverted (This turn keeps showing them). */
+  ids: string[];
+  text: string;
+  undo: string;
+  putBack: boolean;
+}
+
+/** A refusal said in the panel: an agent started here, or the server's own sentence. */
+type Refusal = { kind: 'mid_turn' } | { kind: 'text'; text: string };
+
+/** Hunk and file actions: each view's buttons as diff viewer slots, Revert's confirmation, the busy line, the notices and Undo. */
+function useChangesActions(wsId: string, session: string | undefined) {
+  const busyAgent = useBusyAgent(wsId, session);
+  const hunkAction = useHunkAction(wsId);
+  const undoRevert = useUndoRevert(wsId);
+  const [confirm, setConfirm] = useState<PendingRevert | undefined>(undefined);
+  const [done, setDone] = useState<RevertDone | undefined>(undefined);
+  const [refusal, setRefusal] = useState<Refusal | undefined>(undefined);
+  // This turn's hunks reverted while the panel is open, by view, chat, turn, file and hunk: the snapshots still show them.
+  const [reverted, setReverted] = useState<ReadonlySet<string>>(() => new Set());
+  const revertKey = (target: ChangesTarget, path: string, id: string) => JSON.stringify([target.view, target.session ?? '', target.turn ?? '', path, id]);
+  const markReverted = (target: ChangesTarget, path: string, ids: readonly string[], on: boolean) =>
+    setReverted((was) => {
+      const next = new Set(was);
+      for (const id of ids) {
+        if (on) next.add(revertKey(target, path, id));
+        else next.delete(revertKey(target, path, id));
+      }
+      return next;
+    });
+  const pending = hunkAction.isPending || undoRevert.isPending;
+  const disabled = busyAgent !== undefined || pending;
+
+  const refused = (error: unknown, gone?: string): void => {
+    if (isApiError(error, 'agent_mid_turn')) setRefusal({ kind: 'mid_turn' });
+    else if (gone !== undefined && isApiError(error, 'not_found')) setRefusal({ kind: 'text', text: gone });
+    else setRefusal({ kind: 'text', text: error instanceof Error ? error.message : String(error) });
+  };
+
+  const run = (target: ChangesTarget, action: HunkAction, file: ChangedFile, hunk: DiffHunk | undefined, ids: string[]): void => {
+    if (disabled) return;
+    const request: HunkActionBody = {
+      action,
+      view: target.view,
+      path: file.path,
+      ...(hunk === undefined ? { hunkIds: ids } : { hunkId: hunk.id }),
+      ...(target.session === undefined ? {} : { session: target.session }),
+      ...(target.view === 'turn' && target.turn !== undefined ? { turn: target.turn } : {}),
+    };
+    setRefusal(undefined);
+    hunkAction.mutate(request, {
+      onSuccess: (answer) => {
+        if (action === 'revert' && answer.undo !== undefined) {
+          const done = hunk === undefined ? ids : [hunk.id];
+          if (target.view === 'turn') markReverted(target, file.path, done, true);
+          setDone({ target, path: file.path, ids: done, text: revertedText(nameOf(file.path), hunk === undefined ? undefined : hunkRangeText(hunk)), undo: answer.undo, putBack: false });
+        }
+      },
+      onError: (error) => refused(error),
+      onSettled: () => setConfirm(undefined),
+    });
+  };
+
+  const undo = (): void => {
+    if (done === undefined || done.putBack || disabled) return;
+    setRefusal(undefined);
+    undoRevert.mutate(
+      { undo: done.undo, path: done.path, view: done.target.view, ...(done.target.session === undefined ? {} : { session: done.target.session }) },
+      {
+        onSuccess: () => {
+          markReverted(done.target, done.path, done.ids, false);
+          setDone({ ...done, putBack: true });
+        },
+        onError: (error) => {
+          if (isApiError(error, 'not_found')) setDone(undefined);
+          refused(error, UNDO_GONE_TEXT);
+        },
+      },
+    );
+  };
+
+  const ask = (target: ChangesTarget, action: HunkAction, file: ChangedFile, hunk: DiffHunk | undefined, ids: string[]): void => {
+    if (disabled) return;
+    if (action === 'revert') setConfirm({ target, file, hunk, ids });
+    else run(target, action, file, hunk, ids);
+  };
+
+  /** The viewer's slots for `target`'s files (`data`: their hunks, for a whole file's ids). */
+  const slotsFor = (target: ChangesTarget, data: readonly DiffFileData[]): DiffSlots => {
+    const offered = HUNK_ACTIONS_BY_VIEW[target.view];
+    if (offered.length === 0) return {};
+    const hunksOf = new Map(data.map((entry) => [entry.file.path, entry.hunks]));
+    const button = (action: HunkAction, name: string, onClick: () => void, testId: string) => (
+      <Button
+        key={action}
+        type="button"
+        size="sm"
+        variant={action === 'revert' ? 'destructive' : 'outline'}
+        aria-label={name}
+        aria-disabled={disabled || undefined}
+        data-testid={testId}
+        data-action={action}
+        onClick={onClick}
+      >
+        {HUNK_ACTION_LABELS[action]}
+      </Button>
+    );
+    return {
+      fileActions: (file) => {
+        const hunks = hunksOf.get(file.path) ?? [];
+        if (file.binary || file.tooLarge || hunks.length === 0) return null;
+        const ids = hunks.map((hunk) => hunk.id);
+        // A file with a hunk already reverted offers no whole-file Revert (it would refuse).
+        if (ids.some((id) => reverted.has(revertKey(target, file.path, id)))) return null;
+        return offered.map((action) => button(action, fileActionName(action, nameOf(file.path)), () => ask(target, action, file, undefined, ids), 'changes-file-action'));
+      },
+      hunkActions: (file, hunk) =>
+        reverted.has(revertKey(target, file.path, hunk.id)) ? (
+          <span className="font-sans text-caption text-muted-foreground" data-testid="changes-hunk-reverted">
+            {HUNK_REVERTED_LABEL}
+          </span>
+        ) : (
+          offered.map((action) => button(action, hunkActionName(action, hunkRangeText(hunk)), () => ask(target, action, file, hunk, []), 'changes-hunk-action'))
+        ),
+    };
+  };
+
+  const panel = (
+    <>
+      {busyAgent === undefined ? null : (
+        <Text variant="caption" data-testid="changes-busy">
+          {agentMidTurnText(busyAgent)}
+        </Text>
+      )}
+      {refusal === undefined ? null : (
+        <Notice variant="blocked" role="alert" data-testid="changes-action-error">
+          {refusal.kind === 'mid_turn' ? agentStartedHereText(busyAgent ?? 'An agent') : refusal.text}
+        </Notice>
+      )}
+      {done === undefined ? null : (
+        <Notice
+          data-testid="changes-reverted"
+          action={
+            done.putBack ? undefined : (
+              <Button type="button" size="sm" variant="outline" aria-disabled={disabled || undefined} onClick={undo} data-testid="changes-undo">
+                {UNDO_LABEL}
+              </Button>
+            )
+          }
+        >
+          <span role="status">{done.putBack ? PUT_BACK_TEXT : done.text}</span>
+        </Notice>
+      )}
+      <AlertDialog
+        open={confirm !== undefined}
+        onOpenChange={(open) => {
+          if (!open && !hunkAction.isPending) setConfirm(undefined);
+        }}
+      >
+        {confirm === undefined ? null : (
+          <AlertDialogContent data-testid="changes-revert-confirm" title={REVERT_CONFIRM_TITLE} description={REVERT_CONFIRM_DESCRIPTION}>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogConfirm
+              aria-disabled={disabled || undefined}
+              data-testid="changes-revert-confirm-button"
+              onClick={() => run(confirm.target, 'revert', confirm.file, confirm.hunk, confirm.ids)}
+            >
+              {HUNK_ACTION_LABELS.revert}
+            </AlertDialogConfirm>
+          </AlertDialogContent>
+        )}
+      </AlertDialog>
+    </>
+  );
+
+  return { panel, slotsFor };
 }
 
 /** This turn's turn: the latest, or one picked from the chat's recorded turns (newest first). */
@@ -133,7 +370,7 @@ function TurnPicker({ wsId, session, turn, onPick }: { wsId: string; session: st
 }
 
 /** The view's files and their diffs. */
-function ChangesList({ wsId, target }: { wsId: string; target: ChangesTarget }) {
+function ChangesList({ wsId, target, slotsFor }: { wsId: string; target: ChangesTarget; slotsFor: (target: ChangesTarget, data: readonly DiffFileData[]) => DiffSlots }) {
   const changes = useChanges(wsId, target);
   const files = useMemo(() => changes.data?.files ?? [], [changes.data]);
   // This turn's diffs are read for the turn the list is of (the latest, when none was named).
@@ -201,7 +438,7 @@ function ChangesList({ wsId, target }: { wsId: string; target: ChangesTarget }) 
           <Skeleton />
         </div>
       ) : (
-        <DiffViewer ref={viewer} files={loaded} label={CHANGES_VIEW_LABELS[target.view]} />
+        <DiffViewer ref={viewer} files={loaded} label={CHANGES_VIEW_LABELS[target.view]} {...slotsFor(diffTarget, loaded)} />
       )}
     </div>
   );

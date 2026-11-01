@@ -5,10 +5,15 @@
  * +1 -0" and Review changes, which opens the Workbench on This turn showing
  * only that turn's file; the view switch goes to Unstaged (both turns'
  * files, untracked as Added) and Staged (empty), with no axe violations and
- * no sideways scroll at 1440px and at 390px.
+ * no sideways scroll at 1440px and at 390px. Story 8.5: one of a fake
+ * turn's two hunks is reverted with its one confirmation, on disk only that
+ * hunk goes back, and Undo puts it back, with no axe violations and no
+ * sideways scroll at 390px.
  *
  * Real `git`; the fake ACP agent; no real `claude`, keychain or network.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { fixtureGit } from '../fixtures/fake-bmad-repo.ts';
@@ -77,5 +82,56 @@ test("a turn's Changed row opens This turn with only its file; the views switch,
       await expectNoAxeViolations(page);
     },
     { files: { 'README.md': '# Fixture\n', 'src/a.ts': 'export const a = 1;\n' } },
+  );
+});
+
+/** Twenty numbered lines, with `changes` (1-based line: new text) made. */
+const numbered = (changes: Record<number, string> = {}): string => `${Array.from({ length: 20 }, (_, index) => changes[index + 1] ?? `line ${index + 1}`).join('\n')}\n`;
+
+test("reverts one of a turn's two hunks with its confirmation, and Undo puts it back, at 390px", async ({ page }) => {
+  test.setTimeout(90_000);
+  await withChatServer(
+    page,
+    async ({ repo }) => {
+      fixtureGit(repo, 'init', '-q', '--initial-branch=main');
+      fixtureGit(repo, 'config', 'core.autocrlf', 'false');
+      fixtureGit(repo, 'add', '-A');
+      fixtureGit(repo, 'commit', '-q', '--no-verify', '-m', 'The fixture');
+      await startChat(page, repo);
+      const edited = numbered({ 2: 'line two, by the agent', 18: 'line eighteen, by the agent' });
+      await send(page, writeFile('list.txt', edited));
+      await expect(page.getByTestId('turn-changes')).toHaveCount(1);
+      await page.setViewportSize({ width: 390, height: 800 });
+      await page.getByTestId('turn-changes').getByRole('link', { name: 'Review changes' }).click();
+      await expect(page.getByTestId('workbench-changes')).toHaveAttribute('data-view', 'turn');
+      const hunkActions = page.getByTestId('changes-hunk-action');
+      await expect(hunkActions).toHaveCount(2);
+      await expect(page.getByTestId('changes-file-action')).toHaveAccessibleName('Revert all of list.txt');
+      const second = hunkActions.nth(1);
+      await expect(second).toHaveAccessibleName(/^Revert lines 15 to 20$/);
+      await expectNoAxeViolations(page);
+      await expectNoHorizontalOverflow(page);
+
+      // One confirmation; Cancel changes nothing.
+      await second.click();
+      const confirm = page.getByTestId('changes-revert-confirm');
+      await expect(confirm).toContainText('You can undo it right after, while Changes is open.');
+      await expectNoAxeViolations(page);
+      await confirm.getByRole('button', { name: 'Cancel' }).click();
+      await expect(confirm).toHaveCount(0);
+      expect(readFileSync(join(repo, 'list.txt'), 'utf8')).toBe(edited);
+      await second.click();
+      await page.getByTestId('changes-revert-confirm-button').click();
+      await expect(page.getByTestId('changes-reverted')).toContainText('Reverted lines 15 to 20 in list.txt.');
+      await expect.poll(() => readFileSync(join(repo, 'list.txt'), 'utf8')).toBe(numbered({ 2: 'line two, by the agent' }));
+      await expectNoAxeViolations(page);
+      await expectNoHorizontalOverflow(page);
+
+      await page.getByTestId('changes-undo').click();
+      await expect(page.getByTestId('changes-reverted')).toHaveText('Put back.');
+      await expect.poll(() => readFileSync(join(repo, 'list.txt'), 'utf8')).toBe(edited);
+      await expectNoAxeViolations(page);
+    },
+    { files: { 'README.md': '# Fixture\n', 'list.txt': numbered() } },
   );
 });

@@ -152,3 +152,48 @@ slug = "epic-native-cli-terminal"
 title = "Advanced users run each agent's own CLI in a herdr-style terminal workspace"
 covers = ["CAP-5", "CAP-17"]
 after = [{ epic = 3, needs = "the terminal adapter, socket, Developer mode gate, Windows ConPTY work and per-agent availability, through its release (3.1 to 3.8, 3.10)" }, { epic = 11, needs = "Needs you and NotifierPort webhooks (11.5)" }, { epic = 2, needs = "the per-tab token gate and the status sidebar (2.1, 2.11)" }]
+
+# ---- v1.3 and v2: the desktop harness for any agent (change-desktop-agent-harness, approved 2026-10-31; outside the v1 initiative's Done when) ----
+# Build order (change proposal section 5): 21, 20, 24, 22, 25, then 23 (v2). Epic ids 20 to 25 were free on 2026-10-31.
+
+[[epic]]
+id = 21
+slug = "epic-bring-your-own-agent"
+title = "v1.3: Plug in any ACP agent, including your own"
+covers = ["CAP-27", "CAP-15", "CAP-16"]
+after = [{ epic = 6, needs = "the registry, acp-base and the picker (6.3, 6.4, 6.6)" }, { epic = 12, needs = "the linked-command resolver (12.12)" }, { epic = 14, needs = "the OpenCode route, fake server, chat and skills (14.2, 14.3, 14.6, 14.9)" }, { epic = 17, needs = "the agent-neutral runner and attended builds (17.3, 17.8)" }]
+
+[[epic]]
+id = 20
+slug = "epic-any-cli-agent"
+title = "v1.3: Any CLI agent's prompts become cards"
+covers = ["CAP-28", "CAP-15", "CAP-17"]
+after = [{ epic = 16, needs = "panes, launchers, the status tracker and Developer-mode gating (16.3 to 16.6, 16.9)" }, { epic = 11, needs = "Needs you (11.4)" }]
+
+[[epic]]
+id = 24
+slug = "epic-rotation-and-lineage"
+title = "v1.3: Start long chats fresh, see the family, and know the plan's limits"
+covers = ["CAP-30", "CAP-32", "CAP-22"]
+after = [{ epic = 2, needs = "sessions and events (2.3)" }, { epic = 15, needs = "dispatch, read-back and the loop (15.7, 15.9), built and on main" }]
+
+[[epic]]
+id = 22
+slug = "epic-sessions-on-this-computer"
+title = "v1.3: See and take over sessions you started elsewhere"
+covers = ["CAP-29", "CAP-3", "CAP-17"]
+after = [{ epic = 2, needs = "sessions, resume and the sidebar (2.3, 2.11)" }, { epic = 12, needs = "Codex's adapter and CODEX_HOME (12.3)" }]
+
+[[epic]]
+id = 25
+slug = "epic-desktop-conveniences"
+title = "v1.3: The desktop app feels like a desktop app"
+covers = ["CAP-33", "CAP-20", "CAP-3"]
+after = [{ epic = 13, needs = "the shell, single instance and menu (13.3, 13.5)" }, { epic = 20, needs = "the core Needs you model (20.9)" }, { epic = 5, needs = "worktrees through VcsPort (5.5)" }]
+
+[[epic]]
+id = 23
+slug = "epic-answer-from-your-phone"
+title = "v2: Answer what needs you from your phone"
+covers = ["CAP-31", "CAP-4", "CAP-28"]
+after = [{ epic = 20, needs = "the gate, the screen-prompt model and Needs you (20.5, 20.6, 20.9)" }, { epic = 9, needs = "SecretStorePort (9.2)" }, { epic = 2, needs = "the AD-15 security gate and tab tokens (2.1)" }]

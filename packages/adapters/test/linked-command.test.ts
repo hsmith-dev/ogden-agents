@@ -43,12 +43,12 @@ describe('resolveLinkedCommand', () => {
   });
 
   it('resolves an absolute path directly when it is runnable', () => {
-    const result = resolveLinkedCommand({ command: '/usr/local/bin/codex-acp --foo' }, {}, { isExecutable: (file) => file === '/usr/local/bin/codex-acp' });
+    const result = resolveLinkedCommand({ command: '/usr/local/bin/codex-acp --foo' }, {}, { platform: 'linux', isExecutable: (file) => file === '/usr/local/bin/codex-acp' });
     expect(result).toEqual({ ok: true, resolved: { command: '/usr/local/bin/codex-acp', args: ['--foo'] } });
   });
 
   it('refuses an absolute path that is not runnable', () => {
-    const result = resolveLinkedCommand({ command: '/usr/local/bin/codex-acp' }, {}, { isExecutable: () => false });
+    const result = resolveLinkedCommand({ command: '/usr/local/bin/codex-acp' }, {}, { platform: 'linux', isExecutable: () => false });
     expect(result).toEqual({ ok: false, reason: expect.stringContaining('codex-acp') });
   });
 
@@ -79,24 +79,26 @@ describe('resolveLinkedCommand', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('on Windows, tries the bare name itself before the PATHEXT extensions', () => {
-    const seen: string[] = [];
-    const result = resolveLinkedCommand(
-      { command: 'grok' },
-      { Path: 'C:\\tools' },
-      { platform: 'win32', isExecutable: (file) => (seen.push(file), file === 'C:\\tools\\grok.EXE') },
-    );
+  it('on Windows, takes the .exe over the extensionless npm shim beside it (epic 21 audit)', () => {
+    const present = new Set(['C:\\npm\\grok', 'C:\\npm\\grok.CMD', 'C:\\tools\\grok.EXE']);
+    const result = resolveLinkedCommand({ command: 'grok' }, { Path: 'C:\\npm;C:\\tools' }, { platform: 'win32', isExecutable: (file) => present.has(file) });
     expect(result).toEqual({ ok: true, resolved: { command: 'C:\\tools\\grok.EXE', args: [] } });
-    expect(seen[0]).toBe('C:\\tools\\grok');
   });
 
-  it('on Windows, honours a custom PATHEXT over the default list', () => {
+  it('on Windows, refuses a name that is only an npm shim, .cmd or .bat, in plain words, since no shell starts it', () => {
+    const present = new Set(['C:\\npm\\goose', 'C:\\npm\\goose.CMD', 'C:\\npm\\goose.ps1']);
+    const result = resolveLinkedCommand({ command: 'goose acp' }, { PATH: 'C:\\npm' }, { platform: 'win32', isExecutable: (file) => present.has(file) });
+    expect(result).toEqual({ ok: false, reason: expect.stringContaining('is a script') });
+    expect(resolveLinkedCommand({ command: 'C:\\npm\\goose.cmd' }, {}, { platform: 'win32', isExecutable: () => true })).toEqual({ ok: false, reason: expect.stringContaining('is a script') });
+  });
+
+  it('on Windows, honours a custom PATHEXT order', () => {
     const result = resolveLinkedCommand(
       { command: 'grok' },
-      { PATH: 'C:\\tools', PATHEXT: '.FOO' },
-      { platform: 'win32', isExecutable: (file) => file === 'C:\\tools\\grok.FOO' },
+      { PATH: 'C:\\tools', PATHEXT: '.EXE;.COM' },
+      { platform: 'win32', isExecutable: (file) => file === 'C:\\tools\\grok.COM' || file === 'C:\\tools\\grok.EXE' },
     );
-    expect(result).toEqual({ ok: true, resolved: { command: 'C:\\tools\\grok.FOO', args: [] } });
+    expect(result).toEqual({ ok: true, resolved: { command: 'C:\\tools\\grok.EXE', args: [] } });
   });
 
   it('on Windows, a backslash in a bare-looking token means a path, not a PATH search, and a relative one is refused', () => {
@@ -105,7 +107,7 @@ describe('resolveLinkedCommand', () => {
   });
 
   it('refuses a working directory given as a relative path, never resolving it against the server\'s own working directory', () => {
-    const result = resolveLinkedCommand({ command: '/bin/codex-acp', cwd: 'work' }, {}, { isExecutable: () => true, isDirectory: () => true });
+    const result = resolveLinkedCommand({ command: '/bin/codex-acp', cwd: 'work' }, {}, { platform: 'linux', isExecutable: () => true, isDirectory: () => true });
     expect(result).toEqual({ ok: false, reason: expect.stringContaining('work') });
   });
 
@@ -113,23 +115,23 @@ describe('resolveLinkedCommand', () => {
     const result = resolveLinkedCommand(
       { command: '/bin/codex-acp', cwd: '/home/user/project/work' },
       {},
-      { isExecutable: () => true, isDirectory: (dir) => dir === '/home/user/project/work' },
+      { platform: 'linux', isExecutable: () => true, isDirectory: (dir) => dir === '/home/user/project/work' },
     );
     expect(result).toEqual({ ok: true, resolved: { command: '/bin/codex-acp', args: [], cwd: '/home/user/project/work' } });
   });
 
   it('refuses a working directory that does not exist, persisting nothing', () => {
-    const result = resolveLinkedCommand({ command: '/bin/codex-acp', cwd: '/no/such/dir' }, {}, { isExecutable: () => true, isDirectory: () => false });
+    const result = resolveLinkedCommand({ command: '/bin/codex-acp', cwd: '/no/such/dir' }, {}, { platform: 'linux', isExecutable: () => true, isDirectory: () => false });
     expect(result).toEqual({ ok: false, reason: expect.stringContaining('/no/such/dir') });
   });
 
   it('carries the spec\'s own env into the resolved result, untouched', () => {
-    const result = resolveLinkedCommand({ command: '/bin/codex-acp', env: { FOO: 'bar' } }, {}, { isExecutable: () => true });
+    const result = resolveLinkedCommand({ command: '/bin/codex-acp', env: { FOO: 'bar' } }, {}, { platform: 'linux', isExecutable: () => true });
     expect(result).toEqual({ ok: true, resolved: { command: '/bin/codex-acp', args: [], env: { FOO: 'bar' } } });
   });
 
   it('never runs the command through a shell: the args are the literal tokens after the program', () => {
-    const result = resolveLinkedCommand({ command: '/bin/grok agent --no-leader stdio' }, {}, { isExecutable: () => true });
+    const result = resolveLinkedCommand({ command: '/bin/grok agent --no-leader stdio' }, {}, { platform: 'linux', isExecutable: () => true });
     expect(result).toEqual({ ok: true, resolved: { command: '/bin/grok', args: ['agent', '--no-leader', 'stdio'] } });
   });
 });

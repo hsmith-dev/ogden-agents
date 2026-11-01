@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { AgentId, SETTINGS_STREAM, WhileWorking } from './events-common.js';
 import { ModelId } from './entities.js';
+import { CustomAgentChange } from './custom-agents.js';
 import { assigned } from './events-envelope.js';
 import { OrchestrationMode, RunLimits } from './orchestration-run.js';
 import { TeamRoster } from './team.js';
@@ -49,6 +50,19 @@ export const SettingsAgentLinkedCommandChangedInput = z.object({
  */
 export const SettingsAgentLinkedCommandChangedEvent = SettingsAgentLinkedCommandChangedInput.extend(assigned);
 export type SettingsAgentLinkedCommandChangedEvent = z.infer<typeof SettingsAgentLinkedCommandChangedEvent>;
+
+export const SettingsCustomAgentChangedInput = z.object({
+  type: z.literal('settings.custom_agent_changed'),
+  ...onSettingsStream,
+  payload: z.object({ agentId: AgentId, change: CustomAgentChange }),
+});
+/**
+ * A custom agent (epic 21, story 21.2) was added, changed or removed. Never
+ * its command line, its key or the key's variable (AD-16): the settings list
+ * is read again for those.
+ */
+export const SettingsCustomAgentChangedEvent = SettingsCustomAgentChangedInput.extend(assigned);
+export type SettingsCustomAgentChangedEvent = z.infer<typeof SettingsCustomAgentChangedEvent>;
 
 export const SettingsWhileWorkingChangedInput = z.object({
   type: z.literal('settings.while_working_changed'),

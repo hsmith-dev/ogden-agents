@@ -6,6 +6,8 @@ import {
   SettingsAgentDefaultModelChangedInput,
   SettingsAgentLinkedCommandChangedEvent,
   SettingsAgentLinkedCommandChangedInput,
+  SettingsCustomAgentChangedEvent,
+  SettingsCustomAgentChangedInput,
   SettingsDeveloperModeChangedEvent,
   SettingsDeveloperModeChangedInput,
   SettingsWhileWorkingChangedEvent,
@@ -25,7 +27,7 @@ import {
 } from './events-settings.js';
 
 export { SettingsTerminalsChangedEvent } from './events-settings.js';
-export { AppUpdateAvailableEvent, AppUpdateRequestedEvent, SettingsAgentDefaultModelChangedEvent, SettingsAgentLinkedCommandChangedEvent, SettingsDeveloperModeChangedEvent, SettingsUpdateNoticeChangedEvent, SettingsWhileWorkingChangedEvent, SettingsTeamRosterDefaultChangedEvent, SettingsOrchestrationDefaultsChangedEvent } from './events-settings.js';
+export { AppUpdateAvailableEvent, AppUpdateRequestedEvent, SettingsAgentDefaultModelChangedEvent, SettingsAgentLinkedCommandChangedEvent, SettingsCustomAgentChangedEvent, SettingsDeveloperModeChangedEvent, SettingsUpdateNoticeChangedEvent, SettingsWhileWorkingChangedEvent, SettingsTeamRosterDefaultChangedEvent, SettingsOrchestrationDefaultsChangedEvent } from './events-settings.js';
 // Terminal pane events (epic 16): state only.
 import * as panes from './events-panes.js';
 
@@ -430,6 +432,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SettingsDeveloperModeChangedEvent,
   SettingsAgentDefaultModelChangedEvent,
   SettingsAgentLinkedCommandChangedEvent,
+  SettingsCustomAgentChangedEvent,
   SettingsWhileWorkingChangedEvent,
   SettingsTeamRosterDefaultChangedEvent,
   SettingsOrchestrationDefaultsChangedEvent,
@@ -505,6 +508,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SettingsDeveloperModeChangedInput,
   SettingsAgentDefaultModelChangedInput,
   SettingsAgentLinkedCommandChangedInput,
+  SettingsCustomAgentChangedInput,
   SettingsWhileWorkingChangedInput,
   SettingsTeamRosterDefaultChangedInput,
   SettingsOrchestrationDefaultsChangedInput,

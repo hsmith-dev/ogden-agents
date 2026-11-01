@@ -83,8 +83,19 @@ export const START_TIMEOUT_MS = 60_000;
 /** How long `close` waits, after ending the agent's stdin, for it to exit before killing its process tree. */
 export const EXIT_GRACE_MS = 2_000;
 
+/** Whether the agent's quirks refuse `modeId` (21.5). */
+function refusesMode(quirks: Pick<AcpAgentQuirks, 'refusesMode'>, modeId: string): boolean {
+  return quirks.refusesMode?.(modeId) === true;
+}
+
+/** An `AgentPort` that can also be started once just to read what it advertises (epic 21, story 21.3: Test). */
+export interface AcpAgentPort extends AgentPort {
+  /** Starts the agent, sends `initialize`, stops it, and returns its answer. No session is opened. Rejects with `AgentError`. */
+  probe(input: { env: Readonly<Record<string, string>> }): Promise<acp.InitializeResponse>;
+}
+
 /** An `AgentPort` for the ACP agent `descriptor` describes. */
-export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuirks, options: AcpAgentOptions = {}): AgentPort {
+export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuirks, options: AcpAgentOptions = {}): AcpAgentPort {
   const diagnostic: Diagnostic = (message, fields) => {
     try {
       options.onDiagnostic?.(message, fields);
@@ -177,6 +188,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     // Takes the build's sandbox at start: through its own build start when verified (epic 17), or through `sessionMeta` (Claude Code).
     unattendedBuild: quirks.buildSession !== undefined ? quirks.buildSession.verified : quirks.sessionMeta !== undefined,
     ...(quirks.attendedOnlyReason === undefined ? {} : { attendedOnlyReason: quirks.attendedOnlyReason }),
+    ...(quirks.localOnlyReason === undefined ? {} : { localOnlyReason: quirks.localOnlyReason }),
 
     async startSession(input) {
       const opened = await open(input, { kind: 'new' });
@@ -186,6 +198,11 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     async reopenSession(input) {
       const opened = await open(input, { kind: 'reopen', agentSessionId: input.agentSessionId });
       return { session: opened.session!, restored: opened.restored };
+    },
+
+    async probe({ env }) {
+      // Any folder will do: only `initialize` runs, then the process is stopped.
+      return (await open({ cwd: homedir(), env: { ...env } }, { kind: 'probe' })).init;
     },
 
     async listAuthMethods({ env }) {
@@ -225,6 +242,8 @@ async function startOnChild(
   const sessionMeta = fixed !== undefined ? fixed.sessionMeta : guards === undefined ? {} : { _meta: guards };
   /** While `session/load` replays history the chat already has: those updates are swallowed. */
   let replaying = false;
+  /** The last mode a `session/load` replay reported, for an answer that lists no modes. */
+  let replayedModeId: string | undefined;
   let state: 'idle' | 'working' | 'error' = 'idle';
   let closing = false;
   let fatalReported = false;
@@ -311,7 +330,11 @@ async function startOnChild(
   const connection = acp
     .client({ name: 'ogden-agents' })
     .onNotification('session/update', ({ params }) => {
-      if (replaying) return;
+      if (replaying) {
+        // History is never shown again, but the mode the replay ends in counts (21.5: a reload that lists no modes).
+        if (params.update.sessionUpdate === 'current_mode_update') replayedModeId = params.update.currentModeId;
+        return;
+      }
       if (agentSessionId !== undefined && params.sessionId !== agentSessionId) return;
       const update = params.update;
       switch (update.sessionUpdate) {
@@ -358,6 +381,11 @@ async function startOnChild(
           // An unattended build's agent that moves itself out of its build mode is stopped: nothing it does after that is trusted (epic 17).
           if (buildModeIds !== undefined && !buildModeIds.includes(update.currentModeId)) {
             reportGone(`${descriptor.displayName} changed its own permission mode, so the build was stopped.`);
+            child.kill();
+            break;
+          }
+          if (refusesMode(quirks, update.currentModeId)) {
+            reportGone(`${descriptor.displayName} switched itself to a mode that never asks, so the chat was stopped.`);
             child.kill();
             break;
           }
@@ -472,6 +500,12 @@ async function startOnChild(
     // (a variable the agent ignored, a resumed session that kept its old mode) or that lists none is never used.
     if (buildModeIds !== undefined && (modes === undefined || !buildModeIds.includes(modes.currentModeId))) {
       throw new AgentError('agent_unavailable', `${descriptor.displayName} did not start in the mode a build needs, so the build was not started.`);
+    }
+    // Fail closed (21.5): a chat never opens in a mode that never asks, nor reopens in one a replay reported.
+    const openedIn = modes?.currentModeId ?? replayedModeId;
+    if (openedIn !== undefined && refusesMode(quirks, openedIn)) {
+      const label = modes?.availableModes.find((mode) => mode.id === openedIn)?.name ?? openedIn;
+      throw new AgentError('agent_unavailable', `${descriptor.displayName} starts in a mode that never asks (${mask(label)}). Switch it to a mode that asks in its own settings, then try again.`);
     }
   } catch (error) {
     closing = true;

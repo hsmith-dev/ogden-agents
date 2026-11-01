@@ -1,7 +1,7 @@
 ---
 title: "Builds proposed by the manager: Build ticket N through the Build dialog and nowhere else (epic 15)"
 type: 'feature'
-ticket: '15.11'
+ticket: '11'
 created: '2026-10-06'
 status: 'in-review'
 route: 'full'

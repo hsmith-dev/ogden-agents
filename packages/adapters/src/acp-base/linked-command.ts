@@ -60,11 +60,11 @@ function lookupEnv(env: Readonly<Record<string, string | undefined>>, key: strin
   return undefined;
 }
 
-/** The extensions a bare name may be found under on Windows (`PATHEXT`, else the usual four), tried after the bare name itself. */
+/** The extensions a bare name may be found under on Windows (`PATHEXT`, else the usual four), then the bare name itself (to say it is a script). */
 function windowsExtensions(env: Readonly<Record<string, string | undefined>>): readonly string[] {
   const pathext = lookupEnv(env, 'PATHEXT', true);
   const list = (pathext ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((ext) => ext !== '');
-  return ['', ...list];
+  return [...list, ''];
 }
 
 /**
@@ -112,31 +112,46 @@ export function splitCommandLine(line: string): string[] {
   return tokens;
 }
 
+/** What Windows can start with no shell: `.cmd`, `.bat`, `.ps1` and npm's extensionless shims all need one (Node refuses them, EINVAL). */
+const WINDOWS_STARTABLE = new Set(['.exe', '.com']);
+
+/** A program found, or the script that was found where a program was looked for (Windows), or nothing. */
+type Found = { file: string } | { script: string } | undefined;
+
 /**
  * An already-absolute program resolved directly; a bare name (no path
- * separator) searched on `env`'s `PATH`, trying Windows extensions after the
- * bare name. `undefined` when nothing runnable is found. A relative path
- * with a separator never reaches here: the caller refuses it first, since
- * neither real caller has a base to resolve one against that means anything
- * to the user (the chat's own `cwd`, not the Ogden server's).
+ * separator) searched on `env`'s `PATH`, in `PATHEXT` order on Windows. On
+ * Windows only a `.exe` or `.com` counts (epic 21 audit): an npm shim, a
+ * `.cmd` or a `.bat` can't be started without a shell, so it is reported as
+ * a script rather than resolved to something every start would fail on. A
+ * relative path with a separator never reaches here: the caller refuses it
+ * first, since neither real caller has a base to resolve one against that
+ * means anything to the user (the chat's own `cwd`, not the Ogden server's).
  */
 function resolveProgram(
   program: string,
   env: Readonly<Record<string, string | undefined>>,
   ctx: { windows: boolean; paths: typeof posix | typeof win32; isExecutable: (file: string) => boolean },
-): string | undefined {
+): Found {
   const { windows, paths, isExecutable } = ctx;
-  if (paths.isAbsolute(program)) return isExecutable(program) ? program : undefined;
+  const startable = (file: string) => !windows || WINDOWS_STARTABLE.has(paths.extname(file).toLowerCase());
+  if (paths.isAbsolute(program)) {
+    if (!isExecutable(program)) return undefined;
+    return startable(program) ? { file: program } : { script: program };
+  }
   const pathValue = lookupEnv(env, 'PATH', windows) ?? '';
   const dirs = pathValue.split(paths.delimiter).filter((dir) => dir !== '');
   const extensions = windows ? windowsExtensions(env) : [''];
+  let script: string | undefined;
   for (const dir of dirs) {
     for (const ext of extensions) {
       const file = paths.join(dir, `${program}${ext}`);
-      if (isExecutable(file)) return file;
+      if (!isExecutable(file)) continue;
+      if (startable(file)) return { file };
+      script ??= file;
     }
   }
-  return undefined;
+  return script === undefined ? undefined : { script };
 }
 
 /**
@@ -174,8 +189,12 @@ export function resolveLinkedCommand(
     return { ok: false, reason: `Give an absolute path for "${program}", or just the program's name if it's on your PATH.` };
   }
 
-  const command = resolveProgram(program, env, { windows, paths, isExecutable });
-  if (command === undefined) return { ok: false, reason: `Ogden Agents couldn't find "${program}" to run. Check that it's installed and the command is right.` };
+  const found = resolveProgram(program, env, { windows, paths, isExecutable });
+  if (found === undefined) return { ok: false, reason: `Ogden Agents couldn't find "${program}" to run. Check that it's installed and the command is right.` };
+  if ('script' in found) {
+    return { ok: false, reason: `"${found.script}" is a script, and Windows can only start a program here. Run it with the program it needs, for example: node "path\\to\\its\\script.js".` };
+  }
+  const command = found.file;
 
   let cwd: string | undefined;
   if (spec.cwd !== undefined) {

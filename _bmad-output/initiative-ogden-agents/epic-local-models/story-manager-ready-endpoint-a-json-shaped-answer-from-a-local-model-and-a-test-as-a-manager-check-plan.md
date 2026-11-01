@@ -1,7 +1,7 @@
 ---
 title: 'Manager-ready endpoint: a JSON-shaped answer from a local model, and a Test as a manager check (epic 14)'
 type: 'feature'
-ticket: '14.8'
+ticket: '8'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

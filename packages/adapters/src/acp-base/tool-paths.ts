@@ -34,6 +34,8 @@ export function toolCallPaths(toolCall: acp.ToolCallUpdate, cwd: string, fields:
     for (const field of fields.pathFields) {
       const value = (raw as Record<string, unknown>)[field];
       if (typeof value === 'string' && value !== '') paths.add(value);
+      // A list of paths names each one (naming more only narrows a match).
+      else if (Array.isArray(value)) for (const each of value) if (typeof each === 'string' && each !== '') paths.add(each);
     }
     const folder = (raw as Record<string, unknown>).path;
     const root = typeof folder === 'string' && folder !== '' ? folder : undefined;

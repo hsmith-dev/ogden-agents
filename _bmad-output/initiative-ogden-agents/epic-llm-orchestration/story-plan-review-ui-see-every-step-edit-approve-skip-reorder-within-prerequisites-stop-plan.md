@@ -1,7 +1,7 @@
 ---
 title: 'Plan review UI: see every step, edit, approve, skip, reorder within prerequisites, stop (epic 15)'
 type: 'feature'
-ticket: '15.6'
+ticket: '6'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

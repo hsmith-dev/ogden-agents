@@ -1,7 +1,7 @@
 ---
 title: 'Ask-only modes, safe defaults and the terminal toggle only if the route supports it (epic 14)'
 type: 'feature'
-ticket: '14.7'
+ticket: '7'
 created: '2026-10-05'
 status: 'in-review'
 route: 'oneshot'

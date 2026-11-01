@@ -565,3 +565,20 @@ export const remoteMachines = sqliteTable('remote_machines', {
   hostKeyConfirmed: integer('host_key_confirmed', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull(),
 });
+
+/**
+ * The ACP agents the user brings (epic 21, story 21.2; CAP-27, AD-11): one
+ * row per custom agent, install-wide, by the id the server gave it
+ * (`custom-<slug>`). The command line is kept exactly as typed and resolved
+ * again at every chat start. `key_env_name` is the variable its API key
+ * reaches it under (`NULL`: no key); the key itself is only in the keychain
+ * (`agent-api-key/<agent_id>`, AD-16). Read only through `custom-agents.ts`.
+ */
+export const customAgents = sqliteTable('custom_agents', {
+  agentId: text('agent_id').$type<AgentId>().primaryKey(),
+  displayName: text('display_name').notNull(),
+  commandLine: text('command_line').notNull(),
+  keyEnvName: text('key_env_name'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});

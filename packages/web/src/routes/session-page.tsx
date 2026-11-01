@@ -1,11 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ArrowsLeftRight, ChatCircle, House, Stop } from '@phosphor-icons/react';
 import type { PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
-import { agentNameOf, cancelSession, ChatApiError, UNKNOWN_AGENT_NAME, fetchSession, sendMessage, setPermissionMode, setSessionModel, switchDriver } from '@/chat/chat-api';
+import { agentNameOf, cancelSession, CHAT_AGENTS_QUERY_KEY, ChatApiError, UNKNOWN_AGENT_NAME, fetchSession, sendMessage, setPermissionMode, setSessionModel, switchDriver } from '@/chat/chat-api';
 import { ChatHeaderRename, useChatName, useChatRename } from '@/chat/chat-name';
 import { agentDefaultLabel, ModelPicker, modelLabel, useSessionModel } from '@/chat/model-picker';
 import { useChatAgents } from '@/chat/use-chat-agents';
@@ -34,6 +34,7 @@ import { ReadOnlyBanner } from '@/terminal/read-only-banner';
 import { TerminalPanel } from '@/terminal/terminal-panel';
 import { conversationProps, TerminalPane } from '@/terminal/terminal-pane';
 import { focusComposer, useSessionDriver } from '@/terminal/use-session-driver';
+import { Banner } from '@/ui/banner';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { EmptyState, PageBody, PageFooter } from '@/ui/page';
@@ -63,6 +64,10 @@ const itemKey = (item: TranscriptItem, index: number): string =>
 
 /** What the composer says while the terminal drives (DESIGN.md Composer). */
 const TERMINAL_DRIVING_REASON = 'The terminal is driving this session';
+
+/** What a chat whose agent was removed says (story 21.4; the server's `agent_removed` message is the first sentence). */
+export const AGENT_REMOVED_WORDS = 'This agent was removed.';
+const AGENT_REMOVED_DETAIL = 'You can read this chat, but not continue it.';
 
 /** What the composer says while the agent works (send now or wait): what `Enter` does, and the other way. */
 const workingHint = (agentName: string, whileWorking: 'wait' | 'now') =>
@@ -119,7 +124,12 @@ export function SessionPage() {
   // A handoff (`session.agent_changed`) changes it live.
   const agentId = view.agentId ?? (session.data === undefined ? undefined : (session.data.session.agentId ?? chatAgents.data?.defaultAgentId));
   const agentName = agentId === undefined ? UNKNOWN_AGENT_NAME : agentNameOf(chatAgents.data, agentId);
+  // Story 21.4: the chat's agent is no longer registered (a custom agent the user removed). The chat
+  // stays readable but closed: no composer, no controls that start work, an inert transcript.
+  const agentRemoved = agentId !== undefined && chatAgents.data !== undefined && !chatAgents.data.agents.some((agent) => agent.agentId === agentId);
+  const queryClient = useQueryClient();
   const [handoffOpen, setHandoffOpen] = useState(false);
+  // Continue with another agent stays open for a chat whose agent was removed: the server hands it over.
   const severalAgents = (chatAgents.data?.agents.length ?? 0) > 1;
   // Sign in again (9.4) signs in to the chat's own agent, when it has a setup (entry 6); otherwise the plain error notice.
   const setups = useAgents();
@@ -415,12 +425,18 @@ export function SessionPage() {
             : undefined;
   const nameOf = (id: string | undefined) => (id === undefined ? agentName : agentNameOf(chatAgents.data, id));
 
+  /** A send refused with `agent_removed` (story 21.4): read the agent list again, so the page closes the chat. */
+  const noteAgentRemoved = (failure: unknown) => {
+    if (failure instanceof ChatApiError && failure.code === 'agent_removed') void queryClient.invalidateQueries({ queryKey: CHAT_AGENTS_QUERY_KEY });
+  };
+
   const tryAgain = () => {
     if (view.lastUserText === undefined) return;
     setActionError(undefined);
-    sendMessage(wsId, sesId, view.lastUserText).catch((failure: unknown) =>
-      setActionError(failure instanceof Error ? failure.message : "Your message couldn't be sent. Try again."),
-    );
+    sendMessage(wsId, sesId, view.lastUserText).catch((failure: unknown) => {
+      setActionError(failure instanceof Error ? failure.message : "Your message couldn't be sent. Try again.");
+      noteAgentRemoved(failure);
+    });
   };
 
   return (
@@ -446,7 +462,7 @@ export function SessionPage() {
           </Text>
         ) : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
-        {isBuild ? null : (
+        {isBuild || agentRemoved ? null : (
           <span className={state === undefined ? 'ml-auto' : undefined}>
             <PermissionModePicker
               agentName={agentName}
@@ -459,7 +475,7 @@ export function SessionPage() {
             />
           </span>
         )}
-        {appearance.developerMode && !isBuild ? (
+        {appearance.developerMode && !isBuild && !agentRemoved ? (
           <DriverToggle
             agentName={agentName}
             driver={driver}
@@ -484,9 +500,14 @@ export function SessionPage() {
         }}
       />
       {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
-      {permissionMode === 'skip_all' ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
+      {permissionMode === 'skip_all' && !agentRemoved ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
       {isBuild ? <BuildRunPanel wsId={wsId} run={buildRun.data} /> : null}
       <StartModeNote key={sesId} note={startModeNote} />
+      {agentRemoved ? (
+        <Banner data-testid="agent-removed-banner">
+          {AGENT_REMOVED_WORDS} {AGENT_REMOVED_DETAIL}
+        </Banner>
+      ) : null}
       {driver === 'terminal' ? (
         <ReadOnlyBanner
           onSwitchToChat={() => switchTo('ui')}
@@ -504,7 +525,8 @@ export function SessionPage() {
           {...conversationProps(driver === 'terminal', peekOpen)}
         >
           {/* While the terminal drives: readable, nothing in it sends (3.6 review F2). */}
-          <ReadOnlyConversation.Provider value={terminalDrives}>
+          {/* And while the chat's agent is removed (story 21.4). */}
+          <ReadOnlyConversation.Provider value={terminalDrives || agentRemoved}>
             <section aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
               {!loading && (history.hasEarlier || history.error !== undefined) ? (
                 <EarlierHistory loading={history.loading} error={history.error} onShow={showEarlier} />
@@ -556,7 +578,7 @@ export function SessionPage() {
                 wsId={wsId}
                 sesId={sesId}
                 messages={view.queued}
-                readOnly={terminalDrives}
+                readOnly={terminalDrives || agentRemoved}
                 sendNowBlockedReason={state === 'waiting' ? 'Answer the request above first, then send your message.' : undefined}
                 onError={setActionError}
               />
@@ -572,7 +594,7 @@ export function SessionPage() {
                   data-waiting-on={view.checkIn.waitingOn}
                   role="status"
                   action={
-                    view.checkIn.waitingOn === undefined && !terminalDrives ? (
+                    view.checkIn.waitingOn === undefined && !terminalDrives && !agentRemoved ? (
                       <Button variant="outline" onClick={stop} aria-disabled={stopping} data-testid="check-in-stop">
                         <Stop aria-hidden />
                         Stop
@@ -583,7 +605,7 @@ export function SessionPage() {
                   <StateGlyph state="working" label={checkInWords(view.checkIn, agentName)} />
                 </Notice>
               ) : null}
-              {state === 'error' && view.errorCode === 'auth_required' && !terminalDrives && signsInHere && agentId !== undefined ? (
+              {state === 'error' && view.errorCode === 'auth_required' && !terminalDrives && !agentRemoved && signsInHere && agentId !== undefined ? (
                 // Keyed per error (the message it failed on), so each one starts unarmed (9.4).
                 <SignInAgain
                   key={`${sesId}:${lastSentUserId ?? ''}`}
@@ -599,7 +621,7 @@ export function SessionPage() {
                   data-testid="session-error"
                   data-error-code={view.errorCode}
                   action={
-                    terminalDrives || isBuild ? null : (
+                    terminalDrives || isBuild || agentRemoved ? null : (
                       <span className="flex flex-wrap gap-2">
                         {/* Out of usage (handoff): the chat can go on with another agent while this one cools down. */}
                         {view.errorCode === 'usage_limit' && severalAgents ? (
@@ -621,7 +643,7 @@ export function SessionPage() {
                   {view.errorReason ?? `${agentName} stopped with an error. Try again.`}
                 </Notice>
               ) : null}
-              {refusal !== undefined && model === null && !terminalDrives && dismissedRefusal !== refusal.reason ? (
+              {refusal !== undefined && model === null && !terminalDrives && !agentRemoved && dismissedRefusal !== refusal.reason ? (
                 // The agent couldn't run the chosen model (story 11): its own words, and a way to pick another.
                 <Notice
                   data-testid="model-refused"
@@ -667,14 +689,14 @@ export function SessionPage() {
             </Button>
           </div>
         ) : null}
-        {waitingFor !== undefined && cardOffscreen && !terminalDrives ? (
+        {waitingFor !== undefined && cardOffscreen && !terminalDrives && !agentRemoved ? (
           <div className="pb-2">
             <Button variant="outline" className="w-full justify-start" data-testid="waiting-bar" onClick={showCard}>
               <StateGlyph state="waiting" label={`${agentName} is waiting for you`} />
             </Button>
           </div>
         ) : null}
-        {isBuild ? null : (
+        {isBuild || agentRemoved ? null : (
           <Composer
             label={`Message ${agentName}`}
             blockedReason={
@@ -722,7 +744,14 @@ export function SessionPage() {
               ) : null
             }
             onSend={async (text, delivery) => {
-              await sendMessage(wsId, sesId, text, undefined, delivery);
+              try {
+                await sendMessage(wsId, sesId, text, undefined, delivery);
+              } catch (failure) {
+                // 409 `agent_removed` (story 21.4): its words stay on the page once the composer closes.
+                if (failure instanceof ChatApiError && failure.code === 'agent_removed') setActionError(failure.message);
+                noteAgentRemoved(failure);
+                throw failure;
+              }
             }}
           />
         )}

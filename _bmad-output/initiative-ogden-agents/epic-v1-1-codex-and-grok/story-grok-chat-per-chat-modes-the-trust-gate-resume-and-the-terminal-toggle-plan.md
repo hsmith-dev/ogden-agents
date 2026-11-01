@@ -1,7 +1,7 @@
 ---
 title: 'Grok chat: per-chat modes, the trust gate, resume and the terminal toggle (epic 12)'
 type: 'feature'
-ticket: 'grok-12.7'
+ticket: '7'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

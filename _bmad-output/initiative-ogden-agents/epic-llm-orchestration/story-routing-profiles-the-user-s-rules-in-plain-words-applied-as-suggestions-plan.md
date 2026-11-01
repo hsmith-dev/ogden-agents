@@ -1,7 +1,7 @@
 ---
 title: "Routing profiles: the user's rules in plain words, applied as suggestions (epic 15)"
 type: 'feature'
-ticket: '15.12'
+ticket: '12'
 created: '2026-10-06'
 status: 'in-review'
 route: 'full'

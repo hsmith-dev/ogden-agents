@@ -82,8 +82,10 @@ export function createAgents(
     const build = session.kind === 'build' ? ctx.options.buildSessions?.get(session.id) : undefined;
     // An attended build (story 5.6) is the user's: every tool call is a card at the `ask_every_time` level, no rule allows one.
     const unattended = build === undefined || build.attended === true ? undefined : build;
+    // An agent whose tools Ogden can't read (one the user adds, 21.5) is asked about every call, as an attended build is.
+    const alwaysAsks = ctx.agents.describe(agentIdOf(session))?.alwaysAsks === true;
     const onPermissionRequest =
-      build === undefined ? onPermissionRequestFor(session) : unattended === undefined ? onPermissionRequestFor(session, { attended: true }) : async (request: AgentPermissionRequest) => unattended.decide(request);
+      build === undefined ? onPermissionRequestFor(session, alwaysAsks ? { attended: true } : undefined) : unattended === undefined ? onPermissionRequestFor(session, { attended: true }) : async (request: AgentPermissionRequest) => unattended.decide(request);
     // The agent the session was started with (epic 6), looked up for each start: never another one.
     const agent = agentOf(session.id);
     const agentId = agentIdOf(session);
@@ -126,6 +128,10 @@ export function createAgents(
       // never reused across restarts -- fail closed with `agent_unavailable` when this install never wired the
       // capability at all (every existing test harness and installation that doesn't wire CAP-24, no ripple).
       let withRemote = input;
+      // An agent tied to this computer (the Local model: its endpoint and key) never runs remotely, chat or build (21.6).
+      if ((machineId !== null || input.remote !== undefined) && agent.localOnlyReason !== undefined) {
+        throw new AgentError('agent_unavailable', agent.localOnlyReason);
+      }
       if (machineId !== null) {
         if (ctx.options.remote === undefined) throw new AgentError('agent_unavailable', `${agent.displayName} can't run on a remote machine: remote execution isn't set up.`);
         withRemote = { ...input, remote: await ctx.options.remote.connect(machineId) };

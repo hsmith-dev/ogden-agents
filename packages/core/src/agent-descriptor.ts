@@ -21,10 +21,13 @@ export type AgentPlatform = (typeof AGENT_PLATFORMS)[number];
  *   platform, a binary the package unpacks that Ogden checks itself.
  * - `archive`: one download per platform, checked against Ogden's own
  *   SHA-256 (the vendor publishes none).
+ * - `user`: a command the user named and installs themselves (epic 21, a
+ *   custom agent): Ogden installs nothing and pins no version.
  */
 export type AgentInstallSource =
   | { kind: 'npm'; package: string; version: string; binarySha256?: Readonly<Partial<Record<AgentPlatform, string>>> | undefined }
-  | { kind: 'archive'; version: string; archives: Readonly<Partial<Record<AgentPlatform, { url: string; sha256: string }>>> };
+  | { kind: 'archive'; version: string; archives: Readonly<Partial<Record<AgentPlatform, { url: string; sha256: string }>>> }
+  | { kind: 'user' };
 
 /**
  * An API key an agent can run on (AD-16). `envNames[0]` is the variable
@@ -78,9 +81,18 @@ export interface AgentDescriptor {
    * The agent's vendor allows only a person at the keyboard to drive it
    * (epic 15): one plain sentence saying so, with no dash. Such an agent is
    * never a worker or reviewer a manager addresses. No agent Ogden ships today
-   * sets it; an agent whose terms forbid automation must.
+   * sets it (an agent the user adds does, epic 21); an agent whose terms forbid
+   * automation must.
    */
   interactiveOnly?: string | undefined;
+  /**
+   * Every tool call is a card, at Ask every time, and no caution level or
+   * saved rule allows one without asking (epic 21, story 21.5): for an agent
+   * whose tools' shapes Ogden doesn't know (one the user adds), so a path in
+   * a field Ogden can't read is never auto-allowed. A chat with it is treated
+   * as an attended build's is.
+   */
+  alwaysAsks?: true | undefined;
   /**
    * The permission modes it declares, each with its own name for that mode
    * (a mode id, or the flag it takes). Ask is every agent's. It must list
@@ -192,14 +204,14 @@ export function agentDescriptorProblems(descriptor: AgentDescriptor): string[] {
   if (descriptor.displayName.trim() === '') at('the product name is empty');
   if (descriptor.provider.trim() === '') at('the provider is empty');
   const { install } = descriptor;
-  if (install.version.trim() === '') at('the pinned version is empty');
+  if (install.kind !== 'user' && install.version.trim() === '') at('the pinned version is empty');
   if (install.kind === 'npm') {
     if (install.package.trim() === '') at('the npm package is empty');
     for (const [platform, sha256] of Object.entries(install.binarySha256 ?? {})) {
       if (!(AGENT_PLATFORMS as readonly string[]).includes(platform)) at(`${platform} is not a platform`);
       if (!SHA256.test(sha256 ?? '')) at(`the ${platform} binary's SHA-256 is not 64 lower-case hex digits`);
     }
-  } else {
+  } else if (install.kind === 'archive') {
     const archives = Object.entries(install.archives);
     if (archives.length === 0) at('the install has no archive');
     for (const [platform, archive] of archives) {

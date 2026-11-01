@@ -1,7 +1,7 @@
 ---
 title: 'Manager reliability harness: a fake manager that returns good, malformed and adversarial JSON (epic 15)'
 type: 'feature'
-ticket: '15.1'
+ticket: '1'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

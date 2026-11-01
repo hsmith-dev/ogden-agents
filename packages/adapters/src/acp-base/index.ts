@@ -7,6 +7,7 @@ export {
   acpModeOf,
   acpReasons,
   createAcpAgent,
+  type AcpAgentPort,
   EXIT_GRACE_MS,
   slashSkillInvocation,
   START_TIMEOUT_MS,

@@ -2,7 +2,8 @@
  * The cross-agent safety conformance suite (epic 17, entry 4): the same cases
  * for every agent that can build, on a real server with each agent played by
  * its fake personality (Claude Code the fake ACP agent, Codex, Grok and
- * Antigravity their wrappers), real git on a fixture repo and a fixed
+ * Antigravity their wrappers, the Local model the fake OpenCode on the fake
+ * OpenAI-compatible server), real git on a fixture repo and a fixed
  * sandbox. A table row is one agent; a test fails when an agent the server
  * lists as able to build has no row. No test runs a real agent, the real
  * keychain or network, or reads `~/.claude`, `~/.codex`, `~/.grok` or `~/.gemini`.
@@ -18,19 +19,23 @@ import {
   createCodexAgent,
   createFixedSandbox,
   createGrokAgent,
+  createLocalAgent,
   createMemoryAgentSetup,
+  LOCAL_ATTENDED_ONLY_REASON,
   writeInstallRecord,
 } from '@ogden-agents/adapters';
 import type { AgentSetupPort, TicketStorePort } from '@ogden-agents/core';
 import { API_ROUTES, ApiErrorBody, apiPath, BuildAgentsResponse, BuildResponse, ReviewResponse, RunResponse, WorkspaceResponse } from '@ogden-agents/shared';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { startFakeServer, type FakeServer } from '../../../tests/fixtures/fake-openai-server.mjs';
 import type { StartOptions } from '../src/start-types.js';
 import type { AntigravityPorts } from '../src/antigravity-wiring.js';
 import type { CodexPorts } from '../src/codex-wiring.js';
 import type { GrokPorts } from '../src/grok-wiring.js';
+import type { LocalPorts } from '../src/local-wiring.js';
 import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_WAITING_PLAN, FAKE_BUILD_REPO_FILES, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
-import { removeAfterTest, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
+import { removeAfterTest, signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const fixture = (name: string) => join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', name);
 const temp = (prefix: string) => removeAfterTest(mkdtempSync(join(tmpdir(), prefix)));
@@ -39,6 +44,8 @@ const KEYS = {
   codex: ['CODEX_API_KEY', `sk-proj-${'S'.repeat(40)}4321`],
   grok: ['XAI_API_KEY', `xai-${'S'.repeat(60)}4321`],
   antigravity: ['GEMINI_API_KEY', `AIza${'K'.repeat(31)}9876`],
+  // The Local model has no key of its own: its endpoint's key reaches it only as this variable, from Ogden's own preparation (never the server's environment).
+  local: ['OGDEN_ENDPOINT_KEY', `sk-ogden-conformance-${'L'.repeat(24)}5555`],
 } as const;
 const ALL_KEY_NAMES: string[] = Object.values(KEYS).map(([name]) => name);
 
@@ -66,6 +73,13 @@ interface Row {
   asksForProtected: boolean;
 }
 
+/** The Local model's endpoint: one fake OpenAI-compatible server for the file, started on first use; it accepts only the endpoint's key. */
+let openAi: Promise<FakeServer> | undefined;
+const localEndpoint = () => (openAi ??= startFakeServer({ requireKey: KEYS.local[1] }));
+afterAll(async () => {
+  await (await openAi)?.close();
+});
+
 const PINNED = ANTIGRAVITY_PINS.archives[`${process.platform}-${process.arch}` as keyof typeof ANTIGRAVITY_PINS.archives];
 
 const ROWS: Row[] = [
@@ -89,6 +103,29 @@ const ROWS: Row[] = [
     prefix: '/',
     asksForProtected: true,
     usageText: 'You have exhausted your credits',
+  },
+  {
+    id: 'local',
+    name: 'Local model',
+    // As `local.test.ts`: the fake OpenCode in the agent's slot, in the server's own data folder (its folders must be Ogden's own), its endpoint the fake server.
+    wire: () => {
+      const dataDir = tempDataDir();
+      return {
+        dataDir,
+        local: {
+          agent: createLocalAgent({ dataDir, server: () => ({ command: process.execPath, args: [fixture('fake-opencode.mjs')] }) }),
+          setup: createMemoryAgentSetup({ agentId: 'local', displayName: 'Local model', installed: true, auth: 'signed_in' }),
+          target: async () => ({ baseUrl: `${(await localEndpoint()).url}/v1`, key: KEYS.local[1] }),
+        } satisfies LocalPorts,
+      };
+    },
+    unattended: false,
+    skillFolder: '.agents/skills',
+    prefix: '/',
+    // Every tool call is a card (its config makes each tool ask), the protected file's too.
+    asksForProtected: true,
+    // It has no usage limit (its own server, no account): no words of its descriptor's mean one, so that case is skipped for it.
+    usageText: '',
   },
   ...(PINNED === undefined
     ? []
@@ -137,7 +174,8 @@ async function setup(row: Row, options: { sandbox?: boolean; env?: Record<string
     ...options.wiring,
     ticketStore: createPlanFileTicketStore([{ ref: '1.1', title: 'Build the thing', plan: FAKE_BUILD_PLAN }, ...(options.second === true ? [{ ref: '1.2', title: 'Build the next thing', plan: FAKE_BUILD_WAITING_PLAN }] : [])]) as unknown as TicketStorePort,
     sandbox: createFixedSandbox(options.sandbox === false ? { available: false, reason: 'none here' } : { available: true, kind: 'test' }),
-    extraAgentEnv: { [keyName]: key, FAKE_ACP_CHUNK_DELAY_MS: '1', ...options.env },
+    // The Local model's key is its endpoint's, which its wiring passes itself: never one in the server's environment.
+    extraAgentEnv: { ...(row.id === 'local' ? {} : { [keyName]: key }), FAKE_ACP_CHUNK_DELAY_MS: '1', ...options.env },
   });
   const tab = await signIn(server);
   const wsId = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo.path })).json()).workspace.id;
@@ -284,7 +322,8 @@ describe.each(ROWS)('every agent that builds: $id', { timeout: 90_000 }, (row) =
     expect(ended.run.blockedCode).toBe('unclear_intent');
   });
 
-  it("a rejected key or an expired sign in ends the run blocked in that agent's own words, never retried by itself, and Retry is offered", async () => {
+  // The Local model has no sign in, and Ogden probes its endpoint (key included) before the harness starts: a refused key never reaches a build's turn.
+  it.skipIf(row.id === 'local')("a rejected key or an expired sign in ends the run blocked in that agent's own words, never retried by itself, and Retry is offered", async () => {
     const s = await setup(row, { env: { FAKE_ACP_BUILD_FAIL: 'auth' } });
     const { run, session } = await go(s, 0);
     const ended = await s.settled();
@@ -304,7 +343,8 @@ describe.each(ROWS)('every agent that builds: $id', { timeout: 90_000 }, (row) =
     expect(retry.status).toBe(200);
   });
 
-  it('a usage limit ends the run blocked in that agent\'s words, with the limit named', async () => {
+  // The Local model runs on the person's own server: it has no usage limit to hit.
+  it.skipIf(row.id === 'local')('a usage limit ends the run blocked in that agent\'s words, with the limit named', async () => {
     const s = await setup(row, { env: { FAKE_ACP_BUILD_FAIL: 'usage', FAKE_ACP_BUILD_FAIL_TEXT: row.usageText } });
     const { answered } = await go(s, 0);
     await answered;
@@ -432,6 +472,20 @@ describe.skipIf(PINNED === undefined)('Antigravity builds: Ogden never selects S
     const refused = await s.refusal(await s.build());
     expect(refused).toMatchObject({ status: 409, code: 'sandbox_unavailable' });
     expect(refused.message).toContain(ANTIGRAVITY_ATTENDED_ONLY_REASON);
+  });
+});
+
+describe('Local model builds (epic 21 story 21.6): attended only, in its own words', { timeout: 90_000 }, () => {
+  const row = ROWS.find((each) => each.id === 'local')!;
+
+  it('an unattended Local model build is refused whatever the sandbox, with its own reason, and the picker offers it attended only', async () => {
+    const s = await setup(row);
+    const refused = await s.refusal(await s.build());
+    expect(refused).toMatchObject({ status: 409, code: 'sandbox_unavailable' });
+    expect(refused.message).toContain(LOCAL_ATTENDED_ONLY_REASON);
+    expect(s.server.core.entities.listSessions(s.wsId)).toEqual([]);
+    const list = BuildAgentsResponse.parse(await (await request(s.server, s.tab, 'GET', apiPath(API_ROUTES.workspaceBuildAgents, { wsId: s.wsId }))).json());
+    expect(list.agents.find((agent) => agent.agentId === 'local')).toMatchObject({ way: 'attended_only', reason: LOCAL_ATTENDED_ONLY_REASON });
   });
 });
 

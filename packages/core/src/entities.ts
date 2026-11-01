@@ -56,9 +56,9 @@ import {
   type Workspace,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, like, ne } from 'drizzle-orm';
 import type { Database } from './db/database.js';
-import { events, runs, sessions, workspaces } from './db/schema.js';
+import { events, runs, sessions, workspaceBuildSettings, workspaces } from './db/schema.js';
 import { InvalidOperationError, NotFoundError, ValidationError, WorkspaceBusyError } from './errors.js';
 import type { EventLog, HistoryDeleted } from './event-log.js';
 import { check } from './entity-check.js';
@@ -186,6 +186,8 @@ export interface Entities {
   createSession(input: NewSession): Session;
   getSession(id: SessionId): Session | undefined;
   listSessions(workspaceId: WorkspaceId): Session[];
+  /** Whether any session was started with `agentId`, or any project defaults to it (epic 21: a custom agent's id is never reused). */
+  isAgentIdInUse(agentId: AgentId): boolean;
   /**
    * Sets the normalized state (AD-4), appending `session.state_changed` if it
    * changed. `reason` is plain words for the user (an error's cause), never a
@@ -525,6 +527,17 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
     },
 
     getSession,
+
+    isAgentIdInUse(agentId) {
+      const session = orm.select({ id: sessions.id }).from(sessions).where(eq(sessions.agentId, agentId)).limit(1).get();
+      if (session !== undefined) return true;
+      if (orm.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.defaultAgentId, agentId)).limit(1).get() !== undefined) return true;
+      // A project's build default or team roster naming it (epic 21 audit): a new program must not take over that role.
+      if (orm.select({ id: workspaceBuildSettings.workspaceId }).from(workspaceBuildSettings).where(eq(workspaceBuildSettings.defaultBuildAgentId, agentId)).limit(1).get() !== undefined) return true;
+      // The roster is JSON; the id is matched as a whole quoted string. An agent id has no `%`, and a `_` (any one
+      // character to LIKE) can only match more, which keeps an id reserved: never the other way.
+      return orm.select({ id: workspaces.id }).from(workspaces).where(like(workspaces.orchestrationRoster, `%${JSON.stringify(agentId)}%`)).limit(1).get() !== undefined;
+    },
 
     listSessions(workspaceId) {
       return orm

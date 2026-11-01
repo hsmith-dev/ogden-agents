@@ -1,6 +1,6 @@
 ---
 status: final
-updated: 2026-10-04
+updated: 2026-10-31
 name: Ogden Agents
 sources:
   - ../spec-ogden-agents/spec-ogden-agents.md
@@ -53,6 +53,14 @@ The shell is always the same: the **status sidebar** on the left, the **workspac
 | Settings: Appearance | Sidebar footer menu | Theme, density, Developer mode (kept by the server) | `/settings/appearance` |
 | Settings: New projects | Sidebar footer menu | The app-wide default for new projects: Simple (default) or BMad Method with chosen pieces (CAP-19; note epic 10, 2026-10-01), their default agent, and the permission mode their chats start in | `/settings` section |
 | Command palette | `⌘K` / `Ctrl+K` | Jump to any workspace, session, ticket or action | overlay |
+| On this computer (CAP-29) | Sidebar group below projects, only while discovery is on | Agent sessions started outside Ogden, read-only, with **Take over** (AD-32) | `/found/:foundId` |
+| Family sheet (CAP-30) | Session header chip | A chat's generations and an orchestration run's workers with their state (AD-33) | sheet over the session |
+| Changes panel (CAP-33) | Session header, worktree chats only | The chat's diff on its own branch and **Commit these changes** | side panel |
+| Settings: Agents, Add your own agent (CAP-27) | Settings: Agents | Register any ACP agent by its command | `/settings/agents/new` |
+| Settings: Phone (CAP-31) | Sidebar footer menu | Turn phone access on, pick the network, pair a phone, list and revoke devices | `/settings/phone` |
+| Settings: Session discovery (CAP-29) | Sidebar footer menu | Per agent: show sessions started outside Ogden (off by default) | `/settings/discovery` |
+| Phone page (CAP-31) | A paired phone, on the device listener | Needs you first, then chats in Ask; nothing else (AD-34) | device listener `/` |
+| Tray menu and Quick entry (CAP-33) | Desktop app tray or menu bar; the global shortcut | The Needs you count, the first rows, New chat; a small window to send a message without opening the app | desktop shell |
 
 Navigation rules:
 
@@ -91,7 +99,7 @@ Behavioral. Visual specs live in `DESIGN.md` Components.
 | Component | Use | Behavioral rules |
 |---|---|---|
 | Status sidebar | Always | Lists every workspace and its sessions, active first (working, waiting, error), then idle, then done collapsed under "Earlier". State changes arrive from the event log and update in place without reordering the row under the pointer. Click a row opens that session. A project with no chats shows one row, **Start a chat** (named "Start a chat in <project>" for screen readers), which starts a chat with its default agent and opens it, or opens its Chats page when the default can't start one. Workspace groups remember collapsed state per browser. |
-| Needs you group | Top of sidebar | Aggregates across all workspaces: permission requests, agent questions, an agent quiet for 10 minutes ("has been quiet for 10 minutes"), a chat that needs its agent signed in again, tickets ready for review, blocked runs. Each new one also notifies (Notifications settings). Each row names its workspace and its chat ("Letterpress, Fix the login bug: Claude Code wants to run npm test"). Click jumps straight to the card, review or blocked notice. Hidden when empty. The browser tab title prefixes the count: "(2) Ogden Agents". |
+| Needs you group | Top of sidebar | Aggregates across all workspaces: permission requests, agent questions, an agent quiet for 10 minutes ("has been quiet for 10 minutes"), a chat that needs its agent signed in again, tickets ready for review, blocked runs. Each new one also notifies (Notifications settings). Each row names its workspace and its chat ("Letterpress, Fix the login bug: Claude Code wants to run npm test"). Click jumps straight to the card, review or blocked notice. It reads one core model (AD-31): chats waiting, panes with an open screen prompt ("Ledger, Aider pane: is asking a question"), reviews and blocked runs; sessions under On this computer are never in it (note 2026-10-31). Hidden when empty. The browser tab title prefixes the count: "(2) Ogden Agents". |
 | Project heading | Each workspace group in the sidebar | Chevron, name, gear, as in the navigation rules (it replaced the workspace switcher drop-down, note 2026-10-04). **Add project** at the end of the list picks a folder or creates a new project folder; a workspace is one repo root, and adding the same folder twice opens the existing workspace (AD-2). |
 | Session view | Chats, run view | Transcript, then any pending permission card, then the composer. Auto-scrolls while the user is at the bottom; if they scrolled up, it stops and shows a "Jump to latest" button with a count of new items. Build sessions render read-only with no composer (AD-8). |
 | Tool-call row | Transcript | Collapsed by default in Comfortable (grouped: "Read 4 files, edited 2"); listed individually in Compact. Click or `Enter` expands in place. Edit rows expand to their diff hunk. |
@@ -117,10 +125,20 @@ Behavioral. Visual specs live in `DESIGN.md` Components.
 | Launch state | Tab without a token | Headline "Open Ogden Agents", then "This tab isn't connected. Open Ogden Agents from its shortcut, or run `npx ogden-agents` in a terminal." with the command and Copy (the shortcut clause appears once the app shortcut ships). No sign-in form, no token field. |
 | Server version prompt | Top of workspace area | When the launcher reports a newer version (AD-20): "A new version is ready. Restart when your agents finish." Restart is enabled only when every session is `idle` or `done`. |
 | App launch (desktop app) | The app window | Added by story 13.3 (epic 13). In the desktop app the window opens straight on Ogden Agents through the server's one-time link, so a user never sees the launch state above. If the server cannot start, the window shows one sentence ("Ogden Agents could not start. Quit and open it again. If it keeps happening, the log is in your data folder.") and Quit. **Wording rule for the app: never say "terminal" or "npx", and never offer the app shortcut (the app is the shortcut).** Later epics and stories follow it wherever copy depends on shell mode (`shell: 'desktop'` in `GET /api/v1/updates`). |
-| App menu (desktop app) | Menu bar (macOS), window menu (Windows) | About Ogden Agents (the version), Check for updates, Quit Ogden Agents. No tray icon in the first version (user, 2026-10-04). Closing the window keeps the app in the Dock on macOS and quits on Windows. Built by story 13.5. |
+| App menu (desktop app) | Menu bar (macOS), window menu (Windows) | About Ogden Agents (the version), Check for updates, Quit Ogden Agents. No tray icon in the first version (user, 2026-10-04); from v1.3 the tray below (CAP-33, note 2026-10-31). Closing the window keeps the app in the Dock on macOS and quits on Windows. Built by story 13.5. |
 | Quit with busy sessions (desktop app) | Quit from the menu, the Dock or the window | The same confirmation as the sidebar Quit: "Agents are still working. Quit anyway?" with the consequence in one sentence, shown in the window before anything stops. Quitting stops only a server the app started; one started by `npx ogden-agents` keeps running. Built by story 13.5. |
 | Update prompt (desktop app) | Top of workspace area | "Update available. Ogden 0.6.0 is ready. Restart to update." with **Restart to update**. While an agent turn or a build is running the button is disabled and the sentence says why ("agents are still working, so it cannot restart yet"); **Restart when they finish** waits and then restarts by itself. It never restarts under running work (user, 2026-10-04). A download in progress says "Ogden 0.6.0 is downloading." with no button. The page asks the server; it never talks to the app's shell. Story 13.3 builds the banner, 13.10 the shell side. |
 | Update notice (npm) | Top of workspace area | Story 13.7. Not shown in the desktop app, which has its own prompt above. |
+| Add your own agent (CAP-27) | Settings: Agents | Fields: **Name**, **Command** (a program on this computer; Choose file or type it), **Arguments**, optional **API key** with **Variable name** (must end in `_API_KEY`). **Test** starts it once and lists what it offers (resume, modes, models) or the agent's own error in one sentence. Saved, it is a card like any agent's, with "Your own agent. Ogden asks before everything it does." It offers Ask only, never builds unattended, and can't be an orchestration worker; each is said on the card. Removing it keeps its chats, which open read-only ("This agent was removed."). |
+| Screen-prompt card (CAP-28) | Terminal pane, Needs you, phone | The permission card's anatomy, caption "Read from the screen of <pane>". Under the question, the exact part of the screen it read, in mono, secrets masked. Options are the CLI's own labels: single choice as buttons numbered 1 to n, multi-select as checkboxes with **Submit**, free text as a field with **Send** (desktop only). No option is focused by default. Sending shows "Sending..."; then the card collapses to its record line. **Changed:** "The screen changed, so nothing was sent." and the card redraws from the new screen. **Refused:** one sentence why ("The pane restarted since you looked."). **Unreadable:** "Needs you. Answer in the terminal." with **Open terminal** and the masked screen. Copilot's prompts show "Answered one at a time by you" in the caption. |
+| On this computer (CAP-29) | Sidebar | Collapsed group below the projects, shown only while discovery is on for some agent. Rows: agent glyph, the folder's name, last activity; a running one says "Running". Opening one shows its transcript read-only (secrets masked) and **Take over** ("Continue this conversation in Ogden. It starts in Ask."). Refusals in words: "Still running in another window. Close it there first.", "This conversation is already in Ogden." with **Open it**. A folder that is not a project yet first asks to add it (the normal Add project flow, trust included). |
+| Start fresh (CAP-30) | Session header menu, plan meter suggestion | **Start fresh with a summary** beside Continue with another agent, disabled with its reason while the agent works, waits, the terminal drives or an orchestration step runs in this chat. The agent writes a summary first (shown working), then the dialog shows it editable, masked, with its length and limit, and **Start fresh**. The same chat continues: a "Started fresh from a summary" divider, the earlier part stays above it. |
+| Family chip and sheet (CAP-30) | Session header | Shown when the chat has more than one generation or is an orchestration worker: "3 sessions" or "Part of: <run name>". The sheet lists generations in order (agent, when, "Continued with" or "Started fresh") and, for a run, each worker chat with its state and "Waiting on 2" until they finish; rows open the chat. |
+| Plan meter (CAP-32) | Composer footer, agent picker | For a subscription agent only: a quiet chip beside the model chip, "5h 42%". Tooltip: "Claude plan: 42% of this 5 hour window, resets at 3:10 PM. Week: 18%, resets Monday." At 80% or more it uses the signal color and the chat offers **Start fresh** or **Continue with another agent** once. With no reading there is no chip, never an error. Never money, never tokens. |
+| Attachment chips (CAP-33) | Composer | A paperclip button and drop onto the composer. Chips above the field: name, size, remove. An agent that can't take images says so on the chip: "Sent as a file link". Over the size limit: "Too large to attach (limit 10 MB)." [ASSUMPTION: limit decided in the epic] |
+| Worktree chat (CAP-33) | New chat, session header | **Work in a separate copy** when starting a chat (off by default; one line: "Changes stay on their own branch until you merge them."). The header shows the branch as a badge and opens the **Changes** panel: the diff viewer and **Commit these changes** with a message field. "Never pushed. Merge it yourself when ready." Deleting the chat asks before removing the copy. |
+| Tray and quick entry (CAP-33) | Desktop app | Tray or menu-bar icon with the Needs you count. Menu: Open Ogden Agents, New chat, up to three Needs you rows (each opens its chat), Quit Ogden Agents. On Linux it opens only from its menu. The global shortcut (Cmd/Ctrl+Shift+Space by default, changeable in Settings, Appearance) opens Quick entry: a small window with a project picker, the composer, and **Continue in <last chat>** or **New chat**; `Enter` sends and brings the main window to that chat; `Esc` closes it. Under Wayland the shortcut setting says it works only in X11 sessions. [ASSUMPTION: default shortcut] |
+| Phone pairing (CAP-31) | Settings: Phone | **Let my phone answer** (off by default). Pick the network ("Home Wi-Fi 192.168.1.20" or "Tailscale"). **Pair a phone** shows a QR code and a match code; the phone shows the same code; **Allow** on the desktop finishes it. Both screens show the certificate fingerprint to compare. Devices list: name, last seen, **Revoke**. One line: "Your phone can answer questions and send messages to chats that ask first. It can't open terminals or change settings." |
 | Toasts | Global | Only for transient confirmations that need no decision ("Copied", "Webhook test sent"). Anything that needs the user goes to Needs you instead. |
 
 ## State Patterns
@@ -156,6 +174,14 @@ Behavioral. Visual specs live in `DESIGN.md` Components.
 | Epic finished | Board epic header | "Every ticket in this epic is done. Look back on it?" with **Look back** and **Not now**; Not now is remembered for that epic. Never starts a look-back by itself, and never shown with Retrospectives off (note epic 7, 2026-10-02). |
 | Catalog updated | Plan | New module actions appear with "New" tag; no reload needed. |
 | Webhook test failed | Notifications | Inline error under the field with the HTTP status and a plain sentence. |
+| Pane needs you, readable (CAP-28) | Pane, Needs you | Pane chip "Needs you"; a screen-prompt card floats over the pane's bottom edge and joins Needs you. |
+| Pane needs you, unreadable (CAP-28) | Pane, Needs you | Same chip; the card is the unreadable state with **Open terminal**. |
+| Prompt answered elsewhere (CAP-28) | Card record line | "Answered in the terminal" (or "The agent ended before an answer"). |
+| Discovery off (CAP-29) | Sidebar | The On this computer group is absent. |
+| Take over refused (CAP-29) | Found session | The one-sentence reason and, where it helps, **Open it**. |
+| Start fresh interrupted (CAP-30) | Session | The chat stays on its earlier session, idle, with "Starting fresh didn't finish. Nothing was lost." |
+| Phone listener closed (CAP-31) | Settings: Phone, phone page | Settings: "Your phone can't reach Ogden right now: this computer left <network>." The phone: "Ogden isn't reachable. Check you're on the same network." |
+| Device refused (CAP-31) | Phone | Plain words, never a code: "From your phone you can only send to chats that ask first." / "Answer this one on your computer." |
 
 ## Interaction Primitives
 
@@ -170,6 +196,8 @@ Behavioral. Visual specs live in `DESIGN.md` Components.
 - Permission card focused: `1` Allow once, `2` Always allow, `3` Deny. Numbers, not `Enter`, so a habit keypress never allows.
 - `Esc`: close sheet, dialog or palette; never cancels a running agent.
 - `/`: focus the composer.
+- Screen-prompt card focused: `1` to `n` choose an option; multi-select `Space` toggles and `Enter` on **Submit** sends (CAP-28).
+- Cmd/Ctrl+Shift+Space (desktop app, changeable): Quick entry (CAP-33).
 
 Rules:
 
@@ -190,6 +218,7 @@ Behavioral. Visual contrast lives in `DESIGN.md` Colors.
 - Target size at least 24 by 24 CSS px in Compact and 32 by 32 in Comfortable. Focus ring is `{colors.ring}`, 2px, offset 2px, never removed.
 - Reduced motion honored as defined in DESIGN.md Motion; the working glyph's shape and label carry the state without animation.
 - Every form field has a visible label above it; errors appear below the field in text.
+- A new screen-prompt card announces assertively once, like a permission card ("Aider is asking: Apply this change?"). The masked screen region is a labelled region, not a live region. The phone page has the same floor at 320px wide, with 44 by 44 targets.
 
 ## Responsive & Platform
 
@@ -200,7 +229,7 @@ Behavioral. Visual contrast lives in `DESIGN.md` Colors.
 | `md` (768 to 1023px) | Sidebar collapses to the 56px rail of state glyphs (`{spacing.sidebar-rail}`); Needs you becomes a counted button at the top of the rail. |
 | `< md` | Sidebar opens as a drawer (a sheet from the left) from the menu button at the start of every page header ("Open projects and sessions"), with everything the column has: projects, Add project, settings, Needs you. Focus moves into the drawer and stays there; `Esc`, the close button or the overlay closes it and returns focus to the menu button; following a project, chat or settings link closes it and the new page decides focus. Board epics stack as lists instead of columns. Permission cards and Approve still work fully. |
 
-Local only: the server binds to `127.0.0.1` (AD-15), so there is no phone access; narrow widths exist for side-by-side windows on the same computer. Evergreen Chrome, Edge, Firefox and Safari on macOS, Windows and Linux. Layout is verified in a real browser with Playwright (architecture Conventions). No offline mode beyond reconnect and catch-up.
+Local by default: the server binds to `127.0.0.1` (AD-15); narrow widths exist for side-by-side windows on the same computer. The one exception is the opt-in **phone page** (CAP-31, AD-34): a single column at phone width (320 to 480px) with Needs you first, then chats in Ask; cards full width with Allow once and Deny; screen prompts only with options that apply once; a composer only in Ask chats. It has no terminal, settings, mode picker, Developer mode or sidebar. Reached only from a paired phone. Evergreen Chrome, Edge, Firefox and Safari on macOS, Windows and Linux. Layout is verified in a real browser with Playwright (architecture Conventions). No offline mode beyond reconnect and catch-up.
 
 ## Inspiration & Anti-patterns
 
@@ -209,7 +238,8 @@ Local only: the server binds to `127.0.0.1` (AD-15), so there is no phone access
 - **Lifted from GitHub pull request review:** checks above the diff and a single approve action that merges.
 - **Lifted from acp-ui and claudecodeui:** chat plus terminal on the same agent session; inline tool-call rows. References only, not forks.
 - **Rejected: the generic AI chat look.** Purple gradients, sparkle icons, a centered "How can I help you today?" with suggestion chips, typing-dot animations. The spec asks for a UI without that look.
-- **Rejected: cost and token meters.** A non-goal; users check their agent's own billing.
+- **Rejected: cost and token meters.** A non-goal; users check their agent's own billing. The plan meter (CAP-32) shows only how much of a subscription window is used and when it resets, never money or tokens.
+- **Lifted from the-mob (ideas only, its code is unlicensed):** answering a CLI's own prompts from its screen, one gate for keystrokes, sessions found on the machine, starting fresh with a summary, answering from a phone.
 - **Rejected: auto-approve timers and "trust this agent forever" defaults.** Guardrails are enforced in code, and the default caution level asks every time.
 - **Rejected: celebration moments.** No confetti on merge. The done ticket and the one-line confirmation are the reward.
 - **Rejected: a separate developer UI.** Developers get density and detail, not a different app.
@@ -260,7 +290,28 @@ Failure: while the terminal drives, he clicks into the chat composer by habit. I
 
 Failure: after a reboot the server is not running; the app shortcut starts it and opens a fresh link (a stale bookmark shows the launch state, "Open Ogden Agents", with `npx ogden-agents` and Copy). After she runs it, her sessions reappear as idle with "Resumed from history" markers, ready to continue (CAP-3). Failure: her webhook to her phone's notification app is configured, so the ready-for-review event also reached her while she was out (CAP-14).
 
+### Flow 4: A CLI-only agent, answered from the card and the phone (Priya Natarajan, contract developer, Wednesday on a client's billing-api)
+
+Priya uses an agent that has only a terminal program. Developer mode is on.
+
+1. In `billing-api` she opens a terminal pane and starts the agent's program. It works through a migration.
+2. The pane chip turns to "Needs you" and the sidebar's Needs you shows "Billing api, Agent pane: is asking a question". A card floats over the pane: "Read from the screen of Agent pane", the masked screen region, and three buttons: **1 Yes**, **2 Yes, and don't ask again**, **3 No**.
+3. She presses `1`. "Sending..." then "Answered in Ogden". The pane carries on.
+4. She leaves for school pickup. On her phone, paired last week, Needs you shows the next question. The card shows **Yes** and **No** only; "Yes, and don't ask again" is absent because it would change a setting.
+5. **Climax:** she taps **Yes** in the car park. The agent continues, and when she is back the record line reads "Answered from Priya's iPhone".
+
+Failure: the agent prints a new question just as she taps. "The screen changed, so nothing was sent." and the card redraws with the new question. Failure: the program draws something Ogden can't read: "Needs you. Answer in the terminal." with the screen.
+
+### Flow 5: Starting fresh before the plan runs out (Sam Okoro, runs a small bakery's website, Friday)
+
+1. Sam's long chat about the order form has the plan chip at "5h 81%", in the signal color. The chat offers **Start fresh** once.
+2. He clicks it. Claude Code writes a summary; the dialog shows it, and he removes a line about an old idea.
+3. **Climax:** he clicks **Start fresh**. A "Started fresh from a summary" divider appears, the agent picks up from the summary, and the earlier conversation stays above the divider.
+
 ## Open Questions
+
+- Attachment size limit and allowed types (CAP-33 epic).
+- The quick-entry default shortcut, if it collides on some systems.
 
 - Default concurrency limits and maximum run time (architecture Deferred, epic 5) affect the copy in the time-limit state.
 - Which agents show the terminal toggle (agent-matrix, epic 3).

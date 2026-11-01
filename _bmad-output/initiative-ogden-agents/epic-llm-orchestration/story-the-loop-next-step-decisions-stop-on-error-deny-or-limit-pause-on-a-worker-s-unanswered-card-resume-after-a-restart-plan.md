@@ -1,7 +1,7 @@
 ---
 title: "The loop: next-step decisions, stop on error, Deny or limit, pause on a worker's unanswered card, resume after a restart (epic 15)"
 type: 'feature'
-ticket: '15.9'
+ticket: '9'
 created: '2026-10-06'
 status: 'in-review'
 route: 'full'

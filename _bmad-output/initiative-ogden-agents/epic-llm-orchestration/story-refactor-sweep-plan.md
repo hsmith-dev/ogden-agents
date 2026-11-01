@@ -1,7 +1,7 @@
 ---
 title: 'Refactor sweep (epic 15)'
 type: 'refactor'
-ticket: '15.13'
+ticket: '13'
 created: '2026-10-06'
 status: 'in-review'
 route: 'full'

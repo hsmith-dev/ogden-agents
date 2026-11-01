@@ -35,6 +35,9 @@
 //   "skills"       replies the skill folders it can see, `<scope>:<name>` comma separated
 //   "session-start"  replies `via=<new|resumed|loaded> cwd=<cwd> meta=<_meta or none>`
 //   "crash"        exits with code 1
+//   "/bmad-build-auto ticket <ref>"  with that skill in the project's `.agents/skills`, plays the
+//                  shared fake build (`fake-build-turn.mjs`, its `FAKE_ACP_BUILD_*` switches) and
+//                  never calls the server
 // Errors map as the harness's do: a server that can't be reached is an internal error
 // "Cannot connect to API: Unable to connect. Is the computer able to access the url?"
 // (after FAKE_OPENCODE_CONNECT_DELAY_MS, default 0: the real one takes 63 to 66 s), any
@@ -43,6 +46,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
+import { isBuildPrompt, playBuildTurn } from './fake-build-turn.mjs';
 
 if (process.env.FAKE_OPENCODE_EXIT_AT_START === '1') process.exit(3);
 
@@ -231,6 +235,10 @@ async function runPrompt(params, client, session) {
   if (text === 'session-start') {
     await say(client, sessionId, `via=${session.via} cwd=${session.cwd} meta=${session.opened?._meta === undefined ? 'none' : JSON.stringify(session.opened._meta)} prompt=${JSON.stringify(text)}`);
     return { stopReason: 'end_turn' };
+  }
+  if (isBuildPrompt(text) && skillsSeen(session.cwd).includes('project-agents:bmad-build-auto')) {
+    // The build skill, from the worktree's `.agents/skills` (epic 21 story 21.6): the same build the other fake agents play.
+    return playBuildTurn({ acp, client, sessionId, text, cwd: session.cwd, mode: undefined, openedAdditionalDirectories: session.opened?.additionalDirectories });
   }
   if (text.startsWith('/')) {
     // A slash command is a skill only if the harness lists it (spike 14.1: skills are listed as commands).

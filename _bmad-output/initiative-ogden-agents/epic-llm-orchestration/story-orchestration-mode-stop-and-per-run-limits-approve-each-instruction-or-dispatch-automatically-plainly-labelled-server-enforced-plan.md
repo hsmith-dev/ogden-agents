@@ -1,7 +1,7 @@
 ---
 title: 'Orchestration mode, Stop and per-run limits: Approve each instruction or Dispatch automatically, plainly labelled, server-enforced (epic 15)'
 type: 'feature'
-ticket: '15.8'
+ticket: '8'
 created: '2026-10-06'
 status: 'in-review'
 route: 'full'

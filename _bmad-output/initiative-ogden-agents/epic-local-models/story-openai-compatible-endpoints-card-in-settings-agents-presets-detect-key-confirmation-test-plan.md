@@ -1,7 +1,7 @@
 ---
 title: 'OpenAI-compatible endpoints card in Settings, Agents: presets, Detect, key, confirmation, Test (epic 14)'
 type: 'feature'
-ticket: '14.4'
+ticket: '4'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

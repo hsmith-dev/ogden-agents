@@ -218,6 +218,16 @@ export const API_ERROR_CODES = [
   'remote_host_key_changed',
   /** CAP-24: a remote machine was used before its host key was confirmed (409). Nothing was called. */
   'remote_host_key_not_confirmed',
+  /** Epic 21 (story 21.1): a custom agent's command can't be found or run (400); the message is the plain reason. Nothing was registered. */
+  'custom_agent_command_invalid',
+  /** Story 21.4: a message to a chat whose agent was removed (409). The chat stays readable; nothing was sent. */
+  'agent_removed',
+  /** Story 21.2: no stored custom agent has that id (404). */
+  'custom_agent_not_found',
+  /** Story 21.3: Test started the agent and it failed, or never answered `initialize` (422); the message is its plain reason, `details.reason` the agent error's code. Nothing was kept. */
+  'custom_agent_test_failed',
+  /** Story 21.3: a Test of the same agent (or of an unsaved command) is still running (409). Nothing was started. */
+  'custom_agent_test_running',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

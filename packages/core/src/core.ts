@@ -29,6 +29,7 @@ import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
 import { createAgentModels, type AgentModels } from './agent-models.js';
+import { createCustomAgents, type CustomAgents } from './custom-agents.js';
 import { createAgentLinkedCommands, type AgentLinkedCommands } from './agent-linked-commands.js';
 import { createInstallSettings, type InstallSettings } from './install-settings.js';
 import { createPaneStore, type PaneStore } from './pane-store.js';
@@ -100,6 +101,8 @@ export interface Core {
    * never in the database. The server calls it once, after it has its secret store.
    */
   localEndpoints(secrets: SecretStorePort): LocalEndpoints;
+  /** The custom agents the user brings (epic 21, story 21.2), their keys in `secrets`. */
+  customAgents(secrets: SecretStorePort): CustomAgents;
   /**
    * The remote-machine registry (CAP-24, epic 19 story 19.1) over the keychain the server holds (AD-16): a
    * machine's SSH credential, once story 19.2 stores one, is never in the database. The server calls it once,
@@ -257,6 +260,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     terminalsSettings: createTerminalsSettings({ db, events }),
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),
     localEndpoints: (secrets) => createLocalEndpoints({ db, events, secrets }),
+    customAgents: (secrets) => createCustomAgents({ db, events, secrets }),
     remoteMachines: (secrets, hosts) => createRemoteMachines({ db, events, secrets, hosts }),
     jiraLinks: (secrets, jira) => createJiraLinks({ db, events, secrets, jira }),
     createOrchestration: (ports) => createOrchestration({ db, events, feature: orchestration, ...ports }),

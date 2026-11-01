@@ -8,7 +8,7 @@
 import type { CoreEvent, PermissionMode, SessionId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
-  AGENT_NOT_REGISTERED_REASON,
+  AgentRemovedError,
   createAgentRegistry,
   createChat,
   ModeUnavailableError,
@@ -145,14 +145,14 @@ describe('a chat has the agent it was started with (E6-R1)', () => {
     await chat.settled();
   });
 
-  it('a chat whose agent is not registered this run fails with a plain reason instead of reaching another agent', async () => {
+  it('a chat whose agent is not registered this run is refused in plain words (21.4) instead of reaching another agent', async () => {
     const { core, chat, workspace, claude, second } = setUp();
     const gone = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', agentId: 'removed-agent' });
-    chat.sendMessage(workspace.id, gone.id, 'hello');
+    const before = streamOf(core, gone.id).length;
+    expect(() => chat.sendMessage(workspace.id, gone.id, 'hello')).toThrow(AgentRemovedError);
     await chat.settled();
-    expect(core.entities.getSession(gone.id)?.state).toBe('error');
-    const failed = streamOf(core, gone.id).find((event) => event.type === 'session.state_changed' && event.payload.state === 'error');
-    expect(failed?.type === 'session.state_changed' && failed.payload.reason).toBe(AGENT_NOT_REGISTERED_REASON);
+    expect(core.entities.getSession(gone.id)?.state).toBe('idle');
+    expect(streamOf(core, gone.id).length).toBe(before);
     expect(claude.envs).toEqual([]);
     expect(second.envs).toEqual([]);
   });

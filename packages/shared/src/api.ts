@@ -306,6 +306,20 @@ export const API_ROUTES = {
    * clears it (idempotent); the next chat start resolves the managed install again.
    */
   agentLinkedCommand: `${API_BASE}/agents/:agentId/linked-command`,
+  /**
+   * `POST CustomAgentCreateRequest` → 201 `CustomAgentCreateResponse` (epic 21,
+   * story 21.1): registers an ACP agent the user brings by its command line,
+   * live, until the server stops. 400 `custom_agent_command_invalid` when the
+   * command can't be found or run (nothing registered), 400 `invalid_request`
+   * for a body that doesn't fit.
+   */
+  customAgents: `${API_BASE}/custom-agents`,
+  /** Start a command once and report what it advertises (story 21.3): nothing is kept. */
+  customAgentsTest: `${API_BASE}/custom-agents/test`,
+  /** One custom agent (story 21.2): `PATCH` changes it, `DELETE` removes it and its key. */
+  customAgent: `${API_BASE}/custom-agents/:agentId`,
+  /** Start a saved custom agent once with its own command and key (story 21.3). */
+  customAgentTest: `${API_BASE}/custom-agents/:agentId/test`,
   /** `GET` → `OnboardingState`; `PATCH OnboardingState` → `OnboardingState` (9.5): whether Welcome is done. */
   onboarding: `${API_BASE}/onboarding`,
   /**

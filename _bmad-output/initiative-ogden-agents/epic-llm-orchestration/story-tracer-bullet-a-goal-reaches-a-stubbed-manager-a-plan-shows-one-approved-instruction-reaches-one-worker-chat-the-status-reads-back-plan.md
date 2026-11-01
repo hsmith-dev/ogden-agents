@@ -1,7 +1,7 @@
 ---
 title: 'Tracer bullet: a goal reaches a stubbed manager, a plan shows, one approved instruction reaches one worker chat, the status reads back (epic 15)'
 type: 'feature'
-ticket: '15.3'
+ticket: '3'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

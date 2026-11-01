@@ -294,6 +294,11 @@ export interface AgentPort {
   /** Plain words on why it builds only with the user watching (epic 17), shown in the Build picker; no dashes. Only with `unattendedBuild` false. */
   readonly attendedOnlyReason?: string | undefined;
   /**
+   * Plain words on why the agent runs only on this computer (epic 21 story 21.6): set, a chat or build naming a
+   * remote machine is refused before any connection, so nothing it is given here (an endpoint key) leaves this computer.
+   */
+  readonly localOnlyReason?: string | undefined;
+  /**
    * Starts the agent and a new session in `cwd`. Rejects with an
    * {@link AgentError} (code `agent_unavailable` when it can't be started).
    */
@@ -455,30 +460,49 @@ export function effectiveDefaultAgent(agents: Pick<AgentRegistry, 'get' | 'defau
 }
 
 /**
+ * A registry whose agents can grow while the server runs (epic 21, E21-R1: a
+ * custom agent the user registers is added live, without a restart). `add`
+ * checks the agent exactly as construction does and refuses an id already
+ * registered; `agentIds` is read live, so every reader sees it at once.
+ */
+export interface MutableAgentRegistry extends AgentRegistry {
+  /** Adds `registered` after the agents already there. Throws (with the same words as construction) when it fails a check. */
+  add(registered: RegisteredAgent): void;
+  /** Takes the agent registered under `agentId` out (story 21.2: a custom agent removed). Throws for the default agent; `false` when none was registered. */
+  remove(agentId: AgentId): boolean;
+}
+
+/** Throws (a wiring bug) when `registered` can't join the agents in `byId`: see {@link createAgentRegistry}. */
+function checkRegistered(registered: RegisteredAgent, byId: ReadonlyMap<AgentId, RegisteredAgent>): void {
+  const { descriptor, agent } = registered;
+  const agentId = descriptor.agentId;
+  if (!AgentIdSchema.safeParse(agentId).success) throw new Error(`agent registry: ${JSON.stringify(agentId)} is not an agent id`);
+  if (byId.has(agentId)) throw new Error(`agent registry: ${agentId} is registered twice`);
+  const problems = agentDescriptorProblems(descriptor);
+  if (problems.length > 0) throw new Error(`agent registry: ${problems.join('; ')}`);
+  if (agent.displayName !== descriptor.displayName) throw new Error(`agent registry: ${agentId}'s port is named ${JSON.stringify(agent.displayName)}, its descriptor ${JSON.stringify(descriptor.displayName)}`);
+  const portModes = [...new Set(agent.permissionModes ?? ['ask'])].sort().join(',');
+  const described = declaredModes(descriptor).sort().join(',');
+  if (portModes !== described) throw new Error(`agent registry: ${agentId}'s port declares the modes ${portModes}, its descriptor ${described}`);
+  if ((agent.modeFixedAtStart ?? false) !== (descriptor.modeFixedAtStart ?? false)) throw new Error(`agent registry: ${agentId}'s port and descriptor disagree on whether its mode is fixed at start`);
+}
+
+/**
  * A registry of `agents`, in order. `defaultAgentId` and `legacyAgentId`
  * default to the first agent; the default must be registered. Throws (a
  * wiring bug) on an empty list, an id given twice, a descriptor with a
  * problem ({@link agentDescriptorProblems}), or a port whose product name or
- * declared permission modes differ from its descriptor's.
+ * declared permission modes differ from its descriptor's. Its `add` applies
+ * the same checks to an agent registered later ({@link MutableAgentRegistry}).
  */
 export function createAgentRegistry(
   agents: readonly RegisteredAgent[],
   options: { defaultAgentId?: AgentId | undefined; legacyAgentId?: AgentId | undefined } = {},
-): AgentRegistry {
+): MutableAgentRegistry {
   const byId = new Map<AgentId, RegisteredAgent>();
   for (const registered of agents) {
-    const { descriptor, agent } = registered;
-    const agentId = descriptor.agentId;
-    if (!AgentIdSchema.safeParse(agentId).success) throw new Error(`agent registry: ${JSON.stringify(agentId)} is not an agent id`);
-    if (byId.has(agentId)) throw new Error(`agent registry: ${agentId} is registered twice`);
-    const problems = agentDescriptorProblems(descriptor);
-    if (problems.length > 0) throw new Error(`agent registry: ${problems.join('; ')}`);
-    if (agent.displayName !== descriptor.displayName) throw new Error(`agent registry: ${agentId}'s port is named ${JSON.stringify(agent.displayName)}, its descriptor ${JSON.stringify(descriptor.displayName)}`);
-    const portModes = [...new Set(agent.permissionModes ?? ['ask'])].sort().join(',');
-    const described = declaredModes(descriptor).sort().join(',');
-    if (portModes !== described) throw new Error(`agent registry: ${agentId}'s port declares the modes ${portModes}, its descriptor ${described}`);
-    if ((agent.modeFixedAtStart ?? false) !== (descriptor.modeFixedAtStart ?? false)) throw new Error(`agent registry: ${agentId}'s port and descriptor disagree on whether its mode is fixed at start`);
-    byId.set(agentId, registered);
+    checkRegistered(registered, byId);
+    byId.set(registered.descriptor.agentId, registered);
   }
   const first = agents[0]?.descriptor.agentId;
   if (first === undefined) throw new Error('agent registry: no agent registered');
@@ -487,11 +511,21 @@ export function createAgentRegistry(
   const legacyAgentId = options.legacyAgentId ?? first;
   if (!AgentIdSchema.safeParse(legacyAgentId).success) throw new Error(`agent registry: ${JSON.stringify(legacyAgentId)} is not an agent id`);
   return {
-    agentIds: [...byId.keys()],
+    get agentIds() {
+      return [...byId.keys()];
+    },
     get: (agentId) => byId.get(agentId)?.agent,
     describe: (agentId) => byId.get(agentId)?.descriptor,
     defaultAgentId,
     legacyAgentId,
+    add(registered) {
+      checkRegistered(registered, byId);
+      byId.set(registered.descriptor.agentId, registered);
+    },
+    remove(agentId) {
+      if (agentId === defaultAgentId) throw new Error(`agent registry: the default agent ${agentId} can't be removed`);
+      return byId.delete(agentId);
+    },
   };
 }
 

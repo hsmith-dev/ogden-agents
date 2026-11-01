@@ -1,7 +1,7 @@
 ---
 title: 'Tracer bullet: one Local model chat against a fake server, end to end (epic 14)'
 type: 'feature'
-ticket: '14.2'
+ticket: '2'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

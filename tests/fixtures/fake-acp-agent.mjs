@@ -59,6 +59,8 @@
 //                  registered agent a chat reached (epic 6, two agents at once),
 //                  then ` home=<value>` when FAKE_ACP_HOME_ENV names the
 //                  variable its home folder is in (6.3)
+//   "has-env <NAME>" replies `<NAME>=set ending <last 4>` or `<NAME>=unset`:
+//                  whether a variable reached it, never the whole value (21.2)
 //   "env"          replies with the CLAUDE_CODE_EXECUTABLE it was given
 //   "echo-env"     replies with its whole environment, `NAME=value` per line,
 //                  each value split across two chunks, and writes it to stderr
@@ -179,6 +181,8 @@
 // `fake-acp-agent-auto-fallback.mjs`): the server passes agents an
 // allowlisted environment.
 //
+// FAKE_ACP_PID_FILE=<file> writes its pid to <file> before anything else
+// (story 21.5: a start that fails still leaves no process behind).
 // With FAKE_ACP_EXIT_AT_START=1 it exits before answering anything. With
 // FAKE_ACP_SPAWN_GRANDCHILD=1 it starts a long-lived child of its own (as the
 // real adapter starts `claude`), which it never stops.
@@ -302,14 +306,17 @@
 // 5 s limit), and a wrapper process plus a second Node start and the SDK's
 // load could pass that limit on a busy Windows runner, which reads as "can't
 // check the sign-in" and turns a saved API key off.
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { isBuildPrompt, playBuildTurn } from './fake-build-turn.mjs';
 
+// FAKE_ACP_PID_FILE=<file>: its pid, written first thing (before any other switch), so a test can check it is gone after a failed start.
+if (process.env.FAKE_ACP_PID_FILE) writeFileSync(process.env.FAKE_ACP_PID_FILE, `${process.pid}\n`);
 if (process.env.FAKE_ACP_EXIT_AT_START === '1') process.exit(3);
 
 if (process.argv.includes('--cli')) {
@@ -518,6 +525,9 @@ const agentBuilder = acp
         loadSession: RESUME === 'load' || RESUME === 'both',
         sessionCapabilities: { ...(ANTIGRAVITY || CODEX || GROK ? { list: {} } : { close: {} }), ...(GROK ? { close: {} } : {}), ...(RESUME === 'resume' || RESUME === 'both' ? { resume: {} } : {}) },
         ...(ANTIGRAVITY ? { auth: { logout: {} } } : {}),
+        // FAKE_ACP_PROMPT_CAPS=image,audio,embeddedContext: what its prompts take (Test, story 21.3). FAKE_ACP_TITLE_ENV=<NAME>
+        // titles it `<NAME>=set` or `=unset` (agentInfo below): whether a key reached a Test, never its value.
+        ...(process.env.FAKE_ACP_PROMPT_CAPS ? { promptCapabilities: Object.fromEntries(process.env.FAKE_ACP_PROMPT_CAPS.split(',').map((name) => [name.trim(), true])) } : {}),
       },
       authMethods: process.env.FAKE_ACP_AUTH_METHODS
         ? // A generic agent's own sign-in methods, done by the agent itself (6.3).
@@ -530,7 +540,7 @@ const agentBuilder = acp
                 { type: 'terminal', id: 'console-login', name: 'Anthropic Console', description: 'Use Anthropic Console (API usage billing)', args: ['--cli', 'auth', 'login', '--console'] },
               ]
             : [],
-      agentInfo: ANTIGRAVITY ? { name: 'antigravity-acp', title: 'Google Antigravity', version: '1.3.0' } : CODEX ? { name: '@agentclientprotocol/codex-acp', title: 'Codex', version: '2.1.1' } : GROK ? { name: 'grok', title: 'Grok Build', version: '1.0.49' } : { name: 'fake-acp-agent', version: '1.0.0' },
+      agentInfo: ANTIGRAVITY ? { name: 'antigravity-acp', title: 'Google Antigravity', version: '1.3.0' } : CODEX ? { name: '@agentclientprotocol/codex-acp', title: 'Codex', version: '2.1.1' } : GROK ? { name: 'grok', title: 'Grok Build', version: '1.0.49' } : { name: 'fake-acp-agent', version: '1.0.0', ...(process.env.FAKE_ACP_TITLE_ENV ? { title: `${process.env.FAKE_ACP_TITLE_ENV}=${process.env[process.env.FAKE_ACP_TITLE_ENV] ? 'set' : 'unset'}` } : {}) },
       ...(STEERING ? { _meta: { steering: { supported: true } } } : {}),
     };
   })
@@ -798,111 +808,9 @@ async function runPrompt(params, client, session) {
       await say(client, params.sessionId, `trust=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
       return { stopReason: 'end_turn' };
     }
-    // The skill as an agent runs it: a slash command, or Codex's `$name` (epic 17).
-    if (/^[/$]bmad-build-auto ticket /.test(text)) {
-      const ref = text.slice('/bmad-build-auto ticket '.length).trim().split(/\s/)[0];
-      const cwd = session.opened.cwd ?? process.cwd();
-      const ask = async (toolCallId, path) => {
-        const toolCall = { toolCallId, title: `Write ${path}`, kind: 'edit', locations: [{ path }], rawInput: { file_path: path } };
-        // Codex in `workspace-write` (epic 17), as the real sandbox: an edit inside the workspace (or an added directory) needs no card.
-        if (CODEX && session.mode === 'workspace-write') {
-          const roots = [cwd, ...(session.opened.additionalDirectories ?? [])];
-          const insideRoot = roots.some((root) => { const rel = relative(root, path); return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel); });
-          if (insideRoot) {
-            await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'completed' });
-            return true;
-          }
-        }
-        await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
-        const answer = await client.request('session/request_permission', {
-          sessionId: params.sessionId,
-          toolCall,
-          options: [
-            { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
-            { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
-          ],
-        });
-        const allowed = answer.outcome.outcome === 'selected' && answer.outcome.optionId === 'allow';
-        await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: allowed ? 'completed' : 'failed' });
-        return allowed;
-      };
-      // Epic 17: the agent could not go on. `auth`: a rejected key or an expired sign in (ACP's -32000); `usage`: its usage limit, in
-      // the words FAKE_ACP_BUILD_FAIL_TEXT gives (each agent says it its own way).
-      if (process.env.FAKE_ACP_BUILD_FAIL === 'auth') throw acp.RequestError.authRequired(undefined, 'Authentication required');
-      if (process.env.FAKE_ACP_BUILD_FAIL === 'usage') throw acp.RequestError.internalError(undefined, process.env.FAKE_ACP_BUILD_FAIL_TEXT ?? 'usage limit reached');
-      await say(client, params.sessionId, `Building ${ref}. `);
-      // Story 5.7: what the build's agent was started with, for the secrets and allowlist tests.
-      if (process.env.FAKE_ACP_BUILD_ENV_DUMP) {
-        writeFileSync(process.env.FAKE_ACP_BUILD_ENV_DUMP, Object.entries(process.env).map(([name, value]) => `${name}=${value}`).join('\n'));
-        // How the session was opened (epic 17), beside the environment: its mode and the session's added directories.
-        writeFileSync(`${process.env.FAKE_ACP_BUILD_ENV_DUMP}.session`, [`session_mode=${session.mode}`, `additionalDirectories=${JSON.stringify(session.opened.additionalDirectories ?? null)}`].join('\n'));
-      }
-      if (process.env.FAKE_ACP_BUILD_ECHO_KEY === '1') await say(client, params.sessionId, `The key is ${process.env.ANTHROPIC_API_KEY ?? 'none'}. `);
-      const childFile = process.env.FAKE_ACP_BUILD_CHILD;
-      if (childFile) {
-        // Not detached: it stays in the agent's process group (its tree on Windows), as a build's command does.
-        const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
-        child.on('error', () => undefined);
-        writeFileSync(childFile, `${process.pid} ${child.pid}\n`);
-      }
-      const inside = join(cwd, 'src', `built-${ref}.txt`);
-      if (await ask('call-build-write', inside)) {
-        mkdirSync(dirname(inside), { recursive: true });
-        writeFileSync(inside, `Built ${ref} by the fake agent.\n`);
-      }
-      const outside = resolve(cwd, '..', `escape-${ref}.txt`);
-      if (await ask('call-build-escape', outside)) writeFileSync(outside, 'escaped\n');
-      // Epic 17: FAKE_ACP_BUILD_PROTECTED=1 also tries a protected file inside the worktree (AGENTS.md).
-      if (process.env.FAKE_ACP_BUILD_PROTECTED === '1') {
-        const protectedFile = join(cwd, 'AGENTS.md');
-        if (await ask('call-build-protected', protectedFile)) writeFileSync(protectedFile, 'The agent changed this.\n');
-      }
-      // The plan: the Markdown file under _bmad-output whose frontmatter names this ticket's id.
-      const id = ref.slice(ref.lastIndexOf('.') + 1);
-      const plans = [];
-      const visit = (dir) => {
-        for (const entry of readdirSync(dir, { withFileTypes: true })) {
-          const full = join(dir, entry.name);
-          if (entry.isDirectory()) visit(full);
-          else if (entry.name.endsWith('.md') && new RegExp(`^ticket:\\s*['"]?${id}['"]?\\s*$`, 'm').test(readFileSync(full, 'utf8'))) plans.push(full);
-        }
-      };
-      if (existsSync(join(cwd, '_bmad-output'))) visit(join(cwd, '_bmad-output'));
-      const halt = process.env.FAKE_ACP_BUILD_HALT;
-      const blocked = process.env.FAKE_ACP_BUILD_OUTCOME === 'blocked' || (halt !== undefined && halt !== '');
-      const reason = halt !== undefined && halt !== '' ? halt : 'The fake agent was told to block.';
-      const delay = Number(process.env.FAKE_ACP_BUILD_DELAY_MS ?? '0');
-      if (delay > 0) await new Promise((done) => setTimeout(done, delay));
-      if (process.env.FAKE_ACP_BUILD_FAIL_TESTS === '1') writeFileSync(join(cwd, '.fake-tests-fail'), 'fail\n');
-      for (const plan of plans) {
-        const before = readFileSync(plan, 'utf8');
-        const status = blocked ? `status: blocked\nblocked_reason: ${JSON.stringify(reason)}` : 'status: built';
-        writeFileSync(plan, before.replace(/^status:.*$/m, status));
-        if (blocked && reason.startsWith('intent gap')) {
-          // As the skill's intent-gap HALT: the attempted change saved as a patch beside the plan, the code reverted.
-          rmSync(inside, { force: true });
-          const file = `src/fix-${ref}.txt`;
-          writeFileSync(plan.replace(/\.md$/, '.patch'), `diff --git a/${file} b/${file}\nnew file mode 100644\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1 @@\n+Fixed ${ref} by the saved patch.\n`);
-        }
-      }
-      const hooks = process.env.FAKE_ACP_BUILD_HOOKS;
-      if (hooks) {
-        mkdirSync(join(cwd, '.husky'), { recursive: true });
-        for (const hook of ['pre-commit', 'commit-msg', 'post-merge', 'post-commit', 'post-checkout', 'pre-merge-commit']) {
-          const file = join(cwd, '.husky', hook);
-          writeFileSync(file, `#!/bin/sh\ntouch "${join(hooks, hook)}"\n`);
-          chmodSync(file, 0o755);
-        }
-      }
-      try {
-        const git = (...args) => execFileSync('git', ['-c', `core.hooksPath=${join(cwd, '.no-hooks')}`, '-c', 'user.name=Fake Agent', '-c', 'user.email=fake@example.com', ...args], { cwd, stdio: 'ignore' });
-        git('add', '-A');
-        git('commit', '--no-verify', '-m', `Build ${ref}`);
-      } catch {
-        await say(client, params.sessionId, 'The commit failed. ');
-      }
-      await say(client, params.sessionId, `${blocked ? 'Blocked' : 'Built'} ${ref}.`);
-      return { stopReason: 'end_turn' };
+    // The skill as an agent runs it: a slash command, or Codex's `$name` (epic 17); the turn is shared with `fake-opencode.mjs`.
+    if (isBuildPrompt(text)) {
+      return playBuildTurn({ acp, client, sessionId: params.sessionId, text, cwd: session.opened.cwd ?? process.cwd(), mode: session.mode, openedAdditionalDirectories: session.opened.additionalDirectories, editsInsideWithoutAsking: CODEX && session.mode === 'workspace-write' });
     }
     if (text === 'context') {
       await say(client, params.sessionId, `session=${params.sessionId} via=${session.via} primed=${primed}`);
@@ -1050,6 +958,12 @@ async function runPrompt(params, client, session) {
       await say(client, params.sessionId, `agent=${process.env.FAKE_ACP_AGENT_NAME ?? 'default'}${home}`);
       return { stopReason: 'end_turn' };
     }
+    if (text.startsWith('has-env ')) {
+      const name = text.slice('has-env '.length).trim();
+      const value = process.env[name];
+      await say(client, params.sessionId, `${name}=${value ? `set ending ${value.slice(-4)}` : 'unset'}`);
+      return { stopReason: 'end_turn' };
+    }
     if (GROK && text === 'env') {
       const key = process.env.XAI_API_KEY;
       await say(client, params.sessionId, `GROK_FOLDER_TRUST=${process.env.GROK_FOLDER_TRUST ?? '(unset)'} GROK_DISABLE_AUTOUPDATER=${process.env.GROK_DISABLE_AUTOUPDATER ?? '(unset)'} key=${key ? key.slice(-4) : 'none'}`);
@@ -1170,10 +1084,15 @@ async function runPrompt(params, client, session) {
       return { stopReason: 'end_turn' };
     }
     if (text === 'hold') {
+      // The cancel handler goes in before "Holding" is said: a client cancelling on that first chunk must never be missed.
+      let cancelled = false;
+      let wake;
+      session.cancel = () => {
+        cancelled = true;
+        wake?.();
+      };
       await say(client, params.sessionId, 'Holding');
-      await new Promise((resolve) => {
-        session.cancel = () => resolve(undefined);
-      });
+      if (!cancelled) await new Promise((resolve) => (wake = resolve));
       session.cancel = undefined;
       return { stopReason: 'cancelled' };
     }

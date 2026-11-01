@@ -29,6 +29,7 @@ import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERR
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
+import { createCustomAgentsWiring } from './start-custom-agents.js';
 import { supportsUnattendedBuild } from './build-agent-sandbox.js';
 import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
 import { SHIPPED_ORCHESTRATION } from './orchestration-routes.js';
@@ -297,8 +298,10 @@ async function listenAndAnnounce({
     // The event carries the plain reason; the log also gets the target, URL and (on a mismatch) both hashes.
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
+  // Each custom agent's key as its chat environment sees it (story 21.2): filled by the custom agent wiring below.
+  const customKeyEnv = new Map<AgentId, Readonly<Record<string, string>>>();
   // Every agent is wired before the stored sessions are settled, as before story 6.9's split: a wiring error leaves the database untouched.
-  const { endpointApi, localModelPort, claudeSetup, secrets, remoteHosts, remoteMachines, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
+  const { endpointApi, localModelPort, claudeSetup, secrets, remoteHosts, remoteMachines, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core, customKeyEnv });
   const { localEndpoints, localModels } = endpointApi;
   // One git for builds and for Save the lessons (epic 7); built here (moved up from beside Plan and Board, story 19.7)
   // so the real remote capability below can share it, before `createChat` runs.
@@ -336,6 +339,23 @@ async function listenAndAnnounce({
     wirings.map(({ descriptor, agent: port }) => ({ descriptor, agent: descriptor.agentId === CLAUDE_CODE_AGENT_ID ? chatAgent : forChat(descriptor.agentId, port) })),
     { defaultAgentId: CLAUDE_CODE_AGENT_ID, legacyAgentId: CLAUDE_CODE_AGENT_ID },
   );
+  // The custom ACP agents the user brings (epic 21, stories 21.1 and 21.2) join the live registry, the unwrapped
+  // ports and the descriptors as a wired agent does; the stored ones are registered now, before chats and builds.
+  // Bound to `chat.stopAgent` once the chat exists, below.
+  const stopChats: { current: ((agentId: AgentId) => void) | undefined } = { current: undefined };
+  const customAgents = createCustomAgentsWiring({
+    store: core.customAgents(secrets),
+    agents,
+    unwrapped,
+    descriptors,
+    keyEnv: customKeyEnv,
+    forChat,
+    chatEnv,
+    isAgentIdInUse: (agentId) => core.entities.isAgentIdInUse(agentId),
+    log,
+    stopChats,
+  });
+  await customAgents.load();
   /** A session's agent id: its own, else (stored before agents could be chosen) Claude Code's. */
   const agentIdOf = (session: Session): AgentId => session.agentId ?? agents.legacyAgentId;
   /** A session's agent as a chat runs it (epic 6 entry 8: a planning session's first message is in its own syntax). */
@@ -376,6 +396,7 @@ async function listenAndAnnounce({
     remote,
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
+  stopChats.current = (agentId) => chat.stopAgent(agentId);
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
   const { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
     vcs,
@@ -499,6 +520,7 @@ async function listenAndAnnounce({
     bmadSetup: withAgentSkillFolders(core.bmadSetup, { core, agents }),
     agentSetup,
     agentLinkedCommands: core.agentLinkedCommands,
+    customAgents,
     onboarding,
     newProjectDefaults,
     installSettings: core.installSettings,

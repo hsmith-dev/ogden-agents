@@ -1,7 +1,7 @@
 ---
 title: "Reviewer role: a bounded question to the reviewer about a worker's result, linked to the review page (epic 15)"
 type: 'feature'
-ticket: '15.10'
+ticket: '10'
 created: '2026-10-06'
 status: 'in-review'
 route: 'full'

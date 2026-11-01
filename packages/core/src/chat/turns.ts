@@ -6,7 +6,7 @@
 import type { Session, SessionId, Workspace } from '@ogden-agents/shared';
 import { AgentError, type AgentEvent, type AgentSession } from '../agent-port.js';
 import {
-  BuildSessionReadOnlyError,
+  AgentRemovedError, BuildSessionReadOnlyError,
   DriverIsTerminalError,
   InvalidOperationError,
   QueueFullError,
@@ -280,6 +280,12 @@ export function createTurns(
       // A message sent right away whose answer is still coming is taken in, or goes next, before anything else.
       await steered(turn);
       if (ctx.closing || turn.failed) break;
+      // Its agent removed meanwhile (21.4): what waits is never sent to it, as after a Stop.
+      if (ctx.agents.get(ctx.agentIdOf(session)) === undefined) {
+        turn.queue = [];
+        turn.reasons = [];
+        break;
+      }
       const following = takeNext(turn);
       if (following === undefined) break;
       try {
@@ -316,12 +322,14 @@ export function createTurns(
     }
   };
 
-  const methods: Pick<Chat, 'sendMessage' | 'cancel'> = {
+  const methods: Pick<Chat, 'sendMessage' | 'cancel' | 'stopAgent'> = {
     sendMessage(workspaceId, sessionId, text, sendOptions = {}) {
       if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
       const session = getSession(workspaceId, sessionId);
       // An unattended build's session takes only the builds use-case's own prompt (story 5.2).
       if (session.kind === 'build' && sendOptions.build !== true) throw new BuildSessionReadOnlyError();
+      // A chat whose agent was removed is read-only (21.4): refused here, not left to fail at the agent's start.
+      if (ctx.agents.get(ctx.agentIdOf(session)) === undefined) throw new AgentRemovedError();
       const workspace = getWorkspace(workspaceId);
       // Between drivers first: a switch back (or a CLI's exit) still reads `terminal` until it is done (story 3.4).
       if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
@@ -360,6 +368,16 @@ export function createTurns(
       const turn = busy.get(sessionId);
       if (turn === undefined || turn.failed) throw new SessionNotBusyError(sessionId);
       stop(sessionId, turn, { keepQueue: false });
+    },
+
+    stopAgent(agentId) {
+      // Every running turn of the agent, stopped as Stop does (21.4): an agent removed is never left working.
+      for (const [sessionId, turn] of busy) {
+        if (turn.failed) continue;
+        const session = entities.getSession(sessionId);
+        if (session === undefined || ctx.agentIdOf(session) !== agentId) continue;
+        stop(sessionId, turn, { keepQueue: false });
+      }
     },
   };
 

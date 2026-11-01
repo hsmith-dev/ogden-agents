@@ -1,7 +1,7 @@
 ---
 title: 'End to end journey, docs and live-check list (epic 14)'
 type: 'feature'
-ticket: '14.11'
+ticket: '11'
 created: '2026-10-05'
 status: 'in-review'
 route: 'full'

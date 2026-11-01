@@ -640,6 +640,13 @@ const EXPECTED_API_ROUTES = [
   `DELETE ${API_ROUTES.agentApiKey}`,
   `PUT ${API_ROUTES.agentLinkedCommand}`,
   `DELETE ${API_ROUTES.agentLinkedCommand}`,
+  // Custom ACP agents, registered live (epic 21, story 21.1) and kept, changed and removed (21.2).
+  `GET ${API_ROUTES.customAgents}`,
+  `POST ${API_ROUTES.customAgents}`,
+  `PATCH ${API_ROUTES.customAgent}`,
+  `DELETE ${API_ROUTES.customAgent}`,
+  `POST ${API_ROUTES.customAgentsTest}`,
+  `POST ${API_ROUTES.customAgentTest}`,
   `GET ${API_ROUTES.onboarding}`,
   `PATCH ${API_ROUTES.onboarding}`,
   `GET ${API_ROUTES.bmadPieces}`,

@@ -152,12 +152,18 @@ export const WORKSPACE_SEARCH_MAX_FILE_BYTES = MAX_WORKSPACE_FILE_BYTES;
 export const WorkspaceSearchMode = z.enum(['text', 'names']);
 export type WorkspaceSearchMode = z.infer<typeof WorkspaceSearchMode>;
 
-/** `GET …/files/search?q=&mode=&matchCase=&session=`, as the server reads it (`matchCase` is `true` or absent). */
+/**
+ * `GET …/files/search?q=&mode=&matchCase=&regex=&session=`, as the server
+ * reads it (`matchCase` and `regex` are `true` or absent). `regex` (8.8):
+ * `q` is a regular expression (compiled with `u`, and `i` unless Match
+ * case), run off the server's main thread; otherwise `q` is a literal.
+ */
 export const WorkspaceSearchQuery = z
   .object({
     q: z.string().min(1).max(WORKSPACE_SEARCH_MAX_QUERY),
     mode: WorkspaceSearchMode.default('text'),
     matchCase: z.boolean().default(false),
+    regex: z.boolean().default(false),
     session: SessionId.optional(),
   })
   .strict();
@@ -218,6 +224,19 @@ export const WORKSPACE_SEARCH_CAPPED_TEXT = `Showing the first ${WORKSPACE_SEARC
 export const workspaceSearchNoMatchText = (query: string): string => `No matches for "${query}" in this project.`;
 /** Search isn't built on this server yet (501). */
 export const WORKSPACE_SEARCH_UNAVAILABLE_TEXT = "Search isn't available here yet.";
+/** A Regex search whose pattern doesn't compile (400 `invalid_request`). */
+export const WORKSPACE_SEARCH_INVALID_REGEX_TEXT = "That isn't a valid regular expression.";
+/** The Search panel's field, its modes and its options (8.8). */
+export const WORKSPACE_SEARCH_FIELD_LABEL = 'Search the project';
+export const WORKSPACE_SEARCH_MODE_LABEL = 'Search in';
+export const WORKSPACE_SEARCH_TEXT_LABEL = 'Text';
+export const WORKSPACE_SEARCH_NAMES_LABEL = 'File names';
+export const WORKSPACE_SEARCH_MATCH_CASE_LABEL = 'Match case';
+export const WORKSPACE_SEARCH_REGEX_LABEL = 'Regex';
+/** A search that stopped early for time or the files it may look at (not the match cap). */
+export const WORKSPACE_SEARCH_STOPPED_TEXT = 'The search stopped early. Narrow it to see everything.';
+/** A search that couldn't run (the fallback when the server gives no message). */
+export const WORKSPACE_SEARCH_FAILED_TEXT = "Ogden couldn't search this project";
 
 // ---------------------------------------------------------------------------
 // 8.7: links to the viewer from an agent's reply and a rendered markdown file.

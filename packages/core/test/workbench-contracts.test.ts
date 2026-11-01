@@ -8,7 +8,7 @@
  */
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { chatWorktreeBranch, COMMIT_NOTHING_MESSAGE, type ChangedFile, type DiffHunk, type EditorInfo, type SessionId, type WorkspaceId, type WorkspaceSearchFile } from '@ogden-agents/shared';
+import { chatWorktreeBranch, COMMIT_NOTHING_MESSAGE, type ChangedFile, type DiffHunk, type EditorInfo, type SessionId, type WorkspaceId, type WorkspaceSearchFile, WORKSPACE_SEARCH_INVALID_REGEX_TEXT } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
   AgentMidTurnError,
@@ -27,6 +27,7 @@ import {
   type VcsWorkingTreePort,
   type WorkspaceFilesPort,
   type WorkspaceRootKind,
+  type WorkspaceSearchPortQuery,
 } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
 
@@ -361,5 +362,33 @@ describe('open in editor (AD-39)', () => {
   it('is undefined without a launcher, or a files port that can locate', () => {
     expect(openTestCore(undefined, undefined, { workspaceFilesPort: filesPort().port }).editorLaunch).toBeUndefined();
     expect(openTestCore(undefined, undefined, { workspaceFilesPort: filesPort({ locate: false }).port, editorLauncherPort: launcher().port }).editorLaunch).toBeUndefined();
+  });
+});
+
+describe('workspace files search: regex and the client going away (8.8)', () => {
+  it('passes regex and the signal to the port; refuses a pattern that does not compile, asking the port nothing', async () => {
+    const seen: WorkspaceSearchPortQuery[] = [];
+    const { port } = filesPort({ search: [] });
+    port.search = async (_root, query) => {
+      seen.push(query);
+      return { files: [], truncated: false };
+    };
+    const core = openTestCore(undefined, undefined, { workspaceFilesPort: port });
+    const { workspace } = project(core);
+    const gone = new AbortController();
+    await core.workspaceFiles!.search!(workspace.id, { q: 'add\\(\\w+', regex: true }, gone.signal);
+    await core.workspaceFiles!.search!(workspace.id, { q: 'add(' });
+    expect(seen.map(({ q, regex, matchCase, signal }) => ({ q, regex, matchCase, signal }))).toEqual([
+      { q: 'add\\(\\w+', regex: true, matchCase: false, signal: gone.signal },
+      { q: 'add(', regex: false, matchCase: false, signal: undefined },
+    ]);
+    for (const q of ['add(', '[', '(?<', 'a{2,1}', '\\p{Nope}']) {
+      const refused = core.workspaceFiles!.search!(workspace.id, { q, regex: true });
+      await expect(refused, q).rejects.toBeInstanceOf(ValidationError);
+      await expect(refused, q).rejects.toThrow(WORKSPACE_SEARCH_INVALID_REGEX_TEXT);
+    }
+    // Under Match case too (`u` alone).
+    await expect(core.workspaceFiles!.search!(workspace.id, { q: '(', regex: true, matchCase: true })).rejects.toBeInstanceOf(ValidationError);
+    expect(seen).toHaveLength(2);
   });
 });

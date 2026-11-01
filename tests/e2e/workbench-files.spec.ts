@@ -11,6 +11,10 @@
  * link opens the file with line 12 highlighted and in view; `.env` is
  * masked, a 2 MB file and a binary one say so with their sizes; axe finds
  * nothing and a 390px page has no sideways scroll.
+ *
+ * 8.8: `g s` opens Search; typing a fixture word lists the tracked file and
+ * not the ignored one, and its result opens the viewer at that line; axe
+ * finds nothing on the panel and a 390px page has no sideways scroll.
  */
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
@@ -172,5 +176,61 @@ test('README renders with Show source; a reply naming src/a.ts:12 links it, open
         '.git/config': '[core]\n',
       },
     },
+  );
+});
+
+test('g s opens Search; a word is found in the tracked file and not the ignored one, and its result opens the viewer at its line; axe clean at 390px', async ({ page }) => {
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const wsId = await addProject(page, repo);
+      const searches: string[] = [];
+      page.on('request', (request) => {
+        if (new URL(request.url()).pathname.endsWith('/files/search')) searches.push(request.url());
+      });
+      await page.goto(`${server.url}/w/${wsId}/workbench`);
+      await expect(page.getByTestId('workbench-panel-files')).toHaveAttribute('aria-current', 'page');
+      await page.locator('body').click();
+      await page.keyboard.press('g');
+      await page.keyboard.press('s');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/workbench\\?panel=search$`));
+      await expect(page.getByTestId('workbench-panel-search')).toHaveAttribute('aria-current', 'page');
+      await expect(page.getByTestId('search-empty')).toHaveText('Search text or file names in this project.');
+
+      const field = page.getByLabel('Search the project');
+      await expect(field).toBeFocused();
+      await field.pressSequentially('zebraword');
+      const results = page.getByTestId('search-results');
+      await expect(results.getByTestId('search-file')).toHaveCount(1);
+      await expect(results.getByTestId('search-file-path')).toHaveText('src/a.ts');
+      await expect(results).not.toContainText('dist/');
+      // Typing replaced the history entry, and the search is in the address.
+      await expect(page).toHaveURL(/q=zebraword/);
+      const searchCount = searches.length;
+      expect(searchCount).toBeGreaterThanOrEqual(1);
+      expect(searchCount).toBeLessThanOrEqual(3);
+
+      // Axe on the panel, and a phone width with no sideways scroll.
+      await page.setViewportSize({ width: 390, height: 844 });
+      const axe = await new AxeBuilder({ page }).include('[data-testid="workbench-search"]').analyze();
+      expect(axe.violations.map((v) => `${v.id}: ${v.nodes.map((node) => node.target.join(' ')).join(', ')}`)).toEqual([]);
+      await expectNoSidewaysScroll(page);
+
+      // Enter on the result opens the viewer at the line, highlighted.
+      await results.getByTestId('search-match').first().focus();
+      await page.keyboard.press('Enter');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/workbench\\?path=src%2Fa\\.ts&line=3$`));
+      await expect(page.locator('[data-testid="code-line"][data-line="3"]')).toHaveAttribute('data-highlighted', 'true');
+      await expectNoSidewaysScroll(page);
+
+      // File names: the ignored file isn't listed either.
+      await page.goto(`${server.url}/w/${wsId}/workbench?panel=search&q=a.&mode=names`);
+      await expect(page.getByTestId('search-name')).toHaveText(['src/a.ts']);
+      // Regex, run by the bundled server's worker.
+      await page.goto(`${server.url}/w/${wsId}/workbench?panel=search&q=${encodeURIComponent('zebra\\w+ =')}&regex=true`);
+      await expect(page.getByTestId('search-match')).toHaveCount(1);
+      await expect(page.getByTestId('search-file-path')).toHaveText('src/a.ts');
+    },
+    { files: { '.gitignore': 'dist/\n', 'src/a.ts': 'const a = 1;\n\nexport const zebraword = a;\n', 'dist/a.js': 'export const zebraword = 1;\n', '.git/config': '[core]\n' } },
   );
 });

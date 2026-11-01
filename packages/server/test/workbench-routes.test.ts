@@ -34,7 +34,6 @@ describe('workbench routes on the real server', () => {
     const created = await fetch(`${server.url}${API_ROUTES.workspaces}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ path: repo }) });
     const wsId = WorkspaceResponse.parse(await created.json()).workspace.id;
     const unwired: Array<[string, string]> = [
-      ['GET', `${apiPath(API_ROUTES.workspaceFileSearch, { wsId })}?q=x`],
       // Changes are wired on git since 8.4; hunk actions are 8.5's.
       ['POST', apiPath(API_ROUTES.workspaceChangesHunks, { wsId })],
       ['GET', apiPath(API_ROUTES.workspaceProjectCommands, { wsId })],

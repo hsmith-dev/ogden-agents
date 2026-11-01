@@ -69,7 +69,7 @@ describe('workbench contracts (epic 8 entry 2)', () => {
     expect(WorkspaceSearchQuery.safeParse({ q: 'x'.repeat(200) }).success).toBe(true);
     expect(WorkspaceSearchQuery.safeParse({ q: 'x'.repeat(201) }).success).toBe(false);
     expect(WorkspaceSearchQuery.safeParse({ q: '' }).success).toBe(false);
-    expect(WorkspaceSearchQuery.parse({ q: 'a' })).toEqual({ q: 'a', mode: 'text', matchCase: false });
+    expect(WorkspaceSearchQuery.parse({ q: 'a' })).toEqual({ q: 'a', mode: 'text', matchCase: false, regex: false });
     expect(WorkspaceSearchResponse.safeParse({ files: [{ path: 'a.ts', matches: [{ line: 1, column: 1, preview: 'x'.repeat(241) }] }], truncated: false, limit: 500 }).success).toBe(false);
     expect(ProjectCommandRunDetail.shape.items.safeParse(Array.from({ length: 501 }, () => ({ path: 'a.ts', line: 1, message: 'x', format: 'typescript' }))).success).toBe(false);
   });

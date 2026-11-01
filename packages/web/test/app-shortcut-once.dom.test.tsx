@@ -194,7 +194,7 @@ describe('Help (26.5)', () => {
 
   it('the shortcuts table has the shortcuts that exist, with no dashes in its words', () => {
     const rows = keyboardShortcuts('Macintosh').flatMap((group) => group.shortcuts);
-    expect(rows.map((row) => row.keys.map((press) => press.join('+')).join(' '))).toEqual(['g c', 'g p', 'g b', 'g r', 'g o', 'g t', 'g y', ']', '[', 'F2', 'Enter', '1', '2', '3', '⌘.']);
+    expect(rows.map((row) => row.keys.map((press) => press.join('+')).join(' '))).toEqual(['g c', 'g s', 'g p', 'g b', 'g r', 'g o', 'g t', 'g y', ']', '[', 'F2', 'Enter', '1', '2', '3', '⌘.']);
     expect(keyboardShortcuts('Windows').at(-1)?.shortcuts.at(-1)?.keys).toEqual([['Ctrl+.']]);
     for (const row of rows) expect(`${row.action} ${row.where ?? ''}`).not.toMatch(/[–—]/);
   });

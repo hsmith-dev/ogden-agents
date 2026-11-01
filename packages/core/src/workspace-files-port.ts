@@ -37,6 +37,10 @@ export interface WorkspaceSearchPortQuery {
   q: string;
   mode: WorkspaceSearchMode;
   matchCase: boolean;
+  /** `q` is a regular expression (already known to compile with `u`, and `i` unless `matchCase`); absent or false, a literal. */
+  regex?: boolean;
+  /** Aborted when the client goes away: the search stops and answers what it has, `truncated`. */
+  signal?: AbortSignal;
 }
 
 /**

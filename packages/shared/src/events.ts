@@ -162,6 +162,8 @@ import {
   WorkspaceProjectCommandFinishedInput,
   WorkspaceProjectCommandStartedEvent,
   WorkspaceProjectCommandStartedInput,
+  WorkspaceProjectCommandsChangedEvent,
+  WorkspaceProjectCommandsChangedInput,
 } from './events-workbench.js';
 import { ApiErrorCode } from './errors.js';
 import { PermissionRuleId, RunId, SessionId, WorkspaceId } from './ids.js';
@@ -248,7 +250,7 @@ export {
 export { DevToolsCatalogChangedEvent, DevToolsCatalogChangeReason, WorkspaceDevToolUnattendedAllowChangedEvent } from './events-dev-tools.js';
 
 // The Workbench's events (epic 8 entry 2): ids, states and counts only.
-export { SessionTurnChangesRecordedEvent, SessionWorktreeCommittedEvent, WorkspaceProjectCommandStartedEvent, WorkspaceProjectCommandFinishedEvent } from './events-workbench.js';
+export { SessionTurnChangesRecordedEvent, SessionWorktreeCommittedEvent, WorkspaceProjectCommandStartedEvent, WorkspaceProjectCommandFinishedEvent, WorkspaceProjectCommandsChangedEvent } from './events-workbench.js';
 
 // ---------------------------------------------------------------------------
 // Event types. Each is defined once without the core-assigned fields (what a
@@ -447,6 +449,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SessionWorktreeCommittedEvent,
   WorkspaceProjectCommandStartedEvent,
   WorkspaceProjectCommandFinishedEvent,
+  WorkspaceProjectCommandsChangedEvent,
   SettingsDeveloperModeChangedEvent,
   SettingsAgentDefaultModelChangedEvent,
   SettingsAgentLinkedCommandChangedEvent,
@@ -527,6 +530,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SessionWorktreeCommittedInput,
   WorkspaceProjectCommandStartedInput,
   WorkspaceProjectCommandFinishedInput,
+  WorkspaceProjectCommandsChangedInput,
   SettingsDeveloperModeChangedInput,
   SettingsAgentDefaultModelChangedInput,
   SettingsAgentLinkedCommandChangedInput,

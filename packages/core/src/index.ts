@@ -89,6 +89,8 @@ export * from './turn-snapshots.js';
 export * from './editor-launcher-port.js';
 export * from './editor-launch.js';
 export * from './project-commands.js';
+export * from './project-command-parsers.js';
+export * from './shell-free.js';
 // The home credential fences, for the Files adapter's confinement (AD-36).
 export { CREDENTIAL_FOLDERS, credentialReadFences } from './build-names.js';
 export * from './local-endpoints.js';

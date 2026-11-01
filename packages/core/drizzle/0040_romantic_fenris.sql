@@ -1,0 +1,1 @@
+ALTER TABLE `workspaces` ADD `project_commands` text DEFAULT '[]' NOT NULL;

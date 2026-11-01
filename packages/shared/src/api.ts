@@ -541,9 +541,15 @@ export const API_ROUTES = {
    * `invalid_operation` for a chat without a worktree, `agent_mid_turn`.
    */
   sessionWorktreeCommit: `${API_BASE}/workspaces/:wsId/sessions/:sesId/worktree/commit`,
-  /** `GET` → `ProjectCommandsResponse`; `PUT SetProjectCommandsRequest` → the same (AD-38; 8.9). */
+  /**
+   * `GET` → `ProjectCommandsResponse`; `PUT SetProjectCommandsRequest` → the
+   * same (AD-38; 8.9). Every Problems route answers 409 `scripts_not_trusted`
+   * in a project not trusted yet; `PUT` 400 `invalid_request` with the plain
+   * reason for a command that needs a shell, 409 `command_changed` for a
+   * script whose text isn't the one confirmed.
+   */
   workspaceProjectCommands: `${API_BASE}/workspaces/:wsId/project-commands`,
-  /** `POST` → 202 `ProjectCommandRunResponse`: runs a confirmed command in a trusted project. */
+  /** `POST` → 202 `ProjectCommandRunResponse`: runs a confirmed command in a trusted project. 409 `command_changed` (nothing ran), 409 `invalid_operation` while it already runs, 404 an unknown command. */
   workspaceProjectCommandRuns: `${API_BASE}/workspaces/:wsId/project-commands/:commandId/runs`,
   /** `GET` → `ProjectCommandRunDetail`: a run, its masked output and parsed failures (`no-store`). */
   workspaceProjectCommandRun: `${API_BASE}/workspaces/:wsId/project-command-runs/:runId`,

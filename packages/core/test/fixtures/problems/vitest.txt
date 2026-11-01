@@ -1,0 +1,34 @@
+
+ RUN  v3.2.4 {root}
+
+ ❯ src/wrap.test.ts (2 tests | 1 failed) 6ms
+   ✓ wrap > wraps long lines 1ms
+   × wrap > keeps spaces 4ms
+     → expected 'a b' to be 'a  b' // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/wrap.test.ts > wrap > keeps spaces
+AssertionError: expected 'a b' to be 'a  b' // Object.is equality
+
+- Expected
++ Received
+
+- a  b
++ a b
+
+ ❯ src/wrap.test.ts:88:20
+     86|   it('keeps spaces', () => {
+     87|     const out = wrap('a b');
+     88|     expect(out).toBe('a  b');
+       |                    ^
+     89|   });
+     90| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  10:12:03
+   Duration  312ms (transform 41ms, setup 0ms, collect 38ms, tests 6ms, environment 0ms, prepare 61ms)
+

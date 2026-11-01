@@ -24,6 +24,7 @@
  */
 import {
   AgentMidTurnError,
+  CommandChangedError,
   CoreError,
   EditorUnavailableError,
   HunkOutdatedError,
@@ -31,6 +32,7 @@ import {
   NotImplementedError,
   NotFoundError,
   PathProtectedError,
+  ScriptsNotTrustedError,
   ValidationError,
   VcsError,
   type WorkspaceFiles,
@@ -38,6 +40,8 @@ import {
 import {
   AGENT_MID_TURN_MESSAGE,
   API_ROUTES,
+  COMMAND_CHANGED_MESSAGE,
+  PROBLEMS_UNTRUSTED_TEXT,
   EDITOR_NONE_FOUND_TEXT,
   EDITOR_UNAVAILABLE_MESSAGE,
   GIT_POINTER_UNUSUAL_MESSAGE,
@@ -91,6 +95,9 @@ export function workbenchRefusal(log: Logger, what: string): (c: Context, error:
     if (error instanceof VcsError && error.message === GIT_POINTER_UNUSUAL_MESSAGE) return apiError(c, 409, 'invalid_operation', GIT_POINTER_UNUSUAL_MESSAGE);
     // A lane not shipped yet (hunk actions before 8.5): core's own plain message.
     if (error instanceof NotImplementedError) return apiError(c, 501, 'not_implemented', error.message);
+    // Problems (AD-38; 8.9): an untrusted project ran nothing; a script that changed since it was confirmed ran nothing.
+    if (error instanceof ScriptsNotTrustedError) return apiError(c, 409, 'scripts_not_trusted', PROBLEMS_UNTRUSTED_TEXT);
+    if (error instanceof CommandChangedError) return apiError(c, 409, 'command_changed', COMMAND_CHANGED_MESSAGE);
     if (error instanceof EditorUnavailableError) return apiError(c, 409, 'editor_unavailable', error.message === EDITOR_NONE_FOUND_TEXT ? EDITOR_NONE_FOUND_TEXT : EDITOR_UNAVAILABLE_MESSAGE);
     // Never the path or the reason's text, which could name it.
     log.error(`a ${what} request failed`, { code: error instanceof CoreError ? error.code : 'unexpected' });

@@ -238,6 +238,8 @@ export const API_ERROR_CODES = [
   'hunk_outdated',
   /** Open in editor (AD-39): the editor asked for, or any editor, is not found on this computer, or it did not start (409). Nothing was started. */
   'editor_unavailable',
+  /** Problems (AD-38; 8.9): a detected script's text in `package.json` isn't the one the user confirmed, or the command saved no longer matches (409). Nothing ran or was stored; the UI asks again. */
+  'command_changed',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

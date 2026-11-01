@@ -8,7 +8,7 @@ import type { AntigravityPorts } from './antigravity-wiring.js';
 import type { CodexPorts } from './codex-wiring.js';
 import type { GrokPorts } from './grok-wiring.js';
 import type { LocalPorts } from './local-wiring.js';
-import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, WorkspaceFilesPort, NotifierPort, PaneLaunchers, RemoteHostPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort, VcsWorkingTreePort } from '@ogden-agents/core';
+import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, ProjectCommandRunner, WorkspaceFilesPort, NotifierPort, PaneLaunchers, RemoteHostPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort, VcsWorkingTreePort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -53,6 +53,8 @@ export interface StartOptions {
   workspaceFilesPort?: WorkspaceFilesPort;
   /** Override the Workbench's Changes git (tests; AD-37, story 8.4). Default: `vcs-git`'s working tree on the user's `git`, snapshots in `<data>/snapshots`. */
   vcsWorkingTreePort?: VcsWorkingTreePort;
+  /** Override Problems' command runner (tests; AD-38, 8.9). Default: the `project-commands-node` adapter. The server closes it on stop. */
+  projectCommandRunner?: ProjectCommandRunner;
   /** Override Claude Code's chat agent (tests). Default: the `acp-claude-code` adapter. */
   agent?: AgentPort;
   /**

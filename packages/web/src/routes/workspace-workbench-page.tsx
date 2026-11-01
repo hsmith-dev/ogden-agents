@@ -1,4 +1,4 @@
-import { WORKBENCH_CHANGES_LABEL, WORKBENCH_FILES_LABEL, WORKBENCH_PAGE_TITLE, WORKBENCH_SEARCH_LABEL } from '@ogden-agents/shared';
+import { WORKBENCH_CHANGES_LABEL, WORKBENCH_FILES_LABEL, WORKBENCH_PAGE_TITLE, WORKBENCH_PROBLEMS_LABEL, WORKBENCH_SEARCH_LABEL } from '@ogden-agents/shared';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import type { WorkbenchSearch } from '@/router';
 import { WorkspaceHeader } from '@/shell/workspace-header';
@@ -7,6 +7,7 @@ import { TabNav, TabNavItem } from '@/ui/tab-nav';
 import { WorkbenchChanges } from '@/workbench/workbench-changes';
 import { WorkbenchFiles } from '@/workbench/workbench-files';
 import { WorkbenchSearch as WorkbenchSearchPanel, type WorkbenchSearchState } from '@/workbench/workbench-search';
+import { WorkbenchProblems } from '@/workbench/workbench-problems';
 
 const EXACT = { exact: true, includeSearch: true } as const;
 
@@ -19,6 +20,8 @@ const EXACT = { exact: true, includeSearch: true } as const;
  * changes opens it on This turn. Search (`?panel=search`, story 8.8, `g s`):
  * the query in `?q=` with `?mode=`, `?matchCase=`, `?regex=`; typing
  * replaces the history entry, and a result opens Files at its line.
+ * Problems (`?panel=problems`, 8.9): the project's test and lint commands,
+ * their runs and failures, each a link back to Files at its line.
  */
 export function WorkspaceWorkbenchPage() {
   const { wsId } = useParams({ strict: false }) as { wsId: string };
@@ -26,6 +29,7 @@ export function WorkspaceWorkbenchPage() {
   const navigate = useNavigate();
   const changes = search.panel === 'changes';
   const searching = search.panel === 'search';
+  const problems = search.panel === 'problems';
   const kept = search.session === undefined ? {} : { session: search.session };
   // The Files tab keeps the file and the chat's worktree; choosing another file drops the line.
   const keptFiles: WorkbenchSearch = { ...(search.path === undefined ? {} : { path: search.path }), ...kept };
@@ -44,7 +48,7 @@ export function WorkspaceWorkbenchPage() {
       <WorkspaceHeader title={WORKBENCH_PAGE_TITLE} wsId={wsId} tab="workbench" />
       <PageBody data-testid="workspace-workbench-page">
         <TabNav label="Workbench panels" data-testid="workbench-panels">
-          <TabNavItem current={!changes && !searching} asChild>
+          <TabNavItem current={!changes && !searching && !problems} asChild>
             {/* Both panels are one route: `current` decides, never the router's partial match of the search. */}
             <Link to="/w/$wsId/workbench" params={{ wsId }} search={keptFiles} activeOptions={EXACT} data-testid="workbench-panel-files">
               {WORKBENCH_FILES_LABEL}
@@ -60,8 +64,15 @@ export function WorkspaceWorkbenchPage() {
               {WORKBENCH_CHANGES_LABEL}
             </Link>
           </TabNavItem>
+          <TabNavItem current={problems} asChild>
+            <Link to="/w/$wsId/workbench" params={{ wsId }} search={{ panel: 'problems' }} activeOptions={EXACT} data-testid="workbench-panel-problems">
+              {WORKBENCH_PROBLEMS_LABEL}
+            </Link>
+          </TabNavItem>
         </TabNav>
-        {searching ? (
+        {problems ? (
+          <WorkbenchProblems wsId={wsId} />
+        ) : searching ? (
           <WorkbenchSearchPanel
             wsId={wsId}
             session={search.session}

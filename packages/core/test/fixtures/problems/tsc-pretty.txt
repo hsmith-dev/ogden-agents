@@ -1,0 +1,8 @@
+[96msrc/a.ts[0m:[93m12[0m:[93m5[0m - [91merror[0m[90m TS2322: [0mType 'string' is not assignable to type 'number'.
+
+[7m12[0m     total = "x";
+[7m  [0m [91m    ~~~~~[0m
+
+
+Found 1 error in src/a.ts[90m:12[0m
+

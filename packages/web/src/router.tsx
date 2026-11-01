@@ -195,12 +195,12 @@ const workspaceTerminalsRoute = createRoute({
  * chat (This turn, and its worktree's Commit); `?panel=changes` opens Changes
  * (story 8.4) on `?view=`, on the chat's turn `?turn=`; `?panel=search`
  * opens Search (8.8) with its query `?q=` (at most 200 characters) and
- * `?mode=`, `?matchCase=`, `?regex=`.
+ * `?mode=`, `?matchCase=`, `?regex=`; `?panel=problems` opens Problems (8.9).
  */
 export interface WorkbenchSearch {
   path?: string;
   line?: number;
-  panel?: 'changes' | 'search';
+  panel?: 'changes' | 'search' | 'problems';
   view?: ChangesView;
   session?: string;
   turn?: string;
@@ -224,7 +224,7 @@ export function workbenchSearch(search: Record<string, unknown>): WorkbenchSearc
   return {
     ...(path === undefined ? {} : { path }),
     ...(path !== undefined && line !== undefined && Number.isSafeInteger(line) && line >= 1 ? { line } : {}),
-    ...(search.panel === 'changes' ? { panel: 'changes' as const } : search.panel === 'search' ? { panel: 'search' as const } : {}),
+    ...(search.panel === 'changes' ? { panel: 'changes' as const } : search.panel === 'search' ? { panel: 'search' as const } : search.panel === 'problems' ? { panel: 'problems' as const } : {}),
     ...(view.success ? { view: view.data } : {}),
     ...(session.success ? { session: session.data } : {}),
     ...(turn.success ? { turn: turn.data } : {}),

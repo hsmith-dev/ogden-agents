@@ -14,18 +14,21 @@ import {
 } from '@phosphor-icons/react';
 import type { ToolCallDiff, ToolKind } from '@ogden-agents/shared';
 import { useId, useState } from 'react';
-import type { Density } from '@/appearance/appearance';
 import { StateGlyph } from '@/ui/state-glyph';
 import { cn } from '@/ui/utils';
+import type { ChatDetail } from './detail-level';
 import type { TranscriptToolCall } from './transcript';
 
 /**
  * Tool-call rows (DESIGN.md Tool-call row, EXPERIENCE.md; story 2.10): one
  * bordered line per call, a glyph for the action, a plain verb ("Read",
  * "Edited", "Ran") and the target in mono. A row with a diff expands in
- * place to its hunk (click or `Enter`). In Comfortable density a run of
- * consecutive calls collapses into one row ("Read 3 files, edited 1") that
- * expands to the list; in Compact they are listed one by one.
+ * place to its hunk (click or `Enter`). How much shows is the chat's detail
+ * level (epic 26 story 4): in Normal a run of consecutive calls collapses into
+ * one row ("Read 3 files, edited 1") that expands to the list; in Verbose every
+ * call is listed on its own with its diff open. A call held by its permission
+ * card reads "Waiting for you: npm test" with the waiting glyph, never
+ * "Running"; a denied one "Denied: npm test".
  */
 
 const ICONS: Record<ToolKind, Icon> = {
@@ -60,11 +63,18 @@ const TITLE_VERB = /^(?:read|reading|view|edit|editing|write|writing|update|crea
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
-/** What the row says: the verb, and the target in mono. */
-export function toolCallLabel(call: Pick<TranscriptToolCall, 'title' | 'kind' | 'status' | 'diffs'>): { verb: string | undefined; target: string } {
+/** The words of a call its permission card holds, whatever its kind. */
+const HELD_WORDS: Record<NonNullable<TranscriptToolCall['held']>, string> = {
+  waiting: 'Waiting for you:',
+  denied: 'Denied:',
+};
+
+const isRunning = (call: Pick<TranscriptToolCall, 'status' | 'held'>) => call.held === undefined && (call.status === 'pending' || call.status === 'in_progress');
+
+/** What the row says: the verb (or the held words), and the target in mono. */
+export function toolCallLabel(call: Pick<TranscriptToolCall, 'title' | 'kind' | 'status' | 'diffs' | 'held'>): { verb: string | undefined; target: string } {
   const verbs = VERBS[call.kind];
-  const running = call.status === 'pending' || call.status === 'in_progress';
-  const verb = verbs === undefined ? undefined : running ? verbs[1] : verbs[0];
+  const verb = call.held !== undefined ? HELD_WORDS[call.held] : verbs === undefined ? undefined : isRunning(call) ? verbs[1] : verbs[0];
   if (verb === undefined) return { verb, target: call.title };
   const stripped = call.title.replace(TITLE_VERB, '').trim();
   const target = stripped !== '' ? stripped : (call.diffs?.[0]?.path ?? call.title);
@@ -134,7 +144,6 @@ const rowClass =
 function RowLine({ call }: { call: TranscriptToolCall }) {
   const Glyph = ICONS[call.kind];
   const { verb, target } = toolCallLabel(call);
-  const running = call.status === 'pending' || call.status === 'in_progress';
   return (
     <>
       <Glyph aria-hidden className="shrink-0" />
@@ -142,8 +151,9 @@ function RowLine({ call }: { call: TranscriptToolCall }) {
       <span className="min-w-0 flex-1 truncate font-mono" title={target}>
         {target}
       </span>
-      {running ? <StateGlyph state="working" label="In progress" labelMode="hidden" /> : null}
-      {call.status === 'failed' ? <span className="shrink-0 font-sans text-caption text-state-error">Failed</span> : null}
+      {call.held === 'waiting' ? <StateGlyph state="waiting" labelMode="none" /> : null}
+      {isRunning(call) ? <StateGlyph state="working" label="In progress" labelMode="hidden" /> : null}
+      {call.status === 'failed' && call.held !== 'denied' ? <span className="shrink-0 font-sans text-caption text-state-error">Failed</span> : null}
     </>
   );
 }
@@ -172,20 +182,20 @@ function DiffDetail({ diffs }: { diffs: readonly ToolCallDiff[] }) {
   );
 }
 
-/** One tool call. A call with a diff is a button that expands to its hunk. */
-export function ToolCallRow({ call }: { call: TranscriptToolCall }) {
-  const [open, setOpen] = useState(false);
+/** One tool call. A call with a diff is a button that expands to its hunk (open from the start in Verbose). */
+export function ToolCallRow({ call, defaultOpen = false }: { call: TranscriptToolCall; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const detailId = useId();
   const diffs = call.diffs ?? [];
   if (diffs.length === 0) {
     return (
-      <div className={rowClass} data-testid="tool-call-row" data-kind={call.kind} data-status={call.status}>
+      <div className={rowClass} data-testid="tool-call-row" data-kind={call.kind} data-status={call.status} data-held={call.held}>
         <RowLine call={call} />
       </div>
     );
   }
   return (
-    <div className="flex flex-col gap-1" data-testid="tool-call-row" data-kind={call.kind} data-status={call.status}>
+    <div className="flex flex-col gap-1" data-testid="tool-call-row" data-kind={call.kind} data-status={call.status} data-held={call.held}>
       <button type="button" className={cn(rowClass, 'hover:bg-muted')} aria-expanded={open} aria-controls={detailId} onClick={() => setOpen((was) => !was)}>
         <CaretRight aria-hidden className={cn('shrink-0 transition-transform', open && 'rotate-90')} />
         <RowLine call={call} />
@@ -198,24 +208,43 @@ export function ToolCallRow({ call }: { call: TranscriptToolCall }) {
 }
 
 /**
- * A run of consecutive tool calls: grouped into one expandable row in
- * Comfortable (when there is more than one), listed one by one in Compact.
+ * A run of consecutive tool calls, as the chat's detail level shows it.
+ * Verbose lists every call with its diff open. Normal groups the run into one
+ * expandable row (when there is more than one), with a call its card still
+ * holds (or denied) on its own row below the group, readable right above its
+ * card; once allowed it rejoins the group. Switching the level starts the rows
+ * afresh (their open state comes from the level).
  */
-export function ToolCalls({ calls, density }: { calls: readonly TranscriptToolCall[]; density: Density }) {
+export function ToolCalls({ calls, detail }: { calls: readonly TranscriptToolCall[]; detail: ChatDetail }) {
+  return <ToolCallsAt key={detail} calls={calls} detail={detail} />;
+}
+
+function ToolCallsAt({ calls, detail }: { calls: readonly TranscriptToolCall[]; detail: ChatDetail }) {
   const [open, setOpen] = useState(false);
   const listId = useId();
-  if (density === 'compact' || calls.length === 1) {
+  if (detail === 'verbose') {
     return (
-      <div className="flex flex-col gap-1" data-testid="tool-calls" data-grouped="false">
+      <div className="flex flex-col gap-1" data-testid="tool-calls" data-grouped="false" data-detail={detail}>
         {calls.map((call) => (
+          <ToolCallRow key={call.toolCallId} call={call} defaultOpen />
+        ))}
+      </div>
+    );
+  }
+  const grouped = calls.filter((call) => call.held === undefined);
+  const held = calls.filter((call) => call.held !== undefined);
+  if (grouped.length <= 1) {
+    return (
+      <div className="flex flex-col gap-1" data-testid="tool-calls" data-grouped="false" data-detail={detail}>
+        {[...grouped, ...held].map((call) => (
           <ToolCallRow key={call.toolCallId} call={call} />
         ))}
       </div>
     );
   }
-  const running = calls.some((call) => call.status === 'pending' || call.status === 'in_progress');
+  const running = grouped.some(isRunning);
   return (
-    <div className="flex flex-col gap-1" data-testid="tool-calls" data-grouped="true">
+    <div className="flex flex-col gap-1" data-testid="tool-calls" data-grouped="true" data-detail={detail}>
       <button
         type="button"
         className={cn(rowClass, 'hover:bg-muted')}
@@ -225,12 +254,15 @@ export function ToolCalls({ calls, density }: { calls: readonly TranscriptToolCa
         onClick={() => setOpen((was) => !was)}
       >
         <CaretRight aria-hidden className={cn('shrink-0 transition-transform', open && 'rotate-90')} />
-        <span className="min-w-0 flex-1 truncate font-sans text-label text-foreground">{groupSummary(calls)}</span>
+        <span className="min-w-0 flex-1 truncate font-sans text-label text-foreground">{groupSummary(grouped)}</span>
         {running ? <StateGlyph state="working" label="In progress" labelMode="hidden" /> : null}
       </button>
       <div id={listId} hidden={!open} className="flex flex-col gap-1 pl-4">
-        {open ? calls.map((call) => <ToolCallRow key={call.toolCallId} call={call} />) : null}
+        {open ? grouped.map((call) => <ToolCallRow key={call.toolCallId} call={call} />) : null}
       </div>
+      {held.map((call) => (
+        <ToolCallRow key={call.toolCallId} call={call} />
+      ))}
     </div>
   );
 }

@@ -2,8 +2,8 @@
 /**
  * The session view's behaviour in a real browser (story 2.10), through the
  * real `acp-claude-code` adapter and the fake ACP agent: a multi-file change
- * groups its tool-call rows in Comfortable and lists them in Compact, with
- * the edit expanding to its hunk; a message sent while the agent works is
+ * groups its tool-call rows in the chat's Normal detail level whatever the
+ * density (epic 26 story 4), with the edit expanding to its hunk; a message sent while the agent works is
  * "Queued", then sent; an error offers Try again; and a quiet agent gets the
  * check-in line, with Stop, which leaves what was queued "Not sent" and puts
  * its text back in the composer. Each test runs its own server.
@@ -30,7 +30,7 @@ const withChat = (page: Page, body: () => Promise<void>, extra: StartOptions = {
 
 const state = (page: Page) => page.getByTestId('session-state');
 
-test('a multi-file change groups its rows in Comfortable and lists them in Compact; the edit expands to its hunk', async ({ page }) => {
+test('a multi-file change groups its rows in Normal detail, in Compact density too; the edit expands to its hunk', async ({ page }) => {
   await withChat(page, async () => {
     await send(page, 'tools');
     await expect(page.getByTestId('message-agent')).toContainText('Changed src/a.ts.');
@@ -54,12 +54,13 @@ test('a multi-file change groups its rows in Comfortable and lists them in Compa
     await expect(hunk.locator('[data-mark="removed"]')).toHaveText('- export const a = 1;');
     await expect(hunk.locator('[data-mark="added"]')).toHaveText('+ export const a = 2;');
 
-    // Compact lists every call on its own.
-    await page.evaluate((key) => localStorage.setItem(key, JSON.stringify({ theme: 'system', density: 'compact', developerMode: true })), APPEARANCE_KEY);
+    // Compact density keeps the group: the detail level decides, not density.
+    await page.evaluate((key) => localStorage.setItem(key, JSON.stringify({ theme: 'system', density: 'compact', developerMode: false })), APPEARANCE_KEY);
     await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
     await expect(page.getByTestId('message-agent')).toContainText('Changed src/a.ts.');
-    await expect(page.getByTestId('tool-call-group')).toHaveCount(0);
-    await expect(page.getByTestId('tool-call-row')).toHaveCount(4);
+    await expect(page.getByTestId('tool-call-group')).toHaveText('Read 3 files, edited 1');
+    await expect(page.getByTestId('tool-call-row')).toHaveCount(0);
     await page.evaluate((key) => localStorage.removeItem(key), APPEARANCE_KEY);
   });
 });

@@ -91,6 +91,7 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `GET ${API_ROUTES.workspaceChanges}`,
   `GET ${API_ROUTES.workspaceChangesFile}`,
   `POST ${API_ROUTES.workspaceChangesHunks}`,
+  `POST ${API_ROUTES.workspaceChangesHunksUndo}`,
   `GET ${API_ROUTES.sessionTurns}`,
   `POST ${API_ROUTES.sessionWorktreeCommit}`,
   `GET ${API_ROUTES.workspaceProjectCommands}`,

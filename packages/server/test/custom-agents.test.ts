@@ -5,14 +5,14 @@
  * A command that can't be found or run registers nothing; one removed after
  * it was registered fails the chat's start in plain words.
  */
-import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { API_ROUTES, ApiErrorBody, apiPath, BuildAgentsResponse, ChatAgentsResponse, CustomAgentListResponse, CustomAgentResponse, CustomAgentTestResponse, SessionResponse, UNKNOWN_BUILD_AGENT_MESSAGE, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
+import { API_ROUTES, ApiErrorBody, apiPath, BuildAgentsResponse, TeamRosterViewResponse, ChatAgentsResponse, CustomAgentListResponse, CustomAgentResponse, CustomAgentTestResponse, SessionResponse, UNKNOWN_BUILD_AGENT_MESSAGE, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createCustomAgent, createMemorySecretStore, customAgentDescriptor } from '@ogden-agents/adapters';
 import { supportsUnattendedBuild } from '../src/build-agent-sandbox.js';
-import { SecretsUnavailableError, type SecretStorePort } from '@ogden-agents/core';
+import { PREFERENCES_FILE, SecretsUnavailableError, type SecretStorePort } from '@ogden-agents/core';
 import { createFakeBmadRepo, FAKE_BUILD_REPO_FILES } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { FAKE_AGENT, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -380,6 +380,60 @@ describe('a custom agent stays in its limits, and its chats outlive it (epic 21 
     const view = await request(server, tab, 'GET', API_ROUTES.teamRosterDefault);
     expect(view.status).toBe(200);
     expect(JSON.stringify(await view.json())).toContain('My Agent is never given instructions by a manager. An agent you add yourself works only in chats you drive');
+  });
+
+  it('removed, every role of the new projects\' team that names it is cleared, and a new agent of the same name takes no role', async () => {
+    const dataDir = temp('ogden-agents-data-');
+    const server = await startTestServer({ dataDir });
+    servers.push(server);
+    const tab = await signIn(server);
+    expect((await request(server, tab, 'POST', API_ROUTES.customAgents, { displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    const saved = await request(server, tab, 'PUT', API_ROUTES.teamRosterDefault, { roster: { manager: null, planner: { kind: 'agent', agentId: 'custom-my-agent' }, worker: null, reviewer: null } });
+    expect(saved.status).toBe(200);
+    const rosterEvents = () => server.core.events.readAfter(0).filter((event) => event.type === 'settings.team_roster_default_changed');
+    expect(rosterEvents()).toHaveLength(1);
+
+    expect((await request(server, tab, 'DELETE', apiPath(API_ROUTES.customAgent, { agentId: 'custom-my-agent' }))).status).toBe(204);
+    expect(JSON.parse(readFileSync(join(dataDir, PREFERENCES_FILE), 'utf8')).newProjects.orchestrationRoster).toBeUndefined();
+    const view = TeamRosterViewResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.teamRosterDefault)).json());
+    expect(view.stored.planner).toBeNull();
+    expect(rosterEvents()).toHaveLength(2);
+    expect(rosterEvents()[1]).toMatchObject({ payload: { orchestrationRoster: { planner: null }, previousOrchestrationRoster: { planner: { agentId: 'custom-my-agent' } } } });
+
+    // The same name again takes the freed id, and holds no role.
+    const again = await request(server, tab, 'POST', API_ROUTES.customAgents, { displayName: 'My Agent', commandLine: FAKE_COMMAND });
+    expect(again.status).toBe(201);
+    expect(CustomAgentResponse.parse(await again.json()).agent.agentId).toBe('custom-my-agent');
+    const after = TeamRosterViewResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.teamRosterDefault)).json());
+    expect(after.roster.roles.find((role) => role.role === 'planner')).toMatchObject({ chosen: null });
+    expect(after.roster.roles.find((role) => role.role === 'planner')?.effective).not.toEqual({ kind: 'agent', agentId: 'custom-my-agent' });
+  });
+
+  it('removed while the team default names nothing of it, the file stays as it was and no roster event is appended', async () => {
+    const dataDir = temp('ogden-agents-data-');
+    const server = await startTestServer({ dataDir });
+    servers.push(server);
+    const tab = await signIn(server);
+    expect((await request(server, tab, 'POST', API_ROUTES.customAgents, { displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    expect((await request(server, tab, 'DELETE', apiPath(API_ROUTES.customAgent, { agentId: 'custom-my-agent' }))).status).toBe(204);
+    expect(server.core.events.readAfter(0).some((event) => event.type === 'settings.team_roster_default_changed')).toBe(false);
+  });
+
+  it('removed when the team default cannot be written, it is still removed and a warning is logged', async () => {
+    const dataDir = temp('ogden-agents-data-');
+    const lines: string[] = [];
+    const server = await startTestServer({ dataDir, lines });
+    servers.push(server);
+    const tab = await signIn(server);
+    expect((await request(server, tab, 'POST', API_ROUTES.customAgents, { displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    expect((await request(server, tab, 'PUT', API_ROUTES.teamRosterDefault, { roster: { manager: null, planner: { kind: 'agent', agentId: 'custom-my-agent' }, worker: null, reviewer: null } })).status).toBe(200);
+    const file = readFileSync(join(dataDir, PREFERENCES_FILE), 'utf8');
+    // A folder where the save's temporary file goes: the write throws on every OS.
+    mkdirSync(join(dataDir, `${PREFERENCES_FILE}.${process.pid}.tmp`));
+    expect((await request(server, tab, 'DELETE', apiPath(API_ROUTES.customAgent, { agentId: 'custom-my-agent' }))).status).toBe(204);
+    expect(CustomAgentListResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.customAgents)).json()).agents).toEqual([]);
+    expect(readFileSync(join(dataDir, PREFERENCES_FILE), 'utf8')).toBe(file);
+    expect(lines.some((line) => line.includes("roles in the default team could not be cleared"))).toBe(true);
   });
 
   it('never builds unattended: its port declares no unattended build, so the build check refuses it', async () => {

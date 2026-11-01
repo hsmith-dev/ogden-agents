@@ -532,6 +532,12 @@ export const API_ROUTES = {
    * the same folder is working or waiting, 409 `hunk_outdated`.
    */
   workspaceChangesHunks: `${API_BASE}/workspaces/:wsId/changes/hunks`,
+  /**
+   * `POST UndoHunkRequest` → `HunkActionResponse` (8.5): puts back what a
+   * revert took, while the server still keeps it. 404 when it is gone, 409
+   * `hunk_outdated` when the file was edited since, `agent_mid_turn`.
+   */
+  workspaceChangesHunksUndo: `${API_BASE}/workspaces/:wsId/changes/hunks/undo`,
   /** `GET` → `TurnsResponse`: the chat's recorded turns (from `session.turn_changes_recorded`), newest first. */
   sessionTurns: `${API_BASE}/workspaces/:wsId/sessions/:sesId/turns`,
   /**

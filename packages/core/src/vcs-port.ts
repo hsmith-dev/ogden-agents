@@ -191,8 +191,15 @@ export interface VcsChangedFiles {
   truncated: boolean;
 }
 
-/** What a hunk action did: `outdated` when the hunk changed since it was shown, `not_found` when the file or hunk has no change there. */
-export type VcsHunkResult = 'applied' | 'outdated' | 'not_found';
+/**
+ * What a hunk action (or an undo) did (8.5): `applied`, with a revert's
+ * undo id; `outdated` when the hunk (or the file's hunks, or the file an
+ * undo puts back) changed since it was shown, and nothing was written;
+ * `not_found` when the folder is in no repository (an undo: gone, used, or
+ * of another folder or path); `unsupported` for a binary, too large, link
+ * or submodule file, or a path under a linked folder.
+ */
+export type VcsHunkResult = { outcome: 'applied'; undo?: string | undefined } | { outcome: 'outdated' | 'not_found' | 'unsupported' };
 
 /**
  * The folder a working-tree call runs in (AD-37; story 8.4): the project's
@@ -224,8 +231,15 @@ export interface VcsWorkingTreePort {
   changedFiles(folder: VcsFolder, target: VcsChangesTarget): Promise<VcsChangedFiles>;
   /** One file's diff in the view (no hunks when it is binary or over `MAX_DIFF_FILE_BYTES`), or `undefined` when it has no change there. */
   fileDiff(folder: VcsFolder, target: VcsChangesTarget, path: string): Promise<{ file: ChangedFile; hunks: DiffHunk[] } | undefined>;
-  /** Stages, unstages or reverts one hunk (`hunkId`) or the whole file, all or nothing (8.5; absent until then: 501). */
-  applyHunk?(folder: VcsFolder, input: { target: VcsChangesTarget; action: HunkAction; path: string; hunkId?: string | undefined }): Promise<VcsHunkResult>;
+  /**
+   * Stages, unstages or reverts one hunk (`hunkId`) or the whole file
+   * (`hunkIds`: every id the file has now, else `outdated`), all or nothing,
+   * from the view's own diff (8.5; absent: 501). A revert writes the folder
+   * only, never the index, and answers an undo id.
+   */
+  applyHunk?(folder: VcsFolder, input: { target: VcsChangesTarget; action: HunkAction; path: string; hunkId?: string | undefined; hunkIds?: readonly string[] | undefined }): Promise<VcsHunkResult>;
+  /** Puts back what the revert `undo` took from `path` in `folder` (the same folder, path and view only, onto the file as the revert left it), all or nothing, then forgets it (8.5). */
+  undoRevert?(folder: VcsFolder, input: { undo: string; path: string; view?: ChangesView | undefined }): Promise<VcsHunkResult>;
   /** Snapshots the folder's working tree (tracked and untracked, not ignored) as a tree object; its id, or `undefined` when the folder is in no repository. */
   snapshot(folder: VcsFolder): Promise<string | undefined>;
   /**

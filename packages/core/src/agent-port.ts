@@ -332,6 +332,20 @@ export interface AgentPort {
 }
 
 /**
+ * The flags of `agent` a wrapper around its port keeps as they are: its mode fixed at start, and what Build and the
+ * remote check read (epic 21 story 21.6: `unattendedBuild`, `attendedOnlyReason`, `localOnlyReason`). Spread into
+ * the wrapper, so a wrapped Local model is still refused a remote chat or build before any connection.
+ */
+export function keptAgentFlags(agent: AgentPort): Pick<AgentPort, 'modeFixedAtStart' | 'unattendedBuild' | 'attendedOnlyReason' | 'localOnlyReason'> {
+  return {
+    ...(agent.modeFixedAtStart === true ? { modeFixedAtStart: true } : {}),
+    ...(agent.unattendedBuild === undefined ? {} : { unattendedBuild: agent.unattendedBuild }),
+    ...(agent.attendedOnlyReason === undefined ? {} : { attendedOnlyReason: agent.attendedOnlyReason }),
+    ...(agent.localOnlyReason === undefined ? {} : { localOnlyReason: agent.localOnlyReason }),
+  };
+}
+
+/**
  * How an agent's own CLI resumes its sessions in a terminal (CAP-5). Every
  * `env` is the environment the chat's agent process gets.
  */

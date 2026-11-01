@@ -9,7 +9,7 @@
  * the keychain once and is never answered, logged or evented (AD-16), so
  * these routes are `no-store`.
  */
-import { resolveLinkedCommand } from '@ogden-agents/adapters';
+import { CUSTOM_AGENT_ID_PREFIX, resolveLinkedCommand } from '@ogden-agents/adapters';
 import { AgentError, CoreError, NotFoundError, SecretsUnavailableError, ValidationError } from '@ogden-agents/core';
 import { API_ROUTES, CustomAgentCreateRequest, CustomAgentListResponse, CustomAgentResponse, CustomAgentTestRequest, CustomAgentTestResponse, CustomAgentUpdateRequest, customAgentTestLines, type AgentId, type CustomAgent, type CustomAgentAdvertised } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
@@ -49,9 +49,11 @@ const MAX_CUSTOM_AGENT_BODY_BYTES = 16 * 1024;
 const MAX_SLUG_LENGTH = 48;
 const COULD_NOT_SAVE = "Ogden Agents couldn't save that agent. Try again.";
 const noStore = (c: Context) => c.header('Cache-Control', 'no-store');
+/** The id an unsaved command is tested under (its environment): no stored agent can have it (a slug never has two dashes in a row). */
+export const UNSAVED_TEST_ID: AgentId = `${CUSTOM_AGENT_ID_PREFIX}-test`;
 
 /** The kebab-case slug of `name`: letters and digits, accents dropped, everything else a single `-`; `agent` when nothing is left. */
-export function customAgentSlug(name: string): string {
+function customAgentSlug(name: string): string {
   const slug = name
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -64,8 +66,8 @@ export function customAgentSlug(name: string): string {
 }
 
 /** `custom-<slug>`, else `custom-<slug>-2`, `-3`… : the first no agent has yet. */
-export function customAgentId(name: string, isRegistered: (agentId: AgentId) => boolean): AgentId {
-  const base = `custom-${customAgentSlug(name)}`;
+function customAgentId(name: string, isRegistered: (agentId: AgentId) => boolean): AgentId {
+  const base = `${CUSTOM_AGENT_ID_PREFIX}${customAgentSlug(name)}`;
   if (!isRegistered(base)) return base;
   for (let n = 2; ; n++) {
     const candidate = `${base}-${n}`;
@@ -132,7 +134,7 @@ export function registerCustomAgentRoutes(app: Hono, options: CustomAgentRoutesO
     if (!body.ok) return body.response;
     const request = body.value;
     // Refused as Save refuses it, before anything starts.
-    const resolved = resolve('custom--test', request.commandLine);
+    const resolved = resolve(UNSAVED_TEST_ID, request.commandLine);
     if (!resolved.ok) return apiError(c, 400, 'custom_agent_command_invalid', resolved.reason);
     return tested(c, undefined, () => customAgents.test(request));
   });

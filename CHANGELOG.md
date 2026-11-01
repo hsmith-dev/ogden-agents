@@ -14,6 +14,14 @@ Every release of the `ogden-agents` npm package. Since `2026.10.8-1`, each relea
 - **Always allow commands starting with the same words.** A command's permission card now also offers "Commands starting with `npm test`" (the command's first one or two words, never free text) beside the exact command. Such a rule never answers a command that chains, pipes, redirects or substitutes, or that names a protected path, and it is listed with **Remove** in Settings > Projects > Always allow rules. Custom agents, attended builds and Skip all write no such rule.
 - **Fixed: a message sent straight after New chat** could reach the previous chat while the draft page was still loading. The previous chat's composer now takes no text once you have left it.
 
+## 2026.11.1-1 — the Local model stays on this computer
+
+A fix for `2026.10.31-1`: update if you use remote machines with the Local model.
+
+- **The Local model is now really refused on a remote machine.** `2026.10.31-1` said a chat or build naming a remote machine with the Local model is refused so its endpoint and key stay on this computer. The rule was in place, but the running server dropped it on the way to the chat, so such a chat or build could start on the remote machine with the endpoint's key. It is now refused before any connection, and a test goes through the server's real wiring.
+- **Removing your own agent clears it from the default team.** If a removed custom agent was named in the team for new projects, that role is now cleared; projects' own teams are untouched.
+- **Under the hood.** The fake OpenCode used in tests now follows Ogden's permission settings, so the Local build tests prove every tool call asks; shared validation and keychain-error helpers replace three copies.
+
 ## 2026.10.31-1 — agents on your other machines, and bring your own agent
 
 - **Run an agent on another computer you own, over SSH.** Settings > Remote machines adds a machine by address and user. Ogden Agents makes a fresh Ed25519 key for each machine (you add its public key to the machine yourself) and shows the machine's host key for you to confirm once. A later connection whose host key changed is refused, never silently trusted again. A chat or an attended build can then target that machine: the build's copy is sent there as a git bundle, the agent runs there, and the result comes back for review. Keys and tokens reach the remote agent only through SSH's own environment option, never the command line. A dropped connection ends the turn or blocks the build with its own plain reason. Unattended builds on a remote machine are refused for now, because Ogden Agents can't yet fence the remote machine's credential folders the way it fences yours. Ogden Agents itself still listens only on `127.0.0.1`.

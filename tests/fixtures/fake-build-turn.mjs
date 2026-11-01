@@ -11,26 +11,27 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 /** Whether `text` is a build prompt. */
 export const isBuildPrompt = (text) => /^[/$]bmad-build-auto ticket /.test(text);
 
+/** Whether `path` is inside one of `roots` (never a root itself). */
+export const isInside = (path, roots) => roots.some((root) => { const rel = relative(root, path); return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel); });
+
 /**
  * Plays one build in `cwd` (the run's worktree).
- * `editsInsideWithoutAsking`: Codex in `workspace-write`, as its real sandbox: an edit inside the workspace
- * (or an added directory) needs no card. `mode` and `openedAdditionalDirectories` are only reported in the env dump.
+ * `decide(path)`: what the agent does with a write to `path` before any card, as its own rules say: `ask` (a card,
+ * the default), `allow` (written with no card) or `deny` (refused with no card). Codex in `workspace-write` allows
+ * an edit inside the workspace (or an added directory), as its real sandbox; OpenCode follows its config's
+ * `permission`. `mode` and `openedAdditionalDirectories` are only reported in the env dump.
  */
-export async function playBuildTurn({ acp, client, sessionId, text, cwd, mode, openedAdditionalDirectories, editsInsideWithoutAsking = false }) {
-  const additionalDirectories = openedAdditionalDirectories ?? [];
+export async function playBuildTurn({ acp, client, sessionId, text, cwd, mode, openedAdditionalDirectories, decide = () => 'ask' }) {
   const update = (body) => client.notify('session/update', { sessionId, update: body });
   const say = (_client, _sessionId, chunk) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunk } });
   const ref = text.slice('/bmad-build-auto ticket '.length).trim().split(/\s/)[0];
   const ask = async (toolCallId, path) => {
     const toolCall = { toolCallId, title: `Write ${path}`, kind: 'edit', locations: [{ path }], rawInput: { file_path: path } };
-    // Codex in `workspace-write` (epic 17), as the real sandbox: an edit inside the workspace (or an added directory) needs no card.
-    if (editsInsideWithoutAsking) {
-      const roots = [cwd, ...additionalDirectories];
-      const insideRoot = roots.some((root) => { const rel = relative(root, path); return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel); });
-      if (insideRoot) {
-        await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'completed' });
-        return true;
-      }
+    // The agent's own rule first (Codex's sandbox, OpenCode's config): an allowed or denied write never reaches a card.
+    const decided = decide(path);
+    if (decided === 'allow' || decided === 'deny') {
+      await update({ sessionUpdate: 'tool_call', ...toolCall, status: decided === 'allow' ? 'completed' : 'failed' });
+      return decided === 'allow';
     }
     await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
     const answer = await client.request('session/request_permission', {

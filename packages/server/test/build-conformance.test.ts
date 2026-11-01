@@ -487,6 +487,26 @@ describe('Local model builds (epic 21 story 21.6): attended only, in its own wor
     const list = BuildAgentsResponse.parse(await (await request(s.server, s.tab, 'GET', apiPath(API_ROUTES.workspaceBuildAgents, { wsId: s.wsId }))).json());
     expect(list.agents.find((agent) => agent.agentId === 'local')).toMatchObject({ way: 'attended_only', reason: LOCAL_ATTENDED_ONLY_REASON });
   });
+
+  it("the cards come from Ogden's config: with edit allowed the write inside needs none, the write outside still asks", async () => {
+    // As if the config said `edit: allow`: the fake honours the config's `permission` as OpenCode does, so the row's two cards prove Ogden's config asks.
+    const s = await setup(row, { env: { FAKE_OPENCODE_PERMISSION: JSON.stringify({ edit: 'allow' }) } });
+    const started = await s.build({ mode: 'attended' });
+    expect(started.status).toBe(201);
+    const { session } = BuildResponse.parse(await started.json());
+    const card = async () => s.server.core.events.readAfter(0).find((event) => event.streamId === session.id && event.type === 'permission.requested');
+    await waitFor(async () => (await card()) !== undefined, 'the card for the write outside', 15_000);
+    const asked = await card();
+    if (asked?.type !== 'permission.requested') throw new Error('not a card');
+    expect(JSON.stringify(asked.payload)).toContain('escape-1.1.txt');
+    expect((await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.sessionPermission, { wsId: s.wsId, sesId: session.id, requestId: asked.payload.requestId }), { decision: 'deny' })).status).toBe(204);
+    const ended = await s.settled();
+    const events = s.server.core.events.readAfter(0).filter((event) => event.streamId === session.id);
+    expect(events.filter((event) => event.type === 'permission.requested')).toHaveLength(1);
+    // The write inside was made with no card.
+    expect(events.some((event) => event.type === 'session.tool_call' && event.payload.toolCallId === 'call-build-write')).toBe(true);
+    expect(ended.files).toContain('src/built-1.1.txt');
+  });
 });
 
 describe('limits are shared by every agent', () => {

@@ -33,7 +33,7 @@ import {
 import { eq } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { localEndpoints, localEndpointSettings } from './db/schema.js';
-import { CoreError, NotFoundError, SecretsUnavailableError, ValidationError } from './errors.js';
+import { CoreError, NotFoundError, refuseInvalid, SecretsUnavailableError, secretsUnavailable, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import { newId } from './ids.js';
 import type { SecretStorePort } from './secret-store-port.js';
@@ -93,11 +93,6 @@ const ROW_ID = 1;
 
 export function createLocalEndpoints({ db, events, secrets, now = () => new Date() }: LocalEndpointsOptions): LocalEndpoints {
   const { orm } = db;
-  const refuse = (error: { issues: Array<{ path: PropertyKey[]; message: string }> }, fallback: string): never => {
-    const issue = error.issues[0];
-    throw new ValidationError(issue?.message ?? fallback, error.issues.map((each) => ({ path: each.path, message: each.message })));
-  };
-  const unavailable = (error: unknown): SecretsUnavailableError => (error instanceof SecretsUnavailableError ? error : new SecretsUnavailableError(undefined, { cause: 'unexpected' }));
 
   const rowOf = (id: LocalEndpointId): LocalEndpoint => {
     const row = orm.select().from(localEndpoints).where(eq(localEndpoints.id, id)).get();
@@ -156,7 +151,7 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
 
     async add(request) {
       const parsed = AddLocalEndpointRequest.safeParse(request);
-      if (!parsed.success) return refuse(parsed.error, 'That server can not be added.');
+      if (!parsed.success) return refuseInvalid(parsed.error, 'That server can not be added.');
       const input = parsed.data;
       if (all().length >= MAX_LOCAL_ENDPOINTS) throw new ValidationError(`You can keep up to ${MAX_LOCAL_ENDPOINTS} servers. Remove one first.`, []);
       const address = readEndpointAddress(input.baseUrl);
@@ -168,7 +163,7 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
         try {
           await secrets.set(endpointKeyName(id), input.key);
         } catch (error) {
-          throw unavailable(error);
+          throw secretsUnavailable(error);
         }
       }
       try {
@@ -189,7 +184,7 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
 
     async update(id, request) {
       const parsed = UpdateLocalEndpointRequest.safeParse(request);
-      if (!parsed.success) return refuse(parsed.error, 'Choose something to change.');
+      if (!parsed.success) return refuseInvalid(parsed.error, 'Choose something to change.');
       const input = parsed.data;
       const before = rowOf(id);
       const keyDropped = { value: false };
@@ -246,12 +241,12 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
 
     async setKey(id, request) {
       const parsed = SetEndpointKeyRequest.safeParse(request);
-      if (!parsed.success) return refuse(parsed.error, 'Enter the key.');
+      if (!parsed.success) return refuseInvalid(parsed.error, 'Enter the key.');
       const before = rowOf(id);
       try {
         await secrets.set(endpointKeyName(id), parsed.data.key);
       } catch (error) {
-        throw unavailable(error);
+        throw secretsUnavailable(error);
       }
       try {
         return events.transaction(() => {
@@ -271,7 +266,7 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
       try {
         await secrets.delete(endpointKeyName(id));
       } catch (error) {
-        throw unavailable(error);
+        throw secretsUnavailable(error);
       }
       return events.transaction(() => {
         orm.update(localEndpoints).set({ auth: 'none' }).where(eq(localEndpoints.id, id)).run();
@@ -282,7 +277,7 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
 
     confirm(id, request) {
       const parsed = ConfirmRemoteRequest.safeParse(request);
-      if (!parsed.success) return refuse(parsed.error, 'Confirm the host.');
+      if (!parsed.success) return refuseInvalid(parsed.error, 'Confirm the host.');
       const endpoint = rowOf(id);
       const address = readEndpointAddress(endpoint.baseUrl);
       if (!address.ok || address.loopback) throw new ValidationError('This server runs on this computer, so there is nothing to confirm.', []);
@@ -297,7 +292,7 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
 
     setDefault(request) {
       const parsed = SetDefaultEndpointRequest.safeParse(request);
-      if (!parsed.success) return refuse(parsed.error, 'Choose a server.');
+      if (!parsed.success) return refuseInvalid(parsed.error, 'Choose a server.');
       const next = parsed.data.endpointId;
       if (next !== null) rowOf(next);
       events.transaction(() => {
@@ -317,7 +312,7 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
         try {
           key = await secrets.get(endpointKeyName(endpoint.id));
         } catch (error) {
-          throw unavailable(error);
+          throw secretsUnavailable(error);
         }
         if (key === undefined) throw new SecretsUnavailableError('The key for this server is no longer in your keychain. Enter it again in Settings, Agents.');
       }

@@ -15,7 +15,7 @@
  * - It needs a trusted project (it may run the project's own config), and
  *   its skills go in `.agents/skills`, run as a slash command (`/name idea`).
  */
-import { AgentError, type AgentDescriptor, type AgentPort } from '@ogden-agents/core';
+import { AgentError, type AgentDescriptor } from '@ogden-agents/core';
 import type { AgentId, CustomAgentAdvertised } from '@ogden-agents/shared';
 import { createAcpAgent, type AcpAgentPort, type AcpAgentQuirks } from '../acp-base/acp-agent.js';
 import { resolveLinkedCommand } from '../acp-base/linked-command.js';
@@ -27,10 +27,10 @@ import type { AcpToolInputPaths } from '../acp-base/tool-paths.js';
 export const CUSTOM_AGENT_ID_PREFIX = 'custom-';
 
 /** Its one mode's id: Ogden never sends a mode, so the id is only Ask's own name for it. */
-export const CUSTOM_ASK_MODE_ID = 'ask';
+const CUSTOM_ASK_MODE_ID = 'ask';
 
 /** Where a custom agent's skills go in a project. */
-export const CUSTOM_SKILLS_FOLDER = '.agents/skills';
+const CUSTOM_SKILLS_FOLDER = '.agents/skills';
 
 /** The input fields an arbitrary agent's tools most often name a path in (the shapes the shipped agents use). */
 const TOOL_INPUT_PATHS: AcpToolInputPaths = { pathFields: ['path', 'filePath', 'file_path', 'paths'], patternFields: ['pattern', 'glob'] };
@@ -75,9 +75,9 @@ export interface CustomAgentOptions {
  * digits removed. Claude Code's `dontAsk` is not here: it refuses what isn't
  * already allowed rather than allowing it.
  */
-export const NEVER_ASKING_MODE_WORDS = ['bypass', 'yolo', 'fullaccess', 'autoedit', 'acceptedit', 'autoapprove', 'autonomous', 'dangerous', 'skipall', 'trustall'] as const;
+const NEVER_ASKING_MODE_WORDS = ['bypass', 'yolo', 'fullaccess', 'autoedit', 'acceptedit', 'autoapprove', 'autonomous', 'dangerous', 'skipall', 'trustall'] as const;
 /** Whole ids (normalized as above) that never ask but are too short to match as words. */
-export const NEVER_ASKING_MODE_IDS = ['auto', 'automode'] as const;
+const NEVER_ASKING_MODE_IDS = ['auto', 'automode'] as const;
 
 /** Whether `modeId` is a mode that never asks, by the words and ids above. */
 export function neverAsksMode(modeId: string): boolean {
@@ -110,8 +110,9 @@ export function createCustomAgent(options: CustomAgentOptions): AcpAgentPort {
 /**
  * Test (story 21.3, E21-R2): starts `commandLine` once with `env`, reads its
  * `initialize` answer and stops it; no session is opened. The command is
- * resolved first (a refusal is `AgentError('agent_unavailable', <reason>)`
- * before anything starts); the agent's own failure is its plain reason.
+ * resolved by the launch, as at a chat start (a refusal is
+ * `AgentError('agent_unavailable', <reason>)` before anything starts); the
+ * agent's own failure is its plain reason.
  */
 export async function probeCustomAgent(options: {
   displayName: string;
@@ -120,8 +121,6 @@ export async function probeCustomAgent(options: {
   onDiagnostic?: CustomAgentOptions['onDiagnostic'];
   startTimeoutMs?: number | undefined;
 }): Promise<CustomAgentAdvertised> {
-  const resolved = resolveLinkedCommand({ command: options.commandLine }, options.env);
-  if (!resolved.ok) throw new AgentError('agent_unavailable', resolved.reason);
   const descriptor = customAgentDescriptor({ agentId: `${CUSTOM_AGENT_ID_PREFIX}test`, displayName: options.displayName });
   const port = createCustomAgent({ descriptor, commandLine: options.commandLine, onDiagnostic: options.onDiagnostic, startTimeoutMs: options.startTimeoutMs });
   const init = await port.probe({ env: options.env });

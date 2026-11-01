@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentError, PROTECTED_PATHS, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
+import { PROCESS_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import { acpReasons, CODEX_ATTENDED_ONLY_REASON, CODEX_CONFIG_TOML, CODEX_DESCRIPTOR, createCodexAgent, ensureCodexConfig } from '../src/index.js';
 
 const FAKE_CODEX = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-codex.mjs');
@@ -191,7 +192,7 @@ describe("Codex's chat port (epic 12 entry 5)", () => {
     expect(events).toContainEqual({ type: 'permission_mode', mode: 'ask', asksLess: false, label: 'Read-only' });
   });
 
-  it('reopens its session in a new process with resume, else load, else a new one', async () => {
+  it('reopens its session in a new process with resume, else load, else a new one', { timeout: PROCESS_TEST_TIMEOUT_MS }, async () => {
     const cwd = tempDir();
     const { session } = await start({ cwd });
     const id = session.agentSessionId;

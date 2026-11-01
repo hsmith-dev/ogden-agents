@@ -1,6 +1,6 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
-import { isInsideOverlay } from './keyboard-guard';
+import { focusInsideOverlay } from './keyboard-guard';
 
 /**
  * The project's go-to shortcuts (EXPERIENCE.md Keyboard; story 4.6): `g`,
@@ -32,7 +32,7 @@ export function isShortcutKey(event: Pick<KeyboardEvent, 'key' | 'altKey' | 'ctr
   if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
   if (event.repeat || event.defaultPrevented || event.isComposing) return false;
   const active = typeof document === 'undefined' ? null : document.activeElement;
-  return !isTypingTarget(event.target) && !isTypingTarget(active) && !isInsideOverlay(event.target) && !isInsideOverlay(active);
+  return !isTypingTarget(event.target) && !isTypingTarget(active) && !focusInsideOverlay(event);
 }
 
 /** One `g` sequence: its second key and what it does. */

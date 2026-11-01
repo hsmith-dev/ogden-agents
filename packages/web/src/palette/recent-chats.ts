@@ -1,3 +1,5 @@
+import { storageOf } from '@/ui/stored';
+
 /**
  * The chats opened in this browser, newest first, for the command palette's
  * Recent chats (epic 26 story 3). Kept in `localStorage` only, never sent to
@@ -18,13 +20,7 @@ export interface RecentChat {
 /** The storage the list uses; tests pass their own. */
 export type RecentChatsStorage = () => Pick<Storage, 'getItem' | 'setItem'> | undefined;
 
-const browserStorage: RecentChatsStorage = () => {
-  try {
-    return window.localStorage;
-  } catch {
-    return undefined;
-  }
-};
+const browserStorage: RecentChatsStorage = storageOf;
 
 /** The chats opened, newest first; empty when storage can't be read. */
 export function recentChats(storage: RecentChatsStorage = browserStorage): RecentChat[] {

@@ -21,11 +21,15 @@ import {
   WorkspaceResponse,
   type OrchestrationRunView,
 } from '@ogden-agents/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { FULL_FLOW_TEST_TIMEOUT_MS, PROCESS_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import { createFakeBmadRepo, FAKE_BUILD_REPO_FILES, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
 import type { AgentWiring } from '../src/agent-wiring.js';
 import { removeAfterTest, signIn, startTestServer, testDescriptor, waitFor, type SignedIn, type TestServer } from './helpers.js';
+
+// Each test starts a server and its agents' processes (test-timeouts.ts): a hang limit, not a measurement.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
 const API_KEY_ONLY: AgentDescriptor['signInMethods'] = [{ id: 'fake-key', kind: 'api_key', label: 'Use an API key', apiKey: { envNames: ['FAKE_AGENT_KEY'], format: 'Starts with fake-' } }];
@@ -191,7 +195,7 @@ describe('the build the person starts in the Build dialog', () => {
     } finally {
       await kit.server.close();
     }
-  }, 60_000);
+  }, FULL_FLOW_TEST_TIMEOUT_MS);
 
   it('is refused when it is another ticket\'s build, and links nothing', async () => {
     const kit = await setUp({ steps: [build('b1', '1.1')] });
@@ -209,5 +213,5 @@ describe('the build the person starts in the Build dialog', () => {
     } finally {
       await kit.server.close();
     }
-  }, 60_000);
+  }, FULL_FLOW_TEST_TIMEOUT_MS);
 });

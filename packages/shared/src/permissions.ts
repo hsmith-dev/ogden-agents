@@ -159,7 +159,7 @@ export const TWO_WORD_WRAPPERS: Readonly<Record<string, ReadonlySet<string>>> = 
 };
 
 /** A command's first word, as a program name: its last path segment, lowercased, without a Windows program extension. */
-const programName = (word: string): string =>
+export const programName = (word: string): string =>
   (word.split(/[\\/]/).at(-1) ?? word).toLowerCase().replace(/\.(?:exe|cmd|bat|com|ps1)$/, '');
 
 /**

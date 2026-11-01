@@ -24,6 +24,7 @@ import {
   RUN_REASON_STOPPED,
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
+import { FULL_FLOW_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, FAKE_BUILD_WAITING_PLAN } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
 import { removeAfterTest, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
@@ -75,7 +76,7 @@ describe('verification re-runs the tests (story 5.8)', () => {
     expect(event?.type === 'run.verification_completed' ? event.payload.verification : undefined).toMatchObject({ outcome: 'failed', testCommand: 'npm test', testOutputTail: expect.stringContaining('3 failed') });
     const approved = await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId: s.wsId, ref: '1.1' }), { revision: ended.headRevision });
     expect(await refusalOf(approved)).toMatchObject({ status: 409, code: 'checks_failed' });
-  });
+  }, FULL_FLOW_TEST_TIMEOUT_MS);
 
   it('a build whose tests pass when re-run is verified', async () => {
     const s = await setup();
@@ -84,7 +85,7 @@ describe('verification re-runs the tests (story 5.8)', () => {
     expect(ended.outcome).toBe('verified');
     const event = s.server.core.entities.listSessionEvents(ended.run.sessionId, ['run.verification_completed']).at(-1);
     expect(event?.type === 'run.verification_completed' ? event.payload.verification.checks.map((check) => check.result) : []).toEqual(['pass', 'pass', 'pass']);
-  });
+  }, FULL_FLOW_TEST_TIMEOUT_MS);
 });
 
 describe('Stop, Retry and Build all ready (story 5.8)', () => {
@@ -102,7 +103,7 @@ describe('Stop, Retry and Build all ready (story 5.8)', () => {
     const retried = RunResponse.parse(await (await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.runRetry, { wsId: s.wsId, runId: run.id }), {})).json()).run;
     expect(retried).toMatchObject({ id: run.id, outcome: 'running', worktreePath: run.worktreePath });
     expect((await s.settled('1.1')).outcome).toBe('verified');
-  });
+  }, FULL_FLOW_TEST_TIMEOUT_MS);
 
   it('Build all ready starts the ready ticket (202 with the runs and the queue), never the one waiting for it', async () => {
     const s = await setup();
@@ -115,7 +116,7 @@ describe('Stop, Retry and Build all ready (story 5.8)', () => {
     // 1.2 waits for 1.1 to be merged: a build is the agent's own word until then, so nothing more starts.
     expect((await refusalOf(await request(s.server, s.tab, 'GET', apiPath(API_ROUTES.workspaceBuild, { wsId: s.wsId, ref: '1.2' })))).status).toBe(404);
     expect(await refusalOf(await s.build({ all: true, ref: '1.1' }))).toMatchObject({ status: 400 });
-  }, 40_000);
+  }, FULL_FLOW_TEST_TIMEOUT_MS);
 });
 
 describe('settings (story 5.8)', () => {

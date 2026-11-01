@@ -1,7 +1,7 @@
 import { useParams, useRouterState } from '@tanstack/react-router';
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useAppearance } from '@/appearance/appearance-provider';
-import { isInsideOverlay } from '@/shell/keyboard-guard';
+import { focusInsideOverlay } from '@/shell/keyboard-guard';
 import {
   CommandPalette as CommandPaletteSurface,
   CommandPaletteEmpty,
@@ -12,6 +12,7 @@ import {
   CommandPaletteOption,
   CommandPaletteStatus,
 } from '@/ui/command-palette';
+import { isApplePlatform } from '@/ui/platform';
 import { StateGlyph } from '@/ui/state-glyph';
 import { rankItems, type RankedItem } from './palette-match';
 import {
@@ -51,20 +52,24 @@ export const nothingMatches = (query: string) => (query.trim() === '' ? 'Nothing
 /** The polite count. */
 export const resultCount = (count: number) => (count === 1 ? '1 result' : `${count} results`);
 
-/** Whether a key press is Cmd/Ctrl+K: Ctrl+K inside a terminal is the shell's (kill line); Cmd+K always counts. */
-export function isPaletteKey(event: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'target' | 'isComposing'>): boolean {
+/**
+ * Whether a key press is the palette's key: Cmd+K on Apple devices, where
+ * Ctrl+K stays a text field's delete to end of line; Ctrl+K elsewhere,
+ * except inside a terminal, where it is the shell's kill line.
+ */
+export function isPaletteKey(event: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'target' | 'isComposing'>, platform?: string): boolean {
   if (event.altKey || event.shiftKey || event.isComposing) return false;
   const key = event.key.toLowerCase();
   // A non-Latin layout (Cyrillic, Greek) types another letter on the K key: its physical key counts there; a Latin layout (Dvorak) keeps its own `k`.
   const isK = key === 'k' || (!/^[a-z]$/.test(key) && event.code === 'KeyK');
   if (!isK) return false;
-  if (event.metaKey) return true;
-  if (!event.ctrlKey) return false;
+  if (isApplePlatform(platform)) return event.metaKey && !event.ctrlKey;
+  if (!event.ctrlKey || event.metaKey) return false;
   const target = event.target;
   return !(target instanceof Element && target.closest('.xterm') !== null);
 }
 
-const inPalette = (target: EventTarget | null) => target instanceof Element && target.closest('[data-slot="command-palette"]') !== null;
+const PALETTE_SELECTOR = '[data-slot="command-palette"]';
 
 /** The chat on screen (`/w/:wsId/s/:sesId`), if any. */
 function useChatOnScreen(pathname: string, wsId: string | undefined, sesId: string | undefined): string | undefined {
@@ -99,14 +104,13 @@ export function CommandPalette() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || !isPaletteKey(event)) return;
-      const active = document.activeElement;
       if (paletteState().open) {
         event.preventDefault();
         closeCommandPalette();
         return;
       }
       // Never a second modal over an open dialog, alert dialog or menu.
-      if ((isInsideOverlay(active) && !inPalette(active)) || (isInsideOverlay(event.target) && !inPalette(event.target))) return;
+      if (focusInsideOverlay(event, PALETTE_SELECTOR)) return;
       event.preventDefault();
       openCommandPalette();
     };

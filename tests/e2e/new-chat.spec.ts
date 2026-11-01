@@ -13,12 +13,10 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { composer, send, startChat, withChatServer } from './chat-server.js';
+import { blur } from './tab.js';
 
 /** `NEW_CHAT_EVENT` (packages/web/src/chat/new-chat.ts; its unit test pins this value and the shell's script to it). */
 const NEW_CHAT_EVENT = 'ogden-agents:new-chat';
-
-/** Takes the cursor out of every field, so a single-letter shortcut counts. */
-const blur = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
 /** `g`, then `n`. */
 async function goNew(page: Page) {
@@ -80,6 +78,8 @@ test('the draft first message makes exactly one chat, which opens and shows it',
     const chat = await startChat(page, repo);
     await page.getByTestId('header-new-chat').click();
     await expect(page).toHaveURL(new RegExp(`/w/${chat.wsId}/new$`));
+    // The URL changes before the draft's code has loaded: until it shows, the composer on screen is the old chat's.
+    await expect(page.getByTestId('new-chat-page')).toBeVisible();
     await send(page, 'hello');
     await expect(page).toHaveURL(new RegExp(`/w/${chat.wsId}/s/ses_[0-9A-Z]{26}$`));
     expect(page.url()).not.toBe(chat.url);

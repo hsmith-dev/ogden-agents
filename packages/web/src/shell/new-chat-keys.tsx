@@ -2,7 +2,7 @@ import { useParams } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
 import { NEW_CHAT_EVENT, useOpenNewChat } from '@/chat/new-chat';
 import { openCommandPalette } from '@/palette/palette-store';
-import { isInsideOverlay } from './keyboard-guard';
+import { focusInsideOverlay } from './keyboard-guard';
 import { useGoKeys } from './use-go-shortcuts';
 
 /**
@@ -21,11 +21,11 @@ export function NewChatKeys() {
   current.current = { wsId, openNewChat };
   useGoKeys([{ key: 'n', run: () => (wsId === undefined ? openCommandPalette('new-chat-in') : openNewChat(wsId)) }]);
   useEffect(() => {
-    const onNewChat = () => {
+    const onNewChat = (event: Event) => {
       const { wsId: inProject, openNewChat: open } = current.current;
       if (inProject !== undefined) open(inProject);
       // Never a second modal over an open dialog or menu (as Cmd/Ctrl+K).
-      else if (!isInsideOverlay(document.activeElement)) openCommandPalette('new-chat-in');
+      else if (!focusInsideOverlay(event)) openCommandPalette('new-chat-in');
     };
     window.addEventListener(NEW_CHAT_EVENT, onNewChat);
     return () => window.removeEventListener(NEW_CHAT_EVENT, onNewChat);

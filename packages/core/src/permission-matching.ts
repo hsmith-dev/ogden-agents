@@ -7,7 +7,7 @@
  */
 import { realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
-import { alwaysAllowRefusal, type AlwaysAllowScope, type CautionLevel, type ToolKind, type Workspace } from '@ogden-agents/shared';
+import { alwaysAllowRefusal, programName, type AlwaysAllowScope, type CautionLevel, type ToolKind, type Workspace } from '@ogden-agents/shared';
 import type { ProtectedPaths } from './agent-port.js';
 import { prefixRefusedFor, scriptNameIndex } from './command-prefix-allowlists.js';
 import { canonicalWorkspacePath, isCaseInsensitivePath } from './entities.js';
@@ -145,7 +145,7 @@ export function pathsInsideWorkspace(workspace: Pick<Workspace, 'path' | 'realPa
  * (zsh's `=cmd` expansion), no masked secret, and is not led by an
  * interpreter, a wrapper, a two-word wrapper or a variable assignment
  * ({@link alwaysAllowRefusal}). Paths are checked apart, on the filesystem
- * ({@link commandPathsRulable}).
+ * ({@link commandPathsReach}).
  */
 export function commandRuleRefusal(command: string): string | undefined {
   if (command.includes(MASKED)) return COMMAND_REFUSALS.masked;
@@ -233,11 +233,6 @@ export function commandPathsReach(
   return touchesProtected ? 'protected' : outside ? 'outside' : 'inside';
 }
 
-/** Whether every word of `command` stays inside the workspace and off protected paths ({@link commandPathsReach}). */
-export function commandPathsRulable(workspace: Pick<Workspace, 'path' | 'realPath'>, command: string, extraFolders: readonly string[] = []): boolean {
-  return commandPathsReach(workspace, command, extraFolders) === 'inside';
-}
-
 /**
  * Why a prefix rule must not cover `command` even though an exact rule may
  * (AD-40 security review, and the independent review of 2026-10-31): a
@@ -254,16 +249,13 @@ export function prefixRuleRefusal(command: string): string | undefined {
   return prefixRefusedFor(name, given.slice(1), raw.slice(1)) ? refusal : undefined;
 }
 
-/** A command's first word, as a program name: its last path segment, lowercased, without a Windows program extension. */
-const programName = (word: string): string => (word.split(/[\\/]/).at(-1) ?? word).toLowerCase().replace(/\.(?:exe|cmd|bat|com|ps1)$/, '');
-
 /**
  * What "Always allow" would cover for a request, its first (default) scope:
  * for `execute`, the exact command (`command_exact`, AD-40); for another
  * named kind, the kind; for `other`, an unknown kind, an `execute` without a
  * command, or a command whose text can't be ruled ({@link commandRuleRefusal}),
  * nothing (`null`: Always allow is not offered). Core also refuses a command
- * whose paths can't be ruled ({@link commandPathsRulable}).
+ * whose paths can't be ruled ({@link commandPathsReach}).
  */
 export function alwaysAllowScope(kind: ToolKind, command: string | undefined): AlwaysAllowScope | null {
   if (kind === 'execute') {
@@ -294,7 +286,7 @@ export function alwaysAllowPrefixScope(command: string): AlwaysAllowScope | null
  * Whether a stored rule answers a request of `kind` with `command`.
  * `pathsInside` is, for a file kind, whether every path the call names is
  * inside the workspace ({@link pathsInsideWorkspace}), and for `execute`,
- * whether the command's paths are rulable ({@link commandPathsRulable}); it
+ * whether the command's paths are rulable (`inside` from {@link commandPathsReach}); it
  * defaults to `false`, so a caller that forgets it never allows.
  *
  * A command rule matches only a rulable command ({@link commandRuleRefusal})

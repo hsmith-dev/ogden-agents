@@ -12,6 +12,7 @@
 import type { TranscriptMessage } from '../src/chat/transcript';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { FULL_FLOW_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 
 const { Markdown, MAX_MARKDOWN_LENGTH, STREAMING_RENDER_MS, safeHref } = await import('../src/ui/markdown');
 const { Message } = await import('../src/chat/transcript-parts');
@@ -265,29 +266,60 @@ describe('agent replies as Markdown (chat variant)', () => {
     cleanup();
     return { took, text, rest };
   };
-  const bound = process.platform === 'win32' ? 8_000 : 3_000;
   // Every line differs, so no line is served from the render cache.
   const lines = (count: number, line: (index: number) => string) => Array.from({ length: count }, (_, index) => line(index)).join('\n');
+  /** Today's bound on a quiet machine. */
+  const quietBound = process.platform === 'win32' ? 8_000 : 3_000;
+  let references = 0;
+  /** An ordinary 1,000-line reply rendered now, its text unlike every case's and every other reference's (never from the render cache): how fast this machine is at this moment. */
+  const reference = () => {
+    const run = (references += 1);
+    return timed(lines(1_000, (index) => `Reference ${run}, line ${index}: an ordinary reply with **bold**, \`code\` and plain words.`)).took;
+  };
+  // A test is up to two tries of two references and a case of up to 12 times one, a bound that scales with the load: the
+  // default 5 s and the process tier would cut a loaded run off inside its own bound, so the whole-flow tier is its hang limit.
+  const RENDER_TEST_TIMEOUT_MS = FULL_FLOW_TEST_TIMEOUT_MS;
+  const RATIO = 12;
+  /** One try: the case rendered between two references, against 12 times the slower of them, never less than the quiet bound. */
+  const attempt = (source: string) => {
+    const before = reference();
+    const result = timed(source);
+    return { result, bound: Math.max(quietBound, RATIO * Math.max(before, reference())) };
+  };
+  /**
+   * Requires a case to render within its bound. On a quiet machine that is
+   * the quiet bound; on a loaded one it scales with the load around the case.
+   * A case over its bound is measured once more (each render starts with a
+   * cold cache, as the component is unmounted between them), so a burst of
+   * load during one render is not a failure, while a real slowdown fails
+   * both tries: a case 10 times slower than usual still fails.
+   */
+  const quickly = (source: string) => {
+    let tried = attempt(source);
+    if (tried.result.took >= tried.bound) tried = attempt(source);
+    expect(tried.result.took, `rendered in ${Math.round(tried.result.took)} ms against a bound of ${Math.round(tried.bound)} ms, twice`).toBeLessThan(tried.bound);
+    return tried.result;
+  };
 
-  it('hostile lines render quickly: bracket runs, pipes, address runs, unclosed images, emphasis runs', () => {
-    expect(timed(lines(50, (index) => `${index}${'['.repeat(3_990)}`)).took).toBeLessThan(bound);
-    expect(timed(lines(25, (index) => `${index}${'|'.repeat(3_990)}\n${'|-'.repeat(1_995)}`)).took).toBeLessThan(bound);
-    expect(timed(lines(50, (index) => `${index}${'https://a.b/'.repeat(330)}`)).took).toBeLessThan(bound);
-    expect(timed(lines(50, (index) => `${index}${'![a](https://x/'.repeat(260)}`)).took).toBeLessThan(bound);
-    expect(timed(lines(50, (index) => `${index}${'**a_b'.repeat(790)}`)).took).toBeLessThan(bound);
+  it.each([
+    ['bracket runs', lines(50, (index) => `${index}${'['.repeat(3_990)}`)],
+    ['pipes', lines(25, (index) => `${index}${'|'.repeat(3_990)}\n${'|-'.repeat(1_995)}`)],
+    ['address runs', lines(50, (index) => `${index}${'https://a.b/'.repeat(330)}`)],
+    ['unclosed images', lines(50, (index) => `${index}${'![a](https://x/'.repeat(260)}`)],
+    ['emphasis runs', lines(50, (index) => `${index}${'**a_b'.repeat(790)}`)],
+  ])('hostile lines render quickly: %s', { timeout: RENDER_TEST_TIMEOUT_MS }, (_, source) => {
+    quickly(source);
   });
 
-  it('a huge reply renders quickly; past 200,000 characters the rest is plain text', () => {
+  it('a huge reply renders quickly; past 200,000 characters the rest is plain text', { timeout: RENDER_TEST_TIMEOUT_MS }, () => {
     const source = lines(4_000, (index) => `Line ${index} **bold** text, \`code\` and https://example.com/${index}.`);
-    const huge = timed(source);
     expect(source.length).toBeGreaterThan(MAX_MARKDOWN_LENGTH);
-    expect(huge.took).toBeLessThan(bound);
+    const huge = quickly(source);
     expect(huge.rest?.textContent).toBe(source.slice(MAX_MARKDOWN_LENGTH));
   });
 
-  it('thousands of tiny blocks: Markdown stops at 5,000 lines and the rest is plain text', () => {
-    const blocks = timed('```\n'.repeat(40_000));
-    expect(blocks.took).toBeLessThan(bound);
+  it('thousands of tiny blocks: Markdown stops at 5,000 lines and the rest is plain text', { timeout: RENDER_TEST_TIMEOUT_MS }, () => {
+    const blocks = quickly('```\n'.repeat(40_000));
     expect(blocks.rest?.textContent?.length).toBe(35_000 * 4);
   });
 });

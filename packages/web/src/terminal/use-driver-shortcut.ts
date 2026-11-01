@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { isInsideOverlay } from '@/shell/keyboard-guard';
+import { focusInsideOverlay } from '@/shell/keyboard-guard';
 
 /** Whether `event` is the driver shortcut: `⌘.` on macOS, `Ctrl+.` elsewhere (either works everywhere). */
 export function isDriverShortcut(event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>): boolean {
@@ -21,7 +21,7 @@ export function useDriverShortcut(enabled: boolean, onToggle: () => void, target
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isDriverShortcut(event)) return;
       // Not from inside a dialog or menu: it would switch the chat behind it (3.6 review F4).
-      if (isInsideOverlay(event.target)) return;
+      if (focusInsideOverlay(event)) return;
       event.preventDefault();
       event.stopPropagation();
       if (!event.repeat) toggle.current();

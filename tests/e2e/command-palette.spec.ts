@@ -19,7 +19,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { API_ROUTES, serverModule } from '../support.js';
 import { composer, send, startChat, withChatServer } from './chat-server.js';
-import { sidebarOf, storedToken } from './tab.js';
+import { blur, paletteKey, sidebarOf, storedToken } from './tab.js';
 
 /** The detail level's storage key (`CHAT_DETAIL_KEY`, packages/web/src/chat/detail-level.ts). */
 const CHAT_DETAIL_KEY = 'ogden-agents.chat-detail.v1';
@@ -28,11 +28,8 @@ const palette = (page: Page) => page.getByTestId('command-palette');
 const field = (page: Page) => page.getByRole('combobox');
 const option = (page: Page, name: string | RegExp) => palette(page).getByRole('option', { name });
 
-/** Takes the cursor out of every field, so a single-letter shortcut counts. */
-const blur = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-
 async function openPalette(page: Page) {
-  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.press(await paletteKey(page));
   await expect(palette(page)).toBeVisible();
   await expect(field(page)).toBeFocused();
 }
@@ -76,7 +73,7 @@ test('Cmd/Ctrl+K from the composer: Esc returns focus; a chat in another project
 
     // Cmd/Ctrl+K again toggles it closed.
     await openPalette(page);
-    await page.keyboard.press('ControlOrMeta+k');
+    await page.keyboard.press(await paletteKey(page));
     await expect(palette(page)).toHaveCount(0);
     await expect(composer(page)).toBeFocused();
 

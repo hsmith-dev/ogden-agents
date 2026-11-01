@@ -2,7 +2,7 @@
 
 ## Open items
 
-Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 2 retrospective, action A7); updated 2026-10-01 by the epic 9 and epic 3 retrospectives, 2026-10-03 by the epic 4 sweep (4.12), 2026-10-04 by the epic 6 sweep (6.9), 2026-10-04 by the maintained-fork story, and 2026-10-02 by the epic 10 retrospective. Every entry stays in the log below for history, resolved ones included; an entry that starts with "Resolved:" closes an earlier one. When you add or resolve an entry, update this index too.
+Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 2 retrospective, action A7); updated 2026-10-01 by the epic 9 and epic 3 retrospectives, 2026-10-03 by the epic 4 sweep (4.12), 2026-10-04 by the epic 6 sweep (6.9), 2026-10-04 by the maintained-fork story, 2026-10-02 by the epic 10 retrospective, and 2026-10-31 by the epic 26 sweep (26.9). Every entry stays in the log below for history, resolved ones included; an entry that starts with "Resolved:" closes an earlier one. When you add or resolve an entry, update this index too.
 
 Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim from its Log entry's summary (story 10.8). Log entries are append-only, so the phrase never goes stale; `node scripts/check-provenance.mjs` (CI job Provenance) fails on a line whose phrase is missing or matches no summary, on a line whose phrase a `Resolved:` summary contains (the entry is closed, so the line is stale), and (entry 4.12) on a Log entry added since the base branch that isn't `Resolved:`, contains no index line's phrase, and isn't quoted (`"<part of its summary>"`) by a `Resolved:` summary. A partial close starts `Resolved (…):` and leaves its index line in place.
 
@@ -130,7 +130,15 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 21.7 (refactor sweep): a removed custom agent's id can stay in the install-wide team roster default file; clear it on remove or ignore it on read. From the 21.3 audit. (log: "The install-wide team roster default (a file, not the database) can still name a removed custom agent's id")
 - 21.7 (refactor sweep): make the fake OpenCode honour Ogden's permission config so the Local build row proves every tool call asks. From the 21.6 review. (log: "The fake OpenCode asks on every tool call whatever Ogden's permission config says")
 - 14.11 (live check): The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model. From 14.9 review. (log: "The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model")
-- 26.5 (Help menu): move Welcome out of the settings nav (Advanced's last sub-link) into Help, and drop it from `SETTINGS_GROUPS`. From 26.7 design. (log: "Welcome stays as the settings nav's last Advanced sub-link until Help exists")
+- 26.10 (installed suite): run `tests/e2e-installed/onboarding-journey.spec.ts` and `agents-journey.spec.ts` against the packed tarball; 26.5 edited them without running them. From 26.5. (log: "were edited by 26.5 (the Help opener, `rowsWithAgent`) but not run")
+- Unowned (Developer mode): show the skill name in mono beside a build session's plain title, as EXPERIENCE.md Live run view says. From 26.6. (log: "Developer mode does not show the skill name beside a build session's title")
+- BMad fork (`tickets.py status`): report the epic file's own frontmatter `title`, so the Board's epic heading can show it. From 26.6. (log: "The Board's epic heading could show the epic file's own frontmatter `title`")
+- Epic 27 (composer setup row): a failed first send's chat is remembered only while the new-chat draft stays open, so leaving and returning, or changing agent or machine, can leave that empty chat. From 26.2 review 1. (log: "A failed first send's chat is remembered only while the new-chat draft stays open")
+- Epic 27 (composer setup row): choose the permission mode in the new-chat draft before the first message; until then the project's default applies. From 26.2. (log: "The new-chat draft has no permission mode choice before the first message")
+- Unowned (needs the adapter's `rawInput`): Verbose tool rows show each call's title only, with no input and no command output open. From 26.4. (log: "Verbose tool rows show each call's title only")
+- Unowned (remote machines): about 1 in 200 Ed25519 keys from ssh2's `generateKeyPairSync` fail its own `parseKey` ("Malformed OpenSSH private key"); check the key before saving it and generate again. From 26.9's test runs. (log: "About 1 in 200 Ed25519 key pairs that ssh2 generates")
+- Unowned (a later sweep): the epic 26 sweep's leftovers: two files over 600 lines, helpers repeated across test files, two `command-palette.tsx` file names and exports used only in their own module. From 26.9. (log: "Left by the epic 26 sweep (26.9)")
+- Epic 27 (new-chat draft): while the lazily loaded draft page is still arriving after New chat, the URL already reads `/new` but the previous chat's composer is on screen, so text typed and sent at once goes to that chat. From the 26.9 review. (log: "While the new-chat draft page is still loading after New chat")
 - Unowned (Always allow rules list): show in which chat each rule was added; the rule row stores none. From 26.8 review Q5. (log: "Show in which chat each Always allow rule was added")
 
 ## Log
@@ -1060,3 +1068,34 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `/Users/harrisonsmith/Documents/GitHub/ogden-agents/_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-always-allow-scoped-to-a-command-prefix-ad-40-with-a-securit-plan.md`
   summary: Show in which chat each Always allow rule was added, in the Settings rules list (EXPERIENCE.md Always allow rules row).
   evidence: `permission_rules` stores no session id; adding one needs a migration and a payload change, which 26.8's plan ruled out. The date is shown.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-refactor-sweep-plan.md`
+  summary: Resolved: "Welcome stays as the settings nav's last Advanced sub-link until Help exists" is closed by 26.5: Welcome is in the Help menu, and `SETTINGS_GROUPS` no longer lists it.
+  evidence: `packages/web/src/shell/help-menu.tsx` (`HELP_ITEMS.welcome`, the `/welcome` link); `packages/web/src/settings/settings-groups.ts` has no Welcome page. Checked by the 26.9 sweep.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-one-line-sidebar-rows-the-shortcut-banner-shows-once-plan.md`
+  summary: The installed-suite specs `onboarding-journey.spec.ts` and `agents-journey.spec.ts` were edited by 26.5 (the Help opener, `rowsWithAgent`) but not run there, since they need the packed tarball.
+  evidence: 26.5 Deferred (for the sweep); `tests/e2e-installed/onboarding-journey.spec.ts`, `tests/e2e-installed/agents-journey.spec.ts`. 26.10 (the epic's end-to-end and release part) runs the installed suite.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-plain-titles-and-no-dead-ends-build-titles-runs-rows-the-boa-plan.md`
+  summary: Developer mode does not show the skill name beside a build session's title (in mono, as EXPERIENCE.md Live run view says); the title is the plain "Build 1.2: <ticket title>".
+  evidence: 26.6 Deferred (for the sweep).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-plain-titles-and-no-dead-ends-build-titles-runs-rows-the-boa-plan.md`
+  summary: The Board's epic heading could show the epic file's own frontmatter `title` once `tickets.py status` (the BMad fork) reports it; today it shows the name the status gives.
+  evidence: 26.6 Deferred (for the sweep). The change is in the maintained BMad fork's `tickets.py`, never upstream.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-new-chat-in-one-step-g-n-cmd-ctrl-n-and-header-buttons-plan.md`
+  summary: A failed first send's chat is remembered only while the new-chat draft stays open (a ref in the page), so leaving and returning, or changing agent or machine, can leave that empty chat behind.
+  evidence: 26.2 review 1 (a pre-existing pattern); `packages/web/src/routes/new-chat-page.tsx` `firstChat`. Epic 27's composer setup row reworks the draft.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-new-chat-in-one-step-g-n-cmd-ctrl-n-and-header-buttons-plan.md`
+  summary: The new-chat draft has no permission mode choice before the first message (epic 27's setup row); until then the project's default applies.
+  evidence: 26.2 Deferred (for the sweep).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-tool-rows-wait-in-words-normal-and-verbose-detail-per-chat-plan.md`
+  summary: Verbose tool rows show each call's title only, not its input or its command output open, because the transcript carries neither; the adapters would need to keep the call's `rawInput` and output content.
+  evidence: 26.4 Deferred (for the sweep); EXPERIENCE.md Detail level ("with its input").
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-refactor-sweep-plan.md`
+  summary: Left by the epic 26 sweep (26.9), recorded rather than fixed: `packages/web/src/routes/session-page.tsx` is 841 lines (over 600 before the epic) and `packages/core/test/permissions.test.ts` 1582; the e2e specs' authorized REST caller and session-idle waits and the web tests' memory storage and row builders are repeated across files; two files are named `command-palette.tsx` (`palette/` and `ui/`); some exports are used only in their own module (the palette's strings, `PREFIX_NEVER_PROGRAMS` and the like).
+  evidence: 26.9 Design Notes.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-refactor-sweep-plan.md`
+  summary: About 1 in 200 Ed25519 key pairs that ssh2 generates (`utils.generateKeyPairSync('ed25519')` in `createSshRemoteHostPort().generateKeypair`) fail ssh2's own `utils.parseKey` with "Malformed OpenSSH private key", so a remote machine's new key can be unusable and `remote-host-ssh.test.ts` "returns a private key ssh2 itself can parse back" fails at that rate.
+  evidence: Seen in 26.9's first `pnpm test`; a loop of 3,000 generations here gave 14 unparseable keys. Not changed by the sweep (no behaviour change beyond its two). `packages/adapters/src/remote-host-ssh/index.ts` `generateKeypair`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-refactor-sweep-plan.md`
+  summary: While the new-chat draft page is still loading after New chat (a lazily loaded route), the URL already reads `/w/:wsId/new` but the previous chat's page and composer stay on screen, so a message typed and sent at once goes to the previous chat.
+  evidence: 26.9 review (quick lens): the cause of `tests/e2e/new-chat.spec.ts`'s flake, reproduced by delaying the draft page's chunk 1.5 s; the spec now waits for `new-chat-page`. Pre-existing since 26.2 (`packages/web/src/router.tsx` lazy route, `routes/new-chat-page.tsx`); a fix (a pending component, or the old composer disabled while the route loads) changes behaviour, which the sweep rules out. Usually milliseconds, so rare in use.

@@ -3,8 +3,10 @@
  * The command palette in a DOM (epic 26 story 3): Ctrl+K from the composer
  * opens it with the field focused and the empty query's groups; Ctrl+K again
  * or Esc closes it with focus back in the composer; nothing opens over
- * another dialog, and Ctrl+K in a terminal is the shell's (Cmd+K still
- * opens). The field is a combobox over a grouped listbox with the selected
+ * another dialog, and Ctrl+K in a terminal is the shell's. On Apple
+ * devices Cmd+K opens (in a terminal too) and Ctrl+K is the field's;
+ * elsewhere Meta+K is not the palette (happy-dom's user agent is Linux's).
+ * The field is a combobox over a grouped listbox with the selected
  * option as its active descendant; `↑` `↓` wrap; Enter runs; the count is
  * announced; no match says so. Tickets show only with the Board on; "New
  * chat in..." lists projects and Esc or Backspace goes back; Show every step
@@ -179,15 +181,31 @@ describe('opening and closing', () => {
     await waitFor(() => expect(palette()?.getAttribute('data-mode')).toBe('new-chat-in'));
   });
 
-  it('Ctrl+K in a terminal is the shell kill line; Cmd+K opens there too', async () => {
+  it('Ctrl+K in a terminal is the shell kill line; Meta+K is not the palette off Apple devices', async () => {
     mount();
     const terminal = screen.getByTestId('terminal');
     terminal.focus();
     ctrlK(terminal);
+    fireEvent.keyDown(terminal, { key: 'k', metaKey: true });
+    fireEvent.keyDown(composer(), { key: 'k', metaKey: true });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(palette()).toBeNull();
-    fireEvent.keyDown(terminal, { key: 'k', metaKey: true });
-    await waitFor(() => expect(palette()).not.toBeNull());
+  });
+
+  it('on Apple devices Cmd+K is the key, in a terminal too, and Ctrl+K reaches the field', () => {
+    const mac = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)';
+    const linux = 'Mozilla/5.0 (X11; Linux x86_64)';
+    const xterm = document.createElement('div');
+    xterm.className = 'xterm';
+    const inTerminal = document.createElement('textarea');
+    xterm.append(inTerminal);
+    const base = { key: 'k', code: 'KeyK', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, isComposing: false, target: null };
+    expect(isPaletteKey({ ...base, metaKey: true }, mac)).toBe(true);
+    expect(isPaletteKey({ ...base, metaKey: true, target: inTerminal }, mac)).toBe(true);
+    expect(isPaletteKey({ ...base, ctrlKey: true }, mac)).toBe(false);
+    expect(isPaletteKey({ ...base, ctrlKey: true }, linux)).toBe(true);
+    expect(isPaletteKey({ ...base, ctrlKey: true, target: inTerminal }, linux)).toBe(false);
+    expect(isPaletteKey({ ...base, metaKey: true }, linux)).toBe(false);
   });
 });
 

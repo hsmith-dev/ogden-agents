@@ -16,10 +16,14 @@ import { join } from 'node:path';
 import { createFixedSandbox } from '@ogden-agents/adapters';
 import type { TicketStorePort } from '@ogden-agents/core';
 import { API_ROUTES, ApiErrorBody, apiPath, BuildResponse, CommitPlanFilesResponse, ReviewResponse, TicketsResponse, WorkspaceResponse } from '@ogden-agents/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { PROCESS_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
 import { removeAfterTest, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
+
+// Each test starts a server and its agents' processes (test-timeouts.ts): a hang limit, not a measurement.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 function request(server: TestServer, tab: SignedIn, method: string, path: string, body?: unknown) {
   return fetch(`${server.url}${path}`, {

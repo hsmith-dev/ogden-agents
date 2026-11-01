@@ -19,7 +19,7 @@ import { posix, win32 } from 'node:path';
 import type { LauncherRefusal, PaneLaunchers } from '@ogden-agents/core';
 import type { PaneDetection, PaneLauncher, PaneLauncherStatus } from '@ogden-agents/shared';
 import { WINDOWS_FOLDERS } from '../child-env.js';
-import { absolutePathFolders, envValue, launchEnvironment, platformKey, safeWorkingFolder, windowsCmd } from '../program-launch.js';
+import { absolutePathFolders, envValue, existingFolder, launchEnvironment, platformKey, safeWorkingFolder, windowsCmd } from '../program-launch.js';
 
 /** What detection needs of the computer; replaced in tests. */
 export interface DetectSystem {
@@ -54,17 +54,17 @@ export const nodeDetectSystem: DetectSystem = {
     return new Promise((resolve) => {
       const win = process.platform === 'win32';
       const shim = win && /\.(cmd|bat)$/i.test(path);
-      // Node refuses to run a .cmd or .bat without a shell; a shim goes through cmd.exe with the whole command in one more pair of quotes.
+      // Node refuses to run a .cmd or .bat without a shell; a shim goes through cmd.exe (no AutoRun, delayed expansion off, as the editor's) with the whole command in one more pair of quotes.
       // A shim's path with a character cmd would read as its own is not run (a Windows file name has no quote, so this is depth, not a hole).
       if (shim && /["%^!\r\n]/.test(path)) {
         resolve({ ok: false });
         return;
       }
       const file = shim ? windowsCmd(env) : path;
-      const args = shim ? ['/d', '/s', '/c', `""${path}" --version"`] : ['--version'];
+      const args = shim ? ['/d', '/s', '/v:off', '/c', `""${path}" --version"`] : ['--version'];
       try {
         // Run away from any project and from the shared temp folder: the user's home, else the filesystem's root.
-        const child = execFile(file, args, { env, cwd, timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', windowsHide: true, windowsVerbatimArguments: shim, maxBuffer: 64 * 1024 }, (error, stdout) => {
+        const child = execFile(file, args, { env, cwd: existingFolder(cwd, env, process.platform), timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', windowsHide: true, windowsVerbatimArguments: shim, maxBuffer: 64 * 1024 }, (error, stdout) => {
           clearTimeout(hard);
           if (error) resolve({ ok: false });
           else resolve({ ok: true, version: String(stdout).trim().split(/\r?\n/, 1)[0]?.slice(0, 80) ?? '' });

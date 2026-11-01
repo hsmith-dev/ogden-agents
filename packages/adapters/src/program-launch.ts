@@ -16,6 +16,7 @@
  *   writable by every user, and on Windows `cmd.exe` and `CreateProcess`
  *   look in the working folder before `PATH`.
  */
+import { statSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 import { helperEnvironment } from './child-env.js';
 
@@ -69,6 +70,16 @@ export function safeWorkingFolder(env: Readonly<Record<string, string | undefine
   if (!win) return '/';
   const root = envValue(env, 'SYSTEMROOT', platform);
   return root !== undefined && /^[A-Za-z]:\\/.test(root) ? win32.normalize(root) : 'C:\\Windows';
+}
+
+/** `dir` when it is a folder that exists (a home such as `/nonexistent` is not), else the filesystem's root as {@link safeWorkingFolder} picks it. */
+export function existingFolder(dir: string, env: Readonly<Record<string, string | undefined>>, platform: NodeJS.Platform): string {
+  try {
+    if (statSync(dir).isDirectory()) return dir;
+  } catch {
+    // Missing or unreadable: the root.
+  }
+  return safeWorkingFolder({ ...(platform === 'win32' ? { SystemRoot: envValue(env, 'SYSTEMROOT', platform) } : {}) }, platform);
 }
 
 /** `cmd.exe` for a Windows shim: `ComSpec` when it is a drive-letter path to a `cmd.exe`, else the one in `SystemRoot`'s System32 (a drive-letter `SystemRoot` only), else the one in `C:` Windows' System32. */

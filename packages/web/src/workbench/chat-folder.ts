@@ -23,13 +23,18 @@ export function chatRoots(session: Pick<Session, 'worktreePath'> | undefined, wo
   return [workspace.path, ...(workspace.realPath === undefined ? [] : [workspace.realPath])];
 }
 
-/** `sesId` when that chat works in a worktree of its own (a Workbench request then names it), else `undefined`. */
-export function useWorktreeChat(wsId: string | undefined, sesId: string | undefined, enabled: boolean): string | undefined {
+/**
+ * `session`: `sesId` when that chat works in a worktree of its own (a
+ * Workbench request then names it), else `undefined`; `known`: false while
+ * the chat is still being read, so nothing is rooted at the project by mistake.
+ */
+export function useWorktreeChat(wsId: string | undefined, sesId: string | undefined, enabled: boolean): { session: string | undefined; known: boolean } {
   const session = useQuery({
     queryKey: sessionKey(wsId ?? '', sesId ?? ''),
     queryFn: () => fetchSession(wsId!, sesId!),
     enabled: enabled && wsId !== undefined && sesId !== undefined,
     retry: false,
   });
-  return sesId !== undefined && chatWorktree(session.data?.session) !== null ? sesId : undefined;
+  const known = sesId === undefined || wsId === undefined || session.isSuccess || session.isError;
+  return { session: sesId !== undefined && chatWorktree(session.data?.session) !== null ? sesId : undefined, known };
 }

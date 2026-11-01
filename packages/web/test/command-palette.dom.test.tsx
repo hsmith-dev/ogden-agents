@@ -96,7 +96,11 @@ vi.mock('../src/workspaces/workspace-settings-api', async (importOriginal) => ({
 }));
 vi.mock('../src/chat/chat-api', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  fetchSession: async () => ({ session: { worktreePath: state.worktree } }),
+  // Slower than the pause in typing, so a search sent before the chat is known would show.
+  fetchSession: async () => {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return { session: { worktreePath: state.worktree } };
+  },
 }));
 vi.mock('../src/planning/planning-api', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -515,7 +519,9 @@ describe('files (8.11)', () => {
     act(() => openCommandPalette());
     type('a.ts');
     await screen.findByRole('group', { name: 'Files' });
-    expect(new URLSearchParams(search.calls.at(-1)!.url.split('?')[1]).get('session')).toBe('ses_1');
+    // Every search waits for the chat: none goes to the project root first.
+    expect(search.calls.length).toBeGreaterThan(0);
+    for (const call of search.calls) expect(new URLSearchParams(call.url.split('?')[1]).get('session')).toBe('ses_1');
     const file = options().find((option) => option.getAttribute('data-id') === 'file:src/a.ts')!;
     fireEvent.click(file);
     await waitFor(() => expect(palette()).toBeNull());

@@ -203,4 +203,11 @@ describe.skipIf(process.platform === 'win32')('the real version request on this 
       expect(fixture.ran()).toBe(false);
     });
   }
+
+  it('still finds the program when the home folder does not exist (the request runs at the root)', async () => {
+    const fixture = plantedProgram('claude', 'claude 2.0.0');
+    planted.push(fixture);
+    const system: DetectSystem = { ...nodeDetectSystem, env: { PATH: fixture.bin, HOME: `${fixture.root}/no-such-home` } };
+    expect(await detectLauncher(byId('claude-code'), system)).toMatchObject({ state: 'found', version: 'claude 2.0.0' });
+  });
 });

@@ -240,10 +240,11 @@ function useDebouncedValue(value: string, delay: number): string {
 function useFileItems(ctx: PaletteContext): PaletteItem[] {
   const navigate = useNavigate();
   const active = ctx.open && ctx.mode === 'all' && ctx.wsId !== undefined;
-  const session = useWorktreeChat(ctx.wsId, ctx.sesId, active);
+  const { session, known } = useWorktreeChat(ctx.wsId, ctx.sesId, active);
   const typed = active ? ctx.query.trim() : '';
   const settled = useDebouncedValue(typed, SEARCH_DEBOUNCE_MS);
-  const search = usePaletteFileSearch(ctx.wsId, settled, active, session);
+  // Not before the chat on screen is known: a worktree chat's files are never searched at the project root.
+  const search = usePaletteFileSearch(ctx.wsId, settled, active && known, session);
   const paths = active && settled !== '' && !search.isError ? search.data?.files.map((file) => file.path) : undefined;
   return fileItems(ctx.wsId, paths, ctx.query, (wsId, path) => void navigate({ to: '/w/$wsId/workbench', params: { wsId }, search: session === undefined ? { path } : { path, session } }));
 }

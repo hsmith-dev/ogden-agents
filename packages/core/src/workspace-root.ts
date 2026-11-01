@@ -39,9 +39,9 @@ export const namedSession = (value: unknown): unknown => (value as { session?: u
  * adapter checks the worktree and pins git's folders before it runs there.
  */
 export function vcsFolderOf(workspace: Workspace, session: Session | undefined): VcsFolder {
-  const path = sessionFolder(workspace, session);
-  if (session === undefined || session.worktreePath === null || session.branch === null) return { path };
-  return { path, worktree: { repoPath: workspaceFolder(workspace), branch: session.branch } };
+  // Only a worktree with its branch is pinned; anything less runs in the project, never an unchecked folder.
+  if (session === undefined || session.worktreePath === null || session.branch === null) return { path: workspaceFolder(workspace) };
+  return { path: sessionFolder(workspace, session), worktree: { repoPath: workspaceFolder(workspace), branch: session.branch } };
 }
 
 /** The root of a request for `workspaceId` and (optionally) `session`, or {@link NotFoundError}. */

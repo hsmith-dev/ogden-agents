@@ -3,13 +3,13 @@ title: 'Refactor sweep (epic 8)'
 type: 'refactor'
 ticket: '12'
 created: '2026-11-01'
-status: 'in-review'
+status: 'built'
 baseline_revision: '17a9d78c8efd00c1513de6b85f957407c0a2473a'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 context:
   - '{project-root}/AGENTS.md'
@@ -83,9 +83,29 @@ Deferred dispositions: every Deferred line in the eleven 8.x plans now ends with
 
 Verification (2026-11-01): `pnpm typecheck` clean. `pnpm test`: run 1 (load 13 at start) 1 failure, the architecture test's Workbench route file count (2, now 3 with `workbench-refusal.ts`; fixed); runs 2 and 3 back to back (load 22 and 25 at start) both passed, 460 files, 5962 passed, 13 skipped. Playwright after the build: antigravity-setup, workspaces, command-palette, panes, workbench-changes, workbench-files, workbench-problems 24 passed (`--retries=0`). Provenance passes.
 
+Verification after the review patches (2026-11-01): `pnpm typecheck` clean; `pnpm test` twice back to back (load 9 and 16 at start), both passed, 460 files, 5964 passed, 13 skipped; the same seven Playwright specs 24 passed (`--retries=0`); provenance passes.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick lens; a fresh subagent given only the diff and the repo's rules): 13 findings; medium 4, low 9, false 0, maybe-false 0; patched 7, deferred 3 (plus the Windows half of 8), rejected 3.
+
+| # | Finding | Verdict | Route |
+|---|---------|---------|-------|
+| 1 | `vcsFolderOf` now returns the worktree path unpinned for a chat with a worktree but no branch | low | patch: unreachable (`entities.ts` `checkedWorktree` refuses one without the other), but a refactor must not change it: the project folder again in that case |
+| 2 | Detection (and the editor) fail when HOME is absolute but missing (`/nonexistent`): the start's cwd does not exist | medium | patch: `existingFolder` in `program-launch.ts` takes the root then, in both real systems; real test with a missing home |
+| 3 | `lookupEnv` (linked-command) skips empty values, `envValue` does not | low | reject: only when Windows holds both an empty and a set PATH spelling; merging changes linked-command's lookup |
+| 4 | `dev-tools-catalog` keeps its own `platformKey` and `candidatesFor` | low | reject: outside epic 8, already in the sweep's leftovers Log entry |
+| 5 | Claude Code's lookup keeps Windows root-relative and share PATH entries | medium | defer: pre-existing, outside epic 8; logged and indexed |
+| 6 | Grok's token probe runs in the temp folder with the raw PATH | medium | defer: pre-existing, not a `--version` probe; logged and indexed |
+| 7 | Agent processes still inherit relative PATH entries | low | reject: already logged for a user decision (Design Notes) |
+| 8 | The Problems runner's comment says a planted name never runs, but Windows looks in the working folder first | low | patch: comment limited to POSIX; the Windows half logged and indexed |
+| 9 | The probe's `cmd.exe` call lacks the editor's `/v:off` | low | patch: `/v:off` added (it refuses `!` already) |
+| 10 | The palette on the Workbench `?session=` page searches the project | low | defer: the palette knows only the chat page's chat; logged and indexed |
+| 11 | The palette could search the project before the chat on screen was read, and the test only checked the last call | medium | patch: `useWorktreeChat` answers `known`, the search waits for it; the test slows `fetchSession` past the typing pause and checks every call |
+| 12 | `worktree-commit.tsx` checks `worktreePath` inline | low | patch: `chatWorktree` |
+| 13 | `project-commands.ts` rebuilds `refuseInvalid` by hand; other core files keep the inline mapping | low | patch for the touched spot (`refuseInvalid`); the rest outside the diff, rejected |
 
 ## Design Notes
 

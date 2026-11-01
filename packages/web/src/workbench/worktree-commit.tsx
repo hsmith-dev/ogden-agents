@@ -14,7 +14,7 @@ import { Textarea } from '@/ui/textarea';
 import { Text } from '@/ui/typography';
 import { isBusy } from '@/workspaces/workspace-api';
 import { useCommitWorktree } from './changes-api';
-import { sessionKey } from './chat-folder';
+import { chatWorktree, sessionKey } from './chat-folder';
 
 /** Commit these changes, for a chat working in its own worktree: on its own branch, never pushed. */
 export function WorktreeCommit({ wsId, session: sesId }: { wsId: string; session: string }) {
@@ -28,7 +28,7 @@ export function WorktreeCommit({ wsId, session: sesId }: { wsId: string; session
   const commit = useCommitWorktree(wsId, sesId);
   const [message, setMessage] = useState('');
   const found = session.data?.session;
-  if (found === undefined || found.worktreePath === null) return null;
+  if (found === undefined || chatWorktree(found) === null) return null;
   const busy = isBusy(found);
   const empty = message.trim() === '';
   return (

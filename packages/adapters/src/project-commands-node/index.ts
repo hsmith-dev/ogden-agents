@@ -13,8 +13,10 @@
  * - it is spawned with `shell: false`, stdin ignored, in its own process
  *   group on POSIX (`detached`), with `baseEnvironment()` plus `CI=1`,
  *   `NO_COLOR=1` and `FORCE_COLOR=0`, its `PATH` only the absolute folders
- *   (so a bare name the command runs in turn, `node` behind npm's shim, is
- *   never one planted in the project; `program-launch.ts`, 8.12): never
+ *   (so on POSIX a bare name the command runs in turn, `node` behind npm's
+ *   shim, is never one planted in the project; Windows also looks in the
+ *   working folder, logged in `deferred-work.md`; `program-launch.ts`,
+ *   8.12): never
  *   `process.env`, never a key;
  * - stdout and stderr together keep only their last
  *   `PROJECT_COMMAND_OUTPUT_MAX_BYTES` (`truncated` past it);

@@ -22,7 +22,7 @@ import { posix, win32 } from 'node:path';
 import type { EditorLauncherPort } from '@ogden-agents/core';
 import type { EditorId, EditorInfo } from '@ogden-agents/shared';
 import { DESKTOP_SESSION } from '../child-env.js';
-import { launchEnvironment, platformKey, safeWorkingFolder, windowsCmd } from '../program-launch.js';
+import { existingFolder, launchEnvironment, platformKey, safeWorkingFolder, windowsCmd } from '../program-launch.js';
 import { candidatesFor, nodeDetectSystem, type DetectSystem } from '../pane-launchers/detect.js';
 
 /** How an editor takes a line: `goto` = `-g path:l:c`, `colon` = `path:l:c`, `jetbrains` = `--line l --column c path`. */
@@ -105,7 +105,8 @@ export const nodeEditorSystem: EditorSystem = {
     return nodeDetectSystem.env;
   },
   runnable: (path) => nodeDetectSystem.runnable(path),
-  start: (file, args, options) => spawn(file, [...args], { ...options, env: options.env ?? {}, shell: false }),
+  // A home that does not exist would fail the start: the filesystem's root instead.
+  start: (file, args, options) => spawn(file, [...args], { ...options, ...(typeof options.cwd === 'string' ? { cwd: existingFolder(options.cwd, options.env ?? {}, process.platform) } : {}), env: options.env ?? {}, shell: false }),
 };
 
 /** Only these start on Windows without a shell (as `linked-command.ts`). */

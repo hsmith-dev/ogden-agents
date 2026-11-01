@@ -39,3 +39,12 @@ describe('program-launch', () => {
     expect(windowsCmd({ COMSPEC: '\\\\host\\cmd.exe', SYSTEMROOT: 'rel' })).toBe('C:\\Windows\\System32\\cmd.exe');
   });
 });
+
+describe('existingFolder', () => {
+  it('keeps a folder that exists, and takes the root for one that does not', async () => {
+    const { existingFolder } = await import('../src/program-launch.js');
+    const { tmpdir } = await import('node:os');
+    expect(existingFolder(tmpdir(), {}, process.platform)).toBe(tmpdir());
+    if (process.platform !== 'win32') expect(existingFolder('/nonexistent-ogden-8c1d', {}, 'linux')).toBe('/');
+  });
+});

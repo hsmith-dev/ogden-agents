@@ -353,13 +353,21 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Models, 'initialMo
         ...(worktree === undefined ? {} : { id: worktree.id, worktreePath: worktree.worktreePath, branch: worktree.branch }),
       });
       if (worktree === undefined || worktreeRepo === undefined) return create();
+      let created;
       try {
-        return create();
+        created = create();
       } catch (error) {
         // Its folder, git's record of it and its branch go (27.3); the original error is the answer.
         await discardChatWorktree(ctx, worktreeRepo, worktree);
         throw error;
       }
+      // One more chat worktree: the retention sweep runs, sparing this one (27.6).
+      try {
+        ctx.options.onChatWorktreeAdded?.(created.id);
+      } catch {
+        // The sweep never fails a creation.
+      }
+      return created;
     },
 
     async chatAgents(workspaceId) {

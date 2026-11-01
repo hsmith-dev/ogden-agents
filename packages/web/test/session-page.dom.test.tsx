@@ -18,7 +18,12 @@ import {
   deleteChatBusyText,
   DELETE_CHAT_REMOTE_TEXT,
   deleteChatConfirmText,
+  RESTORE_PATH_TAKEN_TEXT,
   WORKTREE_BADGE_TOOLTIP_TEXT,
+  WORKTREE_PUT_AWAY_COMPOSER_TEXT,
+  WORKTREE_PUT_AWAY_TEXT,
+  WORKTREE_RESTORE_LABEL,
+  WORKTREE_RESTORE_RETRY_LABEL,
   worktreeBadgeLabel,
   type CoreEvent,
   type SessionDriver,
@@ -78,6 +83,12 @@ const fake = vi.hoisted(() => ({
   machines: [] as unknown[],
   /** Host-key probes asked (a started chat's chip never probes). */
   probes: 0,
+  /** Whether the chat's copy is put away (27.6), and each Restore asked with what it answers. */
+  putAway: false,
+  /** The chat was deleted: its read answers 404. */
+  gone: false,
+  restores: [] as string[],
+  restoreResult: (() => Promise.resolve()) as () => Promise<unknown>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -95,6 +106,15 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/chat/new-chat', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/chat/new-chat')>()),
   useOpenNewChat: () => (wsId: string) => fake.newChats.push(wsId),
+}));
+vi.mock('@/worktrees/worktree-retention', () => ({
+  usePutAwayWorktrees: () => ({
+    data: fake.putAway ? [{ id: 'wsn_1', sessionId: 'ses_1', workspaceId: 'ws_1', branch: 'ogden/chat/ses_1', files: 2, cause: 'retention', putAwayAt: '2026-11-01T00:00:00.000Z' }] : [],
+  }),
+  useRestoreWorktree: () => async (sesId: string) => {
+    fake.restores.push(sesId);
+    await fake.restoreResult();
+  },
 }));
 vi.mock('@/shell/workspace-header', () => ({ WorkspaceHeader: ({ children }: { children?: ReactNode }) => <header>{children}</header> }));
 vi.mock('@/events/event-stream', () => ({
@@ -147,6 +167,10 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
   }),
   fetchSession: async (): Promise<SessionResponse> => {
     fake.fetches++;
+    if (fake.gone) {
+      const { ChatApiError: Gone } = await import('../src/chat/chat-api');
+      throw new Gone('That chat is gone.', 404, 'not_found');
+    }
     return {
       session: {
         id: 'ses_1',
@@ -275,6 +299,10 @@ beforeEach(() => {
   fake.deletes = [];
   fake.deleteResults = [];
   fake.newChats = [];
+  fake.putAway = false;
+  fake.gone = false;
+  fake.restores = [];
+  fake.restoreResult = () => Promise.resolve();
   fake.agentId = undefined;
   fake.claudeListed = true;
   fake.sendResult = () => Promise.resolve({ messageId: 'msg_x', queued: false });
@@ -706,5 +734,57 @@ describe('Delete chat (27.3)', () => {
     await mount();
     openMenu(await screen.findByTestId('session-menu'));
     expect((await screen.findByTestId('session-menu-delete-reason')).textContent).toBe(DELETE_CHAT_NOT_DELETABLE_TEXT);
+  });
+});
+
+describe("a chat whose copy was put away (27.6)", () => {
+  it('says so with Restore, and the composer takes no message until then', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.putAway = true;
+    await mount();
+    const notice = await screen.findByTestId('worktree-put-away');
+    expect(notice.textContent).toContain(WORKTREE_PUT_AWAY_TEXT);
+    expect(screen.getByTestId('worktree-restore').textContent).toBe(WORKTREE_RESTORE_LABEL);
+    expect(screen.getByTestId('composer').textContent).toContain(WORKTREE_PUT_AWAY_COMPOSER_TEXT);
+
+    const fetchesBefore = fake.fetches;
+    fireEvent.click(screen.getByTestId('worktree-restore'));
+    await flush();
+    expect(fake.restores).toEqual([SES]);
+    // The session is read again once restored.
+    expect(fake.fetches).toBeGreaterThan(fetchesBefore);
+  });
+
+  it("shows why Restore couldn't finish, with Try again", async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.putAway = true;
+    fake.restoreResult = () => Promise.reject(new ChatApiError(RESTORE_PATH_TAKEN_TEXT, 409, 'restore_failed'));
+    await mount();
+    fireEvent.click(await screen.findByTestId('worktree-restore'));
+    await flush();
+    expect(screen.getByTestId('worktree-restore-error').textContent).toBe(RESTORE_PATH_TAKEN_TEXT);
+    expect(screen.getByTestId('worktree-restore').textContent).toBe(WORKTREE_RESTORE_RETRY_LABEL);
+    fake.restoreResult = () => Promise.resolve();
+    fireEvent.click(screen.getByTestId('worktree-restore'));
+    await flush();
+    expect(fake.restores).toEqual([SES, SES]);
+  });
+
+  it('a worktree chat that is not put away has no notice', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    await mount();
+    await screen.findByTestId('worktree-badge');
+    expect(screen.queryByTestId('worktree-put-away')).toBeNull();
+  });
+
+  it('a worktree chat deleted while open reads as gone, without a hooks error', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    const { push } = await mount();
+    await screen.findByTestId('worktree-badge');
+    fake.gone = true;
+    fake.driver = 'terminal';
+    await push(driverChanged('terminal'));
+    expect(await screen.findByTestId('session-not-found')).toBeTruthy();
+    expect(screen.queryByTestId('worktree-badge')).toBeNull();
   });
 });

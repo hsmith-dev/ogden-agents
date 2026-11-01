@@ -1,4 +1,4 @@
-import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
+import { NEW_PROJECTS_SETTINGS_LABEL, WORKTREES_SETTINGS_TITLE } from '@ogden-agents/shared';
 
 /*
  * Settings' groups (epic 26, E26-R7; EXPERIENCE.md Information Architecture):
@@ -40,6 +40,8 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
       // Every project's Always allow rules (epic 26 story 8, AD-40).
       { label: 'Always allow rules', to: '/settings/always-allow' },
       { label: 'Builds', to: '/settings/builds' },
+      // The install's chat worktree cap (epic 27, 27.6).
+      { label: WORKTREES_SETTINGS_TITLE, to: '/settings/worktrees' },
     ],
   },
   { id: 'appearance', label: 'Appearance', glyph: 'Palette', pages: [{ label: 'Appearance', to: '/settings/appearance' }] },

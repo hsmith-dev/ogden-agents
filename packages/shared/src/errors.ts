@@ -242,8 +242,10 @@ export const API_ERROR_CODES = [
   'handoff_conflict',
   /** Delete chat and Delete history (CAP-35, 27.3): a chat's own worktree has uncommitted changes (staged, unstaged or untracked, or its state can't be read) and the request didn't say `discardUncommitted` (409). Nothing was deleted. */
   'uncommitted_changes',
-  /** Restore (CAP-35, epic 27): a put-away chat worktree could not be brought back, its branch gone or its folder taken (409); `details.reason` is the token. The saved changes are kept. */
+  /** Restore (CAP-35, epic 27): a put-away chat worktree could not be brought back, its branch gone or moved on, or its folder taken (409); `details.reason` is the token. The saved changes are kept. */
   'restore_failed',
+  /** Retention (CAP-35, 27.6): a message to a chat whose copy is put away, or being put away (409). Nothing was sent; Restore brings the copy back. */
+  'worktree_put_away',
   /** A request whose fields don't go together (400), such as a worktree chat on a remote machine (27.1). Nothing was created. */
   'validation_failed',
   /** Problems (AD-38; 8.9): a detected script's text in `package.json` isn't the one the user confirmed, or the command saved no longer matches (409). Nothing ran or was stored; the UI asks again. */

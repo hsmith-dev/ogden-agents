@@ -543,6 +543,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       if (session.kind === 'build') throw new BuildSessionReadOnlyError();
       if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is already switching. Try again in a moment.');
       if (session.driver === driver) return session;
+      // A put-away copy has no folder for the CLI to start in (27.6).
+      if (driver === 'terminal') ctx.requireCopyPresent(sessionId);
       return holdingSwitch(sessionId, () => (driver === 'terminal' ? toTerminal(session) : toChat(session)));
     },
 

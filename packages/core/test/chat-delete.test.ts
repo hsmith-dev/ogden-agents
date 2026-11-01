@@ -7,7 +7,7 @@
  * removes the folder, git's record and the branch. Git is a fake here; the
  * real one is `vcs-git-chat-worktrees.test.ts`'s and the server's tests'.
  */
-import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { chatWorktreeBranch, type CoreEvent, type SessionId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
@@ -19,128 +19,12 @@ import {
   InvalidOperationError,
   UncommittedChangesError,
   WorkspaceBusyError,
-  type AgentEvent,
-  type AgentPort,
-  type AgentSession,
-  type ChatOptions,
   type Entities,
-  type RemoveWorktreeOptions,
-  type StartAgentSession,
   type TerminalPort,
-  type VcsWorkingTreePort,
 } from '../src/index.js';
 import { openTestCore, soleAgent, tempDir } from './helpers.js';
 import { fakeTerminal } from './support/fake-terminal.js';
-
-const REVISION = 'b'.repeat(40);
-
-/** An agent that answers at once, or holds its turn until `release` when `hold` is set. */
-function agent() {
-  let hold = false;
-  let release: (() => void) | undefined;
-  let closed = 0;
-  let hangClose = false;
-  let releaseClose: (() => void) | undefined;
-  const cwds: string[] = [];
-  const open = (input: StartAgentSession, agentSessionId: string): AgentSession => {
-    cwds.push(input.cwd);
-    const listeners = new Set<(event: AgentEvent) => void>();
-    const emit = (event: AgentEvent) => {
-      for (const listener of [...listeners]) listener(event);
-    };
-    return {
-      agentSessionId,
-      onEvent(listener) {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-      async prompt() {
-        emit({ type: 'state', state: 'working' });
-        if (hold) await new Promise<void>((resolve) => (release = resolve));
-        emit({ type: 'message_chunk', text: 'ok' });
-        emit({ type: 'state', state: 'idle' });
-        return { stopReason: 'end_turn' };
-      },
-      async cancel() {},
-      async close() {
-        closed++;
-        if (hangClose) await new Promise<void>((resolve) => (releaseClose = resolve));
-      },
-    };
-  };
-  let sessions = 0;
-  const port: AgentPort = {
-    displayName: 'Test Agent',
-    skillInvocation: (skill) => `/${skill}`,
-    listAuthMethods: async () => [],
-    startSession: async (input) => open(input, `agent-${++sessions}`),
-    reopenSession: async (input) => ({ session: open(input, input.agentSessionId), restored: 'resumed' as const }),
-    terminalResume: {
-      command: async (id, env) => ({ file: 'agent', args: ['--resume', id], env: { ...env } }),
-      locate: async () => ({ found: true }),
-      transcript: async () => [],
-    },
-  };
-  return {
-    port,
-    cwds,
-    closed: () => closed,
-    holdTurns: () => (hold = true),
-    release: () => release?.(),
-    hangClose: () => (hangClose = true),
-    releaseClose: () => releaseClose?.(),
-  };
-}
-
-/** A fake git: `addWorktree` makes the folder and the branch; `removeWorktree` removes the folder (a link only unlinked) and, when asked and merged, the branch. */
-function fakeGit(repo: string) {
-  const calls: string[] = [];
-  const branches = new Set<string>();
-  const unmerged = new Set<string>();
-  let failRemoval = false;
-  const vcs: NonNullable<ChatOptions['vcs']> = {
-    topLevel: async () => repo,
-    head: async () => ({ revision: REVISION, branch: 'main' }),
-    async addWorktree(_repo, input) {
-      calls.push(`addWorktree ${input.path} ${input.branch}`);
-      mkdirSync(input.path);
-      branches.add(input.branch);
-    },
-    async removeWorktree(_repo, path, options: RemoveWorktreeOptions = {}) {
-      calls.push(`removeWorktree ${basename(path)}${options.deleteBranch === undefined ? '' : ` ${options.deleteBranch}${options.mergedOnly === true ? ' merged-only' : ''}${options.keepUnmerged === true ? ' keep-unmerged' : ''}`}`);
-      if (failRemoval) throw new Error('a program has files open there');
-      rmSync(path, { recursive: true, force: true });
-      const branch = options.deleteBranch;
-      if (branch === undefined) return { branchKept: false };
-      if (options.mergedOnly === true && unmerged.has(branch)) return { branchKept: true };
-      branches.delete(branch);
-      return { branchKept: false };
-    },
-    async isMerged(_repo, branch) {
-      calls.push(`isMerged ${branch}`);
-      return !unmerged.has(branch);
-    },
-  };
-  return { vcs, calls, branches, commitOn: (branch: string) => unmerged.add(branch), failRemoval: () => (failRemoval = true) };
-}
-
-/** A fake working tree: each folder's uncommitted files, or a throw (a copy whose state can't be read). */
-function fakeWorkingTree() {
-  const dirty = new Map<string, string[]>();
-  const unreadable = new Set<string>();
-  const during: { read?: (() => Promise<void>) | undefined } = {};
-  const port: Pick<VcsWorkingTreePort, 'changedFiles'> = {
-    async changedFiles(folder, target) {
-      const read = during.read;
-      during.read = undefined;
-      await read?.();
-      if (unreadable.has(folder.path)) throw new Error('not a worktree of this repository');
-      if (target.view !== 'unstaged') return { files: [], truncated: false };
-      return { files: (dirty.get(folder.path) ?? []).map((path) => ({ path: path as never, change: 'added' as const, additions: 1, deletions: 0, binary: false, tooLarge: false })), truncated: false };
-    },
-  };
-  return { port, dirty, unreadable, during };
-}
+import { agent, fakeGit, fakeWorkingTree } from './support/worktree-chat-fakes.js';
 
 function setUp(options: { entities?: (entities: Entities) => Entities; terminal?: TerminalPort; stopBeforeRemovalMs?: number } = {}) {
   const coreDir = tempDir('ogden-agents-core-');

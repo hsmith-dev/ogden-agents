@@ -9,15 +9,20 @@
  * `Cache-Control: no-store`; nothing here logs a path. No git and no child
  * process here: every git operation is `VcsChatWorktreePort`'s.
  */
-import { HandOffConflictError, NotFoundError, RestoreFailedError, type ChatLocations, type Trials, type WorktreeRetention } from '@ogden-agents/core';
+import { HandOffConflictError, NotFoundError, RestoreFailedError, WorktreePutAwayError, type ChatLocations, type Trials, type WorktreeRetention } from '@ogden-agents/core';
 import {
   API_ROUTES,
+  CHAT_WORKTREE_BRANCH_PREFIX,
   HANDOFF_CONFLICT_MESSAGE,
   HandOffResponse,
   PutAwayWorktreesResponse,
   RESTORE_FAILED_MESSAGE,
   RESTORE_PATH_TAKEN_TEXT,
+  restoreBranchMissingText,
+  restoreBranchMovedText,
+  SessionId,
   SessionLocationResponse,
+  WORKTREE_PUT_AWAY_SEND_MESSAGE,
   TrialResponse,
   WorktreeRetentionSetting,
 } from '@ogden-agents/shared';
@@ -26,6 +31,14 @@ import { bodyLimit } from 'hono/body-limit';
 import { apiError, notImplemented } from './errors.js';
 import type { Logger } from './log.js';
 import { NO_STORE, workbenchRefusal } from './workspace-files-routes.js';
+
+/** A failed Restore's sentence: the branch's own when core named the chat's branch (never a path), else the fixed one for its reason. */
+function restoreFailedText(error: RestoreFailedError): string {
+  if (error.reason === 'path_taken') return RESTORE_PATH_TAKEN_TEXT;
+  const branch = error.branch;
+  if (branch === undefined || !branch.startsWith(CHAT_WORKTREE_BRANCH_PREFIX) || !SessionId.safeParse(branch.slice(CHAT_WORKTREE_BRANCH_PREFIX.length)).success) return RESTORE_FAILED_MESSAGE;
+  return error.reason === 'branch_missing' ? restoreBranchMissingText(branch) : restoreBranchMovedText(branch);
+}
 
 /** The largest body any of these routes takes (`CreateTrialRequest`: a 20,000-character task and four agent ids). */
 const MAX_BODY_BYTES = 128 * 1024;
@@ -43,7 +56,8 @@ export function registerWhereWorkRunsRoutes(app: Hono, { chatLocations, worktree
     // An unknown project, session or trial: core's own message, not the Files panel's sentence.
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', error.message);
     if (error instanceof HandOffConflictError) return apiError(c, 409, 'handoff_conflict', HANDOFF_CONFLICT_MESSAGE, { files: error.files });
-    if (error instanceof RestoreFailedError) return apiError(c, 409, 'restore_failed', error.reason === 'path_taken' ? RESTORE_PATH_TAKEN_TEXT : RESTORE_FAILED_MESSAGE, { reason: error.reason });
+    if (error instanceof RestoreFailedError) return apiError(c, 409, 'restore_failed', restoreFailedText(error), { reason: error.reason });
+    if (error instanceof WorktreePutAwayError) return apiError(c, 409, 'worktree_put_away', WORKTREE_PUT_AWAY_SEND_MESSAGE);
     return workbench(c, error);
   };
   const limit = bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });

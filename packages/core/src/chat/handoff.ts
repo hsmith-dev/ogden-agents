@@ -89,6 +89,8 @@ export function createHandoff(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent
     const session = getSession(workspaceId, sessionId);
     const current = ctx.agentIdOf(session);
     if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
+    // A put-away copy takes no message, so no other agent either, until Restore (27.6).
+    ctx.requireCopyPresent(sessionId);
     if (session.driver === 'terminal') {
       throw new DriverIsTerminalError('The terminal is driving this chat. Switch back to the chat before continuing with another agent.');
     }

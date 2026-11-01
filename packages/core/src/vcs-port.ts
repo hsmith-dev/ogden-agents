@@ -269,14 +269,25 @@ export interface VcsWorkingTreePort {
   commitAll(folder: VcsFolder, message: string): Promise<{ revision: string; files: number } | 'nothing'>;
 }
 
-/** What putting a chat worktree away saved: the snapshot of its uncommitted changes (`null` when it had none) and how many files that holds. */
+/**
+ * What putting a chat worktree away saved (27.6): the snapshot of its
+ * uncommitted changes, tracked and untracked, not ignored (`null` when it
+ * had none), the branch's commit it was taken on, and how many files it
+ * holds.
+ */
 export interface VcsPutAway {
   snapshotTree: string | null;
+  head: string;
   files: number;
 }
 
-/** What Restore did: `branch_missing` and `path_taken` change nothing, and the snapshot stays kept. */
-export type VcsRestoreResult = 'restored' | 'branch_missing' | 'path_taken';
+/**
+ * What Restore did: `branch_missing` (the branch is gone), `branch_moved`
+ * (it has a new commit and there are saved changes) and `path_taken`
+ * (something else is at the copy's path) change nothing, and the snapshot
+ * stays kept.
+ */
+export type VcsRestoreResult = 'restored' | 'branch_missing' | 'branch_moved' | 'path_taken';
 
 /** What moving uncommitted changes did: `conflict` (the target has its own changes to `files` of the same files) moves nothing. */
 export interface VcsMoveChanges {
@@ -298,14 +309,26 @@ export interface VcsMoveChanges {
  */
 export interface VcsChatWorktreePort {
   /**
-   * Retention (AD-17 CAP-33 note's exception, user decision 2026-11-01):
-   * snapshots the worktree's uncommitted changes (tracked and untracked, not
-   * ignored) first, then removes its folder, keeping `branch`. Nothing is
-   * removed if the snapshot fails.
+   * Retention (AD-17 CAP-33 note's exception, user decision 2026-11-01;
+   * 27.6): snapshots the worktree's uncommitted changes (tracked and
+   * untracked, not ignored) into the store, every changed object copied
+   * there, and removes nothing (core removes the folder through
+   * `VcsPort.removeWorktree` once the record is written). Refuses
+   * (`VcsError`) a copy whose HEAD isn't `branch`, with a merge, rebase,
+   * cherry-pick or revert in progress, or whose snapshot holds a submodule
+   * or a nested repository (a gitlink).
    */
-  putAway(repoPath: string, worktreePath: string, branch: string): Promise<VcsPutAway>;
-  /** Restore: adds the worktree back at `path` on `branch` and applies `snapshotTree` (when there is one) on top. */
-  restore(repoPath: string, input: { path: string; branch: string; snapshotTree: string | null }): Promise<VcsRestoreResult>;
+  saveForPutAway(repoPath: string, worktreePath: string, branch: string): Promise<VcsPutAway>;
+  /**
+   * Restore: adds the worktree back at `path` on `branch` (git's record of
+   * a copy whose folder is gone is replaced) and writes `snapshotTree`'s
+   * files over the branch's commit, deletions too, through a temporary
+   * index; the real index stays at the commit, so tracked edits come back
+   * unstaged. Verified by a fresh snapshot. A copy still at `path` on its
+   * branch (half put away) gets the snapshot in place. `branch_moved` only
+   * when there is a snapshot and the branch is no longer at `head`.
+   */
+  restore(repoPath: string, input: { path: string; branch: string; head: string; snapshotTree: string | null }): Promise<VcsRestoreResult>;
   /**
    * Hand off (user decision 2026-11-01): moves the uncommitted changes from
    * the folder `from` to the folder `to` (the project folder or the chat's
@@ -324,4 +347,34 @@ export class VcsError extends CoreError {
   ) {
     super('vcs_failed', message);
   }
+}
+
+/** One project's snapshots as cleanup sees them: its folder and the trees to keep (`null`: keep all, the project is busy). */
+export interface VcsSnapshotStoreEntry {
+  folder: string;
+  keep: readonly string[] | null;
+}
+
+/** What a snapshot cleanup removed. */
+export interface VcsSnapshotPruned {
+  objects: number;
+  stores: number;
+  temporary: number;
+  /** Stores (or the snapshots folder) left whole because they were a link, or a project couldn't be read: for the log. */
+  refused: number;
+}
+
+/**
+ * Cleans AD-37's snapshot store (27.6): in each project's store, the loose
+ * objects no kept tree reaches and older than `olderThanMs` (packs are
+ * left), one store at a time whatever number of projects share it (their
+ * keep lists joined, all kept when any is `null`); a store no project maps
+ * to, whole, only when every project's folder was read and it holds none of
+ * `protect` (every put-away copy's tree of the install); files in the store's `tmp` older than `olderThanMs`.
+ * Only regular files and empty folders under a real snapshots folder are
+ * removed, never through a link; the repos' own objects, refs and index
+ * are never touched.
+ */
+export interface VcsSnapshotStorePort {
+  pruneSnapshots(entries: readonly VcsSnapshotStoreEntry[], options: { olderThanMs: number; protect?: readonly string[] | undefined }): Promise<VcsSnapshotPruned>;
 }

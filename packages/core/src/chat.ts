@@ -94,6 +94,7 @@ import { createTurns } from './chat/turns.js';
 import type { Chat, ChatOptions } from './chat/types.js';
 import { createWorkspaces } from './chat/workspaces.js';
 import { createChatDeletion } from './chat/delete-chat.js';
+import { createPutAway } from './chat/put-away.js';
 
 export * from './chat/constants.js';
 export type { Chat, ChatOptions, TerminalSize, TerminalViewer } from './chat/types.js';
@@ -137,6 +138,7 @@ export function createChat(options: ChatOptions): Chat {
   const { stopTerminal, closeTerminals } = terminal;
   const workspaces = createWorkspaces(ctx, { initialModel: models.initialModel });
   const deletion = createChatDeletion(ctx, { drop, stopTerminal });
+  const putAway = createPutAway(ctx, { drop, stopTerminal });
   const handoff = createHandoff(ctx, { releaseAgent, storedAgentSessionId, sendMessage: turns.sendMessage, initialModel: models.initialModel });
   // A stop that couldn't import the terminal's turns (a crash): they come in now (story 3.4).
   terminal.importAfterRestart();
@@ -176,6 +178,10 @@ export function createChat(options: ChatOptions): Chat {
     modelOptions: models.modelOptions,
     handoffPreview: handoff.handoffPreview,
     handOff: handoff.handOff,
+    putAwayWorktree: putAway.putAwayWorktree,
+    restoreWorktree: putAway.restoreWorktree,
+    worktreeIdle: putAway.worktreeIdle,
+    worktreeOpsSettled: putAway.worktreeOpsSettled,
 
     async releaseAgent(workspaceId, sessionId) {
       ctx.getSession(workspaceId, sessionId);

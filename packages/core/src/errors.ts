@@ -23,6 +23,8 @@ import {
   STATUS_NOT_ALLOWED_MESSAGE,
   TICKET_CHANGED_MESSAGE,
   REOPEN_NOT_CONFIRMED_MESSAGE,
+  WORKTREE_PUT_AWAY_SEND_MESSAGE,
+  type RestoreFailedReason,
   type BmadCapability,
   type BmadSetupFailureReason,
   type DispatchRefusalReason,
@@ -832,9 +834,22 @@ export class RestoreFailedError extends CoreError {
   override readonly name = 'RestoreFailedError';
   constructor(
     message: string,
-    readonly reason: 'branch_missing' | 'path_taken',
+    readonly reason: RestoreFailedReason,
+    /** The chat's branch, for the reason's sentence (`branch_missing`, `branch_moved`). */
+    readonly branch?: string,
   ) {
     super('restore_failed', message);
+  }
+}
+
+/**
+ * Retention (CAP-35, 27.6): the chat's copy is put away, or being put away,
+ * so no message starts. 409 `worktree_put_away`; nothing was sent.
+ */
+export class WorktreePutAwayError extends CoreError {
+  override readonly name = 'WorktreePutAwayError';
+  constructor() {
+    super('worktree_put_away', WORKTREE_PUT_AWAY_SEND_MESSAGE);
   }
 }
 

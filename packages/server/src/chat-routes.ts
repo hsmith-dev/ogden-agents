@@ -38,12 +38,14 @@ import {
   UncommittedChangesError,
   UnknownAgentError,
   ValidationError,
+  WorktreePutAwayError,
   type AddProject,
   type AgentModels,
   type Chat,
 } from '@ogden-agents/core';
 import {
   API_ROUTES,
+  WORKTREE_PUT_AWAY_SEND_MESSAGE,
   ChatAgentsResponse,
   ChatDeletedResponse,
   DeleteChatRequest,
@@ -126,6 +128,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', NOT_FOUND);
     if (error instanceof BuildSessionReadOnlyError) return readOnlyBuild(c);
     if (error instanceof AgentRemovedError) return apiError(c, 409, 'agent_removed', error.message);
+    // The chat's copy is put away (27.6): nothing was sent; Restore brings it back.
+    if (error instanceof WorktreePutAwayError) return apiError(c, 409, 'worktree_put_away', WORKTREE_PUT_AWAY_SEND_MESSAGE);
     if (error instanceof QueueFullError) {
       return apiError(c, 409, 'session_busy', 'Too many messages are waiting. Send this one when the agent has caught up.');
     }

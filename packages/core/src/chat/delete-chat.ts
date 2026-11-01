@@ -68,8 +68,13 @@ export function createChatDeletion(ctx: ChatContext, deps: Pick<Agents, 'drop'> 
   const ownsCopy = (session: Session): session is Session & { worktreePath: string; branch: string } =>
     session.worktreePath !== null && session.branch !== null && isChatWorktreePath(ctx.options.dataDir, session.worktreePath);
 
-  /** Whether the copy has uncommitted changes (staged, unstaged or untracked); one that can't be read counts as changed, one that is gone has none. */
+  /**
+   * Whether the copy has uncommitted changes (staged, unstaged or untracked); one that can't be read counts as changed,
+   * one that is gone has none, unless it was put away with saved changes (27.6): those are its changes.
+   */
   const hasChanges = async (workspace: Workspace, session: Session & { worktreePath: string }): Promise<boolean> => {
+    const putAway = ctx.options.worktreePutAway?.get(session.id);
+    if (putAway !== undefined && putAway.files > 0) return true;
     try {
       lstatSync(session.worktreePath);
     } catch (error) {
@@ -142,7 +147,7 @@ export function createChatDeletion(ctx: ChatContext, deps: Pick<Agents, 'drop'> 
   const requireDeletable = (session: Session): void => {
     if (session.kind !== 'chat') throw new InvalidOperationError(DELETE_CHAT_NOT_DELETABLE_TEXT);
     if (session.machineId !== null) throw new InvalidOperationError(DELETE_CHAT_REMOTE_TEXT);
-    if (busy.has(session.id) || switching.has(session.id) || session.state === 'working' || session.state === 'waiting' || session.driver === 'terminal') {
+    if (busy.has(session.id) || switching.has(session.id) || ctx.puttingAway.has(session.id) || session.state === 'working' || session.state === 'waiting' || session.driver === 'terminal') {
       throw new AgentMidTurnError(DELETE_CHAT_MID_TURN_MESSAGE);
     }
   };
@@ -186,7 +191,7 @@ export function createChatDeletion(ctx: ChatContext, deps: Pick<Agents, 'drop'> 
       const current = (): Session[] => {
         const sessions = entities.listSessions(workspaceId);
         // A turn can be starting before its state reads `working`: the busy set covers that gap.
-        if (sessions.some((session) => busy.has(session.id) || (session.worktreePath !== null && (session.driver === 'terminal' || switching.has(session.id))))) throw new WorkspaceBusyError(workspaceId);
+        if (sessions.some((session) => busy.has(session.id) || (session.worktreePath !== null && (session.driver === 'terminal' || switching.has(session.id) || ctx.puttingAway.has(session.id))))) throw new WorkspaceBusyError(workspaceId);
         return sessions;
       };
       const finish = (sessions: readonly Session[]) => {

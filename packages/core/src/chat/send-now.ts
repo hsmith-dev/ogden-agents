@@ -35,6 +35,7 @@ export function createSendNow(ctx: ChatContext, deps: Turns & Pick<Replies, 'fin
     const session = getSession(workspaceId, sessionId);
     if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
     if (session.driver === 'terminal') throw new DriverIsTerminalError();
+    ctx.requireCopyPresent(sessionId);
   };
 
   const queueChanged = (sessionId: SessionId, turn: Turn, cause: QueueChangeCause) => {

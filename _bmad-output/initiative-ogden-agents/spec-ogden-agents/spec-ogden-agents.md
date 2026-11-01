@@ -31,7 +31,7 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** Users hold persistent browser chat sessions with whichever supported agent they select, listed and resumable. Agents that can't resume a session reopen from Ogden Agents's stored transcript.
   - **success:** After a server restart, a reopened chat continues with its prior context. This is demonstrated with at least two different agents (Claude Code and Antigravity; if epic 6's spike is a no-go, the several-agents part moves to v2, user 2026-10-02).
 - **CAP-4**
-  - **intent:** Agent permission requests appear as allow-once / always-allow / deny cards in the UI, governed by a caution level set per project.
+  - **intent:** Agent permission requests appear as allow-once / always-allow / deny cards in the UI, governed by a caution level set per project. Always allow on a command can be scoped to the command's first one or two words (epic 26, AD-40, approved 2026-10-31); such a rule never matches a chained or redirected command or a protected path.
   - **success:** A requested shell command does not run until it is approved in the UI.
 - **CAP-5**
   - **intent:** An advanced user toggles to the selected agent's real interactive CLI on the same session, with only one side driving at a time. The toggle appears only for agents whose chat session can be resumed in their own CLI.
@@ -117,6 +117,12 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
 - **CAP-33** (v1.3)
   - **intent:** In the desktop app: a tray or menu-bar icon with the Needs you count; a global shortcut that opens a quick-entry box to start or continue a chat; files and images attached to a message for agents that accept them; a per-chat choice to work in its own worktree; and, for such a chat, its diff and a local commit from the chat.
   - **success:** Each works on macOS, Windows and Linux in the desktop app; a worktree chat's diff shows its changes and its commit lands on its own branch, never pushed; the npm route lacks only the tray and the global shortcut.
+- **CAP-34** (v1.3)
+  - **intent:** A user looks at what an agent did and why, in the project itself: browses and reads its files (markdown rendered), searches it, reviews changes per file in views for this turn, unstaged, staged and the branch, stages or reverts a hunk, comments on lines and sends the comments to the agent as one message, runs the project's test or lint command and jumps from a failure to its line, and opens any file at a line in their own editor.
+  - **success:** From a finished turn, the user opens This turn's changes, reverts one hunk, comments on another and sends it; the agent's next turn answers the comment; a failing test from Problems opens at its line in the viewer and in VS Code.
+- **CAP-35** (v1.3)
+  - **intent:** The composer carries a setup row: agent, model, permission mode, and Location (This folder, Worktree or a remote machine). A chat can move between this folder and its own worktree. Worktrees are kept to a number the user sets, with Restore. One task can be tried with several agents side by side, each in its own worktree, and one result kept. Parallel worktrees each get their own port.
+  - **success:** The user starts a chat in a new worktree from the composer without opening a dialog, hands it back to this folder, and tries a second task with two agents and keeps one result; a deleted worktree comes back from Restore.
 
 CAP-11 (cost caps) is retired and its number is not reused.
 
@@ -146,6 +152,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - CAP-28 (v1.3): CLI-only agent panes stay behind Developer mode, like every terminal pane. Prompt patterns and key encodings are adapter data per CLI, never core code (AD-1). GitHub Copilot CLI's screen prompts are answered only one at a time by the user, never queued, scheduled or answered by another agent (its terms).
 - CAP-29 (v1.3): discovery reads session records and transcripts only, never a credential file, and installs no hook and writes no agent config.
 - CAP-31 (v2): no route that can run a command, raise a mode above Ask or change settings is reachable with a phone token. The terminal channel (AD-6) is never reachable remotely.
+- CAP-34, CAP-35 (v1.3): every file Ogden reads or searches for a user is inside the project's top folder after resolving links, never a protected path, and capped in size. A project command (test, lint, setup) runs only in a trusted project, as the BMad scripts do (AD-36, AD-38).
 
 ## Non-goals
 
@@ -161,7 +168,8 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - Tracker stores other than Jira (Linear, GitHub Issues, Notion, Trello) remain out of scope. Jira is in scope as CAP-26 (v1.2 or later); until then the board covers the repo store only. Jira never drives build routing directly (CAP-26's own non-goal, below).
 - CAP-26 (v1.2 or later): Jira (or any tracker) driving `bmad-build-auto`'s dispatch or routing directly — declined by the user once BMad's own tooling conflict (trackers never drive build routing) was surfaced. v1 or v1.1 scope. Any tracker other than Jira for this pass.
 
-- Planned for v2, not v1 (epic 8): viewing the project's markdown files in the app, code-change review, a VS Code extension, and chat with Gemini CLI and GitHub Copilot CLI. Codex and Grok chat are v1.1 (epic 12, 2026-10-04). In v1 (epic 17, 2026-10-05): Codex builds unattended (conditional on its live checks; attended-only fallback where `git commit` cannot run in its sandbox), and Grok and Antigravity build attended only; Gemini CLI builds stay v2, and GitHub Copilot CLI builds are excluded outright — autonomous background Copilot CLI use violates GitHub's terms, so it stays interactive-only (epic 16's terminal panes).
+- Ogden is not an IDE (CAP-34): no debugger, no extensions or language servers, no general editing. The file viewer is read-only; editing and debugging hand off to the user's editor. Staging or reverting a hunk is a review action, not editing.
+- Planned for v2, not v1: a VS Code extension, and chat with Gemini CLI and GitHub Copilot CLI (a new envelope split from epic 8, 2026-10-31). Viewing the project's markdown files and code-change review move to v1.3 as CAP-34 (epic 8, the Workbench). Codex and Grok chat are v1.1 (epic 12, 2026-10-04). In v1 (epic 17, 2026-10-05): Codex builds unattended (conditional on its live checks; attended-only fallback where `git commit` cannot run in its sandbox), and Grok and Antigravity build attended only; Gemini CLI builds stay v2, and GitHub Copilot CLI builds are excluded outright — autonomous background Copilot CLI use violates GitHub's terms, so it stays interactive-only (epic 16's terminal panes).
 
 ## Success signal
 
@@ -172,6 +180,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 ## Assumptions
 
 - The one install command (CAP-1) is the only CLI step of the npm route and is exempt from the no-CLI constraint. The desktop app (CAP-20) needs no command at all, and "a single Node process" stays true inside it, since it bundles its own Node (epic 13, 2026-10-04).
+- CAP-34 and CAP-35 are v1.3: the approved order builds epics 26, 8 and 27 before the other v1.3 epics, though the change proposal names a version only for epic 26.
 - Ogden Agents checks for `uv` and installs it if missing, because BMAD's scripts and bmad-loop are Python run through `uv`.
 - The BMad trademark permits the name "Ogden Agents" (the user's call).
 - A fresh UI is built with `design-taste-frontend` on bmad-method-ui's stack. bmad-method-ui and acp-ui (both MIT) are references to borrow from with attribution, not forks.

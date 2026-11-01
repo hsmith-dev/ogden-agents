@@ -95,10 +95,10 @@ risk = "medium"
 id = 9
 type = "story"
 title = "One Needs you model in core, read by the sidebar"
-description = "Moves Needs you from the browser's derivation into the core read model (sessions waiting, panes with an open prompt, reviews, blocked runs, each with its workspace), serves it by route and events, and switches the sidebar, the tab title count and notifications to read it; it reads pane needs-attention as entry 6 defines it, and serves the list and count routes that epic 23's device socket (23.7) and epic 25's tray (25.1) read."
+description = "Moves Needs you from the browser's derivation into the core read model (sessions waiting, panes with an open prompt, reviews, blocked runs, each with its workspace), serves it by route and events, and switches the sidebar, the tab title count and notifications to read it; it reads pane needs-attention as entry 6 defines it, and serves the list and count routes that epic 23's device socket (23.7) and epic 25's tray (25.1) read; each row carries the kind, what and where that 26.1's two-line rows show, and `g y` keeps working."
 verify = "Server tests cover each kind joining and leaving the model, and Playwright shows the sidebar and tab title unchanged for existing kinds plus a pane row."
 covers = ["E20-R6"]
-after = [3, 6, "11.4"]
+after = [3, 6, "11.4", "26.1"]
 hitl = false
 risk = "medium"
 

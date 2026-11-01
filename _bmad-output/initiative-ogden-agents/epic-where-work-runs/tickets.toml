@@ -1,0 +1,115 @@
+# Epic 27 breakdown (v1.3, start work where it should run). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-31 from change-desktop-ux-uplift section 4.4 (approved by the user 2026-10-31). References to other epics use "<epic id>.<entry id>".
+# CI never uses a real agent, model, phone or network: fakes on loopback only. Live checks with real CLIs, agents, machines and devices are hitl.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: the composer setup row with Location This folder and Worktree"
+description = "Adds the setup row under the prompt box with agent, model, mode and Location chips, each a small menu defaulting from the project (the agent chip reuses 6.6's picker and the mode chip the existing mode picker, moved out of the header), and the thinnest Worktree path: starting a chat with Location Worktree creates a worktree through `VcsPort` on `ogden/chat/<ses>`, sets 8.2's `worktreePath`, and runs the fake agent in it; entry 3 completes worktree chats."
+verify = "Playwright starts one chat in This folder and one in Worktree from the composer without a dialog, and the fake agent's edit lands only in the worktree."
+covers = ["E27-R1", "E27-R2"]
+after = ["6.6", "5.5", "8.2"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 2
+type = "story"
+title = "Epic contracts and stubs: Location, retention and Restore, ports, multi-agent trials"
+description = "Adds the shared schemas, use-case interfaces and memory stubs for a chat's Location (this folder, worktree, remote machine id), the retention setting and snapshot records, port allocation, and a trial grouping several chats on one task, with their routes under the AD-15 gate and events carrying ids only, so the lanes start at once."
+verify = "Unit and architecture tests pass, including that no route runs git outside `VcsPort`."
+covers = ["E27-R4", "E27-R5", "E27-R6", "E27-R7"]
+after = [1]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Worktree chats with a branch badge"
+description = "Completes worktree chats (moved from 25.6): AD-17's protections (hooks off, protected paths, Windows long paths), kept on restart, removed with the chat after confirmation, the branch badge in the chat header and the Location chip, the Workbench rooted at the worktree (AD-36), and 8.4's Commit these changes working on it."
+verify = "Tests create a worktree chat on a fixture repo, restart the server and find it intact, commit through 8.4's action to its branch only, and delete the chat to remove the worktree after confirmation."
+covers = ["E27-R2"]
+after = [2, "8.4"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Hand-off between this folder and the chat's worktree"
+description = "Owns the hand-off contract (kept out of entry 2 until the source conflict is settled) and moves a chat from this folder to a new worktree, or from its worktree back to this folder, carrying its uncommitted changes through `VcsPort`, refused mid-turn and when the target has conflicting changes, with the agent continuing in the new folder."
+verify = "Tests hand a fixture chat to its worktree and back with an uncommitted edit intact both ways, and a hand-off mid-turn is refused with its code."
+covers = ["E27-R3"]
+after = [3]
+hitl = false
+risk = "high"
+unknown = "AD-8's CAP-33 note fixes `worktreePath` at creation; this entry waits for the architecture to allow it to change, or for a decision that hand-off starts a linked new chat instead, and with it whether the agent is resumed or restarted in the new folder."
+
+[[entry]]
+id = 5
+type = "story"
+title = "Location: a remote machine from the composer"
+description = "Lists each machine from Settings, Remote machines in the Location chip and starts the chat there through epic 19's chat target, with the machine's name shown where the branch badge would be; Worktree is not offered with a remote machine in v1.3."
+verify = "Playwright starts a chat on a fake remote machine from the composer and the fake agent's reply arrives over its SSH stub."
+covers = ["E27-R4"]
+after = [2, 3, "19.7"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Worktree retention and Restore"
+description = "Adds the per-project retention number in workspace settings, removes the oldest idle worktree past it after snapshotting its uncommitted changes into the data directory with 8.4's tree snapshots (never mid-turn), and lists removed worktrees with Restore, which brings back the worktree, its branch and its changes; it exposes one remove-with-snapshot operation that entry 7 hooks to release and restore a port and entry 8's Keep this one calls."
+verify = "Tests pass the limit on a fixture project, see the oldest idle worktree removed with its changes snapshotted, a mid-turn one kept, and Restore bring it back intact."
+covers = ["E27-R5"]
+after = [3]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 7
+type = "story"
+title = "A port per worktree"
+description = "Allocates a free port per worktree from a range, keeps it for the worktree's life (released on entry 6's removal, given back on Restore), adds a declared setup command to workspace settings beside 8.9's test and lint (confirmed and trusted the same way) run when a worktree is created, passes the port as `PORT` to the chat's agent and to that setup command through 8.9's runner, and shows it beside the branch badge."
+verify = "Tests start two worktree chats at once and read two different ports in each agent's environment and the setup command that ran in each, an unconfirmed setup command never runs, and a released port is reused."
+covers = ["E27-R6"]
+after = [6, "8.9"]
+hitl = false
+risk = "medium"
+unknown = "The port range; assumed 41000 to 41999 unless the build finds a reason to change it."
+
+[[entry]]
+id = 8
+type = "story"
+title = "Try with several agents: one task, side by side, keep one"
+description = "Sends one task to two or more chosen agents, each in its own worktree chat with its own port, shows them side by side with each one's Changes, and on Keep this one removes the others through entry 6's remove-with-snapshot operation so Restore can bring them back."
+verify = "Playwright tries a task with two fake agents, sees both results side by side, keeps one, and restores the other."
+covers = ["E27-R7"]
+after = [6, 7]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 9
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up duplication, dead code and boundary leaks across entries 1 to 8, scoped at start from their build records and deferred review findings."
+verify = "Typecheck, the full suite and the architecture test pass, and the sweep's list of changes is recorded in its plan."
+covers = []
+after = [1, 2, 3, 4, 5, 6, 7, 8]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 10
+type = "story"
+title = "End-to-end suite and v1.3 release part; live checks with real agents and a remote machine"
+description = "Adds the epic's end-to-end journey on all three OSes with fakes only (a worktree chat from the composer, hand-off, a two-agent trial kept and restored) in the desktop app and on the npm route, updates docs, and lists the user's live checks: a real agent in a worktree chat, a trial with two real agents, and a chat on a real remote machine."
+verify = "The end-to-end suite passes in CI on macOS, Windows and Linux, and the user's live check results are recorded in the plan."
+covers = ["E27-R8"]
+after = [9]
+hitl = true
+risk = "medium"

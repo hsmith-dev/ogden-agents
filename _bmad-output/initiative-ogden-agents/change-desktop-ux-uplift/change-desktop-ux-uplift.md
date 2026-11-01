@@ -2,7 +2,7 @@
 type: change
 title: "Desktop UX uplift: what Ogden adopts from Claude Desktop, the Codex app, other harnesses and VS Code"
 created: '2026-10-31'
-status: proposed
+status: approved
 trigger: user, 2026-10-31
 mode: batch
 sources:
@@ -55,6 +55,8 @@ All proposed, not adopted, until the user adopts them.
 
 **P-A4. AD-39 — Opening an editor is a fixed launcher.** Binds CAP-34. `EditorLauncherPort` knows a short list of editors (VS Code `code -g`, Cursor, Zed, JetBrains launchers) found on `PATH` the same way linked commands are; it starts one with `file:line` as arguments, no shell, allowlisted environment, only for paths AD-36 allows. Prevents: a URL scheme or shell string built from user input.
 
+**P-A6. AD-40 — Always allow can be scoped to a command pattern.** Binds epic 26 story 8. For a command (execute-kind) request, Always allow offers, beside the current scope, "Always allow commands starting with `<prefix>`": the prefix is the first one or two words of the parsed command (never a free-typed pattern), it never matches a command containing a shell control character (`;`, `&&`, `||`, `|`, `` ` ``, `$(`, redirection) or a protected path, and it is saved as a rule like any other (shown and removable in Settings). Custom agents (21.5) and attended builds still offer no Always allow. Prevents: a pattern that silently allows a chained or redirected command.
+
 **P-A5. AD-1 port list note:** add `WorkspaceFilesPort` and `EditorLauncherPort`.
 
 ### 4.3 UX (`ux-ogden-agents/EXPERIENCE.md`, `DESIGN.md`)
@@ -79,8 +81,9 @@ All proposed, not adopted, until the user adopts them.
 5. One-line sidebar rows; the shortcut banner shows once.
 6. Plain titles and dead ends: build session titles, clickable Runs rows, the Board's epic name, Review's tab, terminal header icons.
 7. Settings with grouped navigation.
-8. Refactor sweep.
-9. End-to-end suite and release part.
+8. Always allow scoped to a command prefix (AD-40), with a security review.
+9. Refactor sweep.
+10. End-to-end suite and release part.
 
 **Epic 8 (incept; renamed "The Workbench: look into the project and review changes without leaving Ogden")**
 1. Tracer bullet: Files tab lists the project and shows one file read-only through `WorkspaceFilesPort`.
@@ -115,8 +118,9 @@ All proposed, not adopted, until the user adopts them.
 
 Scope: moderate (backlog reorganization plus two new epics and one inception). Order: 26, 8, 27, then 20, 24, 22, 25, 23. Each story follows the usual loop: plan, build, a fresh code-only review, triage, full test suite, commit. AD-36 to AD-39 need the user's adoption before epic 8's stories that use them are built (26 needs none).
 
-Open question for the user: should Always allow be scoped to a command pattern (as Zed does)? Not proposed here, since it changes the permission model.
+Always allow scoped to a command pattern (as Zed does) was added to epic 26 as story 8 under AD-40, at the user's request.
 
 ## 6. Approval and handoff log
 
 - 2026-10-31: proposed.
+- 2026-10-31: approved by the user: the plan and order as proposed (26, 8, 27, then 20, 24, 22, 25, 23); AD-36 to AD-39 adopted; command-pattern Always allow added to epic 26 (AD-40, adopted with the epic).

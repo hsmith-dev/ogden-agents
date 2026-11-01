@@ -58,6 +58,7 @@ import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
 import { Skeleton } from '@/ui/skeleton';
 import { Textarea } from '@/ui/textarea';
+import { withOpenInEditor } from './open-in-editor';
 import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
 import { Text } from '@/ui/typography';
 import { isBusy, useSessions } from '@/workspaces/workspace-api';
@@ -498,6 +499,8 @@ function ChangesList({
   const commentSlots = useLineCommentSlots({ comments, data: settled ? loaded : undefined, origin: { view: target.view, turn: diffTarget.turn }, onNotice: setNotice });
   const sender = useSendComments({ wsId, session: target.session, view: target.view, comments, onNotice: setNotice });
   const bar = <CommentsBar comments={comments} outdated={commentSlots.outdated} notice={notice} onNotice={setNotice} send={sender.control} onSend={sender.onSend} />;
+  // The view's own file actions, then Open in editor (8.10).
+  const withEditor = (slots: DiffSlots): DiffSlots => ({ ...slots, fileActions: withOpenInEditor(wsId, target.session, loaded, slots.fileActions) });
   const body = listBody();
   return (
     <>
@@ -562,7 +565,7 @@ function ChangesList({
           </div>
         ) : (
           <div className="flex min-w-0 flex-col" onFocus={commentSlots.onFocus} onKeyDownCapture={commentSlots.onKeyDownCapture}>
-            <DiffViewer ref={viewer} files={loaded} label={CHANGES_VIEW_LABELS[target.view]} {...slotsFor(diffTarget, loaded)} {...commentSlots.slots} />
+            <DiffViewer ref={viewer} files={loaded} label={CHANGES_VIEW_LABELS[target.view]} {...withEditor(slotsFor(diffTarget, loaded))} {...commentSlots.slots} />
           </div>
         )}
       </div>

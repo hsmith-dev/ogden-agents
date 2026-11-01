@@ -616,6 +616,7 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspaceProjectCommandRun}`,
   `POST ${API_ROUTES.workspaceProjectCommandRunStop}`,
   `GET ${API_ROUTES.editors}`,
+  `PUT ${API_ROUTES.editors}`,
   `GET ${API_ROUTES.workspaces}`,
   `POST ${API_ROUTES.workspaces}`,
   `GET ${API_ROUTES.chatAgents}`,

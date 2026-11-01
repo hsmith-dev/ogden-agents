@@ -1,4 +1,4 @@
-import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
+import { EDITOR_SETTINGS_LABEL, NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
 
 /*
  * Settings' groups (epic 26, E26-R7; EXPERIENCE.md Information Architecture):
@@ -40,6 +40,8 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
       // Every project's Always allow rules (epic 26 story 8, AD-40).
       { label: 'Always allow rules', to: '/settings/always-allow' },
       { label: 'Builds', to: '/settings/builds' },
+      // The editor Open in editor hands files to (AD-39, 8.10).
+      { label: EDITOR_SETTINGS_LABEL, to: '/settings/editor' },
     ],
   },
   { id: 'appearance', label: 'Appearance', glyph: 'Palette', pages: [{ label: 'Appearance', to: '/settings/appearance' }] },

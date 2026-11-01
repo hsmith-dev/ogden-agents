@@ -561,7 +561,7 @@ export const API_ROUTES = {
   workspaceProjectCommandRun: `${API_BASE}/workspaces/:wsId/project-command-runs/:runId`,
   /** `POST` → `ProjectCommandRunResponse`: stops a running command. */
   workspaceProjectCommandRunStop: `${API_BASE}/workspaces/:wsId/project-command-runs/:runId/stop`,
-  /** `GET` → `EditorsResponse` (AD-39; 8.10): the editors found on this computer. */
+  /** `GET` → `EditorsResponse` (AD-39; 8.10): the editors found on this computer. `PUT SetEditorRequest` → `EditorsResponse`: the editor files open in (409 `editor_unavailable` when not found). */
   editors: `${API_BASE}/editors`,
   /**
    * `POST StartBuildRequest` → 201 `BuildResponse` (story 5.2): builds one

@@ -18,6 +18,7 @@ import { diffTexts } from '@/ui/diff/line-diff';
 import { DiffViewer, type DiffFileData } from '@/ui/diff-viewer';
 import { StateGlyph } from '@/ui/state-glyph';
 import { cn } from '@/ui/utils';
+import { withOpenInEditor } from '@/workbench/open-in-editor';
 import type { ChatDetail } from './detail-level';
 import type { TranscriptToolCall } from './transcript';
 
@@ -146,14 +147,22 @@ export function editDiffFile(diff: ToolCallDiff): DiffFileData {
   return { file: { path: diff.path, change: diff.oldText === null ? 'added' : 'changed', additions, deletions, binary: false, tooLarge: false }, hunks };
 }
 
-/** An edit row's detail: each file's diff in the diff viewer (inline, that file only). */
-function DiffDetail({ diffs }: { diffs: readonly ToolCallDiff[] }) {
+/** The chat a row is in, for Open in editor on its edits (8.10): the files are of the chat's worktree when it has one. */
+export interface ToolCallChat {
+  wsId: string;
+  sesId: string;
+  /** The chat's folder (its worktree, else the project's path and real path): an agent's absolute edit path under it opens relative to it. */
+  roots?: readonly string[];
+}
+
+/** An edit row's detail: each file's diff in the diff viewer (inline, that file only), with Open in editor for a workspace-relative path. */
+function DiffDetail({ diffs, chat }: { diffs: readonly ToolCallDiff[]; chat: ToolCallChat | undefined }) {
   const files = useMemo(() => diffs.map(editDiffFile), [diffs]);
   return (
     <div className="flex min-w-0 flex-col gap-2" data-testid="tool-call-detail">
       {diffs.map((diff, index) => (
         <div key={`${diff.path}-${index}`} className="flex min-w-0 flex-col gap-1">
-          <DiffViewer files={[files[index]!]} layout="inline" label={`Changes in ${diff.path}`} />
+          <DiffViewer files={[files[index]!]} layout="inline" label={`Changes in ${diff.path}`} {...(chat === undefined ? {} : { fileActions: withOpenInEditor(chat.wsId, chat.sesId, [files[index]!], undefined, chat.roots) })} />
           {diff.truncated === true ? <span className="text-caption text-muted-foreground">Only the start of this change is shown.</span> : null}
         </div>
       ))}
@@ -162,7 +171,7 @@ function DiffDetail({ diffs }: { diffs: readonly ToolCallDiff[] }) {
 }
 
 /** One tool call. A call with a diff is a button that expands to its hunk (open from the start in Verbose). */
-export function ToolCallRow({ call, defaultOpen = false }: { call: TranscriptToolCall; defaultOpen?: boolean }) {
+export function ToolCallRow({ call, defaultOpen = false, chat }: { call: TranscriptToolCall; defaultOpen?: boolean; chat?: ToolCallChat | undefined }) {
   const [open, setOpen] = useState(defaultOpen);
   const detailId = useId();
   const diffs = call.diffs ?? [];
@@ -180,7 +189,7 @@ export function ToolCallRow({ call, defaultOpen = false }: { call: TranscriptToo
         <RowLine call={call} />
       </button>
       <div id={detailId} hidden={!open}>
-        {open ? <DiffDetail diffs={diffs} /> : null}
+        {open ? <DiffDetail diffs={diffs} chat={chat} /> : null}
       </div>
     </div>
   );
@@ -194,18 +203,18 @@ export function ToolCallRow({ call, defaultOpen = false }: { call: TranscriptToo
  * card; once allowed it rejoins the group. Switching the level starts the rows
  * afresh (their open state comes from the level).
  */
-export function ToolCalls({ calls, detail }: { calls: readonly TranscriptToolCall[]; detail: ChatDetail }) {
-  return <ToolCallsAt key={detail} calls={calls} detail={detail} />;
+export function ToolCalls({ calls, detail, chat }: { calls: readonly TranscriptToolCall[]; detail: ChatDetail; chat?: ToolCallChat | undefined }) {
+  return <ToolCallsAt key={detail} calls={calls} detail={detail} chat={chat} />;
 }
 
-function ToolCallsAt({ calls, detail }: { calls: readonly TranscriptToolCall[]; detail: ChatDetail }) {
+function ToolCallsAt({ calls, detail, chat }: { calls: readonly TranscriptToolCall[]; detail: ChatDetail; chat: ToolCallChat | undefined }) {
   const [open, setOpen] = useState(false);
   const listId = useId();
   if (detail === 'verbose') {
     return (
       <div className="flex flex-col gap-1" data-testid="tool-calls" data-grouped="false" data-detail={detail}>
         {calls.map((call) => (
-          <ToolCallRow key={call.toolCallId} call={call} defaultOpen />
+          <ToolCallRow key={call.toolCallId} call={call} defaultOpen chat={chat} />
         ))}
       </div>
     );
@@ -216,7 +225,7 @@ function ToolCallsAt({ calls, detail }: { calls: readonly TranscriptToolCall[]; 
     return (
       <div className="flex flex-col gap-1" data-testid="tool-calls" data-grouped="false" data-detail={detail}>
         {[...grouped, ...held].map((call) => (
-          <ToolCallRow key={call.toolCallId} call={call} />
+          <ToolCallRow key={call.toolCallId} call={call} chat={chat} />
         ))}
       </div>
     );
@@ -237,10 +246,10 @@ function ToolCallsAt({ calls, detail }: { calls: readonly TranscriptToolCall[]; 
         {running ? <StateGlyph state="working" label="In progress" labelMode="hidden" /> : null}
       </button>
       <div id={listId} hidden={!open} className="flex flex-col gap-1 pl-4">
-        {open ? grouped.map((call) => <ToolCallRow key={call.toolCallId} call={call} />) : null}
+        {open ? grouped.map((call) => <ToolCallRow key={call.toolCallId} call={call} chat={chat} />) : null}
       </div>
       {held.map((call) => (
-        <ToolCallRow key={call.toolCallId} call={call} />
+        <ToolCallRow key={call.toolCallId} call={call} chat={chat} />
       ))}
     </div>
   );

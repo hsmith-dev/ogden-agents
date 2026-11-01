@@ -16,6 +16,7 @@ import {
   apiPath,
   ApiErrorBody,
   chatWorktreeBranch,
+  EDITOR_NONE_FOUND_TEXT,
   HUNK_CHANGED_SINCE_TEXT,
   PROJECT_COMMAND_REFUSALS,
   ProjectCommandRunDetail,
@@ -46,13 +47,16 @@ describe('workbench routes on the real server', () => {
     const repo = tempDataDir();
     const created = await fetch(`${server.url}${API_ROUTES.workspaces}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ path: repo }) });
     const wsId = WorkspaceResponse.parse(await created.json()).workspace.id;
-    const unwired: Array<[string, string]> = [
-      // Changes, hunk actions and their undo (8.4, 8.5), search (8.8) and Problems (8.9) are wired.
-      ['POST', apiPath(API_ROUTES.workspaceFileOpenInEditor, { wsId })],
-      ['GET', API_ROUTES.editors],
-    ];
-    for (const [method, path] of unwired) {
-      await expectError(await fetch(`${server.url}${path}`, { method, headers }), 501, 'not_implemented');
+    // Open in editor is wired since 8.10: a test run's launcher looks only in its own folder, here none, so nothing is found.
+    const editors = await fetch(`${server.url}${API_ROUTES.editors}`, { headers });
+    expect(editors.status).toBe(200);
+    expect(editors.headers.get('cache-control')).toBe('no-store');
+    expect(await editors.json()).toEqual({ editors: [], defaultEditorId: null, chosenEditorId: null });
+    writeFileSync(join(repo, 'a.ts'), 'x');
+    const open = await fetch(`${server.url}${apiPath(API_ROUTES.workspaceFileOpenInEditor, { wsId })}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ path: 'a.ts' }) });
+    expect(open.status).toBe(409);
+    expect(ApiErrorBody.parse(await open.json()).error).toMatchObject({ code: 'editor_unavailable', message: EDITOR_NONE_FOUND_TEXT });
+    for (const [method, path] of [['GET', API_ROUTES.editors], ['PUT', API_ROUTES.editors], ['POST', apiPath(API_ROUTES.workspaceFileOpenInEditor, { wsId })]] as const) {
       // The gate is in front of every one.
       expect((await fetch(`${server.url}${path}`, { method })).status, path).toBe(401);
     }
@@ -184,7 +188,29 @@ describe('workbench routes in-process, on memory ports', () => {
     const opened = await json('POST', open, { path: 'src/a.ts', line: 3 });
     expect(await opened.json()).toEqual({ editorId: 'vscode', editorName: 'VS Code' });
     expect(launcher.opens).toEqual([{ editorId: 'vscode', absolutePath: `${root}/src/a.ts`, line: 3, column: undefined }]);
-    expect(await (await hono.request(API_ROUTES.editors)).json()).toEqual({ editors: [{ id: 'vscode', name: 'VS Code' }], defaultEditorId: 'vscode' });
+    expect(await (await hono.request(API_ROUTES.editors)).json()).toEqual({ editors: [{ id: 'vscode', name: 'VS Code' }], defaultEditorId: 'vscode', chosenEditorId: null });
+  });
+
+  it('PUT editors keeps a found editor (every later open uses it); 409 one not found, 400 a malformed body; open 409s an unknown or failing editor', async () => {
+    const { hono, files, launcher, workspace, root, json } = app();
+    files.setFiles(root, { 'src/a.ts': 'x' });
+    launcher.editors = [{ id: 'vscode', name: 'VS Code' }, { id: 'cursor', name: 'Cursor' }];
+    const put = await json('PUT', API_ROUTES.editors, { editorId: 'cursor' });
+    expect(put.status).toBe(200);
+    expect(put.headers.get('cache-control')).toBe('no-store');
+    expect(await put.json()).toEqual({ editors: launcher.editors, defaultEditorId: 'cursor', chosenEditorId: 'cursor' });
+    const open = apiPath(API_ROUTES.workspaceFileOpenInEditor, { wsId: workspace.id });
+    expect(await (await json('POST', open, { path: 'src/a.ts', line: 12 })).json()).toEqual({ editorId: 'cursor', editorName: 'Cursor' });
+    await expectError(await json('PUT', API_ROUTES.editors, { editorId: 'zed' }), 409, 'editor_unavailable');
+    for (const body of [{}, { editorId: 'sh', args: ['-c'] }, { editorId: '../code' }]) await expectError(await json('PUT', API_ROUTES.editors, body), 400, 'invalid_request');
+    await expectError(await hono.request(API_ROUTES.editors, { method: 'PUT', body: '{nope' }), 400, 'invalid_request');
+    // An editor the client names must be one listed; extra fields are refused by the strict schema.
+    await expectError(await json('POST', open, { path: 'src/a.ts', editorId: 'sh' }), 409, 'editor_unavailable');
+    await expectError(await json('POST', open, { path: 'src/a.ts', editorId: '../code' }), 400, 'invalid_request');
+    await expectError(await json('POST', open, { path: 'src/a.ts', args: ['--evil'] }), 400, 'invalid_request');
+    launcher.failing.add('cursor');
+    await expectError(await json('POST', open, { path: 'src/a.ts' }), 409, 'editor_unavailable');
+    expect(launcher.opens.map((one) => one.editorId)).toEqual(['cursor', 'cursor']);
   });
 
   it('Problems: 409 untrusted, 400 a shell-needing command, 409 a changed script, 202 a run, its detail, 404 an unknown run, Stop', async () => {

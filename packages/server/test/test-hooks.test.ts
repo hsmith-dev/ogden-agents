@@ -20,6 +20,8 @@ import {
   resolveTestHooks,
   CLAUDE_CLI_ENV,
   CHECK_IN_MS_ENV,
+  EDITOR_PATH_ENV,
+  testEditorPath,
   CLAUDE_INSTALL_ENV,
   insideTemp,
   isTestRun,
@@ -101,6 +103,20 @@ describe('isTestRun and testHooksAllowed', () => {
     expect(insideTemp(inside)).toBe(true);
     expect(insideTemp(join(dir, 'out'))).toBe(false);
     expect(insideTemp(inside, join(dir, 'tmp-link'))).toBe(true);
+  });
+});
+
+describe('testEditorPath (story 8.10)', () => {
+  it("is the folder's real path in a test run, '' (finds nothing) with none named, inert otherwise, and throws when unusable", () => {
+    const dir = tempDataDir();
+    const fakes = tempDataDir();
+    expect(testEditorPath({ NODE_ENV: 'test', [EDITOR_PATH_ENV]: fakes }, dir)).toBe(realpathSync(fakes));
+    expect(testEditorPath({ NODE_ENV: 'test' }, dir)).toBe('');
+    expect(testEditorPath({ [EDITOR_PATH_ENV]: fakes }, dir)).toBeUndefined();
+    expect(testEditorPath({ NODE_ENV: 'test', [EDITOR_PATH_ENV]: fakes }, OUTSIDE)).toBeUndefined();
+    expect(() => testEditorPath({ NODE_ENV: 'test', [EDITOR_PATH_ENV]: 'relative' }, dir)).toThrow(/absolute/);
+    expect(() => testEditorPath({ NODE_ENV: 'test', [EDITOR_PATH_ENV]: OUTSIDE }, dir)).toThrow(/inside the temp folder/);
+    expect(() => testEditorPath({ NODE_ENV: 'test', [EDITOR_PATH_ENV]: join(fakes, 'missing') }, dir)).toThrow(/existing folder/);
   });
 });
 

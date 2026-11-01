@@ -22,6 +22,7 @@ This is the release handoff for the `ogden-agents` npm app, not the separate Pyt
 | LLM orchestration (epic 15) | Validated manager plans, worker dispatch, routing, limits, stop and restart; plans in review | Real manager/worker checks; automatic dispatch obeys provider eligibility |
 | Native CLI terminals (epic 16) | Tabs, splits, CLI detection, trust, notifications and environment controls; built/review plans | Real PTYs, resize, shutdown and process cleanup |
 | Builds with other agents (epic 17) | Agent-neutral runners, agent picker, attended fallback and safety tests; plans marked built | Codex attended until sandbox verified; Grok and Antigravity attended only |
+| Everyday polish (epic 26) | Needs you rows and `g y`, New chat in one step, Cmd/Ctrl+K palette, tool rows waiting in words, one-line sidebar, plain titles, grouped Settings, prefix Always allow (AD-40); plans 26.1 to 26.9 built, 26.10's installed journey | The user's check in the desktop app on each OS and at phone width (RELEASING.md) |
 
 Epic numbers reflect the initiative's existing naming; there is no additional missing epic inferred from a numbering gap. Planning evidence lives in `_bmad-output/initiative-ogden-agents/epic-*/`. `deferred-work.md` retains known limitations and follow-up work; resolve actionable release defects there without treating every future enhancement as a v1 requirement.
 
@@ -48,6 +49,7 @@ These checks are not established by this document. Record actual results, OS, pr
 - **Orchestration:** real manager with multiple workers, approval and automatic dispatch boundaries, permission waits, stop/restart without duplicate instructions, routing and build proposals through the Build dialog.
 - **Remote machines (2026.10.31-1):** a real SSH host on macOS and Linux: key install, host-key confirm and a changed-key refusal, a chat and an attended build running there with the diff coming back, and a dropped connection mid-turn.
 - **Custom agents and Local builds (2026.10.31-1):** a real third-party ACP agent (for example Goose) added, tested and chatted with, every tool call asking; a real OpenCode attended build with the Local model reaching Ready for review.
+- **Everyday polish (epic 26):** in the installed desktop app on macOS, Windows and Linux: Needs you rows and `g y`, Cmd/Ctrl+N and `g n` to the draft, Cmd/Ctrl+K, a "Commands starting with" rule saved, used and removed; and at 390px the Needs you drawer, the draft, the palette and Settings' select with no new clipping. Results go in the 26.10 plan's **For the user** table.
 - **BMad:** actual planning, Board updates, retrospective skill, generated files, saved lessons and a later worktree build receiving those lessons.
 
 The detailed procedures and known behavior choices remain in [RELEASING.md](../RELEASING.md). App notarization, Apple/Windows code signing and production updater signing are excluded from this request; unsigned instructions remain available and signed-update availability must be described honestly.

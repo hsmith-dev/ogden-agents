@@ -89,6 +89,30 @@ test('the draft first message makes exactly one chat, which opens and shows it',
   });
 });
 
+test('sent at once after New chat while the draft page loads, the text never reaches the old chat', async ({ page }) => {
+  await withChatServer(page, async ({ repo }) => {
+    const chat = await startChat(page, repo);
+    // The draft page's code arrives 1.5 s late: until then the router is on its way to /new and the old chat stays on screen.
+    await page.route('**/assets/new-chat-page-*.js', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    await page.getByTestId('header-new-chat').click();
+    // At once: fill waits for an enabled field, which is the draft's.
+    await composer(page).fill('sent at once');
+    await composer(page).press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/w/${chat.wsId}/s/ses_[0-9A-Z]{26}$`));
+    expect(page.url()).not.toBe(chat.url);
+    await expect(page.getByTestId('message-user')).toHaveText('sent at once');
+    // The old chat has no user message and no kept text.
+    await page.goto(chat.url);
+    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+    await expect(page.getByTestId('message-user')).toHaveCount(0);
+    await expect(composer(page)).toHaveValue('');
+    await expectChats(page, chat.wsId, 2);
+  });
+});
+
 test('a failed first send says why, and the retry goes to the chat it made', async ({ page }) => {
   await withChatServer(page, async ({ repo }) => {
     const chat = await startChat(page, repo);

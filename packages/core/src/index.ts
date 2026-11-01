@@ -31,6 +31,7 @@ export * from './data-dir.js';
 export { DATABASE_FILE, type OpenDatabaseOptions } from './db/database.js';
 export { BACKUP_DIR, DatabaseNewerError, KEEP_BACKUPS, LAST_VERSION_FILE } from './db/upgrade-guard.js';
 export * from './entities.js';
+export * from './path-shape.js';
 export * from './errors.js';
 export * from './handoff-brief.js';
 // Not `sessionAppender`: the raw session append stays inside core (E2-R7).

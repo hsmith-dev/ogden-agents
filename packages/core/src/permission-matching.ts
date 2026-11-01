@@ -6,11 +6,12 @@
  * from resolving paths on the filesystem.
  */
 import { realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
+import { isAbsolute, parse, resolve, sep } from 'node:path';
 import { alwaysAllowRefusal, programName, type AlwaysAllowScope, type CautionLevel, type ToolKind, type Workspace } from '@ogden-agents/shared';
 import type { ProtectedPaths } from './agent-port.js';
 import { prefixRefusedFor, scriptNameIndex } from './command-prefix-allowlists.js';
 import { canonicalWorkspacePath, isCaseInsensitivePath } from './entities.js';
+import { isDrivePath, isRemotePathShape, resolveLocalSegments } from './path-shape.js';
 
 /**
  * Shell control syntax: `;`, `&`, `|`, a backtick, `$(`, `${`, `>`, `<`, a
@@ -78,41 +79,30 @@ export const PATH_KINDS: ReadonlySet<ToolKind> = new Set<ToolKind>(['read', 'edi
  */
 function reachedPath(base: string, path: string): string | undefined {
   if (path === '' || path.startsWith('~') || path.includes(MASKED) || /[\u0000-\u001f\u007f]/.test(path)) return undefined;
+  // Another computer, a device or a URL is told by its spelling, before any file-system call (on Windows a stat of one is a network lookup).
+  if (isRemotePathShape(path)) return undefined;
   const absolute = isAbsolute(path);
-  let current = absolute ? parse(resolve(path)).root : base;
-  let lastReal = current;
-  let exists = true;
-  for (const segment of (absolute ? path.slice(parse(path).root.length) : path).split(/[\\/]+/)) {
-    if (segment === '' || segment === '.') continue;
-    if (segment === '..') {
-      current = dirname(current);
-      if (exists) lastReal = current;
-      continue;
-    }
-    const next = join(current, segment);
-    if (!exists) {
-      current = next;
-      continue;
-    }
-    try {
-      current = realpathSync.native(next);
-      lastReal = current;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') return undefined;
-      exists = false;
-      current = next;
-    }
+  const start = absolute ? parse(resolve(path)).root : base;
+  let reached: ReturnType<typeof resolveLocalSegments>;
+  try {
+    reached = resolveLocalSegments(start, (absolute ? path.slice(parse(path).root.length) : path).split(/[\\/]+/));
+  } catch {
+    return undefined;
   }
-  return isCaseInsensitivePath(lastReal) ? current.toLowerCase() : current;
+  // The last existing folder decides the case rule; `reached.real` is canonical up to it.
+  return isCaseInsensitivePath(reached.existing) ? reached.real.toLowerCase() : reached.real;
 }
 
 /**
  * Whether one path part names another machine or a URL (independent review
- * 2026-10-31): `host:path`, `user@host:path` (scp, rsync, git remotes) or
- * `scheme://...`. Such a part is never inside the project.
+ * 2026-10-31; Windows CI 2026-11-01), by its spelling alone: `host:path`,
+ * `user@host:path` (scp, rsync, git remotes), `scheme://...`, or a
+ * {@link isRemotePathShape} path (`\\host\share`, `//host/share`, `\\?\`,
+ * `\\.\`). Such a part is never inside the project. On Windows a single
+ * letter and a separator (`C:/x`) is a drive, a local path checked as any.
  */
-const isRemotePart = (part: string): boolean => /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(part) || /^[^/\\:]+:/.test(part);
+export const isRemotePart = (part: string, platform: NodeJS.Platform = process.platform): boolean =>
+  isRemotePathShape(part) || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(part) || (/^[^/\\:]+:/.test(part) && !(platform === 'win32' && isDrivePath(part)));
 
 /**
  * Whether the tool call names at least one path and every one of them lies

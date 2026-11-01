@@ -49,7 +49,9 @@ import {
   credentialReadFences,
   foldSegment,
   isRefusedWorkspacePath,
+  localRealpathSync,
   previewAround,
+  RemotePathError,
   type WorkspaceFilesPort,
   type WorkspacePathRefusal,
   type WorkspaceRootKind,
@@ -178,7 +180,8 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck, searchLimi
     }
     let real: string;
     try {
-      real = await realpath(join(root, ...segments));
+      // Never `realpath`: a link on the way to another computer is refused, not followed (on Windows that would connect to it).
+      real = localRealpathSync(join(root, ...segments));
     } catch {
       return NOT_FOUND;
     }
@@ -296,9 +299,10 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck, searchLimi
             entries.push({ ...entry, kind: 'file', protected: true });
             continue;
           }
-          target = await realpath(join(real, name));
-        } catch {
-          entries.push({ ...entry, kind: 'file', protected: false });
+          // Through a chain of links too: one leading to another computer is refused, not followed.
+          target = localRealpathSync(join(real, name));
+        } catch (error) {
+          entries.push({ ...entry, kind: 'file', protected: error instanceof RemotePathError });
           continue;
         }
         if (!allowed(root, target, fenced)) {

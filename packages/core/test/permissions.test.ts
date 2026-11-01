@@ -1060,7 +1060,8 @@ describe('Always allow by how a command starts (AD-40, epic 26 story 8)', () => 
       'cat ../x',
       'cat src/../../x',
       'cat /etc/passwd',
-      `cat ${join(outside, 'secret.txt')}`,
+      // With `/` on Windows too: a `\\` is refused for its characters before its path is looked at.
+      `cat ${join(outside, 'secret.txt').replaceAll('\\', '/')}`,
       'cat --f=/etc/x',
       'cat --file=../x',
       'cat -I../x',

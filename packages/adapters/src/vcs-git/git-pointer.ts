@@ -11,12 +11,15 @@
  *   nested ones too), and that folder's `core.worktree`, when set, is this
  *   project.
  *
- * Every path is compared by its real path. Anything else is refused with
+ * Every path is compared by its real path. A path the pointer files name,
+ * or a link on the way, that names another computer (`//host/share`,
+ * `\\host\share`) is refused by its spelling and never looked up: on
+ * Windows that lookup is a network request. Anything else is refused with
  * {@link GIT_POINTER_UNUSUAL_MESSAGE}. A `.git` folder is left as it was.
  */
 import { lstatSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { isRealFolder, VcsError } from '@ogden-agents/core';
+import { isRealFolder, isRemotePathShape, localRealpathSync, RemotePathError, VcsError } from '@ogden-agents/core';
 import { GIT_POINTER_UNUSUAL_MESSAGE } from '@ogden-agents/shared';
 import { readRegularFile } from '../fs-safe.js';
 import { isInside, realOf } from './checks.js';
@@ -38,6 +41,22 @@ export type ReadCoreWorktree = (gitDir: string) => Promise<string | undefined>;
 const refuse = (reason: string): never => {
   throw new VcsError(GIT_POINTER_UNUSUAL_MESSAGE, { step: 'gitdir', reason });
 };
+
+/**
+ * The real path of `path` (as `realOf`, `resolve(path)` when it is
+ * missing), refused when it, or a link on the way, names another computer.
+ */
+function realLocal(path: string): string {
+  if (isRemotePathShape(path)) return refuse('remote');
+  try {
+    return localRealpathSync(path);
+  } catch (error) {
+    return error instanceof RemotePathError ? refuse('remote') : resolve(path);
+  }
+}
+
+/** A path read from a git file, resolved from `from` as git reads it; refused by its spelling when it names another computer. */
+const named = (from: string, text: string): string => (isRemotePathShape(text) ? refuse('remote') : realLocal(resolve(from, text)));
 
 /** A small git file's text, as a regular file of its own (never a link, a FIFO or a device), or `undefined` when missing. */
 function small(path: string): string | undefined {
@@ -66,7 +85,7 @@ function nearestGit(folder: string): { top: string; kind: 'folder' | 'file' } | 
         // A link to a folder is git's folder as before; a link to anything else (or to nothing) is not a pointer Ogden reads.
         let linked = false;
         try {
-          linked = statSync(entry).isDirectory();
+          linked = statSync(localRealpathSync(entry)).isDirectory();
         } catch {
           linked = false;
         }
@@ -98,7 +117,7 @@ export async function checkGitPointer(folder: string, readCoreWorktree: ReadCore
   const pointer = line.slice('gitdir: '.length).trim();
   if (pointer === '' || pointer.includes('\0')) return refuse('empty');
   // Relative to the `.git` file's folder, as git reads it.
-  const target = realOf(resolve(top, pointer));
+  const target = named(top, pointer);
   if (!isRealFolder(target)) return refuse('not_folder');
 
   // A linked worktree: `<repo>/.git/worktrees/<name>`, or of a bare repository `<name>.git/worktrees/<name>`
@@ -108,9 +127,9 @@ export async function checkGitPointer(folder: string, readCoreWorktree: ReadCore
   const bareRepo = (dir: string) => /.\.git$/i.test(basename(dir)) && small(join(dir, 'HEAD')) !== undefined && isRealFolder(join(dir, 'objects')) && isRealFolder(join(dir, 'refs'));
   if (basename(admin) === 'worktrees' && (basename(repoGit) === '.git' || bareRepo(repoGit)) && isRealFolder(repoGit)) {
     const back = small(join(target, 'gitdir'));
-    if (back === undefined || realOf(resolve(target, back.trim())) !== dotGit) return refuse('worktree_back_link');
+    if (back === undefined || named(target, back.trim()) !== dotGit) return refuse('worktree_back_link');
     const commondir = small(join(target, 'commondir'));
-    if (commondir === undefined || realOf(resolve(target, commondir.trim())) !== repoGit) return refuse('worktree_commondir');
+    if (commondir === undefined || named(target, commondir.trim()) !== repoGit) return refuse('worktree_commondir');
     return { top, gitDir: target, common: repoGit };
   }
 
@@ -122,7 +141,7 @@ export async function checkGitPointer(folder: string, readCoreWorktree: ReadCore
     const modules = join(superGit, 'modules');
     if (isRealFolder(superGit) && isRealFolder(modules) && target !== modules && isInside(modules, target)) {
       const worktree = await readCoreWorktree(target);
-      if (worktree !== undefined && realOf(resolve(target, worktree)) !== top) return refuse('submodule_worktree');
+      if (worktree !== undefined && named(target, worktree) !== top) return refuse('submodule_worktree');
       return { top, gitDir: target, common: target };
     }
   }

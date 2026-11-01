@@ -545,6 +545,28 @@ describe('file-kind rules stay inside the project (review F1)', () => {
     expect(core.entities.getSession(session.id)?.state).toBe('waiting');
   });
 
+  it("a protected path in a worktree chat's own copy still asks, whatever the rules (27.3)", async () => {
+    const core = openTestCore();
+    const project = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    const worktree = tempDir('ogden-agents-cw-');
+    const id = newId('ses');
+    const session = core.entities.createSession({ workspaceId: project.id, kind: 'chat', id, worktreePath: worktree, branch: chatWorktreeBranch(id) });
+    core.entities.setSessionState(session.id, 'working');
+    const edit = (toolCallId: string, paths: string[]) => ({ toolCallId, title: `Edit ${toolCallId}`, kind: 'edit', paths });
+    void core.permissions.request(session.id, edit('first', [join(worktree, 'a.ts')]));
+    core.permissions.decide(project.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'allow_always' });
+    expect(await core.permissions.request(session.id, edit('inside', [join(worktree, 'b.ts')]))).toEqual({ outcome: 'allow_once' });
+
+    for (const protectedPath of [join(worktree, '.git', 'hooks', 'pre-commit'), join(worktree, '.claude', 'settings.json')]) {
+      const asked = track(core.permissions.request(session.id, edit(`protected-${protectedPath.length}`, [protectedPath])));
+      await flush();
+      expect(asked.decision).toBeUndefined();
+      expect(lastRequested(core, session.id).payload).toMatchObject({ toolCall: { protectedPath: true } });
+      core.permissions.decide(project.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'deny' });
+      await flush();
+    }
+  });
+
   it('a fetch rule stays per kind', async () => {
     const core = openTestCore();
     const { workspace, session } = workingSession(core);

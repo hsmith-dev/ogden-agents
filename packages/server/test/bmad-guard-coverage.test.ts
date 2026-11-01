@@ -35,6 +35,7 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `GET ${API_ROUTES.workspaceSessions}`,
   `POST ${API_ROUTES.workspaceSessions}`,
   `GET ${API_ROUTES.workspaceSession}`,
+  `DELETE ${API_ROUTES.workspaceSession}`,
   `POST ${API_ROUTES.sessionMessages}`,
   `POST ${API_ROUTES.sessionCancel}`,
   `PATCH ${API_ROUTES.sessionQueuedMessage}`,

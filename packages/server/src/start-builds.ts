@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createLocalBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createGitWorkingTree, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
-import { createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsPort, type VcsWorkingTreePort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
+import { chatWorktreesRootOf, createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsPort, type VcsWorkingTreePort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import { createPerAgentSandbox } from './build-agent-sandbox.js';
 import type { Logger } from './log.js';
 import { agentEnvironment, withoutAgentKeys } from './start-env.js';
@@ -29,7 +29,8 @@ export function gitHooksDir(dataDir: string): string {
  * own (`StartOptions.vcs`) replaces it.
  */
 export function createServerVcs(options: StartOptions, dataDir: string): VcsPort {
-  return options.vcs ?? createGitVcs({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), worktreesRoot: worktreesRootOf(dataDir), runsRoot: join(dataDir, RUNS_DIR) });
+  // Chats' own worktrees (`<data>/cw`, 27.3) may be removed too, each only with its `ogden/chat/<ses>` branch.
+  return options.vcs ?? createGitVcs({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), worktreesRoot: worktreesRootOf(dataDir), chatWorktreesRoot: chatWorktreesRootOf(dataDir), runsRoot: join(dataDir, RUNS_DIR) });
 }
 
 /** Where the Workbench's turn snapshots are kept (AD-37; story 8.4): a real folder of the data folder, never a link. */

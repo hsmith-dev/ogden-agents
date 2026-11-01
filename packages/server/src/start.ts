@@ -419,8 +419,13 @@ async function listenAndAnnounce({
     buildSessions: core.buildSessions,
     // A plain chat's remote target (CAP-24, epic 19 story 19.7): `Session.machineId`, opened fresh at each agent start.
     remote,
-    // A chat started in its own worktree (27.1): the same git as builds, made in `<data>/cw`.
+    // A chat started in its own worktree (27.1): the same git as builds, made in `<data>/cw`; removed by Delete chat (27.3).
     vcs,
+    // Whether a worktree chat's copy has uncommitted changes before it is deleted (27.3): the Workbench's own git.
+    vcsWorkingTree: createServerWorkingTree(options, dataDir),
+    // A deleted chat's copy that couldn't be removed (27.3): the session id and the step, never a path.
+    onWorktreeCleanupError: (sessionId, step, error) =>
+      log.warn('a chat worktree was left in place', { sessionId, step, code: error instanceof CoreError ? error.code : error === undefined ? 'refused' : 'unexpected' }),
     // Each prompt's snapshots for This turn (AD-37, story 8.4).
     turnSnapshots: core.turnSnapshots,
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),

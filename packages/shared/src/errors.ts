@@ -240,6 +240,8 @@ export const API_ERROR_CODES = [
   'editor_unavailable',
   /** Hand off (CAP-35, epic 27): the place the chat moves to has its own changes to some of the same files (409); `details.files` counts them. Nothing moved. */
   'handoff_conflict',
+  /** Delete chat and Delete history (CAP-35, 27.3): a chat's own worktree has uncommitted changes (staged, unstaged or untracked, or its state can't be read) and the request didn't say `discardUncommitted` (409). Nothing was deleted. */
+  'uncommitted_changes',
   /** Restore (CAP-35, epic 27): a put-away chat worktree could not be brought back, its branch gone or its folder taken (409); `details.reason` is the token. The saved changes are kept. */
   'restore_failed',
   /** A request whose fields don't go together (400), such as a worktree chat on a remote machine (27.1). Nothing was created. */

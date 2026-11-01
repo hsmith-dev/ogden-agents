@@ -522,7 +522,7 @@ describe('tool calls and permission requests', () => {
 });
 
 describe('workspaces and history (story 2.5)', () => {
-  it('lists workspaces and their sessions; an unknown workspace is not found', () => {
+  it('lists workspaces and their sessions; an unknown workspace is not found', async () => {
     const core = openTestCore();
     const { chat, workspace, session } = setUp(core, hello.port);
     const other = chat.openWorkspace(tempDir('ogden-agents-repo-'));
@@ -533,7 +533,7 @@ describe('workspaces and history (story 2.5)', () => {
     const unknown = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as typeof workspace.id;
     expect(() => chat.getWorkspace(unknown)).toThrow(NotFoundError);
     expect(() => chat.listSessions(unknown)).toThrow(NotFoundError);
-    expect(() => chat.deleteHistory(unknown)).toThrow(NotFoundError);
+    await expect(chat.deleteHistory(unknown)).rejects.toThrow(NotFoundError);
   });
 
   it('deletes one workspace’s history, keeps the other’s, and stops the deleted sessions’ idle agents', async () => {
@@ -545,7 +545,7 @@ describe('workspaces and history (story 2.5)', () => {
     const other = chat.openWorkspace(tempDir('ogden-agents-repo-'));
     const kept = await chat.createChatSession(other.id);
 
-    const deleted = chat.deleteHistory(workspace.id);
+    const deleted = await chat.deleteHistory(workspace.id);
     expect(deleted.deletedSessions).toBe(1);
     expect(deleted.deletedEvents).toBeGreaterThan(0);
     expect(chat.listSessions(workspace.id)).toEqual([]);
@@ -564,13 +564,13 @@ describe('workspaces and history (story 2.5)', () => {
     const { chat, workspace, session } = setUp(core, agent.port);
     chat.sendMessage(workspace.id, session.id, 'one');
     // Refused even before the agent has reported `working`.
-    expect(() => chat.deleteHistory(workspace.id)).toThrow(WorkspaceBusyError);
+    await expect(chat.deleteHistory(workspace.id)).rejects.toThrow(WorkspaceBusyError);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(() => chat.deleteHistory(workspace.id)).toThrow(WorkspaceBusyError);
+    await expect(chat.deleteHistory(workspace.id)).rejects.toThrow(WorkspaceBusyError);
     expect(chat.listSessions(workspace.id)).toHaveLength(1);
     finish();
     await chat.settled();
-    expect(chat.deleteHistory(workspace.id).deletedSessions).toBe(1);
+    expect((await chat.deleteHistory(workspace.id)).deletedSessions).toBe(1);
   });
 
   it('refuses a workspace with a waiting session in core itself', () => {

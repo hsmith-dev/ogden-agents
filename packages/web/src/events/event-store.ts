@@ -120,6 +120,25 @@ export function applyEvent(state: EventStoreState, event: CoreEvent): EventStore
       sessionCursors,
     };
   }
+  if (event.type === 'workspace.chat_deleted') {
+    // Delete chat (27.3): the chat's stream and paging cursor go with its events.
+    const { sessionId } = event.payload;
+    const streams = new Map(workspace.streams);
+    streams.delete(sessionId);
+    streams.set(event.streamId, addEvent(workspace.streams.get(event.streamId) ?? NO_EVENTS, event));
+    const sessionCursors = new Map(state.sessionCursors);
+    sessionCursors.delete(sessionKey(wsId, sessionId));
+    return {
+      ...withWorkspace(state, wsId, {
+        ...workspace,
+        events: addEvent(workspace.events, event),
+        lastSeq: event.seq,
+        oldestSeq: workspace.oldestSeq ?? event.seq,
+        streams,
+      }),
+      sessionCursors,
+    };
+  }
   const streams = new Map(workspace.streams);
   streams.set(event.streamId, addEvent(workspace.streams.get(event.streamId) ?? NO_EVENTS, event));
   return withWorkspace(state, wsId, {
@@ -172,7 +191,7 @@ export function applyEvents(state: EventStoreState, batch: readonly CoreEvent[])
     drafts.clear();
   };
   for (const event of batch) {
-    if (isInstallEvent(event) || event.type === 'workspace.history_deleted') {
+    if (isInstallEvent(event) || event.type === 'workspace.history_deleted' || event.type === 'workspace.chat_deleted') {
       commit();
       next = applyEvent(next, event);
       continue;

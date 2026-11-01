@@ -6,7 +6,7 @@
  * folder. Git is a fake here (core depends on no adapter); the real git is
  * `tests/e2e/composer-setup-row.spec.ts`'s.
  */
-import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { CHAT_WORKTREE_FAILED_TEXT, CHAT_WORKTREE_NOT_REPO_TEXT, CHAT_WORKTREE_NOT_TOP_TEXT, chatWorktreeBranch } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
@@ -78,7 +78,7 @@ function fakeVcs(repo: string) {
   let top: string | undefined = repo;
   let head: { revision: string; branch: string } | undefined = { revision: REVISION, branch: 'main' };
   let fails = false;
-  const vcs: Pick<VcsPort, 'topLevel' | 'head' | 'addWorktree'> = {
+  const vcs: Pick<VcsPort, 'topLevel' | 'head' | 'addWorktree' | 'removeWorktree' | 'isMerged'> = {
     async topLevel(path) {
       calls.push(`topLevel ${path}`);
       return top;
@@ -91,6 +91,14 @@ function fakeVcs(repo: string) {
       calls.push(`addWorktree ${path} ${input.path} ${input.branch} ${input.base}`);
       mkdirSync(input.path);
       if (fails) throw new Error('git failed');
+    },
+    async removeWorktree(path, worktree, options = {}) {
+      calls.push(`removeWorktree ${path} ${worktree}${options.deleteBranch === undefined ? '' : ` ${options.deleteBranch}`}`);
+      rmSync(worktree, { recursive: true, force: true });
+      return { branchKept: false };
+    },
+    async isMerged() {
+      return true;
     },
   };
   return {

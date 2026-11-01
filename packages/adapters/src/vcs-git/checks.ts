@@ -26,6 +26,12 @@ export interface GitVcsOptions {
    */
   worktreesRoot?: string;
   /**
+   * The folder every chat's own worktree is made in (`<data>/cw`; 27.1,
+   * 27.3): a direct child of it may be removed too, with only a chat's
+   * branch (`ogden/chat/<ses_…>`). Refused when it is a link.
+   */
+  chatWorktreesRoot?: string;
+  /**
    * The folder of every run's folder (`<data>/r`; story 5.6). A run's own
    * object store is `<runsRoot>/<run8>/objects`, found from its `ogden/<run8>/…`
    * branch name: reads of that branch take it as an alternate, and a rebase

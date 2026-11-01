@@ -140,3 +140,25 @@ export const WorkspaceTrialKeptInput = z.object({
 /** The user kept one trial chat; the others' copies were put away (`not_kept`, restorable). */
 export const WorkspaceTrialKeptEvent = WorkspaceTrialKeptInput.extend(assigned);
 export type WorkspaceTrialKeptEvent = z.infer<typeof WorkspaceTrialKeptEvent>;
+
+export const WorkspaceChatDeletedInput = z.object({
+  type: z.literal('workspace.chat_deleted'),
+  ...onWorkspaceStream,
+  payload: z
+    .object({
+      sessionId: SessionId,
+      /** Whether the chat's own worktree is being removed with it (a plain chat, or a copy outside Ogden's folder, is `false`). */
+      worktreeRemoved: z.boolean(),
+      /** Whether its branch `ogden/chat/<ses>` is kept: it has commits not merged into the checked-out branch (or nothing was removed). */
+      branchKept: z.boolean(),
+    })
+    .strict(),
+});
+/**
+ * One chat was deleted (Delete chat, 27.3): its row and its stream's events
+ * went in the same transaction as this event, on the workspace's stream (the
+ * chat's own is gone). Clients drop that chat's events and list it no more.
+ * No path.
+ */
+export const WorkspaceChatDeletedEvent = WorkspaceChatDeletedInput.extend(assigned);
+export type WorkspaceChatDeletedEvent = z.infer<typeof WorkspaceChatDeletedEvent>;

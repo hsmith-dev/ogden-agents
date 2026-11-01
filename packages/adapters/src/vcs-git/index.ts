@@ -49,7 +49,7 @@ import {
   type VcsPort,
   type VcsWorktreeGitPaths,
 } from '@ogden-agents/core';
-import { BUILD_BRANCH_PREFIX, MIN_GIT_VERSION } from '@ogden-agents/shared';
+import { BUILD_BRANCH_PREFIX, CHAT_WORKTREE_BRANCH_PREFIX, MIN_GIT_VERSION, SessionId } from '@ogden-agents/shared';
 import {
   type GitResult, type GitVcsOptions, parseGitVersion, gitVersionAtLeast, REVISION, RUN_BRANCH, MAX_IMPORT_BYTES, checkBranch, checkRevision,
   checkPath, checkRelative, SAFE_CONFIG, realOf, isInside, storeIsPlain
@@ -187,21 +187,34 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
   let checked: Promise<VcsCheck> | undefined;
 
   /**
-   * Throws unless `path` may be removed as a run's worktree (story 5.5): a
-   * direct child of `worktreesRoot`, which is a real folder (not a link or a
-   * junction), and never the repo itself.
+   * Throws unless `path` may be removed as a run's or a chat's worktree
+   * (story 5.5; 27.3): a direct child, named like a run's short id, of
+   * `worktreesRoot` (`run`) or `chatWorktreesRoot` (`chat`), each a real
+   * folder (not a link or a junction), and never the repo, a folder holding
+   * it or one inside it. `undefined` when neither root was given (tests of
+   * other methods): only the repo check is made then.
    */
-  const requireOwnWorktree = (repoPath: string, path: string): void => {
+  const requireOwnWorktree = (repoPath: string, path: string): 'run' | 'chat' | undefined => {
     const refuse = (): never => {
       throw new VcsError("That folder isn't one of Ogden Agents' worktrees, so it wasn't removed.", { step: 'remove the worktree' });
     };
     // Never the repo, a folder holding it, or a folder inside it (AD-17: worktrees are never in the repo).
     if (isInside(realOf(path), realOf(repoPath)) || isInside(realOf(repoPath), realOf(path))) refuse();
-    const root = options.worktreesRoot;
-    if (root === undefined) return;
-    if (!isRealFolder(root)) refuse();
-    if (realOf(dirname(path)) !== realOf(root) || !RUN_ID.test(basename(path))) refuse();
+    const runRoot = options.worktreesRoot;
+    const chatRoot = options.chatWorktreesRoot;
+    if (runRoot === undefined && chatRoot === undefined) return undefined;
+    if (!RUN_ID.test(basename(path))) refuse();
+    const parent = realOf(dirname(path));
+    if (runRoot !== undefined && isRealFolder(runRoot) && parent === realOf(runRoot)) return 'run';
+    if (chatRoot !== undefined && isRealFolder(chatRoot) && parent === realOf(chatRoot)) return 'chat';
+    return refuse();
   };
+
+  /** Whether `branch` is the branch a worktree of `kind` named `id` may delete: a run's `ogden/<id>/…`, a chat's `ogden/chat/<ses_…>`. */
+  const ownBranch = (kind: 'run' | 'chat' | undefined, id: string, branch: string): boolean =>
+    kind === 'chat'
+      ? branch.startsWith(CHAT_WORKTREE_BRANCH_PREFIX) && SessionId.safeParse(branch.slice(CHAT_WORKTREE_BRANCH_PREFIX.length)).success
+      : branch.startsWith(`${BUILD_BRANCH_PREFIX}${id}/`);
 
   return {
     check() {
@@ -323,44 +336,92 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
       checkPath(path);
       const id = basename(path);
       const branch = removeOptions.deleteBranch;
-      // Only this run's own branch: `ogden/<its id>/…` (review: never another run's, never the user's).
-      if (branch !== undefined && !checkBranch(branch).startsWith(`${BUILD_BRANCH_PREFIX}${id}/`)) throw new VcsError('That is not this run\'s branch, so it was kept.', { step: 'branch' });
-      requireOwnWorktree(repoPath, path);
-      // The folder first, by Ogden itself, never through git's path matching (review: git resolves a path that became
-      // a link and could match another of the user's worktrees). A link or file is unlinked; a folder is removed
-      // without following any link in it.
+      const kind = requireOwnWorktree(repoPath, path);
+      // Only this worktree's own branch: a run's `ogden/<its id>/…`, a chat's `ogden/chat/<ses_…>` (review: never another run's, never the user's).
+      if (branch !== undefined && !ownBranch(kind, id, checkBranch(branch))) throw new VcsError("That is not this worktree's branch, so it was kept.", { step: 'branch' });
       let entry: ReturnType<typeof lstatSync> | undefined;
       try {
         entry = lstatSync(path);
       } catch {
         entry = undefined;
       }
+      // Git's record of it is found before the folder goes (27.3 review): git names a record after the folder, with a
+      // digit added when that name is taken (by a user's worktree elsewhere), so it is the one the copy's own `.git`
+      // file points at (read without following a link), else the one named after it. A record is Ogden's only as a
+      // real folder directly in a real `<common>/worktrees` whose `gitdir` points back at this copy, or (a pointer an
+      // agent rewrote) that is still checked out on this worktree's own branch, which git checks out in one worktree only.
+      const common = realOf(resolve(repoPath, (await must(repoPath, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'read the repository')).trim()));
+      const records = join(common, 'worktrees');
+      const recordsReal = isRealFolder(records);
+      const backPointers = new Set([join(path, '.git'), join(realOf(path), '.git')]);
+      const pointed = ((): string | undefined => {
+        if (entry === undefined || !entry.isDirectory() || entry.isSymbolicLink()) return undefined;
+        try {
+          if (!lstatSync(join(path, '.git')).isFile()) return undefined;
+          const found = /^gitdir: (.+)$/m.exec(readFileSync(join(path, '.git'), 'utf8'))?.[1]?.trim();
+          return found === undefined || found === '' ? undefined : resolve(path, found);
+        } catch {
+          return undefined;
+        }
+      })();
+      const exists = (file: string): boolean => {
+        try {
+          lstatSync(file);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const regularText = (file: string): string | undefined => (lstatSync(file).isFile() ? readFileSync(file, 'utf8').trim() : undefined);
+      const isOwnRecord = (record: string): boolean => {
+        try {
+          const found = lstatSync(record);
+          if (!recordsReal || !found.isDirectory() || found.isSymbolicLink() || realOf(dirname(record)) !== realOf(records)) return false;
+          const back = exists(join(record, 'gitdir')) ? regularText(join(record, 'gitdir')) : undefined;
+          if (back !== undefined && backPointers.has(resolve(back))) return true;
+          return branch !== undefined && exists(join(record, 'HEAD')) && regularText(join(record, 'HEAD')) === `ref: refs/heads/${branch}`;
+        } catch {
+          return false;
+        }
+      };
+      const candidates = [...new Set([pointed, join(records, id)].filter((candidate): candidate is string => candidate !== undefined))];
+      const record = candidates.find(isOwnRecord);
+      // A record there that isn't provably this copy's (or records behind a link) is left, and so is the branch.
+      const unsure = record === undefined && (!recordsReal ? exists(records) : candidates.some(exists));
+      // The folder first, by Ogden itself, never through git's path matching (review: git resolves a path that became
+      // a link and could match another of the user's worktrees). A link or file is unlinked; a folder is removed
+      // without following any link in it.
       try {
         if (entry !== undefined && (!entry.isDirectory() || entry.isSymbolicLink())) removeLinkOnly(path);
         else if (entry !== undefined) rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
       } catch {
         throw new VcsError("Ogden Agents couldn't remove the run's worktree (a program may still have files open there).", { step: 'remove the worktree' });
       }
-      // Then git's record of it, found by its id in the repo's own git folder (never a prune, which would touch the user's other worktrees).
-      const common = realOf(resolve(repoPath, (await must(repoPath, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'read the repository')).trim()));
-      const admin = join(common, 'worktrees', id);
-      try {
-        const record = lstatSync(admin);
-        if (record.isDirectory() && !record.isSymbolicLink()) rmSync(admin, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-        else removeLinkOnly(admin);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new VcsError("Ogden Agents couldn't remove git's record of the run's worktree.", { step: 'remove the worktree' });
+      // Then that record (never a prune, which would touch the user's other worktrees).
+      if (record !== undefined) {
+        try {
+          rmSync(record, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new VcsError("Ogden Agents couldn't remove git's record of the run's worktree.", { step: 'remove the worktree' });
+        }
       }
-      // git's own folder of records goes when it is empty, as git leaves it (never when another worktree is recorded there).
-      try {
-        rmdirSync(join(common, 'worktrees'));
-      } catch {
-        // Not empty, or not there.
+      // git's own folder of records goes when it is empty, as git leaves it (never when another worktree is recorded there, never through a link).
+      if (recordsReal) {
+        try {
+          rmdirSync(records);
+        } catch {
+          // Not empty, or not there.
+        }
       }
-      if (branch === undefined) return;
-      if ((await run(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], undefined, readEnv(branch))).code !== 0) return;
-      const deleted = await run(repoPath, ['branch', removeOptions.mergedOnly === true ? '-d' : '-D', '--', branch], undefined, readEnv(branch));
-      if (deleted.code !== 0) throw new VcsError("git couldn't delete the run's branch.", { step: 'delete the branch', exitCode: deleted.code });
+      if (unsure) return { branchKept: branch !== undefined };
+      if (branch === undefined) return { branchKept: false };
+      if ((await run(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], undefined, readEnv(branch))).code !== 0) return { branchKept: false };
+      const mergedOnly = removeOptions.mergedOnly === true;
+      const deleted = await run(repoPath, ['branch', mergedOnly ? '-d' : '-D', '--', branch], undefined, readEnv(branch));
+      if (deleted.code === 0) return { branchKept: false };
+      // A branch with commits of its own (`-d` refuses it) is kept and said so (Delete chat, 27.3).
+      if (mergedOnly && removeOptions.keepUnmerged === true) return { branchKept: true };
+      throw new VcsError("git couldn't delete the worktree's branch.", { step: 'delete the branch', exitCode: deleted.code });
     },
 
     status,

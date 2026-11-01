@@ -8,7 +8,20 @@
  * calls, xterm and the terminal socket are stand-ins; the parts have their
  * own tests in `driver-toggle.dom.test.tsx` and `terminal-panel.dom.test.tsx`.
  */
-import type { CoreEvent, SessionDriver, SessionResponse } from '@ogden-agents/shared';
+import {
+  DELETE_AND_DISCARD_LABEL,
+  DELETE_CHAT_CONFIRM_TITLE,
+  DELETE_CHAT_NOT_DELETABLE_TEXT,
+  DELETE_CHAT_UNCOMMITTED_TEXT,
+  deleteChatBusyText,
+  DELETE_CHAT_REMOTE_TEXT,
+  deleteChatConfirmText,
+  WORKTREE_BADGE_TOOLTIP_TEXT,
+  worktreeBadgeLabel,
+  type CoreEvent,
+  type SessionDriver,
+  type SessionResponse,
+} from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -46,8 +59,19 @@ const fake = vi.hoisted(() => ({
   hash: '',
   /** The chat's own worktree (27.1), or `null` for one in the project's folder. */
   worktreePath: null as string | null,
+  machineId: null as string | null,
   /** The location's path: another page's while the router is on its way there (story 26.10). */
   pathname: '/w/ws_1/s/ses_1',
+  /** The session's kind (Delete chat, 27.3). */
+  kind: 'chat' as string,
+  /** The session's state as the REST read gives it. */
+  state: 'idle' as string,
+  /** Each Delete chat asked: whether it discarded uncommitted changes. */
+  deletes: [] as boolean[],
+  /** What each Delete chat answers, in turn (the last repeats). */
+  deleteResults: [] as Array<() => Promise<unknown>>,
+  /** The new-chat drafts opened. */
+  newChats: [] as string[],
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -56,7 +80,15 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => fake.navigate,
   useRouterState: ({ select }: { select: (state: { location: { pathname: string; hash: string; href: string; state: Record<string, string> } }) => unknown }) =>
     select({ location: { pathname: fake.pathname, hash: fake.hash, href: `${fake.pathname}#${fake.hash}`, state: { __TSR_key: 'key_1' } } }),
-  Link: ({ children }: { children: ReactNode }) => <a href="/">{children}</a>,
+  Link: ({ children, to, params: _params, search, activeOptions: _active, ...rest }: { children: ReactNode; to?: string; params?: unknown; search?: unknown; activeOptions?: unknown } & Record<string, unknown>) => (
+    <a href="/" data-to={to} data-search={search === undefined ? undefined : JSON.stringify(search)} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+vi.mock('@/chat/new-chat', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/chat/new-chat')>()),
+  useOpenNewChat: () => (wsId: string) => fake.newChats.push(wsId),
 }));
 vi.mock('@/shell/workspace-header', () => ({ WorkspaceHeader: ({ children }: { children?: ReactNode }) => <header>{children}</header> }));
 vi.mock('@/events/event-stream', () => ({
@@ -106,10 +138,11 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
       session: {
         id: 'ses_1',
         workspaceId: 'ws_1',
-        state: 'idle',
+        kind: fake.kind,
+        state: fake.state,
         driver: fake.driver,
         adapterRefs: {},
-        machineId: null,
+        machineId: fake.machineId,
         worktreePath: fake.worktreePath,
         branch: fake.worktreePath === null ? null : 'ogden/chat/ses_1',
         ...(fake.agentId === undefined ? {} : { agentId: fake.agentId }),
@@ -126,6 +159,11 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
     return fake.sendResult();
   },
   cancelSession: async () => undefined,
+  deleteChat: async (_wsId: string, _sesId: string, discard: boolean) => {
+    fake.deletes.push(discard);
+    const result = fake.deleteResults[Math.min(fake.deletes.length - 1, fake.deleteResults.length - 1)];
+    return result === undefined ? { sessionId: 'ses_1', worktreeRemoved: false, branchKept: false } : result();
+  },
 }));
 // xterm and its socket: the panel's real effect runs, and xterm's focus lands on a textarea of its own.
 vi.mock('@xterm/xterm', () => ({
@@ -216,6 +254,12 @@ beforeEach(() => {
   fake.connections = 0;
   fake.sent = [];
   fake.worktreePath = null;
+  fake.machineId = null;
+  fake.kind = 'chat';
+  fake.state = 'idle';
+  fake.deletes = [];
+  fake.deleteResults = [];
+  fake.newChats = [];
   fake.agentId = undefined;
   fake.claudeListed = true;
   fake.sendResult = () => Promise.resolve({ messageId: 'msg_x', queued: false });
@@ -489,5 +533,121 @@ describe('the composer setup row (epic 27, 27.1)', () => {
     const chip = await screen.findByTestId('location-chip');
     expect(chip.getAttribute('data-location')).toBe('worktree');
     expect(chip.textContent).toContain('Worktree');
+    // 27.3: the branch beside the word.
+    expect(chip.querySelector('[data-testid="location-branch"]')!.textContent).toBe('ogden/chat/ses_1');
+  });
+});
+
+/** Opens a Radix menu the way a pointer does (happy-dom has no layout). */
+function openMenu(trigger: HTMLElement) {
+  act(() => {
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  });
+}
+
+describe('a worktree chat\'s branch badge (27.3)', () => {
+  it('shows the branch in the header, linking to the Workbench rooted at the chat, with its tooltip', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    await mount();
+    const badge = await screen.findByTestId('worktree-badge');
+    expect(badge.textContent).toBe('ogden/chat/ses_1');
+    expect(badge.getAttribute('data-to')).toBe('/w/$wsId/workbench');
+    expect(JSON.parse(badge.getAttribute('data-search')!)).toEqual({ session: SES });
+    expect(badge.getAttribute('aria-label')).toBe(worktreeBadgeLabel('ogden/chat/ses_1'));
+    await act(async () => {
+      fireEvent.focus(badge);
+    });
+    expect((await screen.findAllByText(WORKTREE_BADGE_TOOLTIP_TEXT)).length).toBeGreaterThan(0);
+  });
+
+  it('a chat in the project folder has no badge', async () => {
+    await mount();
+    await screen.findByTestId('location-chip');
+    expect(screen.queryByTestId('worktree-badge')).toBeNull();
+    expect(screen.queryByTestId('location-branch')).toBeNull();
+  });
+});
+
+describe('Delete chat (27.3)', () => {
+  const openDelete = async () => {
+    openMenu(await screen.findByTestId('session-menu'));
+    fireEvent.click(await screen.findByTestId('session-menu-delete'));
+    return screen.findByTestId('delete-chat-confirm');
+  };
+
+  it('confirms a plain chat once, deletes it and opens the new-chat draft', async () => {
+    await mount();
+    const dialog = await openDelete();
+    expect(dialog.textContent).toContain(DELETE_CHAT_CONFIRM_TITLE);
+    expect(dialog.textContent).toContain(deleteChatConfirmText(null));
+    fireEvent.click(screen.getByTestId('delete-chat-confirm-button'));
+    await flush();
+    expect(fake.deletes).toEqual([false]);
+    expect(fake.newChats).toEqual([WS]);
+    expect(screen.queryByTestId('delete-chat-confirm')).toBeNull();
+  });
+
+  it('a worktree chat names its copy and branch, and its one confirmation discards uncommitted changes', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    await mount();
+    const dialog = await openDelete();
+    expect(dialog.textContent).toContain(deleteChatConfirmText('ogden/chat/ses_1'));
+    expect(dialog.textContent).toContain('any changes not committed');
+    fireEvent.click(screen.getByTestId('delete-chat-confirm-button'));
+    await flush();
+    expect(fake.deletes).toEqual([true]);
+    expect(fake.newChats).toEqual([WS]);
+  });
+
+  it('a plain chat refused for uncommitted changes all the same names them and asks again (fallback)', async () => {
+    fake.deleteResults = [() => Promise.reject(new ChatApiError('changes', 409, 'uncommitted_changes')), () => Promise.resolve({ sessionId: SES, worktreeRemoved: true, branchKept: false })];
+    await mount();
+    const dialog = await openDelete();
+    fireEvent.click(screen.getByTestId('delete-chat-confirm-button'));
+    await flush();
+    expect(fake.deletes).toEqual([false]);
+    expect(dialog.textContent).toContain(DELETE_CHAT_UNCOMMITTED_TEXT);
+    expect(screen.getByTestId('delete-chat-confirm-button').textContent).toBe(DELETE_AND_DISCARD_LABEL);
+    fireEvent.click(screen.getByTestId('delete-chat-confirm-button'));
+    await flush();
+    expect(fake.deletes).toEqual([false, true]);
+    expect(fake.newChats).toEqual([WS]);
+  });
+
+  it('another refusal stays in the dialog', async () => {
+    fake.deleteResults = [() => Promise.reject(new ChatApiError('Only a chat you started can be deleted on its own.', 409, 'invalid_operation'))];
+    await mount();
+    await openDelete();
+    fireEvent.click(screen.getByTestId('delete-chat-confirm-button'));
+    await flush();
+    expect(screen.getByRole('alert').textContent).toContain('Only a chat you started');
+    expect(fake.newChats).toEqual([]);
+  });
+
+  it('is reachable but does nothing while the agent works, saying why', async () => {
+    fake.state = 'working';
+    fake.events = [created(), event('session.state_changed', { sessionId: SES, state: 'working', previous: 'idle' })];
+    await mount();
+    openMenu(await screen.findByTestId('session-menu'));
+    const item = await screen.findByTestId('session-menu-delete');
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByTestId('session-menu-delete-reason').textContent).toBe(deleteChatBusyText('Codex'));
+    fireEvent.click(item);
+    await flush();
+    expect(screen.queryByTestId('delete-chat-confirm')).toBeNull();
+  });
+
+  it('a remote chat says it is not deleted on its own', async () => {
+    fake.machineId = 'mach_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
+    await mount();
+    openMenu(await screen.findByTestId('session-menu'));
+    expect((await screen.findByTestId('session-menu-delete-reason')).textContent).toBe(DELETE_CHAT_REMOTE_TEXT);
+  });
+
+  it('a planning session says it is not deleted on its own; a build has no item', async () => {
+    fake.kind = 'planning';
+    await mount();
+    openMenu(await screen.findByTestId('session-menu'));
+    expect((await screen.findByTestId('session-menu-delete-reason')).textContent).toBe(DELETE_CHAT_NOT_DELETABLE_TEXT);
   });
 });

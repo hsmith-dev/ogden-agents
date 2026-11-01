@@ -210,9 +210,10 @@ describe('workspace-files-node: listing', () => {
 describe('workspace-files-node: links to another computer', () => {
   it('a link, or a chain of links, to `//host/share` is protected in a listing, unreadable, and never followed', async () => {
     const { root, port } = setup({ 'a.txt': 'a' });
-    symlinkSync('//server/share', join(root, 'net'));
-    symlinkSync('net', join(root, 'net2'));
-    symlinkSync('net2', join(root, 'net3.txt'));
+    // An explicit type: without one, Node on Windows stats the target to choose file or folder, which is the very lookup of `\\server\share` this test forbids.
+    symlinkSync('//server/share', join(root, 'net'), 'dir');
+    symlinkSync('net', join(root, 'net2'), 'dir');
+    symlinkSync('net2', join(root, 'net3.txt'), 'dir');
     const remote: string[] = [];
     fsHooks.beforeStat = (path) => void (/server/.test(path) && remote.push(`stat ${path}`));
     fsHooks.beforeRealpath = (path) => void (/server/.test(path) && remote.push(`realpath ${path}`));

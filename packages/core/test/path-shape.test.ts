@@ -99,9 +99,10 @@ describe('a permission check never hands a remote-shaped path to the file system
   });
 
   it('a link in the project to another computer, directly or through another link, is outside and never followed', () => {
-    symlinkSync('//server/share', join(root, 'net'));
-    symlinkSync('net', join(root, 'net2'));
-    symlinkSync('\\\\server\\share', join(root, 'net3'));
+    // An explicit type: without one, Node on Windows stats the target to choose file or folder, which is the very lookup of `\\server\share` this test forbids.
+    symlinkSync('//server/share', join(root, 'net'), 'dir');
+    symlinkSync('net', join(root, 'net2'), 'dir');
+    symlinkSync('\\\\server\\share', join(root, 'net3'), 'dir');
     for (const command of ['cat net/x', 'cat net2/x', 'cat net', 'cat net3/x', 'cat src/../net2/x']) {
       fsCalls.length = 0;
       expect(commandPathsReach(workspace(), command), command).toBe('outside');

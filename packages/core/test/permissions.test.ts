@@ -1604,7 +1604,8 @@ describe('AD-40 review fixes: prefix allowlists, each edge allowed and refused',
     ['host:path', 'cat', 'cat build:x', false],
     ['user@host:path', 'cat', 'cat git@example.com:x/y', false],
     ['URL', 'cat', 'cat https://example.com/x', false],
-    ['colon after a slash is a file name', 'cat', 'cat src/a:b', true],
+    // On Windows `src/a:b` names an NTFS alternate data stream of `src/a`, not a file: refused there, the safer answer.
+    ['colon after a slash is a file name (a data stream on Windows)', 'cat', 'cat src/a:b', process.platform !== 'win32'],
   ];
   it.each(cases)('%s: rule %j, %j -> %j', (_why, rule, command, approved) => {
     expect(autoApproves(repo(), rule, command)).toBe(approved);

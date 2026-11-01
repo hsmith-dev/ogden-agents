@@ -228,7 +228,8 @@ describe("vcs-git working tree: a project's .git file (user decision 2026-11-01)
     const { root, vcs } = setup();
     const project = join(root, 'project');
     mkdirSync(project, { recursive: true });
-    symlinkSync('//server/share', join(root, 'net'));
+    // An explicit type: without one, Node on Windows stats the target to choose file or folder, which is the very lookup of `\\server\share` this test forbids.
+    symlinkSync('//server/share', join(root, 'net'), 'dir');
     for (const pointer of ['//server/share/repo/.git/worktrees/x', '\\\\server\\share\\repo\\.git', '\\\\?\\UNC\\server\\share\\.git', '../net/repo/.git/worktrees/x']) {
       writeFileSync(join(project, '.git'), `gitdir: ${pointer}\n`);
       fsCalls.length = 0;

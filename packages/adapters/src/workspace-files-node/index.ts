@@ -7,8 +7,12 @@
  * way followed) and refused, as `protected`, when its real path leaves the
  * root, when the real path's segments relative to the root name `.git` or a
  * credential folder but `.claude` (core's {@link isRefusedWorkspacePath},
- * folded), or when it lies inside a home credential fence
- * ({@link credentialReadFences}) or the data folder. A file is opened
+ * folded; a name ending in `.git`, a bare repository, counts as `.git`), or
+ * when it lies inside a home credential fence ({@link credentialReadFences})
+ * or the data folder. A regular file with more than one link (a hard link,
+ * which no path check can follow out of the project) is refused as
+ * `protected` with `reason: 'hard_link'` (and listed so), unless its real
+ * path is under a `node_modules` folder (pnpm hard-links its store there). A file is opened
  * `O_RDONLY | O_NOFOLLOW | O_NONBLOCK` (a link swapped in after the check
  * is refused, a FIFO never blocks) and read only when the opened file is a
  * regular file with the same device and inode as the checked path, which
@@ -48,6 +52,7 @@ export interface WorkspaceFilesNodeOptions {
 
 const PROTECTED: WorkspacePathRefusal = { refused: 'protected' };
 const NOT_FOUND: WorkspacePathRefusal = { refused: 'not_found' };
+const HARD_LINKED: WorkspacePathRefusal = { refused: 'protected', reason: 'hard_link' };
 
 const realOrUndefined = (path: string): string | undefined => {
   try {
@@ -71,6 +76,13 @@ const within = (inner: string, outer: string): boolean => {
   const rel = relative(outer, inner);
   return rel === '' || !(rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel));
 };
+
+/** Whether a real path below the root lies under a `node_modules` folder (folded as core folds a segment). */
+const underNodeModules = (root: string, real: string): boolean => segmentsBelow(root, real).slice(0, -1).map(foldSegment).includes('node_modules');
+
+/** Whether `info` is a regular file with more than one link whose real path is not under `node_modules`: never read. */
+const refusedHardLink = (root: string, real: string, info: { isFile(): boolean; nlink: number | bigint }): boolean =>
+  info.isFile() && Number(info.nlink) > 1 && !underNodeModules(root, real);
 
 /** A name the client could never ask for back (`WorkspaceRelativePath` refuses `:`, `\` and NUL). */
 const unaskable = (name: string): boolean => /[\\:\0]/.test(name);
@@ -194,6 +206,15 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
     }
   };
 
+  /** Whether the entry at `real` (not a link) is a hard-linked file that is refused; false when it is gone. */
+  const hardLinkedAt = async (root: string, real: string): Promise<boolean> => {
+    try {
+      return refusedHardLink(root, real, await lstat(real));
+    } catch {
+      return false;
+    }
+  };
+
   return {
     async list(rootPath, path): Promise<WorkspaceFolderResponse | WorkspacePathRefusal> {
       const checked = await resolveChecked(rootPath, path);
@@ -231,7 +252,10 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
       // The folder listed is still the one checked.
       if (!(await stillSame(root, real, identity))) return PROTECTED;
       const entries: WorkspaceFileEntry[] = [];
-      for (const { name, directory, link } of found) {
+      // Each plain file's link count, looked up together (none inside a `node_modules` folder, where hard links are allowed).
+      const inNodeModules = underNodeModules(root, join(real, '_'));
+      const plainHardLinked = await Promise.all(found.map(({ name, directory, link }) => (!inNodeModules && !directory && !link ? hardLinkedAt(root, join(real, name)) : false)));
+      for (const [index, { name, directory, link }] of found.entries()) {
         const entrySegments = [...segments, name];
         const entry = { name, path: entrySegments.join('/') };
         if (isRefusedWorkspacePath(entrySegments) || unaskable(name)) {
@@ -239,7 +263,12 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
           continue;
         }
         if (!link) {
-          entries.push({ ...entry, kind: directory ? 'folder' : 'file', protected: !allowed(root, join(real, name), fenced) });
+          const shown = allowed(root, join(real, name), fenced);
+          if (shown && plainHardLinked[index]) {
+            entries.push({ ...entry, kind: 'file', protected: true, protectedReason: 'hard_link' });
+            continue;
+          }
+          entries.push({ ...entry, kind: directory ? 'folder' : 'file', protected: !shown });
           continue;
         }
         // A link is shown as what it leads to, and protected when that is out of bounds; one that leads nowhere is a file.
@@ -260,12 +289,15 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
           continue;
         }
         let isFolder = false;
+        let hardLinked = false;
         try {
-          isFolder = (await stat(target)).isDirectory();
+          const info = await stat(target);
+          isFolder = info.isDirectory();
+          hardLinked = refusedHardLink(root, target, info);
         } catch {
           // Gone since: a file, which then reads as missing.
         }
-        entries.push({ ...entry, kind: isFolder ? 'folder' : 'file', protected: false });
+        entries.push(hardLinked ? { ...entry, kind: 'file', protected: true, protectedReason: 'hard_link' } : { ...entry, kind: isFolder ? 'folder' : 'file', protected: false });
       }
       entries.sort((a, b) => (a.kind === b.kind ? (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) : a.kind === 'folder' ? -1 : 1));
       return { path, entries, truncated };
@@ -280,6 +312,7 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
         const identity = await linkFreeIdentity(root, real);
         if (identity === undefined) return PROTECTED;
         if (!identity.isFile()) return NOT_FOUND;
+        if (refusedHardLink(root, real, identity)) return HARD_LINKED;
         // What the path leads to now must still be that file.
         if (!sameFile(identity, await stat(real, { bigint: true }))) return PROTECTED;
         await afterCheck?.(real);
@@ -288,6 +321,8 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
         // Only a regular file, the very one checked, still at its checked real path under the same root.
         if (!opened.isFile()) return NOT_FOUND;
         if (!sameFile(opened, identity) || !(await stillSame(root, real, identity))) return PROTECTED;
+        // A hard link made after the check.
+        if (refusedHardLink(root, real, opened)) return HARD_LINKED;
         const size = Number(opened.size);
         if (size > MAX_WORKSPACE_FILE_BYTES) return { kind: 'too_large', path, size, limit: MAX_WORKSPACE_FILE_BYTES };
         // One byte more than the limit tells a file that grew past it since the stat.

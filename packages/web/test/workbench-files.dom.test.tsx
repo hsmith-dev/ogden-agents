@@ -11,10 +11,12 @@ import {
   apiPath,
   WORKSPACE_FILE_BINARY_TEXT,
   WORKSPACE_FILE_EMPTY_TEXT,
+  WORKSPACE_FILE_HARD_LINK_TEXT,
   WORKSPACE_FILE_MASKED_TEXT,
   WORKSPACE_FILE_NONE_SELECTED_TEXT,
   WORKSPACE_FILE_PROTECTED_TEXT,
   WORKSPACE_FILE_TOO_LARGE_TEXT,
+  WORKSPACE_PATH_HARD_LINK_MESSAGE,
   type WorkspaceFileResponse,
   type WorkspaceFolderResponse,
 } from '@ogden-agents/shared';
@@ -163,5 +165,17 @@ describe('Workbench Files', () => {
     fireEvent.click(screen.getByTestId('file-row-b.txt'));
     await flush();
     expect(screen.getByTestId('file-error').textContent).toBe("That isn't there any more. It may have been moved or deleted.");
+  });
+
+  it('a hard-linked row, and a hard-link refusal from the server, say Ogden does not open hard-linked files, with no request for the row', async () => {
+    fake.folders[''] = folder('', [{ ...fileEntry('notes.txt', true), protectedReason: 'hard_link' }, fileEntry('late.txt')]);
+    fake.files['late.txt'] = new ChatApiError(WORKSPACE_PATH_HARD_LINK_MESSAGE, 403, 'path_protected');
+    await mount('notes.txt');
+    expect(screen.getByTestId('file-protected').textContent).toBe(WORKSPACE_FILE_HARD_LINK_TEXT);
+    expect(WORKSPACE_FILE_HARD_LINK_TEXT).not.toMatch(/[\u2013\u2014]/);
+    fireEvent.click(screen.getByTestId('file-row-late.txt'));
+    await flush();
+    expect(screen.getByTestId('file-protected').textContent).toBe(WORKSPACE_FILE_HARD_LINK_TEXT);
+    expect(fake.calls).toEqual([FILES, `${CONTENT}?path=late.txt`]);
   });
 });

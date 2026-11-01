@@ -82,6 +82,8 @@ context: ['{project-root}/AGENTS.md']
 - Refusals: the port answers `{ refused: 'protected' | 'not_found' }`; core turns them into `PathProtectedError` (new, code `path_protected`, added to `API_ERROR_CODES`) and `NotFoundError`; the route answers with fixed messages, never the path. Both responses carry `Cache-Control: no-store`.
 - Link rows are listed as what they lead to; one that leads out of the project or into a refused or fenced place is `protected: true` with kind `file` (nothing about its target is shown). A dangling link is an unprotected file that reads as 404. A file swapped after the check (other inode, or a link caught by `O_NOFOLLOW`) answers `protected`; the adapter takes a test-only `afterCheck` hook to prove it.
 - The viewer finds its row in the parent folder's listing (the tree's cached query) before asking for content, so a protected row, or a deep link to one, is never requested. Long lines wrap, so nothing scrolls sideways at phone width.
+- Hard links (decided by the user 2026-10-31, row 7): a regular file with more than one link (`nlink > 1`) whose real path is not under a `node_modules` folder is refused by the port as `{ refused: 'protected', reason: 'hard_link' }`, checked on the lstat identity before the open and on the opened handle after it. Core turns it into `PathProtectedError` with `WORKSPACE_PATH_HARD_LINK_MESSAGE`; the route answers 403 `path_protected` with that fixed message. Like other refused entries, the listing still shows the name, as `protected: true` with `protectedReason: 'hard_link'` (a symlink to such a file too), and the viewer says "Ogden doesn't open hard-linked files. You can open this one in your editor." without requesting it. Files under `node_modules` stay readable, since pnpm hard-links its store there. The adapter's former `it.fails` row is a passing refusal test, with an allowed `node_modules` row.
+- Bare repositories (decided by the user 2026-10-31, row 12): any segment whose folded name (`foldSegment`, the same NFKC and case fold used for `.ssh`, trailing dots and spaces stripped) ends in `.git` counts as git internals, like the project's own `.git`: listed protected, never listed into or read, refused by name in core and on the real path in the adapter. A path check can't tell a folder from a file, so a file so named is refused too; `.github` and `.gitignore` stay readable.
 
 ## Plan Change Log
 
@@ -116,15 +118,13 @@ Pass 1 (2026-10-31; lenses: quick, security-containment). Verdicts: high 3, medi
 
 ## Deferred (for the sweep)
 
-- Hard links: a hard link in the project to a file outside it (say `~/.ssh/id_rsa`) is read. Needs a decision: refuse `nlink > 1` outside `node_modules`, match against fenced files, or accept as a known limit (row 7; adapter test kept `it.fails`).
 - Windows reserved device names (`CON`, `COM1`, `aux.js`): confirm on the win32 CI run that they are refused or not found without stalling (row 11).
-- `*.git` bare repository folders inside a project (`repo.git/config`) are readable; decide in AD-36 whether they are `.git` internals (row 12).
 - Folders over 5000 entries list an arbitrary subset in directory order (row 19).
 - Residual race between the lstat chain check and the open; Node has no `openat`/`O_BENEATH` (row 20).
 
 ## Design Notes
 
-Refusal check, applied to the client segments and to `relative(realRoot, realPath)` segments, lower-cased with trailing dots and spaces stripped: any segment `.git`; any segment (or consecutive pair, for `Library/Keychains`-style entries) in `CREDENTIAL_FOLDERS` except `.claude`; plus the resolved path inside `credentialReadFences(home)` or the data dir. Masking: in a file named `.env`, `.env.*`, `.envrc` or `*.env`, an assignment line keeps `NAME=` and its value becomes `[redacted]`; a comment keeps its text through `redactApiKeys` unless it is a commented assignment (masked the same); any other line (a continuation of a multi-line value) is masked whole.
+Refusal check, applied to the client segments and to `relative(realRoot, realPath)` segments, lower-cased with trailing dots and spaces stripped: any segment `.git` or ending in `.git` (bare repositories, decided 2026-10-31); any segment (or consecutive pair, for `Library/Keychains`-style entries) in `CREDENTIAL_FOLDERS` except `.claude`; plus the resolved path inside `credentialReadFences(home)` or the data dir. Masking: in a file named `.env`, `.env.*`, `.envrc` or `*.env`, an assignment line keeps `NAME=` and its value becomes `[redacted]`; a comment keeps its text through `redactApiKeys` unless it is a commented assignment (masked the same); any other line (a continuation of a multi-line value) is masked whole.
 
 ## Verification
 

@@ -1,10 +1,12 @@
 import {
   WORKSPACE_FILE_BINARY_TEXT,
   WORKSPACE_FILE_EMPTY_TEXT,
+  WORKSPACE_FILE_HARD_LINK_TEXT,
   WORKSPACE_FILE_MASKED_TEXT,
   WORKSPACE_FILE_NONE_SELECTED_TEXT,
   WORKSPACE_FILE_PROTECTED_TEXT,
   WORKSPACE_FILE_TOO_LARGE_TEXT,
+  WORKSPACE_PATH_HARD_LINK_MESSAGE,
   type WorkspaceFileEntry,
 } from '@ogden-agents/shared';
 import { isApiError } from '@/api/http';
@@ -42,13 +44,13 @@ function FileViewer({ wsId, path }: { wsId: string; path: string }) {
   const folder = entry?.kind === 'folder';
   const file = useWorkspaceFile(wsId, path, parent.isSuccess && !refused && !folder);
 
-  if (refused) return <ViewerState path={path} testId="file-protected">{WORKSPACE_FILE_PROTECTED_TEXT}</ViewerState>;
+  if (refused) return <ViewerState path={path} testId="file-protected">{entry?.protectedReason === 'hard_link' ? WORKSPACE_FILE_HARD_LINK_TEXT : WORKSPACE_FILE_PROTECTED_TEXT}</ViewerState>;
   if (folder) return <ViewerState path={path} testId="file-none">{WORKSPACE_FILE_NONE_SELECTED_TEXT}</ViewerState>;
   if (parent.isError) return <ViewerState path={path} testId="file-error">{parent.error.message}</ViewerState>;
   if (file.isError) {
     return (
       <ViewerState path={path} testId={isApiError(file.error, 'path_protected') ? 'file-protected' : 'file-error'}>
-        {isApiError(file.error, 'path_protected') ? WORKSPACE_FILE_PROTECTED_TEXT : file.error.message}
+        {isApiError(file.error, 'path_protected') ? (file.error.message === WORKSPACE_PATH_HARD_LINK_MESSAGE ? WORKSPACE_FILE_HARD_LINK_TEXT : WORKSPACE_FILE_PROTECTED_TEXT) : file.error.message}
       </ViewerState>
     );
   }

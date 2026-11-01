@@ -4,10 +4,10 @@
  * and 404 refusals in the API's error shape; and neither a file's content
  * nor its path in the event log, the data folder or a log line.
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { API_ROUTES, apiPath, ApiErrorBody, WorkspaceFileResponse, WorkspaceFolderResponse, WorkspaceResponse } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, ApiErrorBody, WORKSPACE_PATH_HARD_LINK_MESSAGE, WORKSPACE_PATH_PROTECTED_MESSAGE, WorkspaceFileResponse, WorkspaceFolderResponse, WorkspaceResponse } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { signIn, startTestServer, tempDataDir } from './helpers.js';
 
@@ -58,6 +58,32 @@ async function expectError(response: Response, status: number, code: string) {
 }
 
 describe('workspace files routes', () => {
+  it('refuses a hard-linked file with 403 and the hard-link message, and a bare repository folder with the protected message', async () => {
+    const { headers, repo, files, content } = await serverWithProject();
+    const outside = realpathSync.native(mkdtempSync(join(tmpdir(), 'ogden-agents-files-out-')));
+    repos.push(outside);
+    writeFileSync(join(outside, 'secret'), 'OUTSIDE_SECRET');
+    mkdirSync(join(repo, 'mirror.git'));
+    writeFileSync(join(repo, 'mirror.git', 'config'), '[core] bare = true');
+    for (const response of [await fetch(content('mirror.git/config'), { headers }), await fetch(files('mirror.git'), { headers })]) {
+      expect(response.status).toBe(403);
+      expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'path_protected', message: WORKSPACE_PATH_PROTECTED_MESSAGE });
+    }
+    try {
+      linkSync(join(outside, 'secret'), join(repo, 'notes.txt'));
+    } catch {
+      return; // Different volumes: no hard link here.
+    }
+    const response = await fetch(content('notes.txt'), { headers });
+    expect(response.status).toBe(403);
+    const text = await response.text();
+    expect(text).not.toContain('OUTSIDE_SECRET');
+    expect(ApiErrorBody.parse(JSON.parse(text)).error).toEqual({ code: 'path_protected', message: WORKSPACE_PATH_HARD_LINK_MESSAGE });
+    const listed = WorkspaceFolderResponse.parse(await (await fetch(files(), { headers })).json());
+    expect(listed.entries.find((entry) => entry.name === 'notes.txt')).toEqual({ name: 'notes.txt', path: 'notes.txt', kind: 'file', protected: true, protectedReason: 'hard_link' });
+    expect(listed.entries.find((entry) => entry.name === 'mirror.git')).toEqual({ name: 'mirror.git', path: 'mirror.git', kind: 'folder', protected: true });
+  });
+
   it('lists the root and reads a file, and both answer 401 without a token', async () => {
     const { headers, files, content } = await serverWithProject();
     expect((await fetch(files())).status).toBe(401);

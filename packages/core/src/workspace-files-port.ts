@@ -6,9 +6,14 @@
  */
 import type { WorkspaceFileResponse, WorkspaceFolderResponse } from '@ogden-agents/shared';
 
-/** Why a path was not listed or read: `protected` (a refused name, or a real path out of the project or into a fence) or `not_found`. */
+/**
+ * Why a path was not listed or read: `protected` (a refused name, a real
+ * path out of the project or into a fence, or, with `reason: 'hard_link'`, a
+ * regular file with more than one link outside `node_modules`) or `not_found`.
+ */
 export interface WorkspacePathRefusal {
   refused: 'protected' | 'not_found';
+  reason?: 'hard_link';
 }
 
 export interface WorkspaceFilesPort {

@@ -36,8 +36,10 @@ export const WorkspaceFileEntry = z.object({
   /** The entry's workspace-relative path, `/`-joined. */
   path: z.string().min(1),
   kind: z.enum(['folder', 'file']),
-  /** `.git`, a credential folder, or a link that leads out of the project or into one of those: never listed or read. */
+  /** `.git` (or any folder named `*.git`), a credential folder, a link that leads out of the project or into one of those, or a hard-linked file outside `node_modules`: never listed or read. */
   protected: z.boolean(),
+  /** Why a protected row is refused, when it is not the plain protected reason: `hard_link` for a file with more than one link outside `node_modules`. */
+  protectedReason: z.enum(['hard_link']).optional(),
 });
 export type WorkspaceFileEntry = z.infer<typeof WorkspaceFileEntry>;
 
@@ -86,7 +88,11 @@ export const WORKSPACE_FOLDER_TRUNCATED_TEXT = 'This folder has more files than 
 export const WORKSPACE_FILE_NONE_SELECTED_TEXT = 'Pick a file to see it here.';
 /** Over an environment file whose values are hidden. */
 export const WORKSPACE_FILE_MASKED_TEXT = 'Values in this file are hidden.';
+/** A hard-linked file outside `node_modules`, selected or read: said instead of its content. */
+export const WORKSPACE_FILE_HARD_LINK_TEXT = "Ogden doesn't open hard-linked files. You can open this one in your editor.";
 /** The error message for a refused path (403 `path_protected`). */
 export const WORKSPACE_PATH_PROTECTED_MESSAGE = WORKSPACE_FILE_PROTECTED_TEXT;
+/** The error message for a hard-linked file outside `node_modules` (403 `path_protected`). */
+export const WORKSPACE_PATH_HARD_LINK_MESSAGE = WORKSPACE_FILE_HARD_LINK_TEXT;
 /** The error message for a missing file or folder, or a project that isn't there (404). */
 export const WORKSPACE_PATH_NOT_FOUND_MESSAGE = "That isn't there any more. It may have been moved or deleted.";

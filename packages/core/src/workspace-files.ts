@@ -2,12 +2,12 @@
  * The Workbench's Files use-case (AD-36, E8-R1, E8-R2): lists one folder and
  * reads one file of a project, read-only, through {@link WorkspaceFilesPort}.
  * It checks the client's path (relative, `/`-joined, no `..`, `\`, `:` or
- * NUL) and refuses `.git` and the credential folders by name before the
+ * NUL) and refuses `.git` (and `*.git`) and the credential folders by name before the
  * port is asked anything; the port checks the same names again on the real
  * path, with the home and data-folder fences. Nothing is written, no event
  * is appended, and neither a path nor a file's content is logged.
  */
-import { WorkspaceId, WorkspaceRelativePath, WORKSPACE_PATH_PROTECTED_MESSAGE, type WorkspaceFileResponse, type WorkspaceFolderResponse } from '@ogden-agents/shared';
+import { WorkspaceId, WorkspaceRelativePath, WORKSPACE_PATH_HARD_LINK_MESSAGE, WORKSPACE_PATH_PROTECTED_MESSAGE, type WorkspaceFileResponse, type WorkspaceFolderResponse } from '@ogden-agents/shared';
 import { CREDENTIAL_FOLDERS } from './build-names.js';
 import type { Entities } from './entities.js';
 import { NotFoundError, PathProtectedError, ValidationError } from './errors.js';
@@ -30,12 +30,15 @@ const REFUSED_RUNS: readonly (readonly string[])[] = CREDENTIAL_FOLDERS.filter((
 
 /**
  * Whether a workspace-relative path (its segments) names what Ogden never
- * opens: any `.git` segment, or any credential folder (a run of segments for
- * `Library/Keychains`-style entries) but `.claude`, compared folded.
+ * opens: any segment `.git` or ending in `.git` (a bare repository such as
+ * `repo.git`, git internals like the project's own `.git`; a path check
+ * can't tell a folder from a file, so a file so named is refused too), or
+ * any credential folder (a run of segments for `Library/Keychains`-style
+ * entries) but `.claude`, compared folded.
  */
 export function isRefusedWorkspacePath(segments: readonly string[]): boolean {
   const folded = segments.map(foldSegment);
-  if (folded.includes('.git')) return true;
+  if (folded.some((segment) => segment.endsWith('.git'))) return true;
   return REFUSED_RUNS.some((run) => {
     for (let start = 0; start + run.length <= folded.length; start++) {
       if (run.every((part, offset) => folded[start + offset] === part)) return true;
@@ -77,7 +80,7 @@ export function createWorkspaceFiles({ entities, port }: WorkspaceFilesOptions):
   };
   const answer = <T extends object>(result: T | WorkspacePathRefusal): T => {
     if (!isWorkspacePathRefusal(result)) return result;
-    if (result.refused === 'protected') throw new PathProtectedError(WORKSPACE_PATH_PROTECTED_MESSAGE);
+    if (result.refused === 'protected') throw new PathProtectedError(result.reason === 'hard_link' ? WORKSPACE_PATH_HARD_LINK_MESSAGE : WORKSPACE_PATH_PROTECTED_MESSAGE);
     throw new NotFoundError('path', 'requested');
   };
   return {

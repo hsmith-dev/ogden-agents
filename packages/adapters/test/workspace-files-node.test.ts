@@ -479,19 +479,78 @@ describe('workspace-files-node: review rows (defensive check)', () => {
     expect(listed).toEqual(PROTECTED);
   });
 
-  // KNOWN LIMIT, deferred for a decision (not fixed in this story): a hard link in the project to a file outside it
-  // is a regular file at a path inside, so a path check reads it. Any process that can write the project can
-  // hard-link the user's own files in.
-  it.fails('refuses a hard link to a file outside the project', async () => {
+  // User decision (2026-10-31): a regular file with more than one link outside `node_modules` is refused (no path
+  // check can tell where its other name lives), listed protected with the hard-link reason.
+  it('refuses a hard link to a file outside the project, and lists it protected with the hard-link reason', async () => {
     const outside = tempDir('ogden-files-outside-');
     writeFileSync(join(outside, 'id_rsa'), 'OUTSIDE_SECRET');
-    const { root, port } = setup();
+    const { root, port } = setup({ 'plain.txt': 'p' });
     try {
       linkSync(join(outside, 'id_rsa'), join(root, 'notes.txt'));
     } catch {
       return; // Different volumes: no hard link here.
     }
-    expect(JSON.stringify(await port.read(root, 'notes.txt'))).not.toContain('OUTSIDE_SECRET');
+    const read = await port.read(root, 'notes.txt');
+    expect(read).toEqual({ refused: 'protected', reason: 'hard_link' });
+    expect(JSON.stringify(read)).not.toContain('OUTSIDE_SECRET');
+    expect(await port.list(root, '')).toEqual({
+      path: '',
+      truncated: false,
+      entries: [
+        { name: 'notes.txt', path: 'notes.txt', kind: 'file', protected: true, protectedReason: 'hard_link' },
+        { name: 'plain.txt', path: 'plain.txt', kind: 'file', protected: false },
+      ],
+    });
+  });
+
+  it('refuses both names of a hard link inside the project, and a symlink to one', async () => {
+    const { root, port } = setup({ 'a.txt': 'shared' });
+    try {
+      linkSync(join(root, 'a.txt'), join(root, 'b.txt'));
+    } catch {
+      return;
+    }
+    expect(await port.read(root, 'a.txt')).toEqual({ refused: 'protected', reason: 'hard_link' });
+    expect(await port.read(root, 'b.txt')).toEqual({ refused: 'protected', reason: 'hard_link' });
+    if (!tryLink(join(root, 'a.txt'), join(root, 'alias.txt'), false)) return;
+    expect(await port.read(root, 'alias.txt')).toEqual({ refused: 'protected', reason: 'hard_link' });
+    const listed = await port.list(root, '');
+    expect('entries' in listed && listed.entries.find((entry) => entry.name === 'alias.txt')).toEqual({ name: 'alias.txt', path: 'alias.txt', kind: 'file', protected: true, protectedReason: 'hard_link' });
+  });
+
+  it('reads a hard-linked file under a node_modules folder (pnpm hard-links its store there)', async () => {
+    const store = tempDir('ogden-files-store-');
+    writeFileSync(join(store, 'index.js'), 'module.exports = 1;');
+    const { root, port } = setup({ 'node_modules/.pnpm/pkg@1.0.0/node_modules/pkg/package.json': '{}' });
+    const at = join(root, 'node_modules', '.pnpm', 'pkg@1.0.0', 'node_modules', 'pkg', 'index.js');
+    try {
+      linkSync(join(store, 'index.js'), at);
+    } catch {
+      return;
+    }
+    expect(await port.read(root, 'node_modules/.pnpm/pkg@1.0.0/node_modules/pkg/index.js')).toMatchObject({ kind: 'text', content: 'module.exports = 1;' });
+    const listed = await port.list(root, 'node_modules/.pnpm/pkg@1.0.0/node_modules/pkg');
+    expect('entries' in listed && listed.entries.find((entry) => entry.name === 'index.js')).toEqual({ name: 'index.js', path: 'node_modules/.pnpm/pkg@1.0.0/node_modules/pkg/index.js', kind: 'file', protected: false });
+  });
+
+  it('treats a folder named *.git anywhere (a bare repository) as git internals: listed protected, never listed into or read', async () => {
+    const { root, port } = setup({ 'repo.git/config': '[core] bare = true', 'vendor/Mirror.GIT/HEAD': 'ref', 'x.git./y': 'y', '.github/ci.yml': 'ci', 'src/a.gitignore': 'g' });
+    for (const path of ['repo.git', 'repo.git/config', 'REPO.GIT/config', 'repo.git./config', 'vendor/Mirror.GIT/HEAD', 'vendor/mirror.git', 'x.git/y', 'repo.\uff47it/config']) {
+      expect(await port.read(root, path), path).toEqual(PROTECTED);
+      expect(await port.list(root, path), path).toEqual(PROTECTED);
+    }
+    const listed = await port.list(root, '');
+    expect('entries' in listed && listed.entries.filter((entry) => entry.protected).map((entry) => entry.name).sort()).toEqual(['repo.git', 'x.git.']);
+    const vendor = await port.list(root, 'vendor');
+    expect('entries' in vendor && vendor.entries).toEqual([{ name: 'Mirror.GIT', path: 'vendor/Mirror.GIT', kind: 'folder', protected: true }]);
+    expect(await port.read(root, '.github/ci.yml')).toMatchObject({ kind: 'text' });
+    expect(await port.read(root, 'src/a.gitignore')).toMatchObject({ kind: 'text' });
+  });
+
+  it('refuses a link into a *.git folder', async () => {
+    const { root, port } = setup({ 'repo.git/config': '[core]' });
+    if (!tryLink(join(root, 'repo.git', 'config'), join(root, 'cfg'), false)) return;
+    expect(await port.read(root, 'cfg')).toEqual(PROTECTED);
   });
 
   it.runIf(process.platform === 'win32')('Windows: refuses an 8.3 short name of .git and .ssh', async () => {

@@ -7,6 +7,7 @@
  * use-case; nothing is appended to the event log.
  */
 import { realpathSync } from 'node:fs';
+import { WORKSPACE_PATH_HARD_LINK_MESSAGE } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { isRefusedWorkspacePath, NotFoundError, PathProtectedError, ValidationError, type WorkspaceFilesPort, type WorkspacePathRefusal } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
@@ -103,6 +104,31 @@ describe('workspace files use-case', () => {
     expect(isRefusedWorkspacePath(['Library', 'Application Support', 'Google', 'Chrome'])).toBe(true);
     expect(isRefusedWorkspacePath(['.claude'])).toBe(false);
     expect(isRefusedWorkspacePath(['.claude.json'])).toBe(true);
+  });
+
+  it('refuses any segment ending in .git (a bare repository), folded, asking the port nothing; .github and .gitignore pass', async () => {
+    const { port, calls } = recordingPort();
+    const core = openTestCore(undefined, undefined, { workspaceFilesPort: port });
+    const ws = core.entities.ensureWorkspace(tempDir());
+    for (const path of ['repo.git', 'repo.git/config', 'a/b/Mirror.GIT/HEAD', 'x.git. /objects', 'repo.\uff47it/config', 'repo.\uff27\uff29\uff34/HEAD']) {
+      await expect(core.workspaceFiles!.read(ws.id, path), path).rejects.toBeInstanceOf(PathProtectedError);
+      await expect(core.workspaceFiles!.list(ws.id, path), path).rejects.toBeInstanceOf(PathProtectedError);
+    }
+    expect(calls).toEqual([]);
+    for (const path of ['.github/workflows/ci.yml', '.gitignore', 'src/a.gitignore', 'git/x', 'digit']) {
+      await expect(core.workspaceFiles!.read(ws.id, path), path).resolves.toMatchObject({ kind: 'text' });
+    }
+    expect(isRefusedWorkspacePath(['src', 'repo.git'])).toBe(true);
+    expect(isRefusedWorkspacePath(['repo.gitx'])).toBe(false);
+  });
+
+  it("turns the port's hard-link refusal into PathProtectedError with the hard-link message", async () => {
+    const core = openTestCore(undefined, undefined, { workspaceFilesPort: recordingPort({ refused: 'protected', reason: 'hard_link' }).port });
+    const ws = core.entities.ensureWorkspace(tempDir());
+    const error = await core.workspaceFiles!.read(ws.id, 'notes.txt').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PathProtectedError);
+    expect((error as Error).message).toBe(WORKSPACE_PATH_HARD_LINK_MESSAGE);
+    expect((error as Error).message).not.toMatch(/[\u2013\u2014]/);
   });
 });
 

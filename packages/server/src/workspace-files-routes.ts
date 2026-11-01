@@ -14,7 +14,7 @@
  * the use-case both answer 501 `not_implemented`.
  */
 import { CoreError, NotFoundError, PathProtectedError, ValidationError, type WorkspaceFiles } from '@ogden-agents/core';
-import { API_ROUTES, WORKSPACE_PATH_NOT_FOUND_MESSAGE, WORKSPACE_PATH_PROTECTED_MESSAGE, WorkspaceFileResponse, WorkspaceFolderResponse } from '@ogden-agents/shared';
+import { API_ROUTES, WORKSPACE_PATH_HARD_LINK_MESSAGE, WORKSPACE_PATH_NOT_FOUND_MESSAGE, WORKSPACE_PATH_PROTECTED_MESSAGE, WorkspaceFileResponse, WorkspaceFolderResponse } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { apiError, notImplemented } from './errors.js';
 import type { Logger } from './log.js';
@@ -35,7 +35,8 @@ export function registerWorkspaceFilesRoutes(app: Hono, { workspaceFiles, log }:
   }
   const refusal = (c: Context, error: unknown): Response => {
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
-    if (error instanceof PathProtectedError) return apiError(c, 403, 'path_protected', WORKSPACE_PATH_PROTECTED_MESSAGE);
+    // One of two fixed messages, never the error's own text.
+    if (error instanceof PathProtectedError) return apiError(c, 403, 'path_protected', error.message === WORKSPACE_PATH_HARD_LINK_MESSAGE ? WORKSPACE_PATH_HARD_LINK_MESSAGE : WORKSPACE_PATH_PROTECTED_MESSAGE);
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', WORKSPACE_PATH_NOT_FOUND_MESSAGE);
     // Never the path or the reason's text, which could name it.
     log.error('a workspace files request failed', { code: error instanceof CoreError ? error.code : 'unexpected' });

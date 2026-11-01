@@ -554,6 +554,8 @@ graph LR
   - File content and search results are served by GET only and never enter the event log or the database (AD-5, AD-16).
   - The routes sit behind AD-15's gate and are not on AD-34's device allowlist.
   - Ogden is not an IDE: the viewer is read-only; editing hands off through AD-39.
+  - Hard links (user decision 2026-10-31, story 8.1): a regular file with more than one link outside a `node_modules` folder is refused with a plain reason (Ogden doesn't open hard-linked files; open it in your editor), since no path check can tell where its other name lives. It is listed, marked protected. Files under `node_modules` stay readable (pnpm hard-links them).
+  - Bare repositories (user decision 2026-10-31, story 8.1): any folder whose name ends in `.git`, compared after the same unicode normalization and case fold as the credential folders, counts as `.git` internals anywhere in the project: not listed into, not read.
 
 ### AD-37 — Working-tree changes go through `VcsPort`, never a shell [ADOPTED]
 

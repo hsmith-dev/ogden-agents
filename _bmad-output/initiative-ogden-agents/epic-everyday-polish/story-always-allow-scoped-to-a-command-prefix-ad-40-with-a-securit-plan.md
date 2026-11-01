@@ -192,3 +192,7 @@ Gap list (today vs AD-40):
 - `pnpm test` -- expected: full suite passes
 - `pnpm exec playwright test tests/e2e/always-allow-prefix.spec.ts tests/e2e/permissions.spec.ts tests/e2e/settings-nav.spec.ts tests/e2e/caution.spec.ts tests/e2e/permission-modes.spec.ts` -- expected: pass
 - `PROVENANCE_BASE=origin/main node scripts/check-provenance.mjs` -- expected: pass
+
+## User sign-off
+
+- 2026-10-31: the user read the security summary (two reviews, 18 bypasses fixed, allowlists for high-risk tools, accepted risks npm scripts, git commit hooks, approval-time path checks) and signed off on shipping 26.8 with epic 26.

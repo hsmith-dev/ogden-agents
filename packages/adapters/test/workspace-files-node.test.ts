@@ -373,14 +373,13 @@ describe('workspace-files-node: environment files', () => {
 
 describe('workspace-files-node: review rows (defensive check)', () => {
   /** Whether the temp folder's file system folds case (macOS and Windows by default). */
-  const foldsCase = (root: string): boolean => existsSync(join(root, '.SSH'));
-
   it('refuses Unicode case-fold variants of a credential folder (long s, Kelvin sign) on read and list', async () => {
     const { root, port } = setup({ '.ssh/id_rsa': 'PRIVATE KEY', '.kube/config': 'token: k' });
-    const expected = foldsCase(root) ? PROTECTED : NOT_FOUND;
+    // Core's NFKC fold turns the long s into `s` (and the Kelvin sign into `K`), so every variant is refused as protected whether or not the file system folds case (stricter).
+    const expected = PROTECTED;
     for (const path of ['.ſſh/id_rsa', '.ſsh/id_rsa', '.Kube/config']) {
       const read = await port.read(root, path);
-      expect(read, path).toEqual(path.includes('K') ? PROTECTED : expected);
+      expect(read, path).toEqual(expected);
       expect(JSON.stringify(read)).not.toContain('PRIVATE KEY');
     }
     expect(await port.list(root, '.ſſh')).toEqual(expected);

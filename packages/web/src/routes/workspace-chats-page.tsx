@@ -1,15 +1,16 @@
 import { ChatCircle, GearSix, House } from '@phosphor-icons/react';
-import type { RemoteMachineId, Session } from '@ogden-agents/shared';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { Session } from '@ogden-agents/shared';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
-import { AgentPicker, SET_UP_AGENTS } from '@/chat/agent-picker';
-import { agentNameOf, CHAT_AGENTS_QUERY_KEY, ChatApiError, createChatSession, sendMessage } from '@/chat/chat-api';
+import { AgentPicker } from '@/chat/agent-picker';
+import { agentNameOf, ChatApiError, createChatSession, sendMessage } from '@/chat/chat-api';
 import { ChatListRow } from '@/chat/chat-row';
 import { Composer } from '@/chat/composer';
 import { StartChatActions, useStartChat } from '@/chat/start-chat';
 import { newChatDraftKey } from '@/chat/drafts';
-import { agentAvailability, projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
+import { useOpenNewChat } from '@/chat/new-chat';
+import { AGENT_UNAVAILABLE_ID, NewChatAgentStatus, useNewChatAgent } from '@/chat/new-chat-agent';
 import { MachinePicker } from '@/remote-machines/machine-picker';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
@@ -18,16 +19,15 @@ import { RowList, RowMeta } from '@/ui/row-list';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { BmadOffer } from '@/workspaces/bmad-offer';
-import { ScriptTrustPrompt } from '@/workspaces/script-trust-prompt';
 import { fetchWorkspace, useSessions, workspaceName } from '@/workspaces/workspace-api';
-import { useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
 const started = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 /**
  * `/w/:wsId`: the workspace's Chats list (story 2.5), newest first, each
  * with its live state (AD-4). New chat and Workspace settings sit in the
- * header. With no chats yet the page says so, with Start a chat as its one
+ * header; New chat opens the new-chat draft with the agent and machine picked
+ * beside it (epic 26), so trying it leaves no empty chat behind. With no chats yet the page says so, with Start a chat as its one
  * primary action (the project's default agent), Use another agent while
  * there is a choice, and the composer focused as the second way in
  * (EXPERIENCE.md Empty chats). The list follows the event stream, so a chat
@@ -43,24 +43,9 @@ function ChatsPage({ wsId }: { wsId: string }) {
   const navigate = useNavigate();
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const { sessions, error } = useSessions(wsId);
-  // The agent a new chat starts with (epic 6): the project's default (entry 6), which follows a change made
-  // in another tab, until the user picks another here. Unknown until both the list and the settings are in.
-  // Read for this project: an agent that needs it trusted says so (epic 12, 12.3), and the trust prompt fixes it.
-  const chatAgents = useChatAgents(wsId);
-  const queryClient = useQueryClient();
-  const settings = useWorkspaceSettings(wsId);
-  const [pickedAgent, setPickedAgent] = useState<string | undefined>(undefined);
-  // The machine a new chat runs on (CAP-24, epic 19 story 19.7): Local until the user picks a confirmed one; never persisted beyond this page.
-  const [pickedMachine, setPickedMachine] = useState<RemoteMachineId | null>(null);
-  const settingsKnown = settings.data !== undefined || settings.isError;
-  const projectDefault = chatAgents.data === undefined || !settingsKnown ? undefined : projectDefaultAgent(chatAgents.data, settings.data?.defaultAgentId);
-  const agentId = pickedAgent ?? projectDefault;
-  const severalAgents = (chatAgents.data?.agents.length ?? 0) > 1;
-  const chosen = chatAgents.data?.agents.find((agent) => agent.agentId === agentId);
-  /** Why a new chat with the chosen agent can't start now (not installed, signed out, needs trust), said before trying. */
-  const unavailable = chosen === undefined ? undefined : agentAvailability(chosen);
-  // Only while there is a choice: with one agent the page is as before, and the server says why a chat can't start.
-  const blocked = !severalAgents || unavailable === undefined || unavailable.available ? undefined : unavailable;
+  // The agent and machine New chat opens the draft with (epic 6; CAP-24, 19.7), shared with the draft (epic 26).
+  const { chatAgents, settings, agentId, setPickedAgent, pickedAgent, pickedMachine, setPickedMachine, severalAgents, chosen, blocked } = useNewChatAgent(wsId);
+  const openNewChat = useOpenNewChat();
   const { start, starting: creating, error: createError, setError: setCreateError } = useStartChat(wsId);
   /** The chat the first message created: a retry after a failed send reuses it, never leaving an empty one behind (2.5 F6). */
   const firstChat = useRef<Session | undefined>(undefined);
@@ -89,7 +74,8 @@ function ChatsPage({ wsId }: { wsId: string }) {
       setCreateError(blocked.description);
       return;
     }
-    start(agentId, pickedMachine);
+    // The draft (epic 26): the chat exists only once its first message is sent.
+    openNewChat(wsId, { agent: pickedAgent, machine: pickedMachine ?? undefined });
   };
 
   return (
@@ -114,7 +100,7 @@ function ChatsPage({ wsId }: { wsId: string }) {
             <Button
               variant={startShown ? 'outline' : 'primary'}
               onClick={onNewChat}
-              aria-disabled={creating || blocked !== undefined} aria-describedby={blocked === undefined ? undefined : 'agent-unavailable'} data-testid="new-chat">
+              aria-disabled={creating || blocked !== undefined} aria-describedby={blocked === undefined ? undefined : AGENT_UNAVAILABLE_ID} data-testid="new-chat">
               <ChatCircle aria-hidden />
               New chat
             </Button>
@@ -143,34 +129,8 @@ function ChatsPage({ wsId }: { wsId: string }) {
                 {workspaceName(workspace.data)}
               </Text>
             )}
-            {/* Why the chosen agent can't start a chat now, and where to fix it (epic 6, entry 6). */}
-            {/* Always mounted, so a change (a pick, or the default changed in another tab) is announced. */}
-            <Text variant="caption" id="agent-unavailable" role="status" data-testid="agent-unavailable-status">
-              {blocked === undefined ? null : (
-                <span data-testid="agent-unavailable">
-                  {blocked.description}
-                  {blocked.setUp ? (
-                    <>
-                      {' '}
-                      <Button variant="link" size="sm" asChild>
-                        <Link to="/settings/agents" data-testid="agent-unavailable-link">
-                          {SET_UP_AGENTS}
-                        </Link>
-                      </Button>
-                    </>
-                  ) : null}
-                </span>
-              )}
-            </Text>
-            {/* The chosen agent runs the project's own settings and hooks: one trust covers it and Board's scripts (epic 12, 12.3). */}
-            {blocked?.trust !== true || chosen === undefined ? null : (
-              <ScriptTrustPrompt
-                wsId={wsId}
-                agentName={chosen.displayName}
-                changed={settings.data?.bmadScriptsTrusted === true}
-                onTrusted={() => void queryClient.invalidateQueries({ queryKey: CHAT_AGENTS_QUERY_KEY })}
-              />
-            )}
+            {/* Why the chosen agent can't start a chat now, and the trust prompt that fixes one (epic 6, entry 6; epic 12, 12.3). */}
+            <NewChatAgentStatus wsId={wsId} blocked={blocked} chosen={chosen} trustChanged={settings.data?.bmadScriptsTrusted === true} />
             {/* The "already uses BMad Method" offer (story 10.3): detected when this page opens, never when the project is added. */}
             {workspace.data === undefined ? null : <BmadOffer key={wsId} wsId={wsId} />}
             {createError === undefined ? null : (
@@ -205,7 +165,7 @@ function ChatsPage({ wsId }: { wsId: string }) {
                         agents={chatAgents.data.agents}
                         agentId={agentId}
                         blocked={blocked}
-                        describedBy="agent-unavailable"
+                        describedBy={AGENT_UNAVAILABLE_ID}
                         starting={creating}
                         // A failed first send already made this agent's chat (2.5 F6): open that one, never a second empty chat.
                         onStart={(next) => (firstChat.current !== undefined && firstChat.current.agentId === next ? void openChat(firstChat.current) : start(next))}
@@ -218,7 +178,7 @@ function ChatsPage({ wsId }: { wsId: string }) {
                 <Composer
                   label={`Message ${agentNameOf(chatAgents.data, agentId)}`}
                   // The reason is the status line above, tied to the field; a send still goes to the server, which says why.
-                  describedBy={blocked === undefined ? undefined : 'agent-unavailable'}
+                  describedBy={blocked === undefined ? undefined : AGENT_UNAVAILABLE_ID}
                   draftKey={newChatDraftKey(wsId)}
                   onSend={async (text) => {
                     const session = firstChat.current ?? (await createChatSession(wsId, undefined, agentId, undefined, pickedMachine));

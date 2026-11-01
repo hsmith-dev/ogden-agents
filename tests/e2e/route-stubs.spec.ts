@@ -14,6 +14,7 @@ const ROUTES: ReadonlyArray<readonly [path: string, heading: string, testId: str
   ['/settings/agents', 'Agents', 'agents-settings-page'],
   [`/w/${wsId}`, 'Chats', 'workspace-chats-page'],
   [`/w/${wsId}/settings`, 'Workspace settings', 'workspace-settings-page'],
+  [`/w/${wsId}/new`, 'New chat', 'new-chat-page'],
 ];
 
 for (const [path, heading, testId] of ROUTES) {

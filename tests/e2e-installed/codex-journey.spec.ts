@@ -84,12 +84,17 @@ test('Codex beside Claude Code in a Simple project: own key only, a card that ho
     await expect(codexOption).not.toHaveAttribute('aria-disabled', 'true');
     await expect(codexOption).toContainText('Installed, using your API key');
     await codexOption.click();
+    // New chat opens the draft with the pick (epic 26); its first message starts the chat with it.
     await page.getByTestId('new-chat').click();
-    await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
+    await expect(page).toHaveURL(/\/w\/[^/]+\/new\?agent=codex$/);
+    await composerOf(page, 'Codex').fill('whoami');
+    await composerOf(page, 'Codex').press('Enter');
+    await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/, AGENT);
     codexUrl = page.url();
     await expect(page.getByTestId('session-agent')).toHaveText('Codex');
-    await say(page, 'Codex', 'whoami');
-    await expect(replies(page).last()).toContainText('agent=codex');
+    await expect(page.getByTestId('message-user').last()).toHaveText('whoami', AGENT);
+    await expect(replies(page).last()).toContainText('agent=codex', AGENT);
+    await expect(state(page)).toHaveAttribute('data-state', 'idle', AGENT);
   });
 
   await test.step("Codex's process gets its own key and home only, and no other agent gets the key (AD-16)", async () => {

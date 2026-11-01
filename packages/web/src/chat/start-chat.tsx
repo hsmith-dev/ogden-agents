@@ -16,8 +16,8 @@ export const START_FAILED = "Ogden Agents couldn't start a chat. Try again.";
 export const START_A_CHAT = 'Start a chat';
 
 /**
- * Starts a chat in a project and opens it (the empty project's one click,
- * and the header's New chat). One start at a time: a click while one is in
+ * Starts a chat in a project and opens it (the empty project's one click;
+ * New chat opens the draft instead, epic 26). One start at a time: a click while one is in
  * flight does nothing, so a double click never makes two chats. The chat
  * starts in Ask, as every new chat does (the server's rule).
  */

@@ -276,11 +276,13 @@ test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer,
     await page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: 'Chats' }).click();
     await expect(page.getByTestId('chat-list')).toBeVisible();
     await expectChatsTabOnly(page);
+    // New chat opens the draft (epic 26); its first message starts the chat.
     await page.getByTestId('new-chat').click();
-    await expect(page).toHaveURL(new RegExp(`/w/${plainId}/s/ses_`));
-    await expect(state(page)).toHaveAttribute('data-state', 'idle');
+    await expect(page).toHaveURL(new RegExp(`/w/${plainId}/new$`));
     await expectChatsTabOnly(page);
     const second = await sessionStart(page);
+    await expect(page).toHaveURL(new RegExp(`/w/${plainId}/s/ses_`));
+    await expectChatsTabOnly(page);
     expectSimpleStart(second, cwd);
     expect(await piecesOf(page, plainId)).toEqual([]);
   });

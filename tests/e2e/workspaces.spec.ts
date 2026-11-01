@@ -107,11 +107,22 @@ test('Add project opens a folder through the browser, the same folder twice open
   });
 });
 
-test('Add project, then New chat: the app opens the new chat with the composer focused', async ({ page }) => {
+/** New chat in the header opens the draft (epic 26); its first message starts the chat, which then opens. */
+async function newChat(page: Page, text: string) {
+  await page.getByTestId('new-chat').click();
+  await expect(page).toHaveURL(/\/w\/ws_[0-9A-Z]{26}\/new$/);
+  const composer = page.getByRole('textbox', { name: 'Message Claude Code' });
+  await expect(composer).toBeFocused();
+  await composer.fill(text);
+  await composer.press('Enter');
+  await expect(page).toHaveURL(/\/w\/ws_[0-9A-Z]{26}\/s\/ses_[0-9A-Z]{26}$/);
+}
+
+test('Add project, then New chat: the draft opens with the composer focused, and the first message starts the chat', async ({ page }) => {
   await withServer(page, async () => {
     await addAlpha(page);
-    await page.getByTestId('new-chat').click();
-    await expect(page).toHaveURL(/\/w\/ws_[0-9A-Z]{26}\/s\/ses_[0-9A-Z]{26}$/);
+    await newChat(page, 'hello');
+    await expect(page.getByTestId('message-user')).toContainText('hello');
     await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
     await expect(page.getByRole('textbox', { name: 'Message Claude Code' })).toBeFocused();
   });
@@ -148,7 +159,7 @@ test('the sidebar moves between projects, and Delete history is refused while a 
       await openConnected(other, `/w/${alpha}`, await launchLink(server.url, dataDir));
       await expect(other.getByTestId('chats-empty')).toBeVisible();
 
-      await page.getByTestId('new-chat').click();
+      await newChat(page, 'hello alpha');
       await expect(page).toHaveURL(new RegExp(`/w/${alpha}/s/ses_[0-9A-Z]{26}$`));
       const sesId = /s\/(ses_[0-9A-Z]{26})$/.exec(page.url())![1]!;
       await expect(other.getByTestId('chat-row')).toHaveCount(1);
@@ -158,7 +169,7 @@ test('the sidebar moves between projects, and Delete history is refused while a 
       await projectLink('beta-repo').focus();
       await page.keyboard.press('Enter');
       await expect(page).toHaveURL(new RegExp(`/w/${beta}$`));
-      await page.getByTestId('new-chat').click();
+      await newChat(page, 'hello beta');
       await expect(page).toHaveURL(new RegExp(`/w/${beta}/s/`));
 
       // Delete history on alpha, while its chat is working: refused, shown in the dialog.

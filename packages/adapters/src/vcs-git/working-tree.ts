@@ -9,6 +9,12 @@
  * relative to that folder (`--relative`), `/`-separated; renames show as a
  * deletion and an addition (`--no-renames`).
  *
+ * The project's `.git` is checked before git runs there (user decision
+ * 2026-11-01, AD-37): a `.git` file is followed only for a standard linked
+ * worktree or submodule (`git-pointer.ts`), and the git folder git then
+ * finds must be the one checked; anything else refuses every view, the
+ * snapshot and the commit with `GIT_POINTER_UNUSUAL_MESSAGE`.
+ *
  * Snapshots (This turn): the folder's index is copied to a temporary file
  * in `<snapshots>/tmp`, and with `GIT_INDEX_FILE` on it,
  * `GIT_OBJECT_DIRECTORY` on the repo's own store in Ogden's data folder
@@ -31,9 +37,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { isRealFolder, VcsError, type VcsChangedFiles, type VcsChangesTarget, type VcsFolder, type VcsWorkingTreePort } from '@ogden-agents/core';
-import { MAX_CHANGED_FILES, MAX_DIFF_FILE_BYTES, type ChangedFile, type DiffHunk, type DiffLine } from '@ogden-agents/shared';
+import { GIT_POINTER_UNUSUAL_MESSAGE, MAX_CHANGED_FILES, MAX_DIFF_FILE_BYTES, type ChangedFile, type DiffHunk, type DiffLine } from '@ogden-agents/shared';
 import { readRegularFile, type RegularFileRead } from '../fs-safe.js';
 import { BRANCH, checkPath, checkRelative, REVISION, realOf, SAFE_CONFIG } from './checks.js';
+import { checkGitPointer, type GitPointer } from './git-pointer.js';
 import { createGitRunner, OUTPUT_TOO_LARGE, type GitRunnerOptions } from './runner.js';
 
 export interface GitWorkingTreeOptions extends GitRunnerOptions {
@@ -232,19 +239,45 @@ export function createGitWorkingTree(options: GitWorkingTreeOptions): VcsWorking
     return { ...located.env, GIT_INDEX_FILE: index, GIT_OBJECT_DIRECTORY: store, GIT_ALTERNATE_OBJECT_DIRECTORIES: repoObjects };
   };
 
+  /** `core.worktree` from a git folder's own `config` file only (no includes, no other config), `undefined` when unset. */
+  const readCoreWorktree = async (gitDir: string): Promise<string | undefined> => {
+    const out = await run(gitDir, ['config', '--file', join(gitDir, 'config'), '--get', 'core.worktree']);
+    if (out.code === 1) return undefined;
+    if (out.code !== 0) throw new VcsError(GIT_POINTER_UNUSUAL_MESSAGE, { step: 'gitdir', reason: 'submodule_config' });
+    const value = out.stdout.replace(/\r?\n$/, '');
+    return value === '' ? undefined : value;
+  };
+
+  /** The project's `.git`, checked before git runs there: a `.git` file is followed only for a standard linked worktree or submodule (`git-pointer.ts`). */
+  const checkedProject = (path: string): Promise<GitPointer | undefined> => checkGitPointer(path, readCoreWorktree);
+
+  /** What git found is what was checked: its git folder (and, for a pointer, its shared one) by real path. */
+  const sameAsChecked = (pointer: GitPointer | undefined, gitDir: string, common: string): void => {
+    if (pointer === undefined) throw new VcsError(GIT_POINTER_UNUSUAL_MESSAGE, { step: 'gitdir', reason: 'undiscovered' });
+    if (realOf(gitDir) !== pointer.gitDir || (pointer.common !== undefined && realOf(common) !== pointer.common)) {
+      throw new VcsError(GIT_POINTER_UNUSUAL_MESSAGE, { step: 'gitdir', reason: 'discovered_elsewhere' });
+    }
+  };
+
   /** Where git runs for `folder`; `undefined` when it is in no repository's working tree. */
   const locate = async (folder: VcsFolder): Promise<Located | undefined> => {
     checkPath(folder.path);
     let found: Omit<Located, 'flags'>;
     if (folder.worktree !== undefined) {
+      // The chat's worktree is checked by the pin; the project it came from by its `.git`.
+      checkPath(folder.worktree.repoPath);
+      await checkedProject(folder.worktree.repoPath);
       const pinned = await runner.pinnedWorktree(folder.worktree.repoPath, folder.path, folder.worktree.branch);
       found = { cwd: folder.path, env: pinned.env, common: pinned.common, index: join(pinned.env.GIT_DIR, 'index') };
     } else {
       if (!existsSync(folder.path)) return undefined;
-      const out = await run(folder.path, ['rev-parse', '--is-inside-work-tree', '--path-format=absolute', '--git-common-dir', '--git-path', 'index']);
+      const pointer = await checkedProject(folder.path);
+      if (pointer === undefined) return undefined;
+      const out = await run(folder.path, ['rev-parse', '--is-inside-work-tree', '--path-format=absolute', '--git-common-dir', '--git-path', 'index', '--absolute-git-dir']);
       if (out.code !== 0) return undefined;
-      const [inside, common, index] = out.stdout.split(/\r?\n/).map((line) => line.trim());
-      if (inside !== 'true' || common === undefined || common === '' || index === undefined || index === '') return undefined;
+      const [inside, common, index, gitDir] = out.stdout.split(/\r?\n/).map((line) => line.trim());
+      if (inside !== 'true' || common === undefined || common === '' || index === undefined || index === '' || gitDir === undefined || gitDir === '') return undefined;
+      sameAsChecked(pointer, gitDir, common);
       found = { cwd: folder.path, env: {}, common: realOf(common), index };
     }
     return { ...found, flags: await filterFlags(found.cwd, found.env) };

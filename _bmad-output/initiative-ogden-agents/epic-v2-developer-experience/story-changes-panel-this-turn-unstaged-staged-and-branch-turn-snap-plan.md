@@ -81,6 +81,7 @@ Project root is the worktree `/Users/harrisonsmith/Library/Caches/ogden-agents-d
 - A listing's `tooLarge` is from blob sizes (either side over 1 MiB); the file's diff also says `tooLarge` when the diff text itself is over it.
 - `run`, `must`, `identityFlags` and `pinnedWorktree` moved to `vcs-git/runner.ts`; `index.ts` adds the run's object store to the pinned env itself.
 - New shared texts in `workbench-changes.ts`: `COMMIT_NOTHING_MESSAGE`, `HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE`, the panel's labels, `turnChangedText`, `REVIEW_CHANGES_LABEL`.
+- Decided by the user (2026-11-01, review #12; AD-37 Rule): a project's `.git` file is followed only for a standard linked worktree (`<repo>/.git/worktrees/<name>` whose `gitdir` points back at this `.git` file, its `commondir` that repo's `.git`) or submodule (inside `<super>/.git/modules/`, `core.worktree` if set resolving to this project), by real path; anything else and the views, snapshots and Commit refuse with `GIT_POINTER_UNUSUAL_MESSAGE` (409 `invalid_operation`). Built as an epic follow-up in `vcs-git/git-pointer.ts`; git's discovered git folder must then be the one checked. A bare repo's worktree (`<repo>.git/worktrees/<name>`) is not one of the two layouts and is refused.
 - Not done: the snapshot store is never pruned (no GC of `<data>/snapshots`); snapshot failures are not logged by the server.
 
 ## Plan Change Log
@@ -109,7 +110,6 @@ Pass 1 (2026-11-01; lenses: quick, security). Verdicts: high 4, medium 5, low 6,
 
 ## Deferred (for the sweep)
 
-- The project's own git folder is found by discovery: a `<project>/.git` gitfile pointing at another repo makes the views read it (and a crafted worktree commit write it). Pinning `GIT_DIR` for projects would refuse linked-worktree and submodule projects; decide which (review #12).
 - A turn whose start snapshot timed out or failed records nothing, so This turn shows the previous turn; a "not recorded" marker needs an event contract change (review #13).
 - Turn counts stop at `MAX_CHANGED_FILES` (1000) files; a `--shortstat` count would be exact (review #14).
 - The snapshot store under `<data>/snapshots` is never cleaned and holds full copies of non-ignored files, `.env` included; retention and GC belong with 27.x retention (review #15).

@@ -21,6 +21,7 @@ import {
   chatWorktreeBranch,
   CommitWorktreeResponse,
   FileDiffResponse,
+  GIT_POINTER_UNUSUAL_MESSAGE,
   SessionResponse,
   TurnsResponse,
   WorkspaceResponse,
@@ -117,6 +118,21 @@ describe('workbench changes on git (story 8.4)', () => {
     expect(recorded(server, sesId)).toEqual([]);
     const unstaged = await request(server, tab, 'GET', `${apiPath(API_ROUTES.workspaceChanges, { wsId })}?view=unstaged`);
     expect(ChangesResponse.parse(await unstaged.json()).files).toEqual([]);
+  });
+
+  it("refuses a project whose .git file points at an unrelated repo with the plain sentence, as 409", async () => {
+    const lines: string[] = [];
+    const server = await startTestServer({ lines });
+    const tab = await signIn(server);
+    const { repo: other } = project();
+    const { repo: folder } = project({ repo: false });
+    writeFileSync(join(folder, '.git'), `gitdir: ${join(other, '.git')}\n`);
+    const wsId = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: folder })).json()).workspace.id;
+    const refused = await request(server, tab, 'GET', `${apiPath(API_ROUTES.workspaceChanges, { wsId })}?view=unstaged`);
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error).toEqual({ code: 'invalid_operation', message: GIT_POINTER_UNUSUAL_MESSAGE });
+    // The other repo's path is in no log line.
+    expect(lines.join('\n')).not.toContain(other);
   });
 
   it("commits a fixture worktree chat's changes on its branch: one commit, no hook, nothing pushed, the main checkout unchanged", async () => {

@@ -30,6 +30,7 @@ import {
   NotFoundError,
   PathProtectedError,
   ValidationError,
+  VcsError,
   type WorkspaceFiles,
 } from '@ogden-agents/core';
 import {
@@ -37,6 +38,7 @@ import {
   API_ROUTES,
   EDITOR_NONE_FOUND_TEXT,
   EDITOR_UNAVAILABLE_MESSAGE,
+  GIT_POINTER_UNUSUAL_MESSAGE,
   HUNK_OUTDATED_TEXT,
   SessionId,
   WORKSPACE_PATH_HARD_LINK_MESSAGE,
@@ -83,6 +85,8 @@ export function workbenchRefusal(log: Logger, what: string): (c: Context, error:
     if (error instanceof HunkOutdatedError) return apiError(c, 409, 'hunk_outdated', HUNK_OUTDATED_TEXT);
     // Core's own plain message (never a path).
     if (error instanceof InvalidOperationError) return apiError(c, 409, 'invalid_operation', error.message);
+    // The project's `.git` file points somewhere unusual (AD-37): the fixed sentence, never the path.
+    if (error instanceof VcsError && error.message === GIT_POINTER_UNUSUAL_MESSAGE) return apiError(c, 409, 'invalid_operation', GIT_POINTER_UNUSUAL_MESSAGE);
     // A lane not shipped yet (hunk actions before 8.5): core's own plain message.
     if (error instanceof NotImplementedError) return apiError(c, 501, 'not_implemented', error.message);
     if (error instanceof EditorUnavailableError) return apiError(c, 409, 'editor_unavailable', error.message === EDITOR_NONE_FOUND_TEXT ? EDITOR_NONE_FOUND_TEXT : EDITOR_UNAVAILABLE_MESSAGE);

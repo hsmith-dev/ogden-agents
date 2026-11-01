@@ -204,6 +204,8 @@ export const WORKTREE_NEVER_PUSHED_TEXT = 'Never pushed. Merge it yourself when 
 export const COMMIT_NEEDS_WORKTREE_MESSAGE = 'Only a chat that works in its own copy can commit here.';
 /** Commit asked with nothing changed in the worktree (409 `invalid_operation`). */
 export const COMMIT_NOTHING_MESSAGE = 'There are no changes to commit.';
+/** The project's `.git` file points at no standard linked worktree or submodule, so the views and Commit refuse (409 `invalid_operation`; user decision 2026-11-01, AD-37). */
+export const GIT_POINTER_UNUSUAL_MESSAGE = "Ogden can't read this project's git: its .git file points somewhere unusual.";
 /** A hunk action before story 8.5 ships them (501 `not_implemented`). */
 export const HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE = "Ogden Agents can't stage, unstage or revert a change yet.";
 /** The Workbench's Changes panel (story 8.4). */

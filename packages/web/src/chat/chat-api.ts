@@ -4,6 +4,7 @@ import {
   apiPath,
   ChatAgentsResponse,
   ChatDeletedResponse,
+  HandOffResponse,
   PermissionRulesResponse,
   SendMessageResponse,
   SessionResponse,
@@ -221,4 +222,15 @@ export async function deleteChat(wsId: string, sesId: string, discardUncommitted
     "Ogden Agents couldn't delete this chat",
   );
   return ChatDeletedResponse.parse(json);
+}
+
+/**
+ * `POST /api/v1/workspaces/:wsId/sessions/:sesId/location` (Hand off, 27.4):
+ * moves the idle chat and its uncommitted changes to `to`. 409
+ * `agent_mid_turn`, `handoff_conflict` (`details.files`) or `invalid_operation`
+ * move nothing.
+ */
+export async function handOffChat(wsId: string, sesId: string, to: ChatLocation, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<Session> {
+  const json = await call(auth, apiPath(API_ROUTES.sessionLocation, { wsId, sesId }), postJson({ to }), "Ogden Agents couldn't move this chat");
+  return HandOffResponse.parse(json).session;
 }

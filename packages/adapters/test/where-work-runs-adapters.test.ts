@@ -40,10 +40,14 @@ describe('vcs-memory chat worktrees', () => {
   it('moves changes between folders, or answers conflict and moves nothing', async () => {
     const vcs = createMemoryVcsChatWorktree();
     vcs.changes(TREE).add('a.ts').add('b.ts');
-    expect(await vcs.moveChanges(REPO, { from: TREE, to: REPO })).toEqual({ result: 'moved', files: 2 });
+    const tree = { path: TREE, worktree: { repoPath: REPO, branch: BRANCH } };
+    expect(await vcs.moveChanges(REPO, { from: tree, to: { path: REPO } })).toMatchObject({ result: 'moved', files: 2 });
     expect(vcs.changes(TREE).size).toBe(0);
     vcs.changes(TREE).add('a.ts');
-    expect(await vcs.moveChanges(REPO, { from: TREE, to: REPO })).toEqual({ result: 'conflict', files: 1 });
+    expect(await vcs.moveChanges(REPO, { from: tree, to: { path: REPO } })).toMatchObject({ result: 'conflict', files: 1, snapshots: { from: expect.any(String), to: expect.any(String) } });
+    expect([...vcs.changes(TREE)]).toEqual(['a.ts']);
+    vcs.failingMoves.set(TREE, {});
+    await expect(vcs.moveChanges(REPO, { from: tree, to: { path: REPO } })).rejects.toThrow();
     expect([...vcs.changes(TREE)]).toEqual(['a.ts']);
   });
 });

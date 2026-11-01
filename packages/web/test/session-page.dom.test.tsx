@@ -16,6 +16,12 @@ import {
   deleteChatBusyText,
   DELETE_CHAT_REMOTE_TEXT,
   deleteChatConfirmText,
+  HANDOFF_CONFIRM_TITLE,
+  HANDOFF_TO_WORKTREE_DESCRIPTION,
+  HANDOFF_FOLDER_BUSY_TEXT,
+  handOffConflictText,
+  handOffMidTurnText,
+  handOffWorktreeConflictText,
   WORKTREE_BADGE_TOOLTIP_TEXT,
   worktreeBadgeLabel,
   type CoreEvent,
@@ -72,6 +78,10 @@ const fake = vi.hoisted(() => ({
   deleteResults: [] as Array<() => Promise<unknown>>,
   /** The new-chat drafts opened. */
   newChats: [] as string[],
+  /** Each hand-off asked (27.4): where to. */
+  handOffs: [] as string[],
+  /** What each hand-off answers, in turn (the last repeats). */
+  handOffResults: [] as Array<() => Promise<unknown>>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -159,6 +169,11 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
     return fake.sendResult();
   },
   cancelSession: async () => undefined,
+  handOffChat: async (_wsId: string, _sesId: string, to: string) => {
+    fake.handOffs.push(to);
+    const result = fake.handOffResults[Math.min(fake.handOffs.length - 1, fake.handOffResults.length - 1)];
+    return result === undefined ? { id: 'ses_1' } : result();
+  },
   deleteChat: async (_wsId: string, _sesId: string, discard: boolean) => {
     fake.deletes.push(discard);
     const result = fake.deleteResults[Math.min(fake.deletes.length - 1, fake.deleteResults.length - 1)];
@@ -260,6 +275,8 @@ beforeEach(() => {
   fake.deletes = [];
   fake.deleteResults = [];
   fake.newChats = [];
+  fake.handOffs = [];
+  fake.handOffResults = [];
   fake.agentId = undefined;
   fake.claudeListed = true;
   fake.sendResult = () => Promise.resolve({ messageId: 'msg_x', queued: false });
@@ -649,5 +666,98 @@ describe('Delete chat (27.3)', () => {
     await mount();
     openMenu(await screen.findByTestId('session-menu'));
     expect((await screen.findByTestId('session-menu-delete-reason')).textContent).toBe(DELETE_CHAT_NOT_DELETABLE_TEXT);
+  });
+});
+
+describe('Hand off from the Location chip (27.4)', () => {
+  const openHandOff = async () => {
+    openMenu(await screen.findByTestId('location-chip'));
+    fireEvent.click(await screen.findByTestId('location-hand-off'));
+    return screen.findByTestId('hand-off-confirm');
+  };
+
+  it('confirms once, moves the chat and reads it again', async () => {
+    await mount();
+    const dialog = await openHandOff();
+    expect(dialog.textContent).toContain(HANDOFF_CONFIRM_TITLE);
+    expect(dialog.textContent).toContain(HANDOFF_TO_WORKTREE_DESCRIPTION);
+    const before = fake.fetches;
+    fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
+    await flush();
+    expect(fake.handOffs).toEqual(['worktree']);
+    expect(screen.queryByTestId('hand-off-confirm')).toBeNull();
+    expect(fake.fetches).toBeGreaterThan(before);
+  });
+
+  it('a worktree chat moves to this folder', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    await mount();
+    await openHandOff();
+    fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
+    await flush();
+    expect(fake.handOffs).toEqual(['this_folder']);
+  });
+
+  it('a conflict or the folder still busy stays in the dialog, in plain words for where it moves', async () => {
+    fake.handOffResults = [
+      () => Promise.reject(new ChatApiError('changes', 409, 'handoff_conflict', { files: 2 })),
+      () => Promise.reject(new ChatApiError('mid-turn', 409, 'agent_mid_turn')),
+    ];
+    await mount();
+    await openHandOff();
+    fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
+    await flush();
+    // To its worktree: the clash is in the chat's branch, not this folder.
+    expect(screen.getByRole('alert').textContent).toContain(handOffWorktreeConflictText(2));
+    fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
+    await flush();
+    // Another chat in the folder works: never this chat's agent name.
+    expect(screen.getByRole('alert').textContent).toContain(HANDOFF_FOLDER_BUSY_TEXT);
+    expect(screen.getByRole('alert').textContent).not.toContain('Codex');
+    expect(screen.getByTestId('hand-off-confirm')).toBeTruthy();
+  });
+
+  it('moving to this folder, a conflict names this folder\'s own changes', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.handOffResults = [() => Promise.reject(new ChatApiError('changes', 409, 'handoff_conflict', { files: 1 }))];
+    await mount();
+    await openHandOff();
+    fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
+    await flush();
+    expect(screen.getByRole('alert').textContent).toContain(handOffConflictText(1));
+  });
+
+  it('is reachable but does nothing while the agent works, saying why', async () => {
+    fake.state = 'working';
+    fake.events = [created(), event('session.state_changed', { sessionId: SES, state: 'working', previous: 'idle' })];
+    await mount();
+    openMenu(await screen.findByTestId('location-chip'));
+    const item = await screen.findByTestId('location-hand-off');
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByTestId('location-hand-off-line').textContent).toBe(handOffMidTurnText('Codex'));
+    fireEvent.click(item);
+    await flush();
+    expect(screen.queryByTestId('hand-off-confirm')).toBeNull();
+  });
+
+  it('a planning session has no hand-off item', async () => {
+    fake.kind = 'planning';
+    await mount();
+    openMenu(await screen.findByTestId('location-chip'));
+    await screen.findByTestId('location-menu');
+    expect(screen.queryByTestId('location-hand-off')).toBeNull();
+  });
+
+  it('the transcript shows a divider where the chat moved, and the page reads the chat again', async () => {
+    const { push } = await mount();
+    const before = fake.fetches;
+    await push(
+      event('session.location_changed', { sessionId: SES, location: 'worktree', previous: 'this_folder', branch: 'ogden/chat/ses_1', files: 1, resumes: true }),
+      event('session.location_changed', { sessionId: SES, location: 'this_folder', previous: 'worktree', branch: null, files: 1, resumes: true }),
+    );
+    const markers = screen.getAllByTestId('location-changed-marker');
+    expect(markers.map((marker) => marker.textContent)).toEqual(['Moved to its own worktree: ogden/chat/ses_1', 'Moved to this folder']);
+    expect(markers[0]!.getAttribute('role')).toBe('separator');
+    expect(fake.fetches).toBeGreaterThan(before);
   });
 });

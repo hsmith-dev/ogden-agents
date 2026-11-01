@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createLocalBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createGitWorkingTree, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
-import { chatWorktreesRootOf, createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsPort, type VcsWorkingTreePort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
+import { chatWorktreesRootOf, createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsChatWorktreePort, type VcsPort, type VcsWorkingTreePort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import { createPerAgentSandbox } from './build-agent-sandbox.js';
 import type { Logger } from './log.js';
 import { agentEnvironment, withoutAgentKeys } from './start-env.js';
@@ -48,7 +48,19 @@ export const WORKING_TREE_GIT_TIMEOUT_MS = 30_000;
  * A test's own (`StartOptions.vcsWorkingTreePort`) replaces it.
  */
 export function createServerWorkingTree(options: StartOptions, dataDir: string): VcsWorkingTreePort {
-  return options.vcsWorkingTreePort ?? createGitWorkingTree({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), snapshotsRoot: snapshotsRootOf(dataDir), timeoutMs: WORKING_TREE_GIT_TIMEOUT_MS });
+  return options.vcsWorkingTreePort ?? gitWorkingTree(dataDir);
+}
+
+const gitWorkingTree = (dataDir: string) =>
+  createGitWorkingTree({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), snapshotsRoot: snapshotsRootOf(dataDir), timeoutMs: WORKING_TREE_GIT_TIMEOUT_MS });
+
+/**
+ * A chat's hand-off between this folder and its own worktree (27.4): the
+ * Workbench's own git (the same snapshots store, environment and empty
+ * hooks folder). A test's own (`StartOptions.vcsChatWorktreePort`) replaces it.
+ */
+export function createServerChatWorktree(options: StartOptions, dataDir: string): Pick<VcsChatWorktreePort, 'moveChanges'> {
+  return options.vcsChatWorktreePort ?? gitWorkingTree(dataDir);
 }
 
 export function createBuildsWiring({

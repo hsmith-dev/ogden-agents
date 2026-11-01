@@ -91,6 +91,7 @@ export * from './editor-launcher-port.js';
 export * from './editor-launch.js';
 export * from './project-commands.js';
 export * from './where-work-runs.js';
+export * from './chat-locations.js';
 export * from './project-command-parsers.js';
 export * from './shell-free.js';
 // The home credential fences, for the Files adapter's confinement (AD-36).

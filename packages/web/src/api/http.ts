@@ -22,6 +22,8 @@ export class ChatApiError extends Error {
     message: string,
     readonly status: number,
     readonly code?: ApiErrorCode,
+    /** The body's `error.details` when it has them (27.4: a hand-off conflict's `files`). */
+    readonly details?: Readonly<Record<string, unknown>>,
   ) {
     super(message);
     this.name = 'ChatApiError';
@@ -29,11 +31,16 @@ export class ChatApiError extends Error {
 }
 
 /** The `error.message` and known `error.code` of a failed reply's body; `fallback` and no code when it has none (or is not JSON). */
-async function errorOf(response: Response, fallback: string): Promise<{ message: string; code: ApiErrorCode | undefined }> {
+async function errorOf(response: Response, fallback: string): Promise<{ message: string; code: ApiErrorCode | undefined; details?: Record<string, unknown> }> {
   try {
-    const body = (await response.json()) as { error?: { message?: unknown; code?: unknown } };
+    const body = (await response.json()) as { error?: { message?: unknown; code?: unknown; details?: unknown } };
     const code = ApiErrorCode.safeParse(body.error?.code);
-    return { message: typeof body.error?.message === 'string' ? body.error.message : fallback, code: code.success ? code.data : undefined };
+    const details = body.error?.details;
+    return {
+      message: typeof body.error?.message === 'string' ? body.error.message : fallback,
+      code: code.success ? code.data : undefined,
+      ...(typeof details === 'object' && details !== null && !Array.isArray(details) ? { details: details as Record<string, unknown> } : {}),
+    };
   } catch {
     // Not JSON: keep the fallback.
   }
@@ -59,7 +66,7 @@ async function send(auth: Auth, path: string, init: RequestInit, fallback: strin
   }
   if (response.ok) return response;
   const refusal = await errorOf(response, `${fallback} (error ${response.status}).`);
-  throw new ChatApiError(refusal.message, response.status, refusal.code);
+  throw new ChatApiError(refusal.message, response.status, refusal.code, refusal.details);
 }
 
 /** A call answered with JSON, or a `ChatApiError`. */

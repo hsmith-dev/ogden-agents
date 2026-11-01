@@ -60,6 +60,12 @@ export interface ChatContext {
   readonly terminals: Map<SessionId, Terminal>;
   /** Sessions between drivers: no message is taken and no other switch starts. */
   readonly switching: Set<SessionId>;
+  /**
+   * Folders a hand-off is moving changes out of or into (27.4): no chat
+   * working there takes a message or switches to its terminal until it is
+   * done (`chat/folder-hold.ts`).
+   */
+  readonly movingFolders: Set<string>;
   /** The permission modes each session's agent session offered when it last started this run (permission modes). */
   readonly sessionModes: Map<SessionId, readonly PermissionMode[]>;
   /** The permission modes the agent session started last in this run offered, per agent (any chat of it): a chat whose own agent hasn't started yet. */
@@ -185,6 +191,7 @@ export function createChatContext(options: ChatOptions): ChatContext {
     droppedAgents,
     terminals,
     switching,
+    movingFolders: new Set<string>(),
     sessionModes,
     lastSessionModes: new Map(),
     sessionModels,

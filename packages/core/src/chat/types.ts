@@ -3,7 +3,7 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { AgentId, ChatAgent, ChatDeletedResponse, ChatLocation, HandoffPreviewResponse, PermissionMode, RemoteMachineId, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, ChatAgent, ChatDeletedResponse, ChatLocation, HandoffPreviewResponse, PermissionMode, RemoteMachineId, SessionLocation, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentModels } from '../agent-models.js';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -15,7 +15,7 @@ import type { Permissions } from '../permissions.js';
 import type { RemoteHostConnection } from '../remote-host-port.js';
 import type { SessionEvents } from '../session-events.js';
 import type { TerminalPort, TerminalProcess } from '../terminal-port.js';
-import type { VcsPort, VcsWorkingTreePort } from '../vcs-port.js';
+import type { VcsChatWorktreePort, VcsPort, VcsWorkingTreePort } from '../vcs-port.js';
 import type { TurnSnapshots } from '../turn-snapshots.js';
 
 export interface ChatOptions {
@@ -114,8 +114,18 @@ export interface ChatOptions {
    * Git, for a chat started in its own worktree (epic 27, 27.1): the
    * project's top folder and commit, and the worktree made in
    * `<data>/cw`. Absent: a worktree chat is refused (`InvalidOperationError`).
+   * `branchRevision` finds a chat's kept branch for a hand-off to its own
+   * worktree again (27.4); without it the branch is made new.
    */
-  vcs?: Pick<VcsPort, 'topLevel' | 'head' | 'addWorktree' | 'removeWorktree' | 'isMerged'>;
+  vcs?: Pick<VcsPort, 'topLevel' | 'head' | 'addWorktree' | 'removeWorktree' | 'isMerged'> & Partial<Pick<VcsPort, 'branchRevision'>>;
+  /**
+   * Moving a chat's uncommitted changes between this folder and its own
+   * worktree (27.4, Hand off). Absent: a hand-off is refused
+   * (`InvalidOperationError`), nothing moved.
+   */
+  vcsChatWorktree?: Pick<VcsChatWorktreePort, 'moveChanges'> | undefined;
+  /** Both folders' snapshot trees a hand-off took before anything moved (27.4; AD-37's store), for the log: tree ids, never a path. */
+  onHandOffSnapshot?: ((sessionId: SessionId, snapshots: { from: string; to: string }) => void) | undefined;
   /**
    * The working tree's changes (AD-37; 27.3): whether a worktree chat's copy
    * has uncommitted changes before Delete chat or Delete history removes it
@@ -228,6 +238,22 @@ export interface Chat {
    * never touched, and a removal that fails after is logged, never thrown.
    */
   deleteChat(workspaceId: WorkspaceId, sessionId: SessionId, options?: { discardUncommitted?: boolean | undefined }): Promise<ChatDeletedResponse>;
+  /** Where the chat works (27.4): this folder, its own worktree (branch) or its remote machine. `NotFoundError` for a chat of another project. */
+  chatLocation(workspaceId: WorkspaceId, sessionId: SessionId): SessionLocation;
+  /**
+   * Hand off (27.4; CAP-35): moves an idle local chat and every uncommitted
+   * change of the folder it leaves to `to`, all or nothing, then records it
+   * (`session.location_changed`); its agent restarts in the new folder on
+   * its own session where it can. Moving back removes the clean copy (its
+   * branch kept when it has commits). Refuses, moving nothing:
+   * `AgentMidTurnError` while it or any local chat in the project folder
+   * works, waits, is busy, switches or is terminal-driven;
+   * `HandOffConflictError` when the other place has its own changes to the
+   * same files or they don't apply there; `InvalidOperationError` for a chat
+   * already there, remote, terminal-driven, not a chat, a tampered row, or
+   * git that failed.
+   */
+  moveChat(workspaceId: WorkspaceId, sessionId: SessionId, to: ChatLocation): Promise<Session>;
   /**
    * A new session in the workspace, `idle`, with the agent `agentId` (the
    * registry's default when absent), fixed for its life (epic 6): a `chat`

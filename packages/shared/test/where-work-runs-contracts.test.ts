@@ -13,6 +13,9 @@ import {
   CoreEvent,
   CreateTrialRequest,
   HANDOFF_CONFLICT_MESSAGE,
+  HANDOFF_FAILED_TEXT,
+  HANDOFF_FOLDER_BUSY_TEXT,
+  handOffWorktreeConflictText,
   HANDOFF_TO_THIS_FOLDER_DESCRIPTION,
   HANDOFF_TO_WORKTREE_DESCRIPTION,
   HandOffRequest,
@@ -141,6 +144,12 @@ describe('where work runs contracts (epic 27 entry 2)', () => {
       trialKeepConfirmText('A'),
     ];
     for (const text of texts) expect(text).not.toMatch(/[–—]/);
+  });
+
+  it("says the hand-off's failure, kept-branch conflict and busy-folder words (27.4), with no em or en dash", () => {
+    expect(handOffWorktreeConflictText(2)).toBe("This chat's branch changed 2 of the same files since, so its changes can't go there. Commit or set them aside first, then move.");
+    expect(HANDOFF_FOLDER_BUSY_TEXT).toBe('Move once the agents working in this folder have finished.');
+    for (const text of [HANDOFF_FAILED_TEXT, HANDOFF_FOLDER_BUSY_TEXT, handOffWorktreeConflictText(1)]) expect(text).not.toMatch(/[–—]/);
   });
 
   it('puts the eight events in both unions, and rejects any payload carrying a path, content or text', () => {

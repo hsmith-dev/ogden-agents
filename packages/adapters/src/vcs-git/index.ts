@@ -59,7 +59,7 @@ import { createGitRunner } from './runner.js';
 
 export { gitVersionAtLeast, parseGitVersion, type GitVcsOptions } from './checks.js';
 export { headerPaths } from './patch.js';
-export { createGitWorkingTree, type GitWorkingTreeOptions } from './working-tree.js';
+export { createGitWorkingTree, type GitWorkingTree, type GitWorkingTreeOptions } from './working-tree.js';
 
 export function createGitVcs(options: GitVcsOptions): VcsPort {
 
@@ -311,10 +311,17 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
       await must(checkPath(repoPath), ['--literal-pathspecs', 'checkout', 'HEAD', '--', ...paths.map(checkRelative)], 'restore the plan');
     },
 
-    async addWorktree(repoPath, { path, branch, base }) {
+    async addWorktree(repoPath, { path, branch, base, existingBranch }) {
       checkPath(repoPath);
       checkPath(path);
       if (existsSync(path)) throw new VcsError('The run folder already exists.', { step: 'worktree' });
+      // A chat's kept branch, moved to its own worktree again (27.4): checked out as it is, never made or moved.
+      if (existingBranch === true) {
+        const name = checkBranch(branch);
+        if (!name.startsWith(CHAT_WORKTREE_BRANCH_PREFIX)) throw new VcsError('That is not a branch Ogden Agents can use.', { step: 'branch' });
+        await must(repoPath, ['worktree', 'add', path, name], 'add the worktree');
+        return;
+      }
       await must(repoPath, ['worktree', 'add', '-b', checkBranch(branch), path, checkRevision(base)], 'add the worktree');
     },
 

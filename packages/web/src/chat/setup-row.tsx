@@ -1,4 +1,14 @@
-import { CHAT_LOCATION_DESCRIPTIONS, CHAT_LOCATION_FIXED_TEXT, CHAT_LOCATION_LABELS, CHAT_LOCATIONS, type ChatLocation } from '@ogden-agents/shared';
+import {
+  CHAT_LOCATION_DESCRIPTIONS,
+  CHAT_LOCATION_FIXED_TEXT,
+  CHAT_LOCATION_LABELS,
+  CHAT_LOCATIONS,
+  HANDOFF_TO_THIS_FOLDER_DESCRIPTION,
+  HANDOFF_TO_THIS_FOLDER_LABEL,
+  HANDOFF_TO_WORKTREE_DESCRIPTION,
+  HANDOFF_TO_WORKTREE_LABEL,
+  type ChatLocation,
+} from '@ogden-agents/shared';
 import { ArrowsLeftRight, CaretDown, FolderSimple, GitBranch, Robot } from '@phosphor-icons/react';
 import { Button } from '@/ui/button';
 import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/ui/dropdown-menu';
@@ -28,15 +38,24 @@ export interface LocationChipProps {
   worktreeReason?: string | undefined;
   /** A started worktree chat's branch (27.3), shown beside the word. */
   branch?: string | null | undefined;
+  /** A started chat's hand-off to the other place (27.4); absent: the place is fixed (a planning chat). */
+  onHandOff?: (() => void) | undefined;
+  /** Why the hand-off can't be taken now (the agent works or waits, the terminal drives). */
+  handOffReason?: string | undefined;
 }
 
 /**
  * The Location chip (27.1): This folder (the default) or Worktree. In the
  * draft it picks where the new chat works; in a started chat it shows the
- * place and the other item is disabled with why (moving a chat is 27.4).
+ * place, and the other place is one hand-off item (27.4: Move to its own
+ * worktree, Move to this folder) with its line, or disabled with why. A
+ * started chat that can't move (no `onHandOff`) shows the other place
+ * disabled as fixed.
  */
-export function LocationChip({ value, onChange, worktreeReason, branch }: LocationChipProps) {
+export function LocationChip({ value, onChange, worktreeReason, branch, onHandOff, handOffReason }: LocationChipProps) {
   const started = onChange === undefined;
+  const handOff = started && onHandOff !== undefined;
+  const handOffBlocked = handOffReason !== undefined;
   const Glyph = LOCATION_GLYPHS[value];
   // A started worktree chat names its branch (27.3).
   const shownBranch = started && value === 'worktree' && branch !== undefined && branch !== null ? branch : undefined;
@@ -68,7 +87,7 @@ export function LocationChip({ value, onChange, worktreeReason, branch }: Locati
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" data-testid="location-menu">
         <DropdownMenuLabel>{started ? 'Where this chat works' : 'Where the new chat works'}</DropdownMenuLabel>
-        {CHAT_LOCATIONS.map((each) => {
+        {CHAT_LOCATIONS.filter((each) => !handOff || each === value).map((each) => {
           const reason = reasonFor(each);
           return (
             <DropdownMenuChoiceItem
@@ -90,6 +109,34 @@ export function LocationChip({ value, onChange, worktreeReason, branch }: Locati
             />
           );
         })}
+        {handOff ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              data-testid="location-hand-off"
+              data-to={value === 'worktree' ? 'this_folder' : 'worktree'}
+              // Unavailable but focusable: the keyboard and a screen reader still reach its reason.
+              aria-disabled={handOffBlocked || undefined}
+              aria-describedby="location-hand-off-line"
+              className={cn('flex-col items-start gap-0.5', handOffBlocked && 'opacity-50')}
+              onSelect={(event) => {
+                if (handOffBlocked) {
+                  event.preventDefault();
+                  return;
+                }
+                onHandOff?.();
+              }}
+            >
+              <span className="flex items-center gap-2">
+                <ArrowsLeftRight aria-hidden />
+                {value === 'worktree' ? HANDOFF_TO_THIS_FOLDER_LABEL : HANDOFF_TO_WORKTREE_LABEL}
+              </span>
+              <span id="location-hand-off-line" className="max-w-72 text-caption text-muted-foreground" data-testid="location-hand-off-line">
+                {handOffReason ?? (value === 'worktree' ? HANDOFF_TO_THIS_FOLDER_DESCRIPTION : HANDOFF_TO_WORKTREE_DESCRIPTION)}
+              </span>
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

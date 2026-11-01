@@ -12,6 +12,7 @@ import {
   createChat,
   createDataDir,
   createNewProjectDefaults,
+  createChatLocations,
   createOnboarding,
   createRemoteWorktreeSync,
   clampCheckInDelay,
@@ -49,7 +50,7 @@ import { wireAgents } from './start-agents.js';
 import { createPanesWiring } from './start-panes.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
-import { createBuildsWiring, createServerVcs, createServerWorkingTree } from './start-builds.js';
+import { createBuildsWiring, createServerChatWorktree, createServerVcs, createServerWorkingTree } from './start-builds.js';
 import { createNotificationsWiring } from './start-notifications.js';
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
@@ -423,6 +424,10 @@ async function listenAndAnnounce({
     vcs,
     // Whether a worktree chat's copy has uncommitted changes before it is deleted (27.3): the Workbench's own git.
     vcsWorkingTree: createServerWorkingTree(options, dataDir),
+    // A chat's hand-off between this folder and its own worktree (27.4): the Changes git moves the uncommitted changes.
+    vcsChatWorktree: createServerChatWorktree(options, dataDir),
+    // Both folders' snapshots taken before a hand-off moved anything (AD-37): tree ids, never a path.
+    onHandOffSnapshot: (sessionId, snapshots) => log.info('a chat hand-off snapshotted both folders', { sessionId, fromTree: snapshots.from, toTree: snapshots.to }),
     // A deleted chat's copy that couldn't be removed (27.3): the session id and the step, never a path.
     onWorktreeCleanupError: (sessionId, step, error) =>
       log.warn('a chat worktree was left in place', { sessionId, step, code: error instanceof CoreError ? error.code : error === undefined ? 'refused' : 'unexpected' }),
@@ -553,6 +558,8 @@ async function listenAndAnnounce({
     // Changes and Open in editor (epic 8 entry 2): undefined until their lanes wire a port (8.4, 8.10), so 501.
     workspaceChanges: core.workspaceChanges,
     editorLaunch: core.editorLaunch,
+    // A chat's Location and its hand-off (27.4): the chat's own, its ids and body parsed here.
+    chatLocations: createChatLocations(chat),
     // Problems (AD-38; 8.9): only in a trusted project, only the confirmed text.
     projectCommands: core.projectCommands,
     notifications,

@@ -37,6 +37,7 @@ import {
   terminalClosedNote,
 } from './constants.js';
 import type { ChatContext } from './context.js';
+import { refuseWhileFolderMoves } from './folder-hold.js';
 import { trimBacklog } from './terminal-backlog.js';
 import type { Chat, Terminal, TerminalSize, TerminalViewerEntry, Timer } from './types.js';
 
@@ -543,6 +544,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       if (session.kind === 'build') throw new BuildSessionReadOnlyError();
       if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is already switching. Try again in a moment.');
       if (session.driver === driver) return session;
+      // Another chat's hand-off is moving this chat's folder (27.4): no terminal starts there meanwhile.
+      if (driver === 'terminal') refuseWhileFolderMoves(ctx, getWorkspace(workspaceId), session);
       return holdingSwitch(sessionId, () => (driver === 'terminal' ? toTerminal(session) : toChat(session)));
     },
 

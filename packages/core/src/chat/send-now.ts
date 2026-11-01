@@ -21,6 +21,7 @@ import { AnswerFirstError, DriverIsTerminalError, InvalidOperationError, Message
 import { MAX_QUEUED_MESSAGES, STEER_TIMEOUT_MS } from './constants.js';
 import type { ChatContext } from './context.js';
 import type { Replies } from './replies.js';
+import { refuseWhileFolderMoves } from './folder-hold.js';
 import type { Chat, QueuedItem, Turn } from './types.js';
 
 type Turns = { sendMessage: Chat['sendMessage']; stop(sessionId: SessionId, turn: Turn, options: { keepQueue: boolean }): void };
@@ -33,6 +34,7 @@ export function createSendNow(ctx: ChatContext, deps: Turns & Pick<Replies, 'fin
   const chatDrives = (workspaceId: WorkspaceId, sessionId: SessionId) => {
     if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
     const session = getSession(workspaceId, sessionId);
+    refuseWhileFolderMoves(ctx, ctx.getWorkspace(workspaceId), session);
     if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
     if (session.driver === 'terminal') throw new DriverIsTerminalError();
   };

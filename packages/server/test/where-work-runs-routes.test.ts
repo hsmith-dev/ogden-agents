@@ -25,16 +25,20 @@ async function expectError(response: Response, status: number, code: string) {
 }
 
 describe('where work runs routes on the real server', () => {
-  it('answers 501 for every lane not wired yet, behind the gate', async () => {
+  it('answers 501 for every lane not wired yet, behind the gate (a chat\'s Location is wired)', async () => {
     const server = await startTestServer();
     const { headers } = await signIn(server);
     const created = await fetch(`${server.url}${API_ROUTES.workspaces}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ path: tempDataDir() }) });
     const wsId = WorkspaceResponse.parse(await created.json()).workspace.id;
     const sesId = newId('ses');
     const tryId = newId('try');
+    // A chat's Location and its hand-off are wired (27.4): an unknown chat is 404, behind the gate.
+    for (const method of ['GET', 'POST']) {
+      const path = apiPath(API_ROUTES.sessionLocation, { wsId, sesId });
+      await expectError(await fetch(`${server.url}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify({ to: 'worktree' }) } : {}) }), 404, 'not_found');
+      expect((await fetch(`${server.url}${path}`, { method })).status, path).toBe(401);
+    }
     const unwired: Array<[string, string]> = [
-      ['GET', apiPath(API_ROUTES.sessionLocation, { wsId, sesId })],
-      ['POST', apiPath(API_ROUTES.sessionLocation, { wsId, sesId })],
       ['POST', apiPath(API_ROUTES.sessionWorktreeRestore, { wsId, sesId })],
       ['GET', apiPath(API_ROUTES.workspacePutAwayWorktrees, { wsId })],
       ['GET', API_ROUTES.worktreeRetention],

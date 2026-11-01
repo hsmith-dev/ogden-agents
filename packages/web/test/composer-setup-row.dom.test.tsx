@@ -8,7 +8,7 @@
  * picked, a started chat's place fixed. The router, the REST calls and the
  * remote machines are stand-ins.
  */
-import { CHAT_LOCATION_FIXED_TEXT, CHAT_WORKTREE_REMOTE_TEXT, type ChatAgentsResponse, type Session } from '@ogden-agents/shared';
+import { CHAT_LOCATION_FIXED_TEXT, CHAT_WORKTREE_REMOTE_TEXT, HANDOFF_TO_THIS_FOLDER_DESCRIPTION, HANDOFF_TO_THIS_FOLDER_LABEL, HANDOFF_TO_WORKTREE_DESCRIPTION, HANDOFF_TO_WORKTREE_LABEL, handOffMidTurnText, type ChatAgentsResponse, type Session } from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -178,6 +178,35 @@ describe('the Location chip', () => {
     const folder = screen.getByTestId('location-this_folder');
     expect(folder.getAttribute('aria-disabled')).toBe('true');
     expect(folder.textContent).toContain(CHAT_LOCATION_FIXED_TEXT);
+  });
+
+  it('in a started chat that can move, offers one hand-off item with its line (27.4)', () => {
+    const onHandOff = vi.fn();
+    const { unmount } = render(<LocationChip value="this_folder" onHandOff={onHandOff} />);
+    openMenu(screen.getByTestId('location-chip'));
+    expect(screen.queryByTestId('location-worktree')).toBeNull();
+    const item = screen.getByTestId('location-hand-off');
+    expect(item.textContent).toContain(HANDOFF_TO_WORKTREE_LABEL);
+    expect(screen.getByTestId('location-hand-off-line').textContent).toBe(HANDOFF_TO_WORKTREE_DESCRIPTION);
+    fireEvent.click(item);
+    expect(onHandOff).toHaveBeenCalledTimes(1);
+    unmount();
+
+    render(<LocationChip value="worktree" branch="ogden/chat/ses_1" onHandOff={onHandOff} />);
+    openMenu(screen.getByTestId('location-chip'));
+    expect(screen.getByTestId('location-hand-off').textContent).toContain(HANDOFF_TO_THIS_FOLDER_LABEL);
+    expect(screen.getByTestId('location-hand-off-line').textContent).toBe(HANDOFF_TO_THIS_FOLDER_DESCRIPTION);
+  });
+
+  it('a hand-off that cannot be taken now is reachable, disabled with its reason (27.4)', () => {
+    const onHandOff = vi.fn();
+    render(<LocationChip value="this_folder" onHandOff={onHandOff} handOffReason={handOffMidTurnText('Codex')} />);
+    openMenu(screen.getByTestId('location-chip'));
+    const item = screen.getByTestId('location-hand-off');
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByTestId('location-hand-off-line').textContent).toBe('Move once Codex has finished.');
+    fireEvent.click(item);
+    expect(onHandOff).not.toHaveBeenCalled();
   });
 });
 

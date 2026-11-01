@@ -203,7 +203,8 @@ describe('workspace-files-node search', () => {
     const files: Record<string, string> = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`a/m${String(i).padStart(3, '0')}.txt`, 'x']));
     files['b/m0.txt'] = 'x';
     files['b/m1.txt'] = 'x';
-    const { search, root } = setup(files);
+    // This checks the result cap, not the time limit: a slow file system (Windows CI took about 6 s for 502 files) must not stop the walk early.
+    const { search, root } = setup(files, { searchLimits: { timeoutMs: 60_000 } });
     // `b/m0.txt` gets a second name, so it is a refused hard link; `b/m1.txt` after it is the 501st allowed match.
     linkSync(join(root, 'b', 'm0.txt'), join(root, 'other.bin'));
     const result = await search({ q: 'm', mode: 'names' });
@@ -211,7 +212,7 @@ describe('workspace-files-node search', () => {
     expect(paths(result).at(-1)).toBe('b/m1.txt');
     expect(result.files).toHaveLength(501);
     expect(result.truncated).toBe(true);
-  });
+  }, 60_000);
 
   it('numbers lines as the viewer does: one trailing line ending starts no new line', async () => {
     const { search } = setup({ 'a.txt': 'x\n', 'b.txt': 'x\n\n', 'c.txt': 'x\r\n' });

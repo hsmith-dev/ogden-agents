@@ -12,11 +12,14 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { VcsError, type VcsFolder } from '@ogden-agents/core';
 import { GIT_POINTER_UNUSUAL_MESSAGE } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createGitWorkingTree } from '../src/index.js';
+
+/** `relative`, spelled with `/` on every platform. */
+const posixRelative = (from: string, to: string) => relative(from, to).split(sep).join('/');
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -111,6 +114,8 @@ describe("vcs-git working tree: a project's .git file (user decision 2026-11-01)
     const main = repoAt(join(root, 'main'));
     const bare = join(root, 'project.git');
     git(root, 'clone', '-q', '--bare', main, bare);
+    // As `repoAt` does: a Windows runner's system config (`core.autocrlf=true`) would check README.md out with CRLF, which the adapter's own config-free git reads as changed.
+    git(bare, 'config', 'core.autocrlf', 'false');
     const worktree = join(root, 'feature');
     git(bare, 'worktree', 'add', '-q', '-b', 'feature', worktree, 'HEAD');
     writeFileSync(join(worktree, 'new.txt'), 'new\n');
@@ -188,13 +193,14 @@ describe("vcs-git working tree: a project's .git file (user decision 2026-11-01)
     const other = repoAt(join(root, 'elsewhere', 'other'));
     const project = join(root, 'a', 'b', 'project');
     mkdirSync(project, { recursive: true });
-    writeFileSync(join(project, '.git'), `gitdir: ${relative(project, join(other, '.git'))}\n`);
+    // Written with `/`, as git writes a pointer on every platform (`relative` uses `\\` on Windows).
+    writeFileSync(join(project, '.git'), `gitdir: ${posixRelative(project, join(other, '.git'))}\n`);
     expect(readFileSync(join(project, '.git'), 'utf8')).toMatch(/^gitdir: \.\.\//);
     await expectAllRefused(vcs, project, other);
     // Through `modules` and back out by `..`: the real path is what counts.
     const superproject = repoAt(join(root, 'super'));
     mkdirSync(join(superproject, '.git', 'modules'));
-    writeFileSync(join(project, '.git'), `gitdir: ${relative(project, join(superproject, '.git', 'modules'))}/../../../elsewhere/other/.git\n`);
+    writeFileSync(join(project, '.git'), `gitdir: ${posixRelative(project, join(superproject, '.git', 'modules'))}/../../../elsewhere/other/.git\n`);
     await expectAllRefused(vcs, project, other);
   });
 });

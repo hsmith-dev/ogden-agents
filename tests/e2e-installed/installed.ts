@@ -658,6 +658,8 @@ export function bmadServer(
       [BMAD_AVAILABLE_ENV]: available === undefined ? '' : available.join(','),
       [BMAD_PROBE_ENV]: probe ? '1' : '',
       [BMAD_SOURCE_ENV]: sourceFile,
+      // The in-memory remote host (story 27.10): only when a spec's `env` asks for it.
+      OGDEN_AGENTS_TEST_REMOTE_HOST: '',
       [ANTIGRAVITY_SERVER_ENV]: agyPinned ? antigravityServer : '',
       [ANTIGRAVITY_INSTALL_ENV]: antigravityInstall,
       [TRUST_AGENT_ENV]: trustAgentScript,

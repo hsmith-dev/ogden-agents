@@ -482,6 +482,18 @@ Epic 8's stories (8.1 to 8.12, and 8.13's end-to-end journey and docs) add the W
 
 Record each result in the 8.13 plan's **For the user** table (`_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-end-to-end-suite-and-v1-3-release-part-live-checks-with-a-re-plan.md`); the plan stays in review until they are recorded.
 
+## Live checks for where work runs (epic 27)
+
+Epic 27's stories (27.1 to 27.9, and 27.10's end-to-end journey and docs) add the composer setup row, worktree chats, hand-off, retention with Restore, a port per worktree, a remote machine as Location and Try with several agents. CI runs only fakes (the fake agent and its Codex personality, temp data and home folders, a fake git repo and the in-memory remote host through a test hook), on macOS, Windows and Linux, in the browser and against the installed package (the `where-work-runs` project of `pnpm e2e:installed`), so real agents and a real SSH host need these live checks, which an agent cannot run. Run them in the installed desktop app (and with `npx ogden-agents@latest` for the npm route) in scratch git repos, **on macOS, Windows (x64) and Linux (x64)**.
+
+1. A real agent in a worktree chat: with Claude Code (and any other agent you use), start a chat with Location Worktree from the composer. Its header shows `ogden/chat/<id>` and a port; ask it to edit a file and to print `$PORT`: the edit lands only in the copy (the project folder is untouched) and the port matches the one shown. **Commit these changes** in Changes commits it on the chat's branch.
+2. Hand-off with a real agent: leave an uncommitted edit, **Move to this folder**, and ask the agent to carry on: it works in the project folder and resumes its own conversation where its adapter can. Move it back to its own worktree; mid-turn the move is refused.
+3. Delete chat and retention: with an ignored `.env` in a chat's copy, Delete chat lists it first. With Settings > Projects > Worktrees at 1, a second worktree chat puts the first away; **Restore** brings back its uncommitted edit.
+4. Try with two real agents: send one task to Claude Code and Codex (or another pair you use). Both work side by side, each in its own copy with its own port; **Keep this one** puts the other away, and Restore brings it back with its changes.
+5. A real SSH host (macOS and Linux; Windows as the client too): add the machine in Settings > Remote machines and confirm its host key, pick it as Location in the composer and send: the chat runs on that machine (its header says "on <machine>"). With the Local model chosen, the machine is disabled with its reason.
+
+Record each result in the 27.10 plan's **For the user** table (`_bmad-output/initiative-ogden-agents/epic-where-work-runs/story-end-to-end-suite-and-v1-3-release-part-live-checks-with-real-plan.md`); the plan stays in review until they are recorded.
+
 ## Epic 15 live check: can a real model be the manager
 
 Epic 15 lets a model manage and the other agents be told what to do. CI never runs a real model, so whether a model is dependable enough to manage is your live check. CI proves Ogden handles every kind of manager answer, good, wrapped, cut off, over the rules and hostile (the table in `tests/fixtures/manager-cases.ts`, played by the fake manager of story 15.1). It cannot say how often a real model gets it right. The report function `measureModel` in `tests/fixtures/manager-harness.ts` tallies that over three sample goals; a later story wires it to a button, and until then the Test as a manager button (Settings, Agents, the endpoint's model list) is the way to ask a real model by hand.

@@ -4,26 +4,17 @@
  * hyperlink, so escape sequences are stripped first. Only an `https:` URL on
  * an allowed host is taken. The output itself is never logged (AD-16).
  */
+import { stripTerminalEscapes } from '@ogden-agents/shared';
+
+/** The shared stripper (`@ogden-agents/shared`, 8.9), still exported from here. */
+export { stripTerminalEscapes };
 
 /** Hosts (and their subdomains) a sign-in URL may be on. */
 export const DEFAULT_SIGN_IN_HOSTS: readonly string[] = Object.freeze(['claude.ai', 'claude.com', 'anthropic.com']);
 
 const ESC = '\u001b';
-/** OSC (`ESC ]` … BEL or ST), including OSC 8 hyperlinks: the whole sequence, parameters and all. */
-const OSC = new RegExp(`${ESC}\\][^\\u0007\\u001b]*(?:\\u0007|${ESC}\\\\)`, 'g');
 /** OSC 8 hyperlink openings: the URL they point at. */
 const OSC8_TARGET = new RegExp(`${ESC}\\]8;[^;\\u0007\\u001b]*;([^\\u0007\\u001b]*)(?:\\u0007|${ESC}\\\\)`, 'g');
-/** CSI (`ESC [` … final byte), such as colors and cursor moves. */
-const CSI = new RegExp(`${ESC}\\[[0-?]*[ -/]*[@-~]`, 'g');
-/** Any other two-byte escape, then a lone ESC left by a split sequence. */
-const OTHER_ESCAPE = new RegExp(`${ESC}[@-Z\\\\-_]|${ESC}`, 'g');
-/** C0 controls other than tab, line feed and carriage return, and DEL. */
-const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
-
-/** `text` without terminal escape sequences or control characters. */
-export function stripTerminalEscapes(text: string): string {
-  return text.replace(OSC, '').replace(CSI, '').replace(OTHER_ESCAPE, '').replace(CONTROL, '');
-}
 
 const URL_IN_TEXT = /https:\/\/[^\s"'<>`]+/g;
 

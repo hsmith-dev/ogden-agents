@@ -78,3 +78,12 @@ export const WorkspaceProjectCommandFinishedInput = z.object({
 /** A project command finished (AD-38): its state, exit code and how many failures; the output is fetched. */
 export const WorkspaceProjectCommandFinishedEvent = WorkspaceProjectCommandFinishedInput.extend(assigned);
 export type WorkspaceProjectCommandFinishedEvent = z.infer<typeof WorkspaceProjectCommandFinishedEvent>;
+
+export const WorkspaceProjectCommandsChangedInput = z.object({
+  type: z.literal('workspace.project_commands_changed'),
+  ...onWorkspaceStream,
+  payload: z.object({ count: Count }).strict(),
+});
+/** The project's declared commands were saved (AD-38; 8.9): how many there are now. No command text, no script. */
+export const WorkspaceProjectCommandsChangedEvent = WorkspaceProjectCommandsChangedInput.extend(assigned);
+export type WorkspaceProjectCommandsChangedEvent = z.infer<typeof WorkspaceProjectCommandsChangedEvent>;

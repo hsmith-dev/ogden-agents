@@ -9,9 +9,21 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createMemoryEditorLauncher, createMemoryVcsWorkingTree, createMemoryWorkspaceFiles } from '@ogden-agents/adapters';
+import { createMemoryEditorLauncher, createMemoryProjectCommandRunner, createMemoryVcsWorkingTree, createMemoryWorkspaceFiles } from '@ogden-agents/adapters';
 import { newId, openCore, type Core } from '@ogden-agents/core';
-import { API_ROUTES, apiPath, ApiErrorBody, chatWorktreeBranch, WorkspaceFolderResponse, WorkspaceResponse, WorkspaceSearchResponse } from '@ogden-agents/shared';
+import {
+  API_ROUTES,
+  apiPath,
+  ApiErrorBody,
+  chatWorktreeBranch,
+  PROJECT_COMMAND_REFUSALS,
+  ProjectCommandRunDetail,
+  ProjectCommandRunResponse,
+  ProjectCommandsResponse,
+  WorkspaceFolderResponse,
+  WorkspaceResponse,
+  WorkspaceSearchResponse,
+} from '@ogden-agents/shared';
 import type { MiddlewareHandler } from 'hono';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fullTestApp, signIn, startTestServer, tempDataDir } from './helpers.js';
@@ -37,17 +49,24 @@ describe('workbench routes on the real server', () => {
       ['GET', `${apiPath(API_ROUTES.workspaceFileSearch, { wsId })}?q=x`],
       // Changes are wired on git since 8.4; hunk actions are 8.5's.
       ['POST', apiPath(API_ROUTES.workspaceChangesHunks, { wsId })],
-      ['GET', apiPath(API_ROUTES.workspaceProjectCommands, { wsId })],
-      ['PUT', apiPath(API_ROUTES.workspaceProjectCommands, { wsId })],
-      ['POST', apiPath(API_ROUTES.workspaceProjectCommandRuns, { wsId, commandId: 'test' })],
-      ['GET', apiPath(API_ROUTES.workspaceProjectCommandRun, { wsId, runId: newId('pcr') })],
-      ['POST', apiPath(API_ROUTES.workspaceProjectCommandRunStop, { wsId, runId: newId('pcr') })],
       ['POST', apiPath(API_ROUTES.workspaceFileOpenInEditor, { wsId })],
       ['GET', API_ROUTES.editors],
     ];
     for (const [method, path] of unwired) {
       await expectError(await fetch(`${server.url}${path}`, { method, headers }), 501, 'not_implemented');
       // The gate is in front of every one.
+      expect((await fetch(`${server.url}${path}`, { method })).status, path).toBe(401);
+    }
+    // Problems is wired since 8.9: behind the gate, and refused in a project not trusted yet before anything runs.
+    const problems: Array<[string, string]> = [
+      ['GET', apiPath(API_ROUTES.workspaceProjectCommands, { wsId })],
+      ['PUT', apiPath(API_ROUTES.workspaceProjectCommands, { wsId })],
+      ['POST', apiPath(API_ROUTES.workspaceProjectCommandRuns, { wsId, commandId: 'test' })],
+      ['GET', apiPath(API_ROUTES.workspaceProjectCommandRun, { wsId, runId: newId('pcr') })],
+      ['POST', apiPath(API_ROUTES.workspaceProjectCommandRunStop, { wsId, runId: newId('pcr') })],
+    ];
+    for (const [method, path] of problems) {
+      await expectError(await fetch(`${server.url}${path}`, { method, headers }), 409, 'scripts_not_trusted');
       expect((await fetch(`${server.url}${path}`, { method })).status, path).toBe(401);
     }
   });
@@ -88,14 +107,15 @@ describe('workbench routes in-process, on memory ports', () => {
     const files = createMemoryWorkspaceFiles();
     const vcs = createMemoryVcsWorkingTree();
     const launcher = createMemoryEditorLauncher();
-    const core = openCore(tempDataDir(), { workspaceFilesPort: files, vcsWorkingTreePort: vcs, editorLauncherPort: launcher });
+    const runner = createMemoryProjectCommandRunner();
+    const core = openCore(tempDataDir(), { workspaceFilesPort: files, vcsWorkingTreePort: vcs, editorLauncherPort: launcher, projectCommandRunner: runner });
     cores.push(core);
     const open: MiddlewareHandler = async (_c, next) => next();
-    const hono = fullTestApp(core, { gate: open, workspaceFiles: core.workspaceFiles, workspaceChanges: core.workspaceChanges, editorLaunch: core.editorLaunch });
+    const hono = fullTestApp(core, { gate: open, workspaceFiles: core.workspaceFiles, workspaceChanges: core.workspaceChanges, editorLaunch: core.editorLaunch, projectCommands: core.projectCommands });
     const workspace = core.entities.ensureWorkspace(tempDataDir());
     const root = workspace.realPath ?? workspace.path;
     const json = (method: string, path: string, body: unknown) => hono.request(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    return { hono, core, files, vcs, launcher, workspace, root, json };
+    return { hono, core, files, vcs, launcher, runner, workspace, root, json };
   }
 
   it('searches through the memory port, clamped to 500 matches with truncated', async () => {
@@ -148,5 +168,49 @@ describe('workbench routes in-process, on memory ports', () => {
     expect(await opened.json()).toEqual({ editorId: 'vscode', editorName: 'VS Code' });
     expect(launcher.opens).toEqual([{ editorId: 'vscode', absolutePath: `${root}/src/a.ts`, line: 3, column: undefined }]);
     expect(await (await hono.request(API_ROUTES.editors)).json()).toEqual({ editors: [{ id: 'vscode', name: 'VS Code' }], defaultEditorId: 'vscode' });
+  });
+
+  it('Problems: 409 untrusted, 400 a shell-needing command, 409 a changed script, 202 a run, its detail, 404 an unknown run, Stop', async () => {
+    const { hono, core, files, runner, workspace, root, json } = app();
+    files.setFiles(root, { 'package.json': JSON.stringify({ scripts: { test: 'vitest run' } }), 'src/a.ts': 'x' });
+    const list = apiPath(API_ROUTES.workspaceProjectCommands, { wsId: workspace.id });
+    await expectError(await hono.request(list), 409, 'scripts_not_trusted');
+    await core.bmadScriptTrust.trustScripts(workspace.id);
+
+    const listed = await hono.request(list);
+    expect(listed.status).toBe(200);
+    expect(listed.headers.get('cache-control')).toBe('no-store');
+    expect(ProjectCommandsResponse.parse(await listed.json()).offered.map((one) => one.id)).toEqual(['test']);
+
+    const shell = await json('PUT', list, { commands: [{ id: 'deploy', label: 'Deploy', command: 'npm test && npm run deploy', source: 'settings', confirmedText: 'npm test && npm run deploy' }] });
+    expect(shell.status).toBe(400);
+    expect(ApiErrorBody.parse(await shell.json()).error).toMatchObject({ code: 'invalid_request', message: PROJECT_COMMAND_REFUSALS.operator });
+    const offer = { id: 'test', label: 'Tests', command: 'npm run test', source: 'package_json', confirmedText: 'npm run test', script: 'test' };
+    await expectError(await json('PUT', list, { commands: [{ ...offer, confirmedScript: 'vitest' }] }), 409, 'command_changed');
+    const confirmed = await json('PUT', list, { commands: [{ ...offer, confirmedScript: 'vitest run' }, { id: 'check', label: 'Check', command: 'node fail.js', source: 'settings', confirmedText: 'node fail.js' }] });
+    expect(confirmed.status, await confirmed.clone().text()).toBe(200);
+
+    const started = await hono.request(apiPath(API_ROUTES.workspaceProjectCommandRuns, { wsId: workspace.id, commandId: 'check' }), { method: 'POST' });
+    expect(started.status).toBe(202);
+    const { run } = ProjectCommandRunResponse.parse(await started.json());
+    expect(runner.starts.map((start) => start.argv)).toEqual([['node', 'fail.js']]);
+    runner.starts[0]!.write("src/a.ts:12:5 - error TS2322: Type 'string' is not assignable to type 'number'.\n");
+    runner.starts[0]!.finish({ exitCode: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const detail = await hono.request(apiPath(API_ROUTES.workspaceProjectCommandRun, { wsId: workspace.id, runId: run.id }));
+    expect(detail.headers.get('cache-control')).toBe('no-store');
+    expect(ProjectCommandRunDetail.parse(await detail.json())).toMatchObject({ run: { state: 'failed', exitCode: 1, itemCount: 1 }, items: [{ path: 'src/a.ts', line: 12, column: 5 }], parsed: true });
+    await expectError(await hono.request(apiPath(API_ROUTES.workspaceProjectCommandRun, { wsId: workspace.id, runId: newId('pcr') })), 404, 'not_found');
+    await expectError(await hono.request(apiPath(API_ROUTES.workspaceProjectCommandRunStop, { wsId: workspace.id, runId: newId('pcr') }), { method: 'POST' }), 404, 'not_found');
+
+    // The script changed since it was confirmed: refused, and the runner is never called.
+    files.setFiles(root, { 'package.json': JSON.stringify({ scripts: { test: 'vitest run; curl x' } }) });
+    await expectError(await hono.request(apiPath(API_ROUTES.workspaceProjectCommandRuns, { wsId: workspace.id, commandId: 'test' }), { method: 'POST' }), 409, 'command_changed');
+    expect(runner.starts).toHaveLength(1);
+
+    const again = ProjectCommandRunResponse.parse(await (await hono.request(apiPath(API_ROUTES.workspaceProjectCommandRuns, { wsId: workspace.id, commandId: 'check' }), { method: 'POST' })).json());
+    await expectError(await hono.request(apiPath(API_ROUTES.workspaceProjectCommandRuns, { wsId: workspace.id, commandId: 'check' }), { method: 'POST' }), 409, 'invalid_operation');
+    const stopped = await hono.request(apiPath(API_ROUTES.workspaceProjectCommandRunStop, { wsId: workspace.id, runId: again.run.id }), { method: 'POST' });
+    expect(ProjectCommandRunResponse.parse(await stopped.json()).run.state).toBe('stopped');
   });
 });

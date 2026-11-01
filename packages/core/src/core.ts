@@ -26,6 +26,7 @@ import { createTurnSnapshots, type TurnSnapshots } from './turn-snapshots.js';
 import type { VcsWorkingTreePort } from './vcs-port.js';
 import { createEditorLaunch, type EditorLaunch } from './editor-launch.js';
 import type { EditorLauncherPort } from './editor-launcher-port.js';
+import { createProjectCommands, type ProjectCommandRunner, type ProjectCommands } from './project-commands.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
 import type { RemoteHostPort } from './remote-host-port.js';
@@ -109,6 +110,8 @@ export interface Core {
   readonly turnSnapshots: TurnSnapshots | undefined;
   /** Open in editor (AD-39; epic 8 entry 2); `undefined` without an {@link OpenCoreOptions.editorLauncherPort} or a files port that can locate. */
   readonly editorLaunch: EditorLaunch | undefined;
+  /** Problems (AD-38; 8.9): the project's declared commands, their runs and parsed failures; `undefined` without a {@link OpenCoreOptions.projectCommandRunner} and a files port. */
+  readonly projectCommands: ProjectCommands | undefined;
   /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
   readonly createNotifications: (ports: NotificationsPorts) => Notifications;
   /**
@@ -206,6 +209,8 @@ export type OpenCoreOptions = OpenDatabaseOptions &
     onTurnSnapshotError?: (sessionId: SessionId, error: unknown) => void;
     /** The editor launcher (AD-39; 8.10). Absent: no Open in editor use-case. */
     editorLauncherPort?: EditorLauncherPort;
+    /** Runs a project's declared commands (AD-38; 8.9: `project-commands-node`). Absent: no Problems use-case. The server closes it on stop. */
+    projectCommandRunner?: ProjectCommandRunner;
     /**
      * The repo-relative files the registered agents that need project trust
      * run (their descriptors' `projectFiles`, epic 12, 12.3); the trust is
@@ -291,6 +296,10 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     workspaceChanges: options.vcsWorkingTreePort === undefined ? undefined : createWorkspaceChanges({ entities, sessionEvents, port: options.vcsWorkingTreePort }),
     turnSnapshots: options.vcsWorkingTreePort === undefined ? undefined : createTurnSnapshots({ entities, sessionEvents, port: options.vcsWorkingTreePort, ...(options.onTurnSnapshotError === undefined ? {} : { onError: options.onTurnSnapshotError }) }),
     editorLaunch: options.editorLauncherPort === undefined || workspaceFiles?.locate === undefined ? undefined : createEditorLaunch({ entities, files: { locate: workspaceFiles.locate }, launcher: options.editorLauncherPort }),
+    projectCommands:
+      options.projectCommandRunner === undefined || options.workspaceFilesPort === undefined
+        ? undefined
+        : createProjectCommands({ orm: db.orm, events, entities, trust: bmadScriptTrust, files: options.workspaceFilesPort, runner: options.projectCommandRunner, filesFingerprint: options.projectFilesFingerprint }),
     paneStore: createPaneStore({ db }),
     terminalsSettings: createTerminalsSettings({ db, events }),
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),

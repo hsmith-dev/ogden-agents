@@ -193,12 +193,13 @@ const workspaceTerminalsRoute = createRoute({
  * `?line=` a `file:line` link's line (8.7), only with a path; `?session=` a
  * chat whose worktree the Files panel shows (8.2's root), and for Changes the
  * chat (This turn, and its worktree's Commit); `?panel=changes` opens Changes
- * (story 8.4) on `?view=`, on the chat's turn `?turn=`.
+ * (story 8.4) on `?view=`, on the chat's turn `?turn=`; `?panel=problems`
+ * opens Problems (8.9).
  */
 export interface WorkbenchSearch {
   path?: string;
   line?: number;
-  panel?: 'changes';
+  panel?: 'changes' | 'problems';
   view?: ChangesView;
   session?: string;
   turn?: string;
@@ -214,7 +215,7 @@ export function workbenchSearch(search: Record<string, unknown>): WorkbenchSearc
   return {
     ...(path === undefined ? {} : { path }),
     ...(path !== undefined && line !== undefined && Number.isSafeInteger(line) && line >= 1 ? { line } : {}),
-    ...(search.panel === 'changes' ? { panel: 'changes' as const } : {}),
+    ...(search.panel === 'changes' ? { panel: 'changes' as const } : search.panel === 'problems' ? { panel: 'problems' as const } : {}),
     ...(view.success ? { view: view.data } : {}),
     ...(session.success ? { session: session.data } : {}),
     ...(turn.success ? { turn: turn.data } : {}),

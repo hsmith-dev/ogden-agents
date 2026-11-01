@@ -9,7 +9,7 @@
  */
 import { ReviewResponse } from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -139,5 +139,71 @@ describe('the review page (story 5.9)', () => {
     expect(screen.getByTestId('review-merged')).toBeTruthy();
     expect(screen.queryByTestId('review-approve')).toBeNull();
     expect(screen.queryByTestId('review-reject')).toBeNull();
+  });
+});
+
+describe('the review diff in the diff viewer (story 8.3)', () => {
+  const DIFF = [
+    'diff --git a/src/x.ts b/src/x.ts',
+    'index 1..2 100644',
+    '--- a/src/x.ts',
+    '+++ b/src/x.ts',
+    '@@ -1,2 +1,2 @@',
+    ' const keep = 0;',
+    '-export const x = 1;',
+    '+export const x = 2;',
+    'diff --git a/README.md b/README.md',
+    'new file mode 100644',
+    '--- /dev/null',
+    '+++ b/README.md',
+    '@@ -0,0 +1 @@',
+    '+# Hello',
+    '',
+  ].join('\n');
+
+  it('shows each file as its own section, without hunk actions; the file list buttons jump to their section', async () => {
+    state.review = review({ diff: DIFF });
+    mount(<BuildReview wsId={WS} ticketRef="1.1" />);
+    await settle();
+    const sections = screen.getAllByTestId('diff-file');
+    expect(sections.map((section) => [section.getAttribute('data-diff-file'), section.getAttribute('data-change')])).toEqual([
+      ['src/x.ts', 'changed'],
+      ['README.md', 'added'],
+    ]);
+    expect(screen.getByRole('table', { name: 'Changes in README.md' }).textContent).toContain('Added line 1: # Hello');
+    expect(sections[0]!.querySelectorAll('[data-diff-nav="hunk"] button')).toHaveLength(0);
+    const list = screen.getByTestId('review-files');
+    expect(list.textContent).toContain('Added');
+    const scrolled = vi.fn();
+    const real = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrolled;
+    try {
+      await act(async () => fireEvent.click(within(list).getByRole('button', { name: /README\.md/ })));
+    } finally {
+      Element.prototype.scrollIntoView = real;
+    }
+    expect(scrolled).toHaveBeenCalled();
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('README.md');
+  });
+
+  it('a cut diff shows the lines read so far and one note that only the start is shown', async () => {
+    state.review = review({ diff: DIFF.slice(0, DIFF.indexOf('-export')), truncated: true });
+    mount(<BuildReview wsId={WS} ticketRef="1.1" />);
+    await settle();
+    expect(screen.getAllByTestId('diff-file')).toHaveLength(1);
+    expect(screen.getByTestId('review-diff-cut').textContent).toBe('Only the start of these changes is shown.');
+    // README.md isn't in the cut text: listed, not a button.
+    expect(within(screen.getByTestId('review-files')).queryByRole('button', { name: /README\.md/ })).toBeNull();
+  });
+
+  it('text that is not a diff shows as it was, in a wrapped block', async () => {
+    state.review = review({ diff: 'no header here\n' });
+    mount(<BuildReview wsId={WS} ticketRef="1.1" />);
+    await settle();
+    const block = screen.getByTestId('review-diff');
+    expect(block.tagName).toBe('PRE');
+    expect(block.textContent).toContain('no header here');
+    expect(block.className).toContain('whitespace-pre-wrap');
+    expect(screen.queryByTestId('diff-viewer')).toBeNull();
   });
 });

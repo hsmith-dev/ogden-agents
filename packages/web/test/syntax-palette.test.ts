@@ -78,6 +78,17 @@ describe('syntax and diff tokens', () => {
     }
   });
 
+  it('the diff viewer sets code only on those surfaces and colours it only with those tokens (story 8.3)', () => {
+    const source = ['../src/ui/diff/diff-file.tsx', '../src/ui/diff-viewer.tsx', '../src/ui/syntax/highlight.ts'].map((path) => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n');
+    // The chevron's hover fill holds an icon, never code.
+    const surfaces = new Set([...source.matchAll(/\bbg-([a-z-]+)/g)].map((match) => match[1]!).filter((surface) => surface !== 'accent'));
+    expect([...surfaces].sort()).toEqual(expect.arrayContaining(['background', 'diff-add', 'diff-remove']));
+    for (const surface of surfaces) expect(CODE_SURFACES, surface).toContain(surface);
+    const colors = new Set([...source.matchAll(/\btext-(syntax-[a-z]+|diff-[a-z-]+)/g)].map((match) => match[1]!));
+    expect(colors.size).toBeGreaterThan(5);
+    for (const color of colors) expect(SYNTAX_COLORS, color).toContain(color);
+  });
+
   it('keeps a default that already reads, and falls back to the foreground for a value that is not a color', () => {
     expect(readableOn('#2841a7', '#141715', ['#ffffff'])).toBe('#2841a7');
     expect(readableOn('', '#141715', ['#ffffff'])).toBe('#141715');

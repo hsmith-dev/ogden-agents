@@ -1,6 +1,6 @@
 import type { CoreEvent } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { diffHunk, groupSummary, toolCallLabel } from '../src/chat/tool-call-row';
+import { groupSummary, toolCallLabel } from '../src/chat/tool-call-row';
 import { sessionView } from '../src/chat/transcript';
 
 const at = '2026-09-30T00:00:00.000Z';
@@ -340,23 +340,6 @@ describe('tool-call rows', () => {
     expect(groupSummary(kinds('read', 'read', 'read', 'edit'))).toBe('Read 3 files, edited 1');
     expect(groupSummary(kinds('read', 'read', 'read', 'read', 'edit', 'edit'))).toBe('Read 4 files, edited 2');
     expect(groupSummary(kinds('execute', 'read'))).toBe('Ran 1 command, read 1 file');
-  });
-
-  it('show an edit as its hunk: the changed lines with a little context', () => {
-    const before = ['one', 'two', 'three', 'four', 'five', 'six'].join('\n');
-    const after = ['one', 'two', 'three', 'FOUR', 'five', 'six'].join('\n');
-    expect(diffHunk(before, after)).toEqual([
-      { mark: ' ', text: 'two' },
-      { mark: ' ', text: 'three' },
-      { mark: '-', text: 'four' },
-      { mark: '+', text: 'FOUR' },
-      { mark: ' ', text: 'five' },
-      { mark: ' ', text: 'six' },
-    ]);
-    expect(diffHunk(null, 'new\nfile\n')).toEqual([
-      { mark: '+', text: 'new' },
-      { mark: '+', text: 'file' },
-    ]);
   });
 });
 

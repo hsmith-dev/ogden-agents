@@ -85,7 +85,13 @@ describe('the detail level decides how much shows', () => {
     expect(html).not.toContain('tool-call-group');
     expect(html.match(/data-testid="tool-call-row"/g)).toHaveLength(4);
     expect(html).toContain('data-testid="tool-call-detail"');
-    expect(html).toContain('- export const a = 1;');
+    // The edit's file in the diff viewer, inline, with its signs and line labels.
+    expect(html).toContain('data-testid="diff-viewer" data-layout="inline"');
+    expect(html).toContain('aria-label="Changes in src/a.ts"');
+    const text = (kind: string) => new RegExp(`data-kind="${kind}"[^>]*>((?:(?!</tr>).)*)`).exec(html)![1]!.replace(/<[^>]+>/g, '');
+    expect(text('remove')).toBe('1-Removed line 1: export const a = 1;');
+    expect(text('add')).toBe('1+Added line 1: export const a = 2;');
+    expect(html).not.toContain('data-slot="diff-toolbar"');
     expect(html).toContain('aria-expanded="true"');
   });
 });

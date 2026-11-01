@@ -25,7 +25,17 @@ export interface DiffSlots {
   hunkActions?: (file: ChangedFile, hunk: DiffHunk) => ReactNode;
   /** A full-width row under a line (8.6's comment field and saved comments). */
   lineAfter?: (file: ChangedFile, line: DiffLine) => ReactNode;
+  /**
+   * At the end of a line's code cell (8.6's Comment button): shown on the
+   * row's hover, focus inside it and the row being the viewer's tab stop,
+   * else see-through (never `display: none`, so it stays a real button).
+   * Render its buttons with `tabIndex={-1}`: the viewer makes them a tab
+   * stop while their row is.
+   */
+  lineActions?: (file: ChangedFile, line: DiffLine) => ReactNode;
 }
+
+const shown = (node: ReactNode): boolean => node !== undefined && node !== null && node !== false;
 
 /**
  * The key of a hunk's header row, and of a line row in it. The roving tab
@@ -96,12 +106,45 @@ function LineText({ segments, change, kind }: { segments: readonly Segment[]; ch
   return <>{parts}</>;
 }
 
-/** A line's code cell: the sr-only label, then the wrapped text with a hanging indent. */
-function CodeCell({ line, segments, change, className, side }: { line: DiffLine; segments: readonly Segment[]; change: TextRange | undefined; className?: string; side?: 'old' | 'new' }) {
+/** A line's code cell: the sr-only label, then the wrapped text with a hanging indent, then the line's actions (in room kept at the cell's end, placed so they never change its height). */
+function CodeCell({
+  line,
+  segments,
+  change,
+  className,
+  side,
+  action,
+}: {
+  line: DiffLine;
+  segments: readonly Segment[];
+  change: TextRange | undefined;
+  className?: string;
+  side?: 'old' | 'new';
+  action?: ReactNode;
+}) {
   return (
-    <td data-slot="diff-code" className={cn('py-0.25 pr-3 pl-[2ch] align-top whitespace-pre-wrap text-foreground [overflow-wrap:anywhere] [text-indent:-2ch]', className)}>
+    <td
+      data-slot="diff-code"
+      className={cn(
+        'relative py-0.25 pr-3 pl-[2ch] align-top whitespace-pre-wrap text-foreground [overflow-wrap:anywhere] [text-indent:-2ch]',
+        // Room for the actions at the cell's end, so they never cover its text.
+        shown(action) && 'pr-20',
+        className,
+      )}
+    >
       <span className="sr-only">{lineLabel(line, side)}</span>
       <LineText segments={segments} change={change} kind={line.kind} />
+      {shown(action) ? (
+        <span
+          data-slot="diff-line-action"
+          className={cn(
+            'absolute top-0 right-1 flex items-center gap-1 font-sans whitespace-nowrap [text-indent:0] opacity-0',
+            'group-hover/line:opacity-100 group-focus-within/line:opacity-100 group-data-[current]/line:opacity-100 focus-within:opacity-100',
+          )}
+        >
+          {action}
+        </span>
+      ) : null}
     </td>
   );
 }
@@ -109,6 +152,8 @@ function CodeCell({ line, segments, change, className, side }: { line: DiffLine;
 const gutterClass = 'py-0.25 px-1 text-right align-top text-diff-gutter-foreground select-none tabular-nums';
 const signClass = 'py-0.25 text-center align-top text-diff-gutter-foreground select-none';
 const rowClass = 'outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring';
+/** A line row: its actions show on its hover, focus and tab stop. */
+const lineRowClass = cn(rowClass, 'group/line');
 
 /** Each line's segments and paired word change, for one hunk; each side highlighted as one block. */
 function useHunkText(hunk: DiffHunk, language: Language | undefined) {
@@ -207,6 +252,7 @@ function InlineHunk({ file, hunk, language, slots, columns }: HunkProps) {
       {hunk.lines.map((line, index) => {
         const key = lineKey(file.path, hunk, index);
         const after = slots.lineAfter?.(file, line);
+        const action = slots.lineActions?.(file, line);
         return (
           <Fragment key={index}>
             <tr
@@ -214,7 +260,7 @@ function InlineHunk({ file, hunk, language, slots, columns }: HunkProps) {
               data-diff-key={key}
               data-diff-path={file.path}
               tabIndex={-1}
-              className={cn(rowClass, ROW_BACKGROUND[line.kind])}
+              className={cn(lineRowClass, ROW_BACKGROUND[line.kind])}
               {...rowData(line)}
             >
               <td className={cn(gutterClass, GUTTER_BACKGROUND[line.kind])}>
@@ -226,9 +272,9 @@ function InlineHunk({ file, hunk, language, slots, columns }: HunkProps) {
               <td className={cn(signClass, GUTTER_BACKGROUND[line.kind])}>
                 <span aria-hidden data-slot="diff-sign">{SIGNS[line.kind]}</span>
               </td>
-              <CodeCell line={line} segments={segments[index]!} change={changes.get(index)} />
+              <CodeCell line={line} segments={segments[index]!} change={changes.get(index)} action={action} />
             </tr>
-            {after === undefined || after === null || after === false ? null : (
+            {!shown(after) ? null : (
               <tr>
                 <td colSpan={columns}>{after}</td>
               </tr>
@@ -240,7 +286,21 @@ function InlineHunk({ file, hunk, language, slots, columns }: HunkProps) {
   );
 }
 
-function SplitSide({ line, index, segments, changes, first }: { line: DiffLine | undefined; index: number | undefined; segments: Segment[][]; changes: Map<number, TextRange>; first: boolean }) {
+function SplitSide({
+  line,
+  index,
+  segments,
+  changes,
+  first,
+  action,
+}: {
+  line: DiffLine | undefined;
+  index: number | undefined;
+  segments: Segment[][];
+  changes: Map<number, TextRange>;
+  first: boolean;
+  action?: ReactNode;
+}) {
   const border = first ? undefined : 'border-l border-border';
   if (line === undefined || index === undefined) {
     return (
@@ -260,7 +320,7 @@ function SplitSide({ line, index, segments, changes, first }: { line: DiffLine |
       <td className={cn(signClass, GUTTER_BACKGROUND[line.kind])}>
         <span aria-hidden data-slot="diff-sign">{SIGNS[line.kind]}</span>
       </td>
-      <CodeCell line={line} segments={segments[index]!} change={changes.get(index)} className={ROW_BACKGROUND[line.kind]} side={first ? 'old' : 'new'} />
+      <CodeCell line={line} segments={segments[index]!} change={changes.get(index)} className={ROW_BACKGROUND[line.kind]} side={first ? 'old' : 'new'} action={action} />
     </>
   );
 }
@@ -275,7 +335,10 @@ function SplitHunk({ file, hunk, language, slots, columns }: HunkProps) {
         const left = row.left === undefined ? undefined : hunk.lines[row.left];
         const right = row.right === undefined ? undefined : hunk.lines[row.right];
         const kind = left?.kind === 'context' ? 'context' : left !== undefined && right !== undefined ? 'change' : (left ?? right)!.kind;
-        const afters = [left, right === left ? undefined : right].map((line) => (line === undefined ? undefined : slots.lineAfter?.(file, line))).filter((node) => node !== undefined && node !== null && node !== false);
+        const afters = [left, right === left ? undefined : right].map((line) => (line === undefined ? undefined : slots.lineAfter?.(file, line))).filter(shown);
+        // An unchanged line shows on both sides: its actions once, on the right.
+        const leftAction = left === undefined || left === right ? undefined : slots.lineActions?.(file, left);
+        const rightAction = right === undefined ? undefined : slots.lineActions?.(file, right);
         return (
           <Fragment key={index}>
             <tr
@@ -283,13 +346,13 @@ function SplitHunk({ file, hunk, language, slots, columns }: HunkProps) {
               data-diff-key={key}
               data-diff-path={file.path}
               tabIndex={-1}
-              className={rowClass}
+              className={lineRowClass}
               data-kind={kind}
               data-line-old={left?.oldLine}
               data-line-new={right?.newLine}
             >
-              <SplitSide line={left} index={row.left} segments={segments} changes={changes} first />
-              <SplitSide line={right} index={row.right} segments={segments} changes={changes} first={false} />
+              <SplitSide line={left} index={row.left} segments={segments} changes={changes} first action={leftAction} />
+              <SplitSide line={right} index={row.right} segments={segments} changes={changes} first={false} action={rightAction} />
             </tr>
             {afters.map((after, at) => (
               <tr key={at}>

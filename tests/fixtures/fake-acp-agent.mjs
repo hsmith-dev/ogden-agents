@@ -90,7 +90,8 @@
 //                  `command=<text> primed=<n>` and "Updated AGENTS.md."
 //   "write-file <relpath> <base64>"  as "write-doc", but writes the decoded
 //                  bytes (an agent writing a plan file or `tickets.toml`;
-//                  story 4.13)
+//                  story 4.13); more `<relpath> <base64>` pairs write more
+//                  files in the same turn (story 8.6)
 //
 //   "mode"         replies `mode=<its current session mode>` (permission modes)
 //   "mode-switch <mode id>"  switches its own session mode, as the agent does
@@ -933,8 +934,21 @@ async function runPrompt(params, client, session) {
     }
     if (text.startsWith('write-doc ') || text.startsWith('write-file ')) {
       const own = text.startsWith('write-file ');
-      const [relpath = '', encoded = ''] = own ? text.slice('write-file '.length).trim().split(/\s+/) : [text.slice('write-doc '.length).trim()];
+      const words = own ? text.slice('write-file '.length).trim().split(/\s+/) : [text.slice('write-doc '.length).trim()];
+      const [relpath = '', encoded = ''] = words;
       const cwd = session.opened.cwd ?? process.cwd();
+      // write-file's further pairs: written first, each its own tool call.
+      for (let pair = 2; own && pair + 1 < words.length; pair += 2) {
+        const extra = resolve(cwd, words[pair]);
+        const below = relative(cwd, extra);
+        if (below === '' || below.startsWith('..') || isAbsolute(below)) throw acp.RequestError.invalidParams(undefined, 'write-file writes only inside the session cwd');
+        const extraContent = Buffer.from(words[pair + 1], 'base64').toString('utf8');
+        const extraId = `call-write-${randomUUID()}`;
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call', toolCallId: extraId, title: `Write ${words[pair]}`, kind: 'edit', status: 'in_progress', locations: [{ path: extra }] });
+        mkdirSync(dirname(extra), { recursive: true });
+        writeFileSync(extra, extraContent);
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: extraId, status: 'completed', content: [{ type: 'diff', path: extra, oldText: null, newText: extraContent }] });
+      }
       const file = resolve(cwd, relpath);
       const inside = relative(cwd, file);
       if (relpath === '' || inside === '' || inside.startsWith('..') || isAbsolute(inside)) throw acp.RequestError.invalidParams(undefined, 'write-doc writes only inside the session cwd');

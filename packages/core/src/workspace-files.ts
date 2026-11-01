@@ -17,6 +17,7 @@
  * from an agent's reply or a markdown file. It answers nothing else.
  */
 import {
+  foldPathSegment,
   MAX_WORKSPACE_FILE_LINKS,
   WorkspaceRelativePath,
   WorkspaceSearchQuery,
@@ -45,7 +46,7 @@ const READABLE_IN_PROJECT = '.claude';
  * spaces stripped (Windows ignores them, and macOS folds case).
  */
 export function foldSegment(segment: string): string {
-  return segment.normalize('NFKC').toUpperCase().toLowerCase().replace(/[. ]+$/, '');
+  return foldPathSegment(segment);
 }
 
 /** The credential folders as folded segment runs (`Library/Keychains` is two), but `.claude`. */

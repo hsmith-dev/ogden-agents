@@ -205,4 +205,44 @@ describe('the diff viewer (story 8.3)', () => {
     expect(screen.getByRole('button', { name: 'Revert h0' })).toBeTruthy();
     expect(screen.getByTestId('after').textContent).toBe('comment on 2');
   });
+
+  it('puts line actions at the end of each code cell, a tab stop only on the focused row, and c or C clicks them (8.6)', () => {
+    const clicks: Array<{ line: string; shift: boolean }> = [];
+    render(
+      <DiffViewer
+        files={[fileOf('src/a.ts')]}
+        label="Changes"
+        lineActions={(_file, line) => (
+          <button type="button" tabIndex={-1} onClick={(event) => clicks.push({ line: `${line.kind}:${line.newLine ?? line.oldLine}`, shift: event.shiftKey })}>
+            Comment on {line.kind} {line.newLine ?? line.oldLine}
+          </button>
+        )}
+      />,
+    );
+    const viewer = screen.getByTestId('diff-viewer');
+    const rows = [...viewer.querySelectorAll<HTMLElement>('[data-diff-nav="line"]')];
+    expect(rows).toHaveLength(4);
+    for (const row of rows) expect(row.querySelector('[data-slot="diff-code"] [data-slot="diff-line-action"] button')).not.toBeNull();
+    const buttonOf = (row: HTMLElement) => row.querySelector<HTMLElement>('[data-slot="diff-line-action"] button')!;
+    expect(rows.map((row) => buttonOf(row).getAttribute('tabindex'))).toEqual(['-1', '-1', '-1', '-1']);
+    rows[2]!.focus();
+    expect(rows.map((row) => buttonOf(row).getAttribute('tabindex'))).toEqual(['-1', '-1', '0', '-1']);
+    fireEvent.keyDown(rows[2]!, { key: 'c' });
+    fireEvent.keyDown(rows[2]!, { key: 'C', shiftKey: true });
+    expect(clicks).toEqual([
+      { line: 'add:2', shift: false },
+      { line: 'add:2', shift: true },
+    ]);
+    fireEvent.keyDown(rows[2]!, { key: 'j' });
+    expect(document.activeElement).toBe(rows[3]);
+    expect(rows.map((row) => buttonOf(row).getAttribute('tabindex'))).toEqual(['-1', '-1', '-1', '0']);
+  });
+
+  it('in Side by side gives an unchanged line one action, on the right, and a changed row one per side (8.6)', () => {
+    localStorage.setItem(DIFF_LAYOUT_KEY, 'split');
+    render(<DiffViewer files={[fileOf('src/a.ts')]} label="Changes" lineActions={(_file, line) => <button type="button" tabIndex={-1}>{`${line.kind} ${line.newLine ?? line.oldLine}`}</button>} />);
+    const viewer = screen.getByTestId('diff-viewer');
+    const rows = [...viewer.querySelectorAll<HTMLElement>('[data-diff-nav="line"]')];
+    expect(rows.map((row) => [...row.querySelectorAll('[data-slot="diff-line-action"]')].map((slot) => slot.textContent))).toEqual([['context 1'], ['remove 2', 'add 2'], ['context 3']]);
+  });
 });

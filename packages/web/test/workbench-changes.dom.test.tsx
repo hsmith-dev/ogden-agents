@@ -6,7 +6,9 @@
  * fetched), and Commit these changes for a chat with a worktree of its
  * own, with its message and the server's refusal. Story 8.5: each view's
  * hunk and file buttons, Revert's one confirmation, Undo, the buttons
- * disabled while an agent works in the folder, and the 409 notices. The
+ * disabled while an agent works in the folder, and the 409 notices. Story
+ * 8.6: line comments, their bar, Send to (This turn's chat, or the picker)
+ * writing the chat's composer draft, Outdated, the cap and a reload. The
  * REST call is a stand-in that records every URL asked for.
  */
 import {
@@ -24,12 +26,15 @@ import {
   changesMoreFilesText,
   COMMIT_NOTHING_MESSAGE,
   committedText,
+  COMMENT_OUTDATED_LABEL,
+  COMMENTS_FULL_TEXT,
+  MAX_LINE_COMMENTS,
   type ChangedFile,
   type ChangesResponse,
   type FileDiffResponse,
 } from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -55,7 +60,11 @@ const fake = vi.hoisted(() => ({
   /** What the next hunk action and Undo answer (an error to refuse). */
   hunk: undefined as unknown,
   undo: undefined as unknown,
+  navigate: (() => undefined) as (to: unknown) => void,
+  /** A file's hunks, when not the one-line default. */
+  hunks: {} as Record<string, unknown>,
 }));
+vi.mock('@tanstack/react-router', () => ({ useNavigate: () => fake.navigate }));
 
 vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [], caughtUp: true }) }));
 vi.mock('@/chat/use-chat-agents', () => ({ useChatAgents: () => ({ data: { agents: [{ agentId: 'claude-code', displayName: 'Claude Code' }], defaultAgentId: 'claude-code' } }) }));
@@ -74,6 +83,8 @@ vi.mock('@/api/http', async (importOriginal) => ({
 }));
 
 const { WorkbenchChanges } = await import('../src/workbench/workbench-changes');
+const { chatDraftKey, newChatDraftKey, readDraft, writeDraft } = await import('../src/chat/drafts');
+const { lineCommentsKey, readLineComments, writeLineComments } = await import('../src/workbench/line-comments');
 const { ChatApiError } = await import('../src/api/http');
 const { TooltipProvider } = await import('../src/ui/tooltip');
 type Navigation = import('../src/workbench/workbench-changes').ChangesNavigation;
@@ -139,7 +150,9 @@ function serve(files: Partial<Record<string, ChangedFile[]>>, { worktree = false
     if (base_ === CHANGES) return { view, ...(view === 'branch' && base !== undefined ? { base } : {}), ...(turn === undefined || turns.length === 0 ? {} : { turn }), files: turns.length === 0 && view === 'turn' ? [] : (files[key] ?? []), truncated: false };
     if (base_ === FILE) {
       const file = (files[key] ?? []).find((one) => one.path === query.get('path'));
-      return file === undefined ? undefined : diffOf(file, view);
+      if (file === undefined) return undefined;
+      const diff = diffOf(file, view);
+      return fake.hunks[file.path] === undefined ? diff : { ...diff, hunks: fake.hunks[file.path] };
     }
     return undefined;
   };
@@ -154,6 +167,9 @@ afterEach(() => {
   fake.sessions = [];
   fake.hunk = undefined;
   fake.undo = undefined;
+  fake.hunks = {};
+  fake.navigate = () => undefined;
+  localStorage.clear();
 });
 
 const posted = (url: string) => fake.calls.filter((call) => call.url === url).map((call) => call.body);
@@ -317,5 +333,169 @@ describe('Workbench Changes', () => {
     await flush();
     expect(screen.getByTestId('changes-action-error').textContent).toContain(HUNK_CHANGED_SINCE_TEXT);
     expect(fake.calls.filter((call) => call.url.startsWith(FILE)).length).toBeGreaterThan(reads);
+  });
+});
+
+describe('line comments in Changes (story 8.6)', () => {
+  const comment = (button: HTMLElement, text: string, shift = false) => {
+    fireEvent.click(button, { shiftKey: shift });
+    fireEvent.change(screen.getByTestId('diff-comment-input'), { target: { value: text } });
+    fireEvent.click(screen.getByTestId('diff-comment-save'));
+  };
+  const commentButton = (path: string, name: string) => within(screen.getByRole('table', { name: `Changes in ${path}` })).getByRole('button', { name });
+
+  it("collects comments on two files and Send to Claude Code appends one message to This turn's chat draft, then opens it", async () => {
+    serve({ [`turn:${TURN_2}`]: [changed('a.ts'), changed('b.css')] });
+    fake.sessions = [sessionRow(false)];
+    fake.hunks['b.css'] = [
+      {
+        id: 'h1-0123456789',
+        oldStart: 70,
+        oldLines: 0,
+        newStart: 71,
+        newLines: 4,
+        lines: [71, 72, 73, 74].map((line) => ({ kind: 'add', text: `rule ${line}`, newLine: line })),
+      },
+    ];
+    const opened: unknown[] = [];
+    fake.navigate = (to) => void opened.push(to);
+    writeDraft(chatDraftKey(WS, SES), 'hello');
+    await mount({ session: SES });
+    comment(commentButton('a.ts', 'Comment on line 1'), 'Round after summing.');
+    expect(screen.getByTestId('diff-comment').textContent).toContain('Round after summing.');
+    // A range: line 71 focused (its button clicked), then Shift with line 74's.
+    fireEvent.click(commentButton('b.css', 'Comment on line 71'));
+    fireEvent.click(screen.getByTestId('diff-comment-cancel'));
+    comment(commentButton('b.css', 'Comment on line 74'), 'Use formatPrice.', true);
+    expect(screen.getByTestId('comments-bar-title').textContent).toBe('Comments to send (2)');
+    expect(screen.getAllByTestId('comments-bar-item').map((item) => item.textContent)).toEqual([expect.stringContaining('a.ts:1'), expect.stringContaining('b.css:71-74')]);
+    // Nothing went to the server.
+    expect(fake.calls.some((call) => call.body !== undefined)).toBe(false);
+    const send = screen.getByTestId('comments-send');
+    expect(send.textContent).toBe('Send to Claude Code');
+    fireEvent.click(send);
+    await flush();
+    expect(readDraft(chatDraftKey(WS, SES))).toBe(
+      ['hello', 'Please address these review comments:', 'a.ts:1\n> + in a.ts\nRound after summing.', 'b.css:71-74\n> + rule 71\n> + rule 72\n> + rule 73\n> + rule 74\nUse formatPrice.'].join('\n\n'),
+    );
+    expect(opened).toEqual([{ to: '/w/$wsId/s/$sesId', params: { wsId: WS, sesId: SES } }]);
+    expect(screen.queryByTestId('comments-bar')).toBeNull();
+  });
+
+  it('while the agent works, Send to still only fills the composer (its own rule queues the send)', async () => {
+    serve({ [`turn:${TURN_2}`]: [changed('a.ts')] });
+    fake.sessions = [sessionRow(false, 'working')];
+    const opened: unknown[] = [];
+    fake.navigate = (to) => void opened.push(to);
+    await mount({ session: SES });
+    comment(commentButton('a.ts', 'Comment on line 1'), 'Later.');
+    fireEvent.keyDown(screen.getByTestId('comments-bar'), { key: 'Enter', metaKey: true });
+    await flush();
+    expect(readDraft(chatDraftKey(WS, SES))).toContain('a.ts:1');
+    expect(opened).toHaveLength(1);
+    expect(fake.calls.some((call) => call.body !== undefined)).toBe(false);
+  });
+
+  it('C after j moves makes a range from where they started (Flow 6: lines 71 to 74)', async () => {
+    serve({ unstaged: [changed('b.css')] });
+    fake.hunks['b.css'] = [{ id: 'h1-0123456789', oldStart: 70, oldLines: 0, newStart: 71, newLines: 4, lines: [71, 72, 73, 74].map((line) => ({ kind: 'add', text: `rule ${line}`, newLine: line })) }];
+    await mount();
+    const row = commentButton('b.css', 'Comment on line 71').closest<HTMLElement>('tr')!;
+    act(() => row.focus());
+    for (let step = 0; step < 3; step++) fireEvent.keyDown(document.activeElement!, { key: 'j' });
+    await flush();
+    expect((document.activeElement as HTMLElement).getAttribute('data-line-new')).toBe('74');
+    fireEvent.keyDown(document.activeElement!, { key: 'C', shiftKey: true });
+    expect(screen.getByTestId('diff-comment-field').textContent).toContain('Your comment on lines 71 to 74');
+  });
+
+  it('with no chats, Send to offers New chat only', async () => {
+    serve({ unstaged: [changed('a.ts')] });
+    fake.sessions = [];
+    await mount();
+    comment(commentButton('a.ts', 'Comment on line 1'), 'Fix.');
+    fireEvent.keyDown(screen.getByTestId('comments-send-to'), { key: 'Enter' });
+    await flush();
+    expect(screen.queryAllByTestId('comments-send-to-chat')).toHaveLength(0);
+    expect(screen.getByTestId('comments-send-to-new').textContent).toContain('New chat');
+  });
+
+  it('removing the last comment from the bar leaves no send', async () => {
+    serve({ unstaged: [changed('a.ts')] });
+    await mount();
+    comment(commentButton('a.ts', 'Comment on line 1'), 'Fix.');
+    fireEvent.click(screen.getByTestId('comments-bar-remove'));
+    expect(screen.queryByTestId('comments-bar')).toBeNull();
+    expect(screen.queryByTestId('comments-send-to')).toBeNull();
+  });
+
+  it('quotes a removed line by its old number', async () => {
+    serve({ unstaged: [changed('a.ts')] });
+    fake.hunks['a.ts'] = [{ id: 'h1-0123456789', oldStart: 40, oldLines: 1, newStart: 39, newLines: 0, lines: [{ kind: 'remove', text: 'gone();', oldLine: 40 }] }];
+    fake.sessions = [];
+    await mount();
+    comment(commentButton('a.ts', 'Comment on removed line 40'), 'Keep this.');
+    expect(screen.getByTestId('comments-bar-item').textContent).toContain('a.ts:40 (removed line)');
+    fireEvent.keyDown(screen.getByTestId('comments-send-to'), { key: 'Enter' });
+    await flush();
+    fireEvent.click(screen.getByTestId('comments-send-to-new'));
+    await flush();
+    expect(readDraft(newChatDraftKey(WS))).toContain('a.ts:40 (removed line)\n> - gone();\nKeep this.');
+  });
+
+  it('from Unstaged, Send to lists the chats, latest first, and New chat', async () => {
+    serve({ unstaged: [changed('a.ts')] });
+    const other = { ...sessionRow(false), id: 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2X9', title: 'Older chat', createdAt: '2026-10-31T00:00:00.000Z' };
+    fake.sessions = [other, { ...sessionRow(false), title: 'Latest chat' }];
+    const opened: unknown[] = [];
+    fake.navigate = (to) => void opened.push(to);
+    await mount();
+    comment(commentButton('a.ts', 'Comment on line 1'), 'Fix.');
+    fireEvent.keyDown(screen.getByTestId('comments-send-to'), { key: 'Enter' });
+    await flush();
+    expect(screen.getAllByTestId('comments-send-to-chat').map((item) => item.textContent)).toEqual([expect.stringContaining('Latest chat'), expect.stringContaining('Older chat')]);
+    expect(screen.getByTestId('comments-send-to-new').textContent).toContain('New chat');
+    fireEvent.click(screen.getAllByTestId('comments-send-to-chat')[1]!);
+    await flush();
+    expect(readDraft(chatDraftKey(WS, other.id))).toContain('a.ts:1');
+    expect(opened).toEqual([{ to: '/w/$wsId/s/$sesId', params: { wsId: WS, sesId: other.id } }]);
+  });
+
+  it('keeps comments over a reload, says Outdated for a line that changed, and refuses the 51st', async () => {
+    serve({ unstaged: [changed('a.ts')] });
+    await mount();
+    comment(commentButton('a.ts', 'Comment on line 1'), 'Still here.');
+    cleanup();
+    await mount();
+    expect(screen.getByTestId('diff-comment').textContent).toContain('Still here.');
+    expect(screen.getByTestId('comments-bar-item').getAttribute('data-outdated')).toBe('false');
+    cleanup();
+    fake.hunks['a.ts'] = [{ id: 'h1-0123456789', oldStart: 0, oldLines: 0, newStart: 1, newLines: 1, lines: [{ kind: 'add', text: 'changed since', newLine: 1 }] }];
+    await mount();
+    expect(screen.queryByTestId('diff-comment')).toBeNull();
+    expect(screen.getByTestId('comments-bar-outdated').textContent).toBe(COMMENT_OUTDATED_LABEL);
+    cleanup();
+    const stored = readLineComments(lineCommentsKey(WS, 'project'));
+    writeLineComments(lineCommentsKey(WS, 'project'), Array.from({ length: MAX_LINE_COMMENTS }, (_, index) => ({ ...stored[0]!, id: `c${index}` })));
+    await mount();
+    fireEvent.click(commentButton('a.ts', 'Comment on line 1'));
+    expect(screen.queryByTestId('diff-comment-field')).toBeNull();
+    expect(screen.getByTestId('comments-bar-status').textContent).toBe(COMMENTS_FULL_TEXT);
+  });
+
+  it('masks a secret in the stored quote and the message', async () => {
+    serve({ unstaged: [changed('.env')] });
+    fake.hunks['.env'] = [{ id: 'h1-0123456789', oldStart: 0, oldLines: 0, newStart: 1, newLines: 1, lines: [{ kind: 'add', text: 'TOKEN=abc', newLine: 1 }] }];
+    await mount();
+    comment(commentButton('.env', 'Comment on line 1'), 'Rename it.');
+    expect(JSON.stringify({ ...localStorage })).not.toContain('abc');
+    expect(readLineComments(lineCommentsKey(WS, 'project'))[0]!.quote).toEqual(['+ TOKEN=[redacted]']);
+    fireEvent.keyDown(screen.getByTestId('comments-send-to'), { key: 'Enter' });
+    await flush();
+    fireEvent.click(screen.getByTestId('comments-send-to-new'));
+    await flush();
+    const handed = readDraft(newChatDraftKey(WS));
+    expect(handed).toContain('.env:1\n> + TOKEN=[redacted]\nRename it.');
+    expect(handed).not.toContain('abc');
   });
 });

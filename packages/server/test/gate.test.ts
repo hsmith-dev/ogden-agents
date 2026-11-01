@@ -597,6 +597,9 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.devToolInstall}`,
   `GET ${API_ROUTES.workspaceDevToolsAllowlist}`,
   `PUT ${API_ROUTES.workspaceDevToolAllow}`,
+  // The Workbench's Files (AD-36): behind the gate only, read-only.
+  `GET ${API_ROUTES.workspaceFiles}`,
+  `GET ${API_ROUTES.workspaceFileContent}`,
   `GET ${API_ROUTES.workspaces}`,
   `POST ${API_ROUTES.workspaces}`,
   `GET ${API_ROUTES.chatAgents}`,

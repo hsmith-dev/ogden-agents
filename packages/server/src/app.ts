@@ -32,6 +32,7 @@ import {
   type Toolchain,
   type AgentModels,
   type DevTools,
+  type WorkspaceFiles,
   type AgentLinkedCommands,
 } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
@@ -75,6 +76,7 @@ import { registerShortcutRoutes } from './shortcut-routes.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
 import { registerTerminalSocket } from './terminal-socket.js';
 import { registerWorkspaceRoutes } from './workspace-routes.js';
+import { registerWorkspaceFilesRoutes } from './workspace-files-routes.js';
 
 /** What `GET /launcher/hello` reports about the running server (AD-20). */
 export interface ServerInfo {
@@ -164,6 +166,8 @@ export interface AppOptions {
   buildSettings?: BuildSettings;
   /** Generic developer CLI tools: the catalog, confirmed real installs, and each project's unattended-build allowlist (CAP-25); without it those routes answer 501. */
   devTools?: DevTools;
+  /** The Workbench's Files (AD-36): one folder listed, one file read, read-only; without it those routes answer 501. */
+  workspaceFiles?: WorkspaceFiles | undefined;
   /** Notification settings and webhooks (story 11.4). */
   notifications?: Notifications;
   /** The Local model's endpoints (epic 14 story 14.3); without it those routes answer 501. */
@@ -242,6 +246,7 @@ export function createApp({
   builds,
   buildSettings,
   devTools,
+  workspaceFiles,
   notifications,
   localEndpoints,
   remoteMachines,
@@ -380,6 +385,8 @@ export function createApp({
   // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
   registerRunSettingsRoutes(app, { buildSettings, builds, notifications, log });
   registerDevToolsRoutes(app, { devTools, log });
+  // The Workbench's Files (AD-36): behind the gate only, read-only; never on a paired-device allowlist.
+  registerWorkspaceFilesRoutes(app, { workspaceFiles, log });
   // The Local model's endpoints (epic 14 story 14.3): app-wide, behind the gate, never a piece's guard; a key never leaves.
   registerLocalEndpointRoutes(app, { localEndpoints, log });
   // The remote-machine registry (CAP-24, epic 19 story 19.3): app-wide, behind the gate; a credential never leaves.

@@ -738,3 +738,15 @@ export class BuildSessionReadOnlyError extends CoreError {
     super('build_session_read_only', BUILD_SESSION_READ_ONLY_MESSAGE);
   }
 }
+
+/**
+ * Workbench Files (AD-36): the path is `.git`, a credential folder, or its
+ * real path leaves the project or lands in a fenced folder. The server
+ * answers 403 `path_protected`; nothing was read, not even the size.
+ */
+export class PathProtectedError extends CoreError {
+  override readonly name = 'PathProtectedError';
+  constructor(message: string) {
+    super('path_protected', message);
+  }
+}

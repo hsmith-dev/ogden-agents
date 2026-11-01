@@ -43,7 +43,7 @@ export function WorkspaceHeader({
       </PageTitle>
       {/* Kept at phone width too: with the title hidden there, Rename is still the way to rename from the header. */}
       {titleAction}
-      {wsId === undefined ? null : <WorkspaceTabs wsId={wsId} active={tab} reviewRef={reviewRef} />}
+      {wsId === undefined ? null : <WorkspaceTabs wsId={wsId} active={tab} reviewRef={reviewRef} crowded={compactOnPhone} />}
       {children}
     </PageHeader>
   );

@@ -10,11 +10,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { ptyLoads, send, withTerminalChat } from './chat-server.js';
 
-/** The header's project tabs: no BMad piece's tab, so Chats, marked as the current page, and (these tests run in Developer mode) Terminals (epic 16). */
-async function expectChatsTabOnly(page: Page) {
+/** The header's project tabs: no BMad piece's tab, so Chats, marked as the current page, the Workbench (AD-36) and (these tests run in Developer mode) Terminals (epic 16). */
+async function expectChatsTabOnly(page: Page, tabs: readonly string[] = ['Chats', 'Workbench', 'Terminals']) {
   const nav = page.getByRole('navigation', { name: 'Project sections' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('link')).toHaveText(['Chats', 'Terminals']);
+  await expect(nav.getByRole('link')).toHaveText([...tabs]);
   const chats = nav.getByRole('link', { name: 'Chats' });
   await expect(chats).toHaveAttribute('aria-current', 'page');
 }
@@ -64,7 +64,8 @@ test('a simple project shows only Chats in its header on both pages, two chats w
 
     // At phone width the header still fits, tabs and toggle included.
     await page.setViewportSize({ width: 375, height: 740 });
-    await expectChatsTabOnly(page);
+    // A chat's crowded header leaves the Workbench tab out at phone width (it is `g w` away); the chats page keeps it.
+    await expectChatsTabOnly(page, ['Chats', 'Terminals']);
     await expect(toggle).toBeVisible();
     await expectNoSidewaysScroll(page);
     await page.goto(new URL(`/w/${wsId}`, page.url()).href);

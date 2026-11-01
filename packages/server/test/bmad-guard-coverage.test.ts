@@ -81,6 +81,9 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   // Generic developer CLI tools (CAP-25): not a BMad piece, served whole, behind the gate only.
   `GET ${API_ROUTES.workspaceDevToolsAllowlist}`,
   `PUT ${API_ROUTES.workspaceDevToolAllow}`,
+  // The Workbench's Files (AD-36): not a BMad piece, read-only, behind the gate only.
+  `GET ${API_ROUTES.workspaceFiles}`,
+  `GET ${API_ROUTES.workspaceFileContent}`,
 ];
 
 /** The BMad-named routes that serve projects with BMad off (story 10.2) or the whole install (story 4.14): never guarded, by design. */

@@ -190,7 +190,7 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
     const offId = await addProject(page, off.path);
     await page.goto(`${url}/w/${offId}/plan`);
     await expect(page.getByTestId('plan-feature-off')).toContainText('off in this project');
-    await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats']);
+    await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Workbench']);
     await page.keyboard.press('g');
     await page.keyboard.press('b');
     await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
@@ -240,7 +240,7 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
 
   await test.step('Plan: Start from an idea opens a planning session on the entry action', async () => {
     await page.goto(`${url}/w/${wsId}/plan`);
-    await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Plan', 'Board']);
+    await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Workbench', 'Plan', 'Board']);
     await expect(page.getByTestId('reduced-mode-notice')).toHaveCount(0);
     const input = page.getByLabel('Your idea', { exact: true });
     await input.fill(IDEA);

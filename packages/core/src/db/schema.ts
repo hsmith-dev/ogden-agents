@@ -653,3 +653,43 @@ export const chatWorktreePorts = sqliteTable(
   },
   (t) => [uniqueIndex('chat_worktree_ports_held_port_unique').on(t.port).where(sql`${t.held} = 1`)],
 );
+
+/**
+ * One task tried by several agents (27.8; CAP-35): the task, as the user
+ * typed it (never in an event), and the chat kept (`NULL` until Keep this
+ * one; no foreign key: the kept chat can be deleted later and the trial
+ * still reads). Gone with its project, and with Delete history.
+ */
+export const trials = sqliteTable(
+  'trials',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    text: text('text').notNull(),
+    keptSessionId: text('kept_session_id'),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [index('trials_workspace_idx').on(t.workspaceId)],
+);
+
+/**
+ * A trial's chats (27.8), in the order the agents were picked, and what
+ * became of each (`open`, `kept`, `put_away`, `removed`, `left`). The
+ * session id has no foreign key: a chat deleted later keeps its row, read
+ * as gone.
+ */
+export const trialChats = sqliteTable(
+  'trial_chats',
+  {
+    trialId: text('trial_id')
+      .notNull()
+      .references(() => trials.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    sessionId: text('session_id').notNull(),
+    agentId: text('agent_id').$type<AgentId>().notNull(),
+    result: text('result').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.trialId, t.position] }), index('trial_chats_session_idx').on(t.sessionId)],
+);

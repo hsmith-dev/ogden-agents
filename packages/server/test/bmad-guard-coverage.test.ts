@@ -107,6 +107,7 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `GET ${API_ROUTES.sessionWorktreeIgnoredFiles}`,
   `GET ${API_ROUTES.workspacePutAwayWorktrees}`,
   `POST ${API_ROUTES.workspaceTrials}`,
+  `GET ${API_ROUTES.workspaceTrials}`,
   `GET ${API_ROUTES.workspaceTrial}`,
   `POST ${API_ROUTES.workspaceTrialKeep}`,
 ];

@@ -38,6 +38,12 @@ import {
   TRIAL_TEXT_MAX,
   Trial,
   TrialId,
+  TrialsResponse,
+  trialRetentionText,
+  trialDeleteUncommittedText,
+  trialUnreadyText,
+  TRIAL_LEFT_TEXT,
+  TRIAL_DELETE_DESCRIPTION,
   WORKTREE_PORT_RANGE,
   WORKTREE_PUT_AWAY_TEXT,
   WORKTREE_RESTORED_TEXT,
@@ -77,7 +83,7 @@ const EVENTS = [
   { type: 'session.port_released', workspaceId: WS, streamId: SES, payload: { sessionId: SES, port: 41_000 } },
   { type: 'settings.worktree_retention_changed', workspaceId: null, streamId: 'settings', payload: { keep: 20, previous: 15 } },
   { type: 'workspace.trial_started', workspaceId: WS, streamId: WS, payload: { trialId: TRY, sessionIds: [SES, SES2] } },
-  { type: 'workspace.trial_kept', workspaceId: WS, streamId: WS, payload: { trialId: TRY, sessionId: SES, putAway: [SES2] } },
+  { type: 'workspace.trial_kept', workspaceId: WS, streamId: WS, payload: { trialId: TRY, sessionId: SES, putAway: [SES2], removed: [], left: [] } },
 ] as const;
 
 describe('where work runs contracts (epic 27 entry 2)', () => {
@@ -115,9 +121,23 @@ describe('where work runs contracts (epic 27 entry 2)', () => {
     expect(CreateTrialRequest.safeParse({ ...ok, agentIds: ['codex', 'codex'] }).success).toBe(false);
     expect(CreateTrialRequest.safeParse({ ...ok, text: '   ' }).success).toBe(false);
     expect(CreateTrialRequest.safeParse({ ...ok, text: 'x'.repeat(20_001) }).success).toBe(false);
-    expect(Trial.safeParse({ id: TRY, workspaceId: WS, sessionIds: [SES, SES2], keptSessionId: null, createdAt: AT }).success).toBe(true);
-    expect(Trial.safeParse({ id: TRY, workspaceId: WS, sessionIds: [SES], keptSessionId: null, createdAt: AT }).success).toBe(false);
-    expect(KeepTrialRequest.safeParse({ sessionId: SES }).success).toBe(true);
+    const chats = [
+      { sessionId: SES, agentId: 'claude-code', result: 'kept' },
+      { sessionId: SES2, agentId: 'codex', result: 'put_away' },
+    ];
+    const trial = { id: TRY, workspaceId: WS, text: 'Fix the login bug', sessionIds: [SES, SES2], chats, keptSessionId: SES, createdAt: AT };
+    expect(Trial.safeParse(trial).success).toBe(true);
+    expect(Trial.safeParse({ ...trial, sessionIds: [SES], chats: chats.slice(0, 1) }).success).toBe(false);
+    expect(Trial.safeParse({ ...trial, chats: [chats[0], { ...chats[1], result: 'merged' }] }).success).toBe(false);
+    expect(TrialsResponse.safeParse({ trials: [trial] }).success).toBe(true);
+    // Keep: the others are put away unless asked to delete them; uncommitted changes go only when said.
+    expect(KeepTrialRequest.parse({ sessionId: SES })).toEqual({ sessionId: SES, others: 'put_away', discard: [] });
+    expect(KeepTrialRequest.safeParse({ sessionId: SES, others: 'delete', discard: [SES2] }).success).toBe(true);
+    expect(KeepTrialRequest.safeParse({ sessionId: SES, others: 'delete', discard: [SES2, SES2] }).success).toBe(false);
+    // Never a blanket discard: only the chats named.
+    expect(KeepTrialRequest.safeParse({ sessionId: SES, others: 'delete', discardUncommitted: true }).success).toBe(false);
+    expect(KeepTrialRequest.safeParse({ sessionId: SES, others: 'merge' }).success).toBe(false);
+    expect(KeepTrialRequest.safeParse({ sessionId: SES, machineId: 'x' }).success).toBe(false);
   });
 
   it('names the ids, codes and routes', () => {
@@ -163,7 +183,14 @@ describe('where work runs contracts (epic 27 entry 2)', () => {
       handOffConflictText(1),
       restoreBranchMissingText('b'),
       trialKeepConfirmText('A'),
+      trialRetentionText(1, 2),
+      trialDeleteUncommittedText(['A', 'B']),
+      trialUnreadyText('A', 'Sign in first.'),
+      TRIAL_LEFT_TEXT,
+      TRIAL_DELETE_DESCRIPTION,
     ];
+    expect(trialRetentionText(15, 3)).toBe('These 3 copies count toward your limit of 15 worktrees. None of them is put away to save space until you keep one, so you may have more than 15 for a while.');
+    expect(trialDeleteUncommittedText(['Codex'])).toBe("Codex has changes that aren't committed. Deleting discards them.");
     for (const text of texts) expect(text).not.toMatch(/[–—]/);
   });
 

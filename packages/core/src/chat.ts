@@ -163,6 +163,7 @@ export function createChat(options: ChatOptions): Chat {
     listSessions: (workspaceId) => workspaces.listSessions(workspaceId).map(withAgentId),
     deleteHistory: deletion.deleteHistory,
     deleteChat: deletion.deleteChat,
+    copyHasUncommitted: deletion.copyHasUncommitted,
     chatLocation: location.chatLocation,
     moveChat: location.moveChat,
     copyIgnoredFiles: createCopyIgnoredFiles(ctx).copyIgnoredFiles,

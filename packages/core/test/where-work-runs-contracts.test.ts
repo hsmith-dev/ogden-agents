@@ -116,9 +116,10 @@ describe('setSessionWorktree: Hand off is the one writer of a chat worktree afte
     expect(seen).toEqual([change.worktreePath]);
   });
 
-  it('leaves the where-work-runs use-cases undefined until their lanes (retention is made over the server chat, 27.6)', () => {
+  it('leaves the where-work-runs use-cases undefined until their lanes (retention and trials are made over the server chat, 27.6, 27.8)', () => {
     const { core } = setUp();
-    expect([core.chatLocations, core.worktreePorts, core.trials]).toEqual([undefined, undefined, undefined]);
+    expect([core.chatLocations, core.worktreePorts]).toEqual([undefined, undefined]);
     expect(typeof core.createWorktreeRetention).toBe('function');
+    expect(typeof core.createTrials).toBe('function');
   });
 });

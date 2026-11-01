@@ -154,7 +154,13 @@ export function createChatDeletion(ctx: ChatContext, deps: Pick<Agents, 'drop'> 
     }
   };
 
-  const methods: Pick<Chat, 'deleteChat' | 'deleteHistory'> = {
+  const methods: Pick<Chat, 'deleteChat' | 'deleteHistory' | 'copyHasUncommitted'> = {
+    async copyHasUncommitted(workspaceId, sessionId) {
+      const workspace = getWorkspace(workspaceId);
+      const session = getSession(workspaceId, sessionId);
+      return ownsCopy(session) && (await hasChanges(workspace, session));
+    },
+
     async deleteChat(workspaceId, sessionId, options = {}) {
       const discard = options.discardUncommitted === true;
       const workspace = getWorkspace(workspaceId);

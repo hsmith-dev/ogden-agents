@@ -53,6 +53,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { Text } from '@/ui/typography';
 import { fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
 import { PutAwayNotice } from '@/worktrees/put-away-notice';
+import { TrialLink } from '@/trials/trial-link';
 import { usePutAwayWorktrees } from '@/worktrees/worktree-retention';
 import { WorktreeCopyStatus } from '@/worktrees/worktree-copy-status';
 
@@ -612,6 +613,8 @@ export function SessionPage() {
         ) : null}
         {/* Its copy's own port and the project's setup run there (27.7). */}
         {branch !== null && !isBuild ? <WorktreeCopyStatus wsId={wsId} sesId={sesId} /> : null}
+        {/* The try it is part of (27.8). */}
+        {branch !== null && !isBuild ? <TrialLink wsId={wsId} sesId={sesId} /> : null}
         {/* A remote chat's machine (27.5): it stays on that machine. */}
         {machineId !== null && !isBuild ? <MachineBadge data-testid="machine-badge">{chatOnMachineText(machineName)}</MachineBadge> : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}

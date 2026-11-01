@@ -8,7 +8,8 @@
  * ({@link WorktreeRetention.enforce}) runs one at a time: while more are
  * kept than the cap, it puts away the idle one updated longest ago, never
  * one whose chat works, waits, is busy, switches or is driven by the
- * terminal, never the chat just added, and skips one it can't put away
+ * terminal, never the chat just added nor a trial's copy before Keep
+ * (27.8), and skips one it can't put away
  * safely (the chat's refusal is reported). No startup sweep of `<data>/cw`
  * folders: only chats' rows are counted.
  *
@@ -48,6 +49,13 @@ export interface WorktreeRetentionOptions {
   dataDir: string;
   /** Told of a copy the sweep skipped (a refusal) or a sweep that failed: the session id and an error code, for the log. */
   onSkipped?: ((sessionId: SessionId, error: unknown) => void) | undefined;
+  /**
+   * Chats the sweep never puts away though they count (27.8, decision
+   * 2026-11-01): a trial's copies until one is kept, so older idle copies go
+   * instead and a trial may sit above the cap until Keep. One that throws
+   * counts as spared.
+   */
+  spared?: ((sessionId: SessionId) => boolean) | undefined;
 }
 
 /** {@link WorktreeRetention} with the chat just added spared. */
@@ -58,7 +66,14 @@ export interface WorktreeRetentionSweep extends WorktreeRetention {
   settled(): Promise<void>;
 }
 
-export function createWorktreeRetention({ entities, store, chat, dataDir, onSkipped }: WorktreeRetentionOptions): WorktreeRetentionSweep {
+export function createWorktreeRetention({ entities, store, chat, dataDir, onSkipped, spared }: WorktreeRetentionOptions): WorktreeRetentionSweep {
+  const isSpared = (sessionId: SessionId): boolean => {
+    try {
+      return spared?.(sessionId) === true;
+    } catch {
+      return true;
+    }
+  };
   const skipped = (sessionId: SessionId, error: unknown): void => {
     try {
       onSkipped?.(sessionId, error);
@@ -85,7 +100,7 @@ export function createWorktreeRetention({ entities, store, chat, dataDir, onSkip
       if (copies.length <= keep) return done;
       // Oldest first: the one updated longest ago.
       const next = copies
-        .filter((session) => session.id !== spare && !tried.has(session.id) && chat.worktreeIdle(session.id))
+        .filter((session) => session.id !== spare && !tried.has(session.id) && !isSpared(session.id) && chat.worktreeIdle(session.id))
         .sort((a, b) => (a.updatedAt === b.updatedAt ? (a.id < b.id ? -1 : 1) : a.updatedAt < b.updatedAt ? -1 : 1))[0];
       if (next === undefined) return done;
       tried.add(next.id);

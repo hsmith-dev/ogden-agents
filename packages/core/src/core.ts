@@ -30,6 +30,7 @@ import { createEditorLaunch, type EditorLaunch } from './editor-launch.js';
 import type { EditorLauncherPort } from './editor-launcher-port.js';
 import type { ChatLocations, PortProbePort, Trials, WorktreePorts } from './where-work-runs.js';
 import { createWorktreePorts } from './worktree-ports.js';
+import { createTrials, createTrialStore, type TrialStore, type TrialsOptions } from './trials.js';
 import { createProjectCommands, type ProjectCommandRunner, type ProjectCommands } from './project-commands.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
@@ -129,7 +130,10 @@ export interface Core {
   readonly createSnapshotCleanup: (port: VcsSnapshotStorePort) => SnapshotCleanup;
   /** A worktree chat's own port (27.7), for `createChat`'s `worktreePorts`; `undefined` without a {@link OpenCoreOptions.portProbe}. */
   readonly worktreePorts: WorktreePorts | undefined;
-  readonly trials: Trials | undefined;
+  /** The trials' rows (27.8): what retention spares until Keep. */
+  readonly trialStore: TrialStore;
+  /** One task tried by several agents (27.8) over the server's chat; call once, after the chat. */
+  readonly createTrials: (ports: Pick<TrialsOptions, 'chat' | 'onChatError' | 'onKept'>) => Trials;
   /** Problems (AD-38; 8.9): the project's declared commands, their runs and parsed failures; `undefined` without a {@link OpenCoreOptions.projectCommandRunner} and a files port. */
   readonly projectCommands: ProjectCommands | undefined;
   /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
@@ -297,6 +301,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
   });
   const workspaceFiles = options.workspaceFilesPort === undefined ? undefined : createWorkspaceFiles({ entities, port: options.workspaceFilesPort });
   const worktreePutAway = createWorktreePutAwayStore({ db, events, sessionEvents });
+  const trialStore = createTrialStore({ db, events });
   return {
     events,
     sessionEvents,
@@ -322,13 +327,15 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     // Where work runs (epic 27 entry 2): contracts only until 27.4, 27.7 and 27.8; retention (27.6) is made over the server's chat.
     chatLocations: undefined,
     worktreePutAway,
-    createWorktreeRetention: (ports) => createWorktreeRetention({ ...ports, entities, store: worktreePutAway }),
+    // A trial's copies count, but are never put away before Keep (27.8).
+    createWorktreeRetention: (ports) => createWorktreeRetention({ ...ports, entities, store: worktreePutAway, spared: trialStore.spared }),
     createSnapshotCleanup: (port) => createSnapshotCleanup({ entities, store: worktreePutAway, port }),
     worktreePorts:
       options.portProbe === undefined
         ? undefined
         : createWorktreePorts({ db, events, sessionEvents, entities, probe: options.portProbe, putAway: (sessionId) => worktreePutAway.get(sessionId) !== undefined }),
-    trials: undefined,
+    trialStore,
+    createTrials: (ports) => createTrials({ ...ports, store: trialStore, isPutAway: (sessionId) => worktreePutAway.get(sessionId) !== undefined }),
     projectCommands:
       options.projectCommandRunner === undefined || options.workspaceFilesPort === undefined
         ? undefined

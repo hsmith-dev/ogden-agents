@@ -135,9 +135,20 @@ export type WorkspaceTrialStartedEvent = z.infer<typeof WorkspaceTrialStartedEve
 export const WorkspaceTrialKeptInput = z.object({
   type: z.literal('workspace.trial_kept'),
   ...onWorkspaceStream,
-  payload: z.object({ trialId: TrialId, sessionId: SessionId, putAway: z.array(SessionId).max(TRIAL_AGENTS_MAX - 1) }).strict(),
+  payload: z
+    .object({
+      trialId: TrialId,
+      sessionId: SessionId,
+      /** The others whose copies were put away (`not_kept`, restorable). */
+      putAway: z.array(SessionId).max(TRIAL_AGENTS_MAX - 1),
+      /** The others deleted (Delete chat). */
+      removed: z.array(SessionId).max(TRIAL_AGENTS_MAX - 1),
+      /** The others that couldn't go safely and stay as they were. */
+      left: z.array(SessionId).max(TRIAL_AGENTS_MAX - 1),
+    })
+    .strict(),
 });
-/** The user kept one trial chat; the others' copies were put away (`not_kept`, restorable). */
+/** The user kept one trial chat; each other one was put away (`not_kept`, restorable), deleted, or left as it was. No task text. */
 export const WorkspaceTrialKeptEvent = WorkspaceTrialKeptInput.extend(assigned);
 export type WorkspaceTrialKeptEvent = z.infer<typeof WorkspaceTrialKeptEvent>;
 

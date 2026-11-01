@@ -625,6 +625,7 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.worktreeRetention}`,
   `PUT ${API_ROUTES.worktreeRetention}`,
   `POST ${API_ROUTES.workspaceTrials}`,
+  `GET ${API_ROUTES.workspaceTrials}`,
   `GET ${API_ROUTES.workspaceTrial}`,
   `POST ${API_ROUTES.workspaceTrialKeep}`,
   `GET ${API_ROUTES.workspaces}`,

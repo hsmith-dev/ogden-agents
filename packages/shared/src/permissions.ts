@@ -93,6 +93,25 @@ export const WRAPPER_COMMANDS: ReadonlySet<string> = new Set([
   'swift',
   'java',
   'jshell',
+  // Independent review (2026-10-31): more shells, interpreters and wrappers.
+  'tcsh',
+  'csh',
+  'ash',
+  'mksh',
+  'xonsh',
+  'nu',
+  'elvish',
+  'xcrun',
+  'nodejs',
+  'pypy',
+  'ipython',
+  'irb',
+  'ts-node',
+  'tsx',
+  'pkexec',
+  'gdb',
+  'lldb',
+  'valgrind',
 ]);
 
 /**
@@ -103,8 +122,9 @@ export const WRAPPER_COMMANDS: ReadonlySet<string> = new Set([
  * flag in between (`npm -y exec x`) does not hide it.
  */
 export const TWO_WORD_WRAPPERS: Readonly<Record<string, ReadonlySet<string>>> = {
-  // `create` and `init <x>` download and run a package's create script.
-  npm: new Set(['exec', 'x', 'explore', 'create', 'init']),
+  // `create` and `init <x>` download and run a package's create script; `edit` opens an editor. npm takes
+  // abbreviations of its commands (`npm exe` is `npm exec`), so those count too (independent review 2026-10-31).
+  npm: new Set(['exec', 'x', 'e', 'ex', 'exe', 'explore', 'explo', 'explor', 'create', 'cr', 'cre', 'crea', 'creat', 'init', 'ini', 'innit', 'edit', 'ed', 'edi']),
   pnpm: new Set(['exec', 'dlx', 'create']),
   yarn: new Set(['exec', 'dlx', 'node', 'create']),
   uv: new Set(['run', 'tool']),
@@ -125,13 +145,17 @@ export const TWO_WORD_WRAPPERS: Readonly<Record<string, ReadonlySet<string>>> = 
   nix: new Set(['run', 'shell', 'develop']),
   'nix-shell': new Set(['--run', '--command']),
   devbox: new Set(['run']),
-  docker: new Set(['run', 'exec', 'compose']),
-  podman: new Set(['run', 'exec', 'compose']),
+  // `docker container run` is `docker run`, and `create` then `start` runs one too (independent review 2026-10-31).
+  docker: new Set(['run', 'exec', 'compose', 'container', 'create', 'start']),
+  podman: new Set(['run', 'exec', 'compose', 'container', 'create', 'start']),
+  nerdctl: new Set(['run', 'exec', 'compose', 'container', 'create', 'start']),
   'docker-compose': new Set(['run', 'exec']),
   'podman-compose': new Set(['run', 'exec']),
   kubectl: new Set(['exec', 'run', 'debug']),
   dotnet: new Set(['exec']),
   corepack: new Set(['npx', 'pnpx', 'yarn', 'pnpm', 'npm']),
+  // `go run pkg@latest` downloads and runs a module.
+  go: new Set(['run']),
 };
 
 /** A command's first word, as a program name: its last path segment, lowercased, without a Windows program extension. */
@@ -150,7 +174,7 @@ export function alwaysAllowRefusal(command: string): string | undefined {
     return "Always allow isn't offered for a command that sets variables first, because they can change what it runs.";
   }
   const name = programName(first);
-  if (WRAPPER_COMMANDS.has(name) || /^(?:python|pypy|ruby|perl|php|node|lua)\d+(?:\.\d+)*$/.test(name)) {
+  if (WRAPPER_COMMANDS.has(name) || /^(?:python|pypy|ruby|perl|php|node|nodejs|lua)\d+(?:\.\d+)*$/.test(name)) {
     return `Always allow isn't offered for ${name}, because it can run anything.`;
   }
   const subcommands = TWO_WORD_WRAPPERS[name];

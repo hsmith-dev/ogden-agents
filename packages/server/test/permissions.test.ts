@@ -126,19 +126,19 @@ describe('permission cards through the fake ACP agent', () => {
     const { server, tab } = await startChatServer();
     const { workspace, session } = await openChat(server, tab);
     const rulesPath = apiPath(API_ROUTES.permissionRules, { wsId: workspace.id });
-    const first = await ask(server, tab, workspace.id, session.id, 'permission npm install stripe');
-    expect(first.payload.alwaysAllowScope).toEqual({ kind: 'command_exact', value: 'npm install stripe', label: 'npm install stripe' });
-    expect(first.payload.alwaysAllowPrefix).toEqual({ kind: 'command_prefix', value: 'npm install', label: 'npm install' });
+    const first = await ask(server, tab, workspace.id, session.id, 'permission npm test -- cart');
+    expect(first.payload.alwaysAllowScope).toEqual({ kind: 'command_exact', value: 'npm test -- cart', label: 'npm test -- cart' });
+    expect(first.payload.alwaysAllowPrefix).toEqual({ kind: 'command_prefix', value: 'npm test', label: 'npm test' });
     expect((await decide(server, tab, workspace.id, session.id, first.payload.requestId, { decision: 'allow_always', scope: 'prefix' })).status).toBe(204);
     await idle(server, session.id);
 
     const { rules } = PermissionRulesResponse.parse(await (await request(server, tab, 'GET', rulesPath)).json());
-    expect(rules.map((rule) => rule.scope.value)).toEqual(['npm install']);
+    expect(rules.map((rule) => rule.scope.value)).toEqual(['npm test']);
 
-    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId: workspace.id, sesId: session.id }), { text: 'permission npm install lodash' })).status).toBe(202);
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId: workspace.id, sesId: session.id }), { text: 'permission npm test -- lodash' })).status).toBe(202);
     await waitFor(() => replies(server, session.id).length === 2, 'the second reply', 15_000);
     await idle(server, session.id);
-    expect(replies(server, session.id)).toEqual(['Ran npm install stripe.', 'Ran npm install lodash.']);
+    expect(replies(server, session.id)).toEqual(['Ran npm test -- cart.', 'Ran npm test -- lodash.']);
     expect(sessionEvents(server, session.id).flatMap((e) => (e.type === 'session.state_changed' ? [e.payload.state] : []))).toEqual([
       'working',
       'waiting',
@@ -150,7 +150,7 @@ describe('permission cards through the fake ACP agent', () => {
     expect(sessionEvents(server, session.id).filter((e) => e.type === 'permission.resolved').at(-1)?.payload).toMatchObject({ by: 'rule', ruleId: rules[0]!.id });
 
     // A compound command is never covered by a rule.
-    const compound = await ask(server, tab, workspace.id, session.id, 'permission npm install x && rm -rf build');
+    const compound = await ask(server, tab, workspace.id, session.id, 'permission npm test x && rm -rf build');
     expect((await decide(server, tab, workspace.id, session.id, compound.payload.requestId, { decision: 'deny' })).status).toBe(204);
     await idle(server, session.id);
 
@@ -158,7 +158,7 @@ describe('permission cards through the fake ACP agent', () => {
     expect((await request(server, tab, 'DELETE', rulePath)).status).toBe(204);
     expect((await request(server, tab, 'DELETE', rulePath)).status).toBe(404);
     expect(PermissionRulesResponse.parse(await (await request(server, tab, 'GET', rulesPath)).json()).rules).toEqual([]);
-    const after = await ask(server, tab, workspace.id, session.id, 'permission npm install lodash');
+    const after = await ask(server, tab, workspace.id, session.id, 'permission npm test -- lodash');
     expect((await decide(server, tab, workspace.id, session.id, after.payload.requestId, { decision: 'deny' })).status).toBe(204);
     await idle(server, session.id);
   });

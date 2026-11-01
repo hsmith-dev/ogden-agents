@@ -6,9 +6,10 @@
  * from resolving paths on the filesystem.
  */
 import { realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { alwaysAllowRefusal, type AlwaysAllowScope, type CautionLevel, type ToolKind, type Workspace } from '@ogden-agents/shared';
 import type { ProtectedPaths } from './agent-port.js';
+import { prefixRefusedFor, scriptNameIndex } from './command-prefix-allowlists.js';
 import { canonicalWorkspacePath, isCaseInsensitivePath } from './entities.js';
 
 /**
@@ -67,30 +68,51 @@ const TOOL_SCOPE_LABELS: Record<Exclude<ToolKind, 'execute' | 'other'>, string> 
 export const PATH_KINDS: ReadonlySet<ToolKind> = new Set<ToolKind>(['read', 'edit', 'delete', 'move', 'search']);
 
 /**
- * `path` as it would be reached: absolute (relative to `base` otherwise),
- * with the symlinks of its nearest existing parent resolved, case-folded
- * where that filesystem ignores case. `undefined` when it can't be told: a
- * `~` path, a masked one, control characters, or a read error.
+ * `path` as it would be reached: absolute (relative to `base`, a real path,
+ * otherwise), resolved one segment at a time, so each symlink is followed
+ * before the `..` after it (`hk/../hooks` with `hk` a link to `.git/hooks` is
+ * `.git/hooks`, as the kernel reads it; independent review 2026-10-31), and
+ * case-folded where that filesystem ignores case. Segments past the first
+ * that doesn't exist are joined as written. `undefined` when it can't be
+ * told: a `~` path, a masked one, control characters, or a read error.
  */
 function reachedPath(base: string, path: string): string | undefined {
   if (path === '' || path.startsWith('~') || path.includes(MASKED) || /[\u0000-\u001f\u007f]/.test(path)) return undefined;
-  let current = isAbsolute(path) ? resolve(path) : resolve(base, path);
-  const rest: string[] = [];
-  for (;;) {
+  const absolute = isAbsolute(path);
+  let current = absolute ? parse(resolve(path)).root : base;
+  let lastReal = current;
+  let exists = true;
+  for (const segment of (absolute ? path.slice(parse(path).root.length) : path).split(/[\\/]+/)) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') {
+      current = dirname(current);
+      if (exists) lastReal = current;
+      continue;
+    }
+    const next = join(current, segment);
+    if (!exists) {
+      current = next;
+      continue;
+    }
     try {
-      const real = realpathSync.native(current);
-      const reached = rest.length === 0 ? real : join(real, ...rest.reverse());
-      return isCaseInsensitivePath(real) ? reached.toLowerCase() : reached;
+      current = realpathSync.native(next);
+      lastReal = current;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'ENOENT' && code !== 'ENOTDIR') return undefined;
-      const parent = dirname(current);
-      if (parent === current) return undefined;
-      rest.push(basename(current));
-      current = parent;
+      exists = false;
+      current = next;
     }
   }
+  return isCaseInsensitivePath(lastReal) ? current.toLowerCase() : current;
 }
+
+/**
+ * Whether one path part names another machine or a URL (independent review
+ * 2026-10-31): `host:path`, `user@host:path` (scp, rsync, git remotes) or
+ * `scheme://...`. Such a part is never inside the project.
+ */
+const isRemotePart = (part: string): boolean => /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(part) || /^[^/\\:]+:/.test(part);
 
 /**
  * Whether the tool call names at least one path and every one of them lies
@@ -189,8 +211,17 @@ export function commandPathsReach(
   const prefix = root.endsWith(sep) ? root : root + sep;
   let outside = false;
   let touchesProtected = commandNamesProtectedPath(command, extraFolders);
-  for (const word of words(command)) {
+  const given = words(command);
+  const script = scriptNameIndex(
+    given.map((word) => word.replace(/["']/g, '')),
+    programName(given[0]?.replace(/["']/g, '') ?? ''),
+  );
+  for (const [index, word] of given.entries()) {
     for (const part of commandPathParts(word)) {
+      if (index !== script && isRemotePart(part)) {
+        outside = true;
+        continue;
+      }
       const reached = reachedPath(base, part);
       if (reached === undefined || (reached !== root && !reached.startsWith(prefix))) {
         outside = true;
@@ -207,53 +238,20 @@ export function commandPathsRulable(workspace: Pick<Workspace, 'path' | 'realPat
   return commandPathsReach(workspace, command, extraFolders) === 'inside';
 }
 
-/** Programs whose ordinary arguments can run another command or edit their own config (`sed 's/x/y/e'`, `ssh host cmd`, `vim -c '!x'`): never covered by a prefix. */
-const PREFIX_UNSAFE_PROGRAMS: ReadonlySet<string> = new Set(['sed', 'gsed', 'ssh', 'scp', 'sftp', 'vi', 'vim', 'nvim', 'view', 'emacs', 'ed', 'ex', 'less', 'more', 'man', 'crontab']);
-
-/** Per program, options by which it runs another command (`find -exec`, `tar --to-command`, `rsync -e`): a command holding one is never covered by a prefix. */
-const PREFIX_UNSAFE_OPTIONS: Readonly<Record<string, RegExp>> = {
-  find: /^-(?:exec|execdir|ok|okdir)$/,
-  tar: /^(?:--to-command|--checkpoint-action|--use-compress-program|--info-script|--new-volume-script|--rsh-command|--rmt-command)(?:=|$)|^-[A-Za-z]*[IF]/,
-  rsync: /^(?:--rsh|--rsync-path)(?:=|$)|^-[A-Za-z]*e/,
-  zip: /^--unzip-command(?:=|$)|^-[A-Za-z]*T/,
-  npm: /^--(?:script-shell|node-options|userconfig|globalconfig)(?:=|$)/,
-  pnpm: /^--(?:script-shell|node-options|config\.)/,
-  yarn: /^--(?:script-shell|node-options)(?:=|$)/,
-  make: /^--eval(?:=|$)/,
-  git: /^(?:--exec|-x|--upload-pack|--receive-pack|--extcmd|--ext-diff|--textconv|--sendmail-cmd|--to-cmd|--cc-cmd|--smtp-server|--template)(?:=|$)/,
-};
-
-/** Git subcommands that run another command or write git's config: never covered by a prefix. */
-const GIT_PREFIX_UNSAFE_SUBCOMMANDS: ReadonlySet<string> = new Set(['config', 'bisect', 'submodule', 'filter-branch', 'difftool', 'mergetool', 'daemon', 'instaweb', 'send-email', 'archive', 'credential', 'hook', 'alias']);
-
 /**
  * Why a prefix rule must not cover `command` even though an exact rule may
- * (AD-40 security review): a program whose arguments can run another command
- * (`sed`, `ssh`), an option that does (`find -exec`, `git rebase --exec`), or
- * git's global `-c`, `--config-env`, `--exec-path` and the options that point
- * it at another repo (`-C`, `--git-dir`, `--work-tree`, ...). `undefined` when a
- * prefix may cover it.
+ * (AD-40 security review, and the independent review of 2026-10-31): a
+ * program no prefix covers (`ssh`, `docker`, `rsync`, `sed`), one whose
+ * words leave its allowlist (git, tar, npm, pnpm, yarn, go: see
+ * `command-prefix-allowlists.ts`), or an option that runs another command
+ * (`find -exec`). `undefined` when a prefix may cover it.
  */
 export function prefixRuleRefusal(command: string): string | undefined {
-  const given = words(command).map((word) => word.replace(/["']/g, ''));
+  const raw = words(command);
+  const given = raw.map((word) => word.replace(/["']/g, ''));
   const name = programName(given[0] ?? '');
   const refusal = `Commands starting with ${name} aren't offered, because its options can run another command.`;
-  if (PREFIX_UNSAFE_PROGRAMS.has(name)) return refusal;
-  const unsafe = PREFIX_UNSAFE_OPTIONS[name];
-  if (unsafe !== undefined && given.slice(1).some((word) => unsafe.test(word))) return refusal;
-  if (name === 'git') {
-    // Global options come before the subcommand. `-c`, `--config-env` and `--exec-path` run commands; `-C`,
-    // `--git-dir`, `--work-tree`, `--namespace`, `--bare` and `--super-prefix` point git at another repo,
-    // whose config (core.fsmonitor, core.pager, core.sshCommand) can run commands.
-    let index = 1;
-    while (index < given.length && given[index]!.startsWith('-')) {
-      const option = given[index]!;
-      if (option === '-c' || option === '-C' || /^--(?:config-env|exec-path|git-dir|work-tree|namespace|bare|super-prefix)(?:=|$)/.test(option)) return refusal;
-      index += 1;
-    }
-    if (index < given.length && GIT_PREFIX_UNSAFE_SUBCOMMANDS.has(given[index]!.toLowerCase())) return refusal;
-  }
-  return undefined;
+  return prefixRefusedFor(name, given.slice(1), raw.slice(1)) ? refusal : undefined;
 }
 
 /** A command's first word, as a program name: its last path segment, lowercased, without a Windows program extension. */

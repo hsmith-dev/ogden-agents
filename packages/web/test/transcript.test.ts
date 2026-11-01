@@ -480,3 +480,27 @@ describe('sessionView: send now or wait', () => {
     expect(note(later)?.type === 'interrupted' && note(later)?.cancelledRequest).toBeFalsy();
   });
 });
+
+describe('sessionView: a tool call held by its permission card (epic 26 story 4)', () => {
+  const call = (status: string) => toolCall('t-req_1', 'Run npm test', 'execute', status);
+  const heldOf = (events: CoreEvent[]) => {
+    const tools = sessionView(events, 'ses_1').items.find((item) => item.type === 'tools');
+    return tools?.type === 'tools' ? tools.calls[0]?.held : 'no call';
+  };
+
+  it('waits while the card is open, then runs once allowed', () => {
+    const asking = [created(), stateChanged('working', 'idle'), call('pending'), requested('req_1'), stateChanged('waiting', 'working')];
+    expect(heldOf(asking)).toBe('waiting');
+    const allowed = [...asking, resolved('req_1', 'allow_once', 'user'), stateChanged('working', 'waiting')];
+    expect(heldOf(allowed)).toBeUndefined();
+    expect(heldOf([...allowed, toolCallUpdated('t-req_1', 'Run npm test', 'execute', 'in_progress')])).toBeUndefined();
+  });
+
+  it('is denied once the card was denied, but not when it was cancelled or left unanswered', () => {
+    const asking = [created(), stateChanged('working', 'idle'), call('pending'), requested('req_1'), stateChanged('waiting', 'working')];
+    expect(heldOf([...asking, resolved('req_1', 'deny', 'user'), stateChanged('working', 'waiting'), toolCallUpdated('t-req_1', 'Run npm test', 'execute', 'failed')])).toBe('denied');
+    expect(heldOf([...asking, resolved('req_1', 'deny', 'cancelled'), stateChanged('idle', 'waiting')])).toBeUndefined();
+    // The agent went away with the card unanswered: the row says what its status says.
+    expect(heldOf([...asking, stateChanged('idle', 'waiting')])).toBeUndefined();
+  });
+});

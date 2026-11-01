@@ -12,6 +12,7 @@ import { useChatAgents } from '@/chat/use-chat-agents';
 import { Composer } from '@/chat/composer';
 import { chatDraftKey } from '@/chat/drafts';
 import { HandoffDialog } from '@/chat/handoff-dialog';
+import { onBeforeChatDetailChange, setChatDetail, useChatDetail } from '@/chat/detail-level';
 import { CONTINUE_WITH_ANOTHER_AGENT, SessionMenu } from '@/chat/session-menu';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
@@ -225,6 +226,54 @@ export function SessionPage() {
   useLayoutEffect(() => {
     if (!history.loading) anchor.current = undefined;
   }, [history.loading]);
+
+  // The chat's detail level (epic 26 story 4): switching keeps the item in view where it was.
+  // A switch changes only what a tools item holds, never how many items there are, so the
+  // transcript's child index finds the same item after it.
+  const detail = useChatDetail(sesId, appearance.developerMode);
+  const transcriptRef = useRef<HTMLElement>(null);
+  const detailAnchor = useRef<{ index: number; offset: number } | undefined>(undefined);
+  const detailNow = useRef(detail);
+  detailNow.current = detail;
+  useEffect(
+    () =>
+      onBeforeChatDetailChange((changed, next) => {
+        detailAnchor.current = undefined;
+        const container = scroller();
+        const section = transcriptRef.current;
+        // The same level again changes nothing, so no layout effect would clear an anchor kept now.
+        if (changed !== sesId || next === detailNow.current || container === null || section === null) return;
+        const box = container.getBoundingClientRect();
+        const children = [...section.children];
+        const startsInView = (child: Element) => {
+          const { top } = child.getBoundingClientRect();
+          return top >= box.top && top < box.bottom;
+        };
+        // The item that starts in view nearest its middle and is not tool calls (those change size, and
+        // tool calls between the top and the item would push it), else the first that starts in view, else
+        // the one the view starts inside.
+        const middle = box.top + box.height / 2;
+        let index = -1;
+        children.forEach((child, at) => {
+          if (!startsInView(child) || child.getAttribute('data-testid') === 'tool-calls') return;
+          const distance = Math.abs(child.getBoundingClientRect().top - middle);
+          if (index === -1 || distance < Math.abs(children[index]!.getBoundingClientRect().top - middle)) index = at;
+        });
+        if (index === -1) index = children.findIndex(startsInView);
+        if (index === -1) index = children.findIndex((child) => child.getBoundingClientRect().bottom > box.top);
+        if (index === -1) return;
+        detailAnchor.current = { index, offset: children[index]!.getBoundingClientRect().top - box.top };
+      }),
+    [sesId, scroller],
+  );
+  useLayoutEffect(() => {
+    const kept = detailAnchor.current;
+    detailAnchor.current = undefined;
+    const container = scroller();
+    const child = transcriptRef.current?.children[kept?.index ?? -1];
+    if (kept === undefined || container === null || child === undefined) return;
+    container.scrollTop += child.getBoundingClientRect().top - container.getBoundingClientRect().top - kept.offset;
+  }, [detail, scroller]);
 
   // A new card announces once, assertively, and never takes focus.
   useEffect(() => {
@@ -504,7 +553,14 @@ export function SessionPage() {
             onSwitch={switchTo}
           />
         ) : null}
-        {severalAgents && session.data !== undefined ? <SessionMenu blockedReason={handoffBlocked} onContinue={() => setHandoffOpen(true)} /> : null}
+        {session.data !== undefined ? (
+          <SessionMenu
+            detail={detail}
+            onDetail={(next) => setChatDetail(sesId, next)}
+            blockedReason={handoffBlocked}
+            onContinue={severalAgents ? () => setHandoffOpen(true) : undefined}
+          />
+        ) : null}
       </WorkspaceHeader>
       <HandoffDialog
         open={handoffOpen}
@@ -547,7 +603,7 @@ export function SessionPage() {
           {/* While the terminal drives: readable, nothing in it sends (3.6 review F2). */}
           {/* And while the chat's agent is removed (story 21.4). */}
           <ReadOnlyConversation.Provider value={terminalDrives || agentRemoved}>
-            <section aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
+            <section ref={transcriptRef} aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
               {!loading && (history.hasEarlier || history.error !== undefined) ? (
                 <EarlierHistory loading={history.loading} error={history.error} onShow={showEarlier} />
               ) : null}
@@ -566,7 +622,7 @@ export function SessionPage() {
                   item.type === 'message' ? (
                     <Message key={item.message.messageId} message={item.message} agentName={nameOf(item.message.agentId)} />
                   ) : item.type === 'tools' ? (
-                    <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} density={appearance.density} />
+                    <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} detail={detail} />
                   ) : item.type === 'resumed' ? (
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
                   ) : item.type === 'agent_changed' ? (

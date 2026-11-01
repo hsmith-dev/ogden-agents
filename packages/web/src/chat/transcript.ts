@@ -54,6 +54,12 @@ export interface TranscriptToolCall {
   kind: ToolKind;
   status: ToolCallStatus;
   diffs: ToolCallDiff[] | undefined;
+  /**
+   * The call's permission card (epic 26 story 4): `waiting` while it is still
+   * open, `denied` once it was denied. Absent otherwise (no card, allowed, or
+   * a card left unanswered).
+   */
+  held?: 'waiting' | 'denied';
 }
 
 /** The latest `session.check_in` (story 2.10), until any later event of the session. */
@@ -379,6 +385,12 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
     // Only a waiting session is holding a request for its answer; any other has let it go.
     if (permission.status === 'pending' && view.state !== 'waiting') permission.status = 'unanswered';
     if (permission.status === 'pending') view.pendingPermissions.push(permission);
+    // The tool call the card holds says so; the latest request for a call decides (tool calls are fresh per fold).
+    const held = toolCalls.get(permission.toolCall.toolCallId);
+    if (held === undefined) continue;
+    if (permission.status === 'pending') held.held = 'waiting';
+    else if (permission.resolution?.decision === 'deny' && permission.resolution.by !== 'cancelled') held.held = 'denied';
+    else delete held.held;
   }
   return view;
 }

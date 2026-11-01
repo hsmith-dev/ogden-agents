@@ -334,6 +334,36 @@ describe('the team of a project and the default for new projects', () => {
     expect(core.events.readAfter(0).some((event) => event.type === 'settings.team_roster_default_changed')).toBe(false);
   });
 
+  it('forgetting an agent clears each role of the default that names it, with one event, and leaves projects as they are', async () => {
+    const { team, workspace, core, dataDir } = await setUp();
+    core.permissions.updateSettings(workspace.id, { orchestrationRoster: { worker: { kind: 'agent', agentId: 'beta' } } });
+    await team.setDefault({ planner: { kind: 'agent', agentId: 'beta' }, worker: { kind: 'agent', agentId: 'alpha' }, reviewer: { kind: 'agent', agentId: 'beta' } });
+    const seqBefore = core.events.lastSeq();
+    expect(team.forgetAgent('beta')).toBe(true);
+    const cleared = { ...none, worker: { kind: 'agent', agentId: 'alpha' } };
+    expect(JSON.parse(readFileSync(join(dataDir, PREFERENCES_FILE), 'utf8')).newProjects.orchestrationRoster).toEqual(cleared);
+    expect((await team.defaultView()).stored).toEqual(cleared);
+    const events = core.events.readAfter(seqBefore);
+    expect(events.map((event) => event.type)).toEqual(['settings.team_roster_default_changed']);
+    expect(events[0]).toMatchObject({ workspaceId: null, payload: { orchestrationRoster: cleared, previousOrchestrationRoster: { planner: { agentId: 'beta' }, reviewer: { agentId: 'beta' } } } });
+    // The project's own roster still names it.
+    expect((await team.view(workspace.id)).stored.worker).toEqual({ kind: 'agent', agentId: 'beta' });
+    // Nothing names it now, or another agent: nothing changes, nothing is appended.
+    const after = core.events.lastSeq();
+    const file = readFileSync(join(dataDir, PREFERENCES_FILE), 'utf8');
+    expect(team.forgetAgent('beta')).toBe(false);
+    expect(team.forgetAgent('gamma')).toBe(false);
+    expect(readFileSync(join(dataDir, PREFERENCES_FILE), 'utf8')).toBe(file);
+    expect(core.events.lastSeq()).toBe(after);
+  });
+
+  it('forgetting an agent with no default roster writes nothing', async () => {
+    const { team, core, dataDir } = await setUp();
+    expect(team.forgetAgent('alpha')).toBe(false);
+    expect(existsSync(join(dataDir, PREFERENCES_FILE))).toBe(false);
+    expect(core.events.readAfter(0).some((event) => event.type === 'settings.team_roster_default_changed')).toBe(false);
+  });
+
   it('a project with no roster at all and an older preferences file read as defaults', async () => {
     const { team, workspace, defaults } = await setUp();
     expect(defaults.get()).toEqual({ bmadPieces: [] });

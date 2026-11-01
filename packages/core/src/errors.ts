@@ -599,6 +599,15 @@ export class SecretsUnavailableError extends CoreError {
   }
 }
 
+/** Throws a schema's refusal as a {@link ValidationError}: its first issue's words (else `fallback`), every issue kept. */
+export function refuseInvalid(error: { issues: Array<{ path: PropertyKey[]; message: string }> }, fallback: string): never {
+  const issue = error.issues[0];
+  throw new ValidationError(issue?.message ?? fallback, error.issues.map((each) => ({ path: each.path, message: each.message })));
+}
+
+/** A keychain failure as callers see it: a {@link SecretsUnavailableError} as it is, anything else as one with cause `unexpected`. */
+export const secretsUnavailable = (error: unknown): SecretsUnavailableError => (error instanceof SecretsUnavailableError ? error : new SecretsUnavailableError(undefined, { cause: 'unexpected' }));
+
 /** The agent's provider refused the API key (story 9.2); it was not stored. The message never echoes the key. */
 export class ApiKeyRefusedError extends CoreError {
   override readonly name = 'ApiKeyRefusedError';

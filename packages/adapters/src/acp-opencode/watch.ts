@@ -14,7 +14,7 @@
  * only an endpoint that can't be reached counts. The key is only used for the
  * look itself and never kept.
  */
-import { AgentError, type AgentPort, type AgentSession, type StartAgentSession } from '@ogden-agents/core';
+import { AgentError, keptAgentFlags, type AgentPort, type AgentSession, type StartAgentSession } from '@ogden-agents/core';
 import { probeEndpoint } from '../local-model-openai/probe.js';
 import { ENDPOINT_KEY_ENV, ENDPOINT_URL_ENV } from './constants.js';
 import { FAILURE_WORDS } from './failures.js';
@@ -108,11 +108,8 @@ export function withEndpointWatch(agent: AgentPort, options: EndpointWatchOption
     get permissionModes() {
       return agent.permissionModes;
     },
-    ...(agent.modeFixedAtStart === true ? { modeFixedAtStart: true } : {}),
-    // What Build reads of the agent (epic 21 story 21.6): kept through the wrapper, or the picker falls back to the generic reason.
-    ...(agent.unattendedBuild === undefined ? {} : { unattendedBuild: agent.unattendedBuild }),
-    ...(agent.attendedOnlyReason === undefined ? {} : { attendedOnlyReason: agent.attendedOnlyReason }),
-    ...(agent.localOnlyReason === undefined ? {} : { localOnlyReason: agent.localOnlyReason }),
+    // What Build and the remote check read of the agent (epic 21 story 21.6): kept through the wrapper, or the picker falls back to the generic reason.
+    ...keptAgentFlags(agent),
     async startSession(input) {
       return watched(await agent.startSession(input), input.env, options);
     },

@@ -236,7 +236,7 @@ describe('Hand off between this folder and its own worktree (27.4)', () => {
     expect(kit.git.changes(kit.repo).size).toBe(0);
     expect(kit.moved(session.id).map((event) => event.payload)).toEqual([{ sessionId: session.id, location: 'worktree', previous: 'this_folder', branch, files: 3, resumes: true }]);
     expect(kit.snapshots).toEqual([{ sessionId: session.id, from: 'f'.repeat(40), to: 'e'.repeat(40) }]);
-    expect(kit.chat.chatLocation(kit.workspace.id, session.id)).toEqual({ kind: 'worktree', branch, port: null, putAway: false });
+    expect(kit.chat.chatLocation(kit.workspace.id, session.id)).toEqual({ kind: 'worktree', branch, port: null, setup: null, putAway: false });
 
     // Released first; the next turn reopens its own agent session in the copy.
     await kit.turn(session.id);
@@ -322,7 +322,7 @@ describe('Hand off between this folder and its own worktree (27.4)', () => {
     const session = await kit.chat.createChatSession(kit.workspace.id, { location: 'worktree' });
     kit.git.changes(session.worktreePath!).add('a.txt');
     kit.putAway.add(session.id);
-    expect(kit.chat.chatLocation(kit.workspace.id, session.id)).toEqual({ kind: 'worktree', branch: session.branch, port: null, putAway: true });
+    expect(kit.chat.chatLocation(kit.workspace.id, session.id)).toEqual({ kind: 'worktree', branch: session.branch, port: null, setup: null, putAway: true });
     const error = await refusal(kit.chat.moveChat(kit.workspace.id, session.id, 'this_folder'));
     expect(error).toBeInstanceOf(WorktreePutAwayError);
     expect(error?.message).toBe(HANDOFF_PUT_AWAY_TEXT);

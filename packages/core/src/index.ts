@@ -92,6 +92,7 @@ export * from './editor-launch.js';
 export * from './project-commands.js';
 export * from './where-work-runs.js';
 export * from './worktree-put-away-store.js';
+export * from './worktree-ports.js';
 export * from './worktree-retention.js';
 export * from './chat-locations.js';
 export * from './project-command-parsers.js';

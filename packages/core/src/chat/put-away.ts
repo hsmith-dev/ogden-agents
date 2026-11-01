@@ -48,6 +48,7 @@ import { workspaceFolder } from '../workspace-root.js';
 import { listedPutAway } from '../worktree-put-away-store.js';
 import type { Agents } from './agents.js';
 import type { ChatContext } from './context.js';
+import { readyCopy, releasePort, stopSetup } from './copy-port.js';
 import type { Chat } from './types.js';
 
 /** How long a put-away waits for the chat's agent and terminal to exit before it gives up, removing nothing. */
@@ -94,12 +95,13 @@ export function createPutAway(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { s
     return session as Session & { worktreePath: string; branch: string };
   };
 
-  /** Waits (bounded) for the chat's agent and terminal to exit; whether they did. */
+  /** Waits (bounded) for the chat's agent, terminal and setup run (27.7) to exit; whether they did. */
   const stopLive = async (sessionId: SessionId): Promise<boolean> => {
     const entry = live.get(sessionId);
     if (entry !== undefined) deps.drop(sessionId, entry);
     const terminalStopped = deps.stopTerminal(sessionId).catch(() => undefined);
-    return (await withinTimeout(Promise.all([droppedAgents.get(sessionId), terminalStopped]).then(() => true), stopMs)) === true;
+    const [exited, setupStopped] = await Promise.all([withinTimeout(Promise.all([droppedAgents.get(sessionId), terminalStopped]).then(() => true), stopMs), stopSetup(ctx, sessionId)]);
+    return exited === true && setupStopped;
   };
 
   const added = (sessionId: SessionId): void => {
@@ -171,6 +173,8 @@ export function createPutAway(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { s
         // The authoritative save, with the agent stopped. A failed or refused snapshot removes nothing.
         const saved = await save(port, repoPath, session);
         const record = store.insert({ sessionId, workspaceId: session.workspaceId, branch: session.branch, snapshotTree: saved.snapshotTree, head: saved.head, files: saved.files, cause });
+        // Put away: its port goes back (27.7), kept as the one Restore tries first.
+        await releasePort(ctx, sessionId);
         // Saved again just before the removal: a write since (an editor, a process outside Ogden) keeps the folder, half put away.
         let unchanged: boolean;
         try {
@@ -208,6 +212,7 @@ export function createPutAway(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { s
     const repoPath = workspaceFolder(ctx.getWorkspace(workspaceId));
     puttingAway.add(sessionId);
     let restored: { branch: string; on: RestoredOn } | undefined;
+    let given: number | null = null;
     try {
       await serializedByRepo(repoPath, async () => {
         const current = store.get(sessionId);
@@ -232,11 +237,13 @@ export function createPutAway(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { s
         });
         restored = result;
       });
+      // Its port again (the same one when still free), then the server's setup in the copy (27.7): while still held, so no turn starts without its PORT.
+      given = await readyCopy(ctx, sessionId, { workspaceId, worktreePath: copy.worktreePath });
     } finally {
       puttingAway.delete(sessionId);
     }
     added(sessionId);
-    return { location: { kind: 'worktree', branch: restored!.branch, port: null, putAway: false }, restored: restored!.on };
+    return { location: { kind: 'worktree', branch: restored!.branch, port: given, setup: null, putAway: false }, restored: restored!.on };
   }
 
   return methods;

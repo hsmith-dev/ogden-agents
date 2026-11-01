@@ -620,6 +620,7 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.sessionLocation}`,
   `POST ${API_ROUTES.sessionLocation}`,
   `POST ${API_ROUTES.sessionWorktreeRestore}`,
+  `GET ${API_ROUTES.sessionWorktreeIgnoredFiles}`,
   `GET ${API_ROUTES.workspacePutAwayWorktrees}`,
   `GET ${API_ROUTES.worktreeRetention}`,
   `PUT ${API_ROUTES.worktreeRetention}`,

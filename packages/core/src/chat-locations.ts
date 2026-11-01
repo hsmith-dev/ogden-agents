@@ -4,14 +4,19 @@
  * from a route and are parsed here against the shared schemas. A malformed
  * id is the same `NotFoundError` as an unknown one; a malformed body is a
  * `ValidationError`. The chat itself checks the project and the session
- * (another project's session is `NotFoundError`).
+ * (another project's session is `NotFoundError`). A worktree chat's
+ * Location carries its copy's latest setup run (27.7, `setupOf`: the
+ * server's `ProjectCommands.setupOf`).
  */
-import { HandOffRequest, SessionId, WorkspaceId, type CopyIgnoredFilesResponse, type HandOffResponse, type SessionLocationResponse } from '@ogden-agents/shared';
+import { HandOffRequest, SessionId, WorkspaceId, type CopyIgnoredFilesResponse, type HandOffResponse, type SessionLocationResponse, type WorktreeSetupRun } from '@ogden-agents/shared';
 import type { Chat } from './chat/types.js';
 import { NotFoundError, ValidationError } from './errors.js';
 import type { ChatLocations } from './where-work-runs.js';
 
-export function createChatLocations(chat: Pick<Chat, 'chatLocation' | 'moveChat' | 'copyIgnoredFiles'>): ChatLocations {
+export function createChatLocations(
+  chat: Pick<Chat, 'chatLocation' | 'moveChat' | 'copyIgnoredFiles'>,
+  options: { setupOf?: ((sessionId: SessionId) => WorktreeSetupRun | null) | undefined } = {},
+): ChatLocations {
   const ids = (workspaceId: unknown, sessionId: unknown) => {
     const ws = WorkspaceId.safeParse(workspaceId);
     if (!ws.success) throw new NotFoundError('workspace', 'requested');
@@ -22,7 +27,9 @@ export function createChatLocations(chat: Pick<Chat, 'chatLocation' | 'moveChat'
   return {
     async location(workspaceId, sessionId): Promise<SessionLocationResponse> {
       const parsed = ids(workspaceId, sessionId);
-      return { location: chat.chatLocation(parsed.workspaceId, parsed.sessionId) };
+      const location = chat.chatLocation(parsed.workspaceId, parsed.sessionId);
+      if (location.kind !== 'worktree' || options.setupOf === undefined) return { location };
+      return { location: { ...location, setup: options.setupOf(parsed.sessionId) } };
     },
     async handOff(workspaceId, sessionId, body): Promise<HandOffResponse> {
       const parsed = ids(workspaceId, sessionId);

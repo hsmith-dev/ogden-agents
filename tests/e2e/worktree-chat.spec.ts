@@ -12,7 +12,8 @@
  * worktree and back from the Location chip, confirmed once, intact both
  * times, with a "Moved to" divider each time. Removing a copy (Delete
  * chat, Move to this folder) lists its ignored `.env` first, never what is
- * in its `node_modules` (user decision 2026-11-01).
+ * in its `node_modules` (user decision 2026-11-01). The copy's own port
+ * shows beside the badge with its tooltip (27.7).
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -67,6 +68,14 @@ test('a worktree chat shows its branch, writes only in its copy, opens the Workb
     const badge = page.getByTestId('worktree-badge');
     await expect(badge).toContainText(branch);
     await expect(page.getByTestId('setup-row').getByTestId('location-branch')).toHaveText(branch);
+    // Its copy's own port beside the badge (27.7), the same one its agent got as PORT.
+    const port = page.getByTestId('worktree-port');
+    await expect(port).toHaveText(/^Port 41\d{3}$/);
+    const location = await call<{ location: { port: number | null } }>('GET', apiPath(API_ROUTES.sessionLocation, { wsId, sesId }));
+    await expect(port).toHaveText(`Port ${location.location.port}`);
+    await port.focus();
+    await expect(page.getByTestId('worktree-port-hint').first()).toContainText(`Runs on port ${location.location.port} in this copy`);
+    await page.keyboard.press('Escape');
     await noAxeViolations(page, 'header');
     await page.setViewportSize({ width: 390, height: 844 });
     await expectNoHorizontalOverflow(page);

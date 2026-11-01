@@ -86,7 +86,7 @@ describe('worktree retention on the real server (27.6)', () => {
     // Restore puts the cap over again: the other one (idle) is put away, sparing the one restored.
     const restored = await kit.restore(first.id);
     expect(restored.status).toBe(200);
-    expect(RestoreWorktreeResponse.parse(await restored.json())).toEqual({ location: { kind: 'worktree', branch: first.branch, port: null, putAway: false }, restored: 'saved' });
+    expect(RestoreWorktreeResponse.parse(await restored.json())).toEqual({ location: { kind: 'worktree', branch: first.branch, port: 41_000, setup: null, putAway: false }, restored: 'saved' });
     expect(readFileSync(join(first.worktreePath!, 'notes.txt'), 'utf8')).toBe('from the first chat\n');
     expect(git(first.worktreePath!, 'status', '--porcelain')).toBe('?? notes.txt\n');
     await waitFor(() => kit.server.core.worktreePutAway.get(second.id) !== undefined, 'the second copy put away', 20_000);
@@ -112,7 +112,7 @@ describe('worktree retention on the real server (27.6)', () => {
     const restored = await kit.restore(first.id);
     expect(restored.status).toBe(200);
     const branch = `${first.branch!}-restored`;
-    expect(RestoreWorktreeResponse.parse(await restored.json())).toEqual({ location: { kind: 'worktree', branch, port: null, putAway: false }, restored: 'gone' });
+    expect(RestoreWorktreeResponse.parse(await restored.json())).toEqual({ location: { kind: 'worktree', branch, port: 41_000, setup: null, putAway: false }, restored: 'gone' });
     expect(git(first.worktreePath!, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(branch);
     expect(git(first.worktreePath!, 'rev-parse', 'HEAD').trim()).toBe(head);
     expect(kit.server.core.worktreePutAway.get(first.id)).toBeUndefined();

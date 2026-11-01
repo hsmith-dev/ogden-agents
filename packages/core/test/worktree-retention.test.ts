@@ -161,7 +161,7 @@ describe('putting a chat worktree away (27.6)', () => {
     expect(kit.core.worktreePutAway.get(session.id)).toBeDefined();
     expect(() => kit.chat.sendMessage(kit.workspace.id, session.id, 'hi')).toThrow(WorktreePutAwayError);
 
-    expect(await kit.chat.restoreWorktree(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch: session.branch, port: null, putAway: false }, restored: 'saved' });
+    expect(await kit.chat.restoreWorktree(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch: session.branch, port: null, setup: null, putAway: false }, restored: 'saved' });
     expect(kit.core.worktreePutAway.get(session.id)).toBeUndefined();
     expect([...kit.copies.changes(path)]).toEqual(['a.txt']);
   });
@@ -175,7 +175,7 @@ describe('Restore (27.6)', () => {
     const putAway = await kit.chat.putAwayWorktree(session.id, 'retention');
     kit.copies.forget(path);
 
-    expect(await kit.retention.restore(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch, port: null, putAway: false }, restored: 'saved' });
+    expect(await kit.retention.restore(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch, port: null, setup: null, putAway: false }, restored: 'saved' });
     expect(kit.copies.calls.at(-1)).toBe(`restore ${kit.repo} ${path} ${branch} ${kit.core.worktreePutAway.listAll().length === 0 ? [...kit.copies.snapshots.keys()].at(-1) : ''}`);
     expect([...kit.copies.changes(path)]).toEqual(['a.txt']);
     expect(kit.core.worktreePutAway.get(session.id)).toBeUndefined();
@@ -204,7 +204,7 @@ describe('Restore (27.6)', () => {
     kit.copies.forget(path);
     kit.copies.heads.set(branch, 'd'.repeat(40));
     kit.copies.forwardBranches.add(branch);
-    expect(await kit.chat.restoreWorktree(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch, port: null, putAway: false }, restored: 'newer' });
+    expect(await kit.chat.restoreWorktree(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch, port: null, setup: null, putAway: false }, restored: 'newer' });
     expect(kit.core.entities.getSession(session.id)?.branch).toBe(branch);
     expect(kit.events().some((event) => event.type === 'session.location_changed')).toBe(false);
   });
@@ -221,7 +221,7 @@ describe('Restore (27.6)', () => {
     change(kit.copies, branch);
     const restoredBranch = `${branch}-restored`;
     const before = kit.events().length;
-    expect(await kit.chat.restoreWorktree(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch: restoredBranch, port: null, putAway: false }, restored: on });
+    expect(await kit.chat.restoreWorktree(kit.workspace.id, session.id)).toEqual({ location: { kind: 'worktree', branch: restoredBranch, port: null, setup: null, putAway: false }, restored: on });
     expect(kit.copies.calls.at(-1)).toContain(`restore ${kit.repo} ${path} ${branch} `);
     expect([...kit.copies.changes(path)]).toEqual(['a.txt']);
     expect(kit.core.entities.getSession(session.id)).toMatchObject({ branch: restoredBranch, worktreePath: path });

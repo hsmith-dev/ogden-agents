@@ -21,6 +21,9 @@ export const ProjectCommandId = z
   .regex(/^[a-z][a-z0-9-]*$/, 'A command id: lower-case letters, digits and dashes.');
 export type ProjectCommandId = z.infer<typeof ProjectCommandId>;
 
+/** The id of the command run in each new worktree copy (27.7): declared beside test and lint, never offered, never run from Problems. */
+export const WORKTREE_SETUP_COMMAND_ID = 'setup';
+
 /** Where a command came from: the project's settings, or a `package.json` script (offered until confirmed). */
 export const ProjectCommandSource = z.enum(['settings', 'package_json']);
 export type ProjectCommandSource = z.infer<typeof ProjectCommandSource>;

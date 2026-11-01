@@ -20,6 +20,7 @@ import type {
   SessionKind,
   SessionState,
 } from '@ogden-agents/shared';
+import { sql } from 'drizzle-orm';
 import { foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const workspaces = sqliteTable(
@@ -631,4 +632,24 @@ export const chatWorktreesPutAway = sqliteTable(
     putAwayAt: text('put_away_at').notNull(),
   },
   (t) => [uniqueIndex('chat_worktrees_put_away_session_unique').on(t.sessionId), index('chat_worktrees_put_away_workspace_idx').on(t.workspaceId)],
+);
+
+/**
+ * A worktree chat's port (27.7; CAP-35, AD-38): one row per chat that was
+ * ever given one. `held = 1` while its copy holds the port; a released row
+ * (`held = 0`) keeps the port the chat had, so Restore gives the same one
+ * back when it is still free. The partial unique index means two chats
+ * never hold one port. Gone with its session.
+ */
+export const chatWorktreePorts = sqliteTable(
+  'chat_worktree_ports',
+  {
+    sessionId: text('session_id')
+      .primaryKey()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    port: integer('port').notNull(),
+    held: integer('held').notNull(),
+    assignedAt: text('assigned_at').notNull(),
+  },
+  (t) => [uniqueIndex('chat_worktree_ports_held_port_unique').on(t.port).where(sql`${t.held} = 1`)],
 );

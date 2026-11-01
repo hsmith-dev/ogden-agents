@@ -108,6 +108,10 @@ afterEach(() => {
   fake.sessions = [];
 });
 
+async function flushAll() {
+  for (let i = 0; i < 10; i++) await act(async () => {});
+}
+
 describe('Problems helpers', () => {
   it('writes the draft text from the item, after an existing draft', () => {
     const text = problemDraftText('npm run test', { path: 'src/wrap.ts', line: 88, message: "Expected 'a b' to equal 'a  b'", detail: '- a  b\n+ a b' });
@@ -170,6 +174,29 @@ describe('Problems panel', () => {
     show();
     await screen.findByTestId('problems-empty');
     expect(screen.queryByTestId('problems-offer')).toBeNull();
+  });
+
+  it("hides the worktree setup command (27.7) but keeps it when saving, and never gives a new command its id", async () => {
+    const setup = declared({ id: 'setup', label: 'Worktree setup', command: 'node setup.js', source: 'settings', script: undefined, scriptText: undefined, lastRun: null });
+    fake.answer = (url, method) => {
+      if (url === COMMANDS && method === 'GET') return { declared: [setup], offered: [] };
+      if (url === COMMANDS && method === 'PUT') return { declared: [setup], offered: [] };
+      return undefined;
+    };
+    show();
+    await screen.findByTestId('problems-empty');
+    expect(screen.queryByText('node setup.js')).toBeNull();
+    fireEvent.click(screen.getByTestId('problems-add'));
+    fireEvent.change(screen.getByTestId('problems-command-name'), { target: { value: 'Setup' } });
+    fireEvent.change(screen.getByTestId('problems-command-input'), { target: { value: 'node check.js' } });
+    fireEvent.click(screen.getByTestId('problems-save-command'));
+    await flushAll();
+    expect(fake.calls.find((call) => call.method === 'PUT')?.body).toEqual({
+      commands: [
+        { id: 'setup', label: 'Worktree setup', command: 'node setup.js', source: 'settings', confirmedText: 'node setup.js' },
+        { id: 'setup-2', label: 'Setup', command: 'node check.js', source: 'settings', confirmedText: 'node check.js' },
+      ],
+    });
   });
 
   it('asks again about a changed script and runs nothing until the new text is used', async () => {

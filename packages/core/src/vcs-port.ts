@@ -217,6 +217,52 @@ export interface VcsWorkingTreePort {
   commitAll(root: string, message: string): Promise<{ revision: string; files: number }>;
 }
 
+/** What putting a chat worktree away saved: the snapshot of its uncommitted changes (`null` when it had none) and how many files that holds. */
+export interface VcsPutAway {
+  snapshotTree: string | null;
+  files: number;
+}
+
+/** What Restore did: `branch_missing` and `path_taken` change nothing, and the snapshot stays kept. */
+export type VcsRestoreResult = 'restored' | 'branch_missing' | 'path_taken';
+
+/** What moving uncommitted changes did: `conflict` (the target has its own changes to `files` of the same files) moves nothing. */
+export interface VcsMoveChanges {
+  result: 'moved' | 'conflict';
+  files: number;
+}
+
+/**
+ * The chat-worktree half of the VCS port (CAP-35; epic 27 entry 2's
+ * contract, 27.4 and 27.6 build it on git): kept apart from {@link VcsPort}
+ * and {@link VcsWorkingTreePort} so their adapters and fakes are untouched.
+ * `repoPath` is the workspace's stored real path; every worktree path is a
+ * chat's own, in Ogden's data directory, and every branch is
+ * `ogden/chat/<ses_…>`, both core's (never request input). Snapshots are
+ * tree objects in AD-37's snapshot store in the data directory, never a
+ * commit, a ref or the repo's own object store. Core calls none of these
+ * while an agent works or waits in either folder. AD-17's protections hold
+ * (no hook, serialized with the repo's other git work, never pushed).
+ */
+export interface VcsChatWorktreePort {
+  /**
+   * Retention (AD-17 CAP-33 note's exception, user decision 2026-11-01):
+   * snapshots the worktree's uncommitted changes (tracked and untracked, not
+   * ignored) first, then removes its folder, keeping `branch`. Nothing is
+   * removed if the snapshot fails.
+   */
+  putAway(repoPath: string, worktreePath: string, branch: string): Promise<VcsPutAway>;
+  /** Restore: adds the worktree back at `path` on `branch` and applies `snapshotTree` (when there is one) on top. */
+  restore(repoPath: string, input: { path: string; branch: string; snapshotTree: string | null }): Promise<VcsRestoreResult>;
+  /**
+   * Hand off (user decision 2026-11-01): moves the uncommitted changes from
+   * the folder `from` to the folder `to` (the project folder or the chat's
+   * worktree), all or nothing; `conflict` when `to` has its own changes to
+   * any of the same files.
+   */
+  moveChanges(repoPath: string, input: { from: string; to: string }): Promise<VcsMoveChanges>;
+}
+
 /** A git operation failed; `message` is plain words, `details` are for the log and hold no secret. */
 export class VcsError extends CoreError {
   override readonly name = 'VcsError';

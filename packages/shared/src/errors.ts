@@ -238,6 +238,10 @@ export const API_ERROR_CODES = [
   'hunk_outdated',
   /** Open in editor (AD-39): the editor asked for, or any editor, is not found on this computer, or it did not start (409). Nothing was started. */
   'editor_unavailable',
+  /** Hand off (CAP-35, epic 27): the place the chat moves to has its own changes to some of the same files (409); `details.files` counts them. Nothing moved. */
+  'handoff_conflict',
+  /** Restore (CAP-35, epic 27): a put-away chat worktree could not be brought back, its branch gone or its folder taken (409); `details.reason` is the token. The saved changes are kept. */
+  'restore_failed',
   /** A request whose fields don't go together (400), such as a worktree chat on a remote machine (27.1). Nothing was created. */
   'validation_failed',
   /** Anything else that went wrong on the server (500). */

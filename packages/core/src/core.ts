@@ -25,6 +25,7 @@ import { createWorkspaceChanges, type WorkspaceChanges } from './workspace-chang
 import type { VcsWorkingTreePort } from './vcs-port.js';
 import { createEditorLaunch, type EditorLaunch } from './editor-launch.js';
 import type { EditorLauncherPort } from './editor-launcher-port.js';
+import type { ChatLocations, Trials, WorktreePorts, WorktreeRetention } from './where-work-runs.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
 import type { RemoteHostPort } from './remote-host-port.js';
@@ -106,6 +107,16 @@ export interface Core {
   readonly workspaceChanges: WorkspaceChanges | undefined;
   /** Open in editor (AD-39; epic 8 entry 2); `undefined` without an {@link OpenCoreOptions.editorLauncherPort} or a files port that can locate. */
   readonly editorLaunch: EditorLaunch | undefined;
+  /**
+   * Where work runs (CAP-35; epic 27 entry 2's contract): a chat's place and
+   * hand-off (27.4), retention and Restore (27.6), a worktree's port (27.7)
+   * and trials (27.8). Each is `undefined` until its lane builds it over
+   * `VcsChatWorktreePort` and `PortProbePort`, so their routes answer 501.
+   */
+  readonly chatLocations: ChatLocations | undefined;
+  readonly worktreeRetention: WorktreeRetention | undefined;
+  readonly worktreePorts: WorktreePorts | undefined;
+  readonly trials: Trials | undefined;
   /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
   readonly createNotifications: (ports: NotificationsPorts) => Notifications;
   /**
@@ -285,6 +296,11 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     workspaceFiles,
     workspaceChanges: options.vcsWorkingTreePort === undefined ? undefined : createWorkspaceChanges({ entities, sessionEvents, port: options.vcsWorkingTreePort }),
     editorLaunch: options.editorLauncherPort === undefined || workspaceFiles?.locate === undefined ? undefined : createEditorLaunch({ entities, files: { locate: workspaceFiles.locate }, launcher: options.editorLauncherPort }),
+    // Where work runs (epic 27 entry 2): contracts only until 27.4 to 27.8.
+    chatLocations: undefined,
+    worktreeRetention: undefined,
+    worktreePorts: undefined,
+    trials: undefined,
     paneStore: createPaneStore({ db }),
     terminalsSettings: createTerminalsSettings({ db, events }),
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),

@@ -97,6 +97,14 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `POST ${API_ROUTES.workspaceProjectCommandRuns}`,
   `GET ${API_ROUTES.workspaceProjectCommandRun}`,
   `POST ${API_ROUTES.workspaceProjectCommandRunStop}`,
+  // Where work runs (epic 27 entry 2, CAP-35): not a BMad piece, behind the gate only.
+  `GET ${API_ROUTES.sessionLocation}`,
+  `POST ${API_ROUTES.sessionLocation}`,
+  `POST ${API_ROUTES.sessionWorktreeRestore}`,
+  `GET ${API_ROUTES.workspacePutAwayWorktrees}`,
+  `POST ${API_ROUTES.workspaceTrials}`,
+  `GET ${API_ROUTES.workspaceTrial}`,
+  `POST ${API_ROUTES.workspaceTrialKeep}`,
 ];
 
 /** The BMad-named routes that serve projects with BMad off (story 10.2) or the whole install (story 4.14): never guarded, by design. */

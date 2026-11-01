@@ -36,6 +36,9 @@ import {
   type WorkspaceChanges,
   type EditorLaunch,
   type ProjectCommands,
+  type ChatLocations,
+  type WorktreeRetention,
+  type Trials,
   type AgentLinkedCommands,
 } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
@@ -81,6 +84,7 @@ import { registerTerminalSocket } from './terminal-socket.js';
 import { registerWorkspaceRoutes } from './workspace-routes.js';
 import { registerWorkspaceFilesRoutes } from './workspace-files-routes.js';
 import { registerWorkbenchRoutes } from './workbench-routes.js';
+import { registerWhereWorkRunsRoutes } from './where-work-runs-routes.js';
 
 /** What `GET /launcher/hello` reports about the running server (AD-20). */
 export interface ServerInfo {
@@ -178,6 +182,12 @@ export interface AppOptions {
   projectCommands?: ProjectCommands | undefined;
   /** Open in editor (AD-39; 8.10): without it those routes answer 501. */
   editorLaunch?: EditorLaunch | undefined;
+  /** Where work runs (CAP-35; epic 27 entry 2): a chat's Location and hand-off (27.4); without it those routes answer 501. */
+  chatLocations?: ChatLocations | undefined;
+  /** Worktree retention and Restore (27.6): without it those routes answer 501. */
+  worktreeRetention?: WorktreeRetention | undefined;
+  /** Trials (27.8): without it those routes answer 501. */
+  trials?: Trials | undefined;
   /** Notification settings and webhooks (story 11.4). */
   notifications?: Notifications;
   /** The Local model's endpoints (epic 14 story 14.3); without it those routes answer 501. */
@@ -260,6 +270,9 @@ export function createApp({
   workspaceChanges,
   projectCommands,
   editorLaunch,
+  chatLocations,
+  worktreeRetention,
+  trials,
   notifications,
   localEndpoints,
   remoteMachines,
@@ -402,6 +415,8 @@ export function createApp({
   registerWorkspaceFilesRoutes(app, { workspaceFiles, log });
   // The Workbench's Changes, Problems and editor hand-off (AD-37 to AD-39): behind the gate only, 501 until each lane wires it.
   registerWorkbenchRoutes(app, { workspaceChanges, projectCommands, editorLaunch, log });
+  // Where work runs (CAP-35, epic 27): behind the gate only, on no device allowlist; 501 until each lane wires it.
+  registerWhereWorkRunsRoutes(app, { chatLocations, worktreeRetention, trials, log });
   // The Local model's endpoints (epic 14 story 14.3): app-wide, behind the gate, never a piece's guard; a key never leaves.
   registerLocalEndpointRoutes(app, { localEndpoints, log });
   // The remote-machine registry (CAP-24, epic 19 story 19.3): app-wide, behind the gate; a credential never leaves.

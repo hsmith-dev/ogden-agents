@@ -778,3 +778,32 @@ export class EditorUnavailableError extends CoreError {
     super('editor_unavailable', message);
   }
 }
+
+/**
+ * Hand off (CAP-35, epic 27): the place the chat moves to has its own
+ * uncommitted changes to `files` of the same files. 409 `handoff_conflict`;
+ * nothing moved.
+ */
+export class HandOffConflictError extends CoreError {
+  override readonly name = 'HandOffConflictError';
+  constructor(
+    message: string,
+    readonly files: number,
+  ) {
+    super('handoff_conflict', message);
+  }
+}
+
+/**
+ * Restore (CAP-35, epic 27): a put-away chat worktree could not be brought
+ * back. 409 `restore_failed`; the saved changes are kept.
+ */
+export class RestoreFailedError extends CoreError {
+  override readonly name = 'RestoreFailedError';
+  constructor(
+    message: string,
+    readonly reason: 'branch_missing' | 'path_taken',
+  ) {
+    super('restore_failed', message);
+  }
+}

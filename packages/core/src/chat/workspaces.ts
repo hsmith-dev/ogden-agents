@@ -330,7 +330,7 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
         // here (`entities.createSession`'s own schema check); whether it is reachable is `agentFor`'s own
         // connect-time refusal, never duplicated here.
         machineId: options.machineId ?? null,
-        // A worktree chat's id is its branch's (27.1); its path and branch are set here only, never changed.
+        // A worktree chat's id is its branch's (27.1); its path and branch are set here at creation; changed only by Hand off (`setSessionWorktree`, recorded as `session.location_changed`).
         ...(worktree === undefined ? {} : { id: worktree.id, worktreePath: worktree.worktreePath, branch: worktree.branch }),
       });
       if (worktree === undefined) return create();

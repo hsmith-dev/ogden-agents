@@ -540,6 +540,47 @@ export const API_ROUTES = {
   workspaceProjectCommandRunStop: `${API_BASE}/workspaces/:wsId/project-command-runs/:runId/stop`,
   /** `GET` → `EditorsResponse` (AD-39; 8.10): the editors found on this computer. */
   editors: `${API_BASE}/editors`,
+  // Where work runs (CAP-35; epic 27 entry 2's contract): each is behind the gate only (AD-15), on no
+  // paired-device allowlist (AD-34), not a BMad piece, and answers 501 `not_implemented` until its lane wires it.
+  // A worktree's port has no route of its own: `SessionLocation.port` carries it (27.7).
+  /**
+   * `GET` → `SessionLocationResponse` (27.3 to 27.5): where the chat works,
+   * no path. `POST HandOffRequest` → `HandOffResponse` (27.4): moves an idle
+   * chat and its uncommitted changes between this folder and its own
+   * worktree, appending `session.location_changed`. 409 `agent_mid_turn`,
+   * `handoff_conflict`, `invalid_operation`.
+   */
+  sessionLocation: `${API_BASE}/workspaces/:wsId/sessions/:sesId/location`,
+  /**
+   * `POST` → `SessionLocationResponse` (27.6): brings back a put-away chat
+   * worktree on its branch with its saved changes, appending
+   * `session.worktree_restored`. 409 `restore_failed` (the changes are kept),
+   * `invalid_operation` for a chat with nothing put away.
+   */
+  sessionWorktreeRestore: `${API_BASE}/workspaces/:wsId/sessions/:sesId/worktree/restore`,
+  /** `GET` → `PutAwayWorktreesResponse` (27.6): the project's put-away chat worktrees, newest first (`no-store`). */
+  workspacePutAwayWorktrees: `${API_BASE}/workspaces/:wsId/worktrees/put-away`,
+  /**
+   * `GET` → `WorktreeRetentionSetting`; `PUT WorktreeRetentionSetting` → the
+   * same (27.6): the install's cap over every project's chat worktrees
+   * (default `WORKTREE_RETENTION_DEFAULT`), appending
+   * `settings.worktree_retention_changed`. 400 outside 1 to 100.
+   */
+  worktreeRetention: `${API_BASE}/settings/worktree-retention`,
+  /**
+   * `POST CreateTrialRequest` → 201 `TrialResponse` (27.8): one worktree
+   * chat per agent, appending `workspace.trial_started`. 400 for fewer than
+   * 2, more than 4 or a repeated agent.
+   */
+  workspaceTrials: `${API_BASE}/workspaces/:wsId/trials`,
+  /** `GET` → `TrialResponse` (27.8). 404 for an unknown trial. */
+  workspaceTrial: `${API_BASE}/workspaces/:wsId/trials/:tryId`,
+  /**
+   * `POST KeepTrialRequest` → `TrialResponse` (27.8): keeps one chat and
+   * puts the others' copies away (`not_kept`, restorable), appending
+   * `workspace.trial_kept`. 409 `agent_mid_turn` while one of them works.
+   */
+  workspaceTrialKeep: `${API_BASE}/workspaces/:wsId/trials/:tryId/keep`,
   /**
    * `POST StartBuildRequest` → 201 `BuildResponse` (story 5.2): builds one
    * ticket unattended in its own worktree and `build` session; `{ all: true }`

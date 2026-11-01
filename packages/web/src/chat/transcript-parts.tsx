@@ -11,6 +11,7 @@ import { Markdown } from '@/ui/markdown';
 import { AgentMessage, UserMessage } from '@/ui/message';
 import { Separator } from '@/ui/separator';
 import { Text } from '@/ui/typography';
+import { useChatPathLinks } from '@/workbench/path-links';
 
 /** The marker at the break where a reopened chat continues (EXPERIENCE.md). */
 const RESUMED_FROM_HISTORY = 'Resumed from history';
@@ -83,8 +84,11 @@ const QUEUE_WORDS = { queued: 'Queued', not_sent: 'Not sent' } as const;
  * One message: the user's in a muted block on the right, as typed; the
  * agent's as Markdown under its name (DESIGN.md Message), the same for a
  * reply brought back from the terminal. A queued or unsent one says so under it.
+ * With the chat's `wsId` and `sesId` (8.7), the paths and `file:line` targets
+ * an agent's reply names link to the Workbench viewer once the server
+ * confirms each is a file of the project (or of the chat's worktree).
  */
-export function Message({ message, agentName }: { message: TranscriptMessage; agentName: string }) {
+export function Message({ message, agentName, wsId, sesId }: { message: TranscriptMessage; agentName: string; wsId?: string | undefined; sesId?: string | undefined }) {
   if (message.role === 'user' && message.status !== undefined) {
     return (
       <div className="flex max-w-[85%] flex-col items-end gap-1 self-end" data-testid="message-queued" data-status={message.status}>
@@ -137,9 +141,19 @@ export function Message({ message, agentName }: { message: TranscriptMessage; ag
   if (message.role === 'user') return <UserMessage data-testid="message-user">{message.text}</UserMessage>;
   return (
     <AgentMessage name={agentName} data-testid="message-agent" data-streaming={message.streaming} aria-busy={message.streaming}>
-      <Markdown source={message.text} variant="chat" streaming={message.streaming} />
+      {wsId === undefined || sesId === undefined ? (
+        <Markdown source={message.text} variant="chat" streaming={message.streaming} />
+      ) : (
+        <LinkedReply wsId={wsId} sesId={sesId} text={message.text} streaming={message.streaming} />
+      )}
     </AgentMessage>
   );
+}
+
+/** An agent's reply with links to the viewer for the files it names that exist (asked once it has finished streaming). */
+function LinkedReply({ wsId, sesId, text, streaming }: { wsId: string; sesId: string; text: string; streaming: boolean }) {
+  const links = useChatPathLinks(wsId, sesId, text, streaming);
+  return <Markdown source={text} variant="chat" streaming={streaming} links={links} />;
 }
 
 /** Where the agent's step was stopped so a message sent right away went at once (send now or wait). */

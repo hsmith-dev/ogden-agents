@@ -11,8 +11,13 @@
  * that chat's worktree when it has one (a foreign or unknown chat is
  * {@link NotFoundError}); `search` exists only when the port can search,
  * and `locate` only when it can locate (the editor launcher's).
+ *
+ * 8.7: `exists` (built on `locate`, so only when the port can locate)
+ * answers which candidate paths are files the viewer would open, for links
+ * from an agent's reply or a markdown file. It answers nothing else.
  */
 import {
+  MAX_WORKSPACE_FILE_LINKS,
   WorkspaceRelativePath,
   WorkspaceSearchQuery,
   WORKSPACE_PATH_HARD_LINK_MESSAGE,
@@ -78,6 +83,16 @@ export interface WorkspaceFiles {
   search?(workspaceId: unknown, query: unknown): Promise<WorkspaceSearchResponse>;
   /** The absolute real path of an allowed file, for the editor launcher only; the same refusals as {@link read}. Absent when the port can't locate. */
   locate?(workspaceId: unknown, path: unknown, session?: unknown): Promise<string>;
+  /**
+   * Which of `paths` (an array of at most `MAX_WORKSPACE_FILE_LINKS`
+   * `WorkspaceRelativePath`s, else {@link ValidationError}) are files
+   * {@link read} would open, each once, in the order asked: a refused name,
+   * a refusal of the port's (outside the root, a fence, a hard link), a
+   * folder or a missing path is absent. The root is resolved first, so an
+   * unknown workspace or session is {@link NotFoundError} whatever the paths.
+   * Absent when the port can't locate.
+   */
+  exists?(workspaceId: unknown, paths: unknown, session?: unknown): Promise<string[]>;
 }
 
 export interface WorkspaceFilesOptions {
@@ -182,6 +197,31 @@ export function createWorkspaceFiles({ entities, port }: WorkspaceFilesOptions):
       const root = rootOf(workspaceId, session);
       return workspaceAnswer(await locate(root.path, checkedWorkspacePath(path, { rootAllowed: false }), root.kind)).realPath;
     };
+    files.exists = async (workspaceId, paths, session) => {
+      const root = rootOf(workspaceId, session);
+      if (!Array.isArray(paths) || paths.length > MAX_WORKSPACE_FILE_LINKS || !paths.every((path) => WorkspaceRelativePath.safeParse(path).success)) {
+        const message = `At most ${MAX_WORKSPACE_FILE_LINKS} paths inside the project.`;
+        throw new ValidationError(message, [{ path: ['paths'], message }]);
+      }
+      const unique = [...new Set(paths as string[])].filter((path) => !isRefusedWorkspacePath(path.split('/')));
+      const found = new Set<string>();
+      // A few at a time: a message's paths are checked without holding many files open at once.
+      for (let start = 0; start < unique.length; start += LOCATE_BATCH) {
+        await Promise.all(
+          unique.slice(start, start + LOCATE_BATCH).map(async (path) => {
+            try {
+              if (!isWorkspacePathRefusal(await locate(root.path, path, root.kind))) found.add(path);
+            } catch {
+              // Unreadable is absent, like any refusal.
+            }
+          }),
+        );
+      }
+      return unique.filter((path) => found.has(path));
+    };
   }
   return files;
 }
+
+/** How many paths {@link WorkspaceFiles.exists} locates at once. */
+const LOCATE_BATCH = 10;

@@ -5,10 +5,17 @@
  * `src/a.ts` shows its lines read-only with line numbers, at desktop and
  * phone widths with no sideways scroll; a protected row shows the protected
  * sentence and no content request is made for it.
+ *
+ * 8.7: README.md renders as Markdown with Show source; a fake agent reply
+ * naming `src/a.ts:12` links it (an unconfirmed path stays text), and the
+ * link opens the file with line 12 highlighted and in view; `.env` is
+ * masked, a 2 MB file and a binary one say so with their sizes; axe finds
+ * nothing and a 390px page has no sideways scroll.
  */
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { API_ROUTES } from '../support.js';
-import { withChatServer } from './chat-server.js';
+import { send, startChat, withChatServer } from './chat-server.js';
 import { storedToken } from './tab.js';
 
 const SOURCE = 'const a = 1;\n\nexport function add(b: number): number {\n  return a + b;\n}\n';
@@ -87,5 +94,83 @@ test('the Workbench tab lists the project and shows src/a.ts read-only with line
       await expectNoSidewaysScroll(page);
     },
     { files: { 'src/a.ts': SOURCE, 'README.md': '# Fixture\n', '.git/config': '[core]\n\tbare = false\n' } },
+  );
+});
+
+const LONG = Array.from({ length: 60 }, (_, i) => `export const line${i + 1} = ${i + 1};`).join('\n') + '\n';
+
+test('README renders with Show source; a reply naming src/a.ts:12 links it, opening line 12 highlighted; .env masked, 2 MB and binary named; axe clean at 390px', async ({ page }) => {
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const { wsId } = await startChat(page, repo);
+
+      // The reply names a file that exists, at a line, and one that doesn't.
+      await send(page, 'reply-with Look at `src/a.ts:12` and src/missing.ts:3 for the bug.');
+      const reply = page.getByTestId('message-agent').last();
+      const link = reply.getByRole('link', { name: 'src/a.ts:12' });
+      await expect(link).toHaveAttribute('title', 'Open src/a.ts at line 12');
+      await expect(reply).toContainText('src/missing.ts:3');
+      await expect(reply.getByRole('link')).toHaveCount(1);
+      const href = new URL((await link.getAttribute('href'))!, server.url);
+      expect(href.pathname).toBe(`/w/${wsId}/workbench`);
+      expect(href.searchParams.get('path')).toBe('src/a.ts');
+      expect(href.searchParams.get('line')).toBe('12');
+
+      await link.click();
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/workbench\\?`));
+      await expect(page.getByTestId('code-view-path')).toHaveText('src/a.ts');
+      const target = page.locator('[data-testid="code-line"][data-line="12"]');
+      await expect(target).toHaveAttribute('data-highlighted', 'true');
+      await expect(target).toBeInViewport();
+      await expect(page.locator('[data-testid="code-line"][data-highlighted="true"]')).toHaveCount(1);
+      // Until the next click.
+      await page.getByTestId('code-view-path').click();
+      await expect(page.locator('[data-testid="code-line"][data-highlighted="true"]')).toHaveCount(0);
+
+      // README.md: rendered, then its numbered source.
+      await page.goto(`${server.url}/w/${wsId}/workbench?path=README.md`);
+      const rendered = page.getByTestId('markdown-rendered');
+      await expect(rendered.getByRole('heading', { name: 'Fixture' })).toBeVisible();
+      await expect(rendered.locator('script, img')).toHaveCount(0);
+      await expect(rendered.getByRole('link', { name: 'the source' })).toHaveAttribute('title', 'Open src/a.ts at line 3');
+      await expect(rendered.getByRole('link', { name: 'docs' })).toHaveAttribute('target', '_blank');
+      await expect(rendered).toContainText('escape');
+      await expect(rendered.getByRole('link', { name: 'escape' })).toHaveCount(0);
+      await page.getByTestId('markdown-mode-source').click();
+      await expect(page.getByTestId('code-line-number').first()).toHaveText('1');
+      await expect(page.getByTestId('code-lines')).toContainText('# Fixture');
+      await page.getByTestId('markdown-mode-rendered').click();
+
+      // .env masked, the 2 MB file capped, the binary named with its size.
+      await page.goto(`${server.url}/w/${wsId}/workbench?path=.env`);
+      await expect(page.getByTestId('file-masked')).toBeVisible();
+      await expect(page.getByTestId('code-lines')).not.toContainText('E2E_ENV_SECRET_8c1d');
+      await page.goto(`${server.url}/w/${wsId}/workbench?path=big.log`);
+      await expect(page.getByTestId('file-too-large')).toHaveText('This file is too large to show here (2 MB, limit 1 MB).');
+      await page.goto(`${server.url}/w/${wsId}/workbench?path=logo.png`);
+      await expect(page.getByTestId('file-binary')).toHaveText("Binary file. Ogden doesn't show its contents.");
+      await expect(page.getByTestId('file-size')).toHaveText('16 bytes');
+
+      // Axe on the viewer, and a phone width with no sideways scroll, on the rendered README and the linked line.
+      await page.setViewportSize({ width: 390, height: 844 });
+      for (const at of ['path=README.md', 'path=src%2Fa.ts&line=12']) {
+        await page.goto(`${server.url}/w/${wsId}/workbench?${at}`);
+        await expect(page.getByTestId('code-view-path')).toBeVisible();
+        const axe = await new AxeBuilder({ page }).include('[data-testid="workbench-files"]').analyze();
+        expect(axe.violations.map((v) => `${v.id}: ${v.nodes.map((node) => node.target.join(' ')).join(', ')}`), at).toEqual([]);
+        await expectNoSidewaysScroll(page);
+      }
+    },
+    {
+      files: {
+        'src/a.ts': LONG,
+        'README.md': '# Fixture\n\nRead [the source](./src/a.ts#L3), the [docs](https://example.com/docs) and [escape](../../etc/passwd).\n\n<script>alert(1)</script><img src=x onerror=alert(1)>\n',
+        '.env': 'API_TOKEN=E2E_ENV_SECRET_8c1d\n',
+        'big.log': 'x'.repeat(2 * 1024 * 1024),
+        'logo.png': 'PNG\u0000\u0000\u0000\u0000IHDR12345',
+        '.git/config': '[core]\n',
+      },
+    },
   );
 });

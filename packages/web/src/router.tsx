@@ -1,3 +1,4 @@
+import { SessionId } from '@ogden-agents/shared';
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect } from '@tanstack/react-router';
 import { newChatSearch, type NewChatSearch } from './chat/new-chat';
 import { HomePage } from './routes/home-page';
@@ -187,16 +188,34 @@ const workspaceTerminalsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-terminals-page'), 'WorkspaceTerminalsPage'),
 });
 
-/** The Workbench's search: `?path=` is the file the Files panel shows (AD-36). */
+/**
+ * The Workbench's search: `?path=` is the file the Files panel shows (AD-36);
+ * `?line=` a `file:line` link's line (8.7), only with a path; `?session=` a
+ * chat whose worktree the panel shows (8.2's root).
+ */
 export interface WorkbenchSearch {
   path?: string;
+  line?: number;
+  session?: string;
+}
+
+/** The Workbench's search as the router keeps it: a malformed line or session is left out. */
+export function workbenchSearch(search: Record<string, unknown>): WorkbenchSearch {
+  const path = typeof search.path === 'string' && search.path !== '' ? search.path : undefined;
+  const line = typeof search.line === 'number' ? search.line : typeof search.line === 'string' && /^\d{1,9}$/.test(search.line) ? Number(search.line) : undefined;
+  const session = typeof search.session === 'string' && SessionId.safeParse(search.session).success ? search.session : undefined;
+  return {
+    ...(path === undefined ? {} : { path }),
+    ...(path !== undefined && line !== undefined && Number.isSafeInteger(line) && line >= 1 ? { line } : {}),
+    ...(session === undefined ? {} : { session }),
+  };
 }
 
 /** A project's Workbench (AD-36): its Files panel, the project's tree and one file read-only. */
 const workspaceWorkbenchRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/w/$wsId/workbench',
-  validateSearch: (search: Record<string, unknown>): WorkbenchSearch => (typeof search.path === 'string' && search.path !== '' ? { path: search.path } : {}),
+  validateSearch: workbenchSearch,
   component: lazyRouteComponent(() => import('./routes/workspace-workbench-page'), 'WorkspaceWorkbenchPage'),
 });
 

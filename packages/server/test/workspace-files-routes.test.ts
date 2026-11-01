@@ -7,7 +7,7 @@
 import { linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { API_ROUTES, apiPath, ApiErrorBody, WORKSPACE_PATH_HARD_LINK_MESSAGE, WORKSPACE_PATH_PROTECTED_MESSAGE, WorkspaceFileResponse, WorkspaceFolderResponse, WorkspaceResponse } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, ApiErrorBody, MAX_WORKSPACE_FILE_LINKS, WorkspaceFileLinksResponse, WORKSPACE_PATH_HARD_LINK_MESSAGE, WORKSPACE_PATH_PROTECTED_MESSAGE, WorkspaceFileResponse, WorkspaceFolderResponse, WorkspaceResponse } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { signIn, startTestServer, tempDataDir } from './helpers.js';
 
@@ -213,5 +213,62 @@ describe('workspace files routes: review rows (defensive check)', () => {
       await fetch(`${server.url}${apiPath(API_ROUTES.workspaceFiles, { wsId })}?${query}`, { headers });
     }
     expect(lines.join('\n')).not.toContain('4d1e');
+  });
+});
+
+describe('workspace file links route (8.7)', () => {
+  const post = (url: string, headers: Record<string, string>, body: unknown) => fetch(url, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body) });
+
+  it('answers only the asked paths that are files the viewer would open, once each, no-store, and nothing else', async () => {
+    const { server, headers, wsId, repo } = await serverWithProject();
+    const outside = realpathSync.native(mkdtempSync(join(tmpdir(), 'ogden-agents-links-out-')));
+    repos.push(outside);
+    writeFileSync(join(outside, 'secret'), 'OUTSIDE_SECRET');
+    symlinkSync(join(outside, 'secret'), join(repo, 'out-link.ts'));
+    mkdirSync(join(repo, '.ssh'));
+    writeFileSync(join(repo, '.ssh', 'id_rsa'), 'KEY');
+    let hardLinked = true;
+    try {
+      linkSync(join(outside, 'secret'), join(repo, 'hard.ts'));
+    } catch {
+      hardLinked = false; // Different volumes: no hard link here.
+    }
+    const url = `${server.url}${apiPath(API_ROUTES.workspaceFileLinks, { wsId })}`;
+    const paths = [FILE, '.git/config', 'src', 'src/missing-9b2c.ts', '.ssh/id_rsa', 'out-link.ts', 'README.md', FILE, ...(hardLinked ? ['hard.ts'] : [])];
+    const response = await post(url, headers, { paths });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const text = await response.text();
+    expect(WorkspaceFileLinksResponse.parse(JSON.parse(text))).toEqual({ found: [FILE, 'README.md'] });
+    expect(Object.keys(JSON.parse(text) as object)).toEqual(['found']);
+    for (const needle of [repo, 'OUTSIDE_SECRET', 'WORKBENCH_CONTENT_7f3a']) expect(text).not.toContain(needle);
+    expect(await (await post(url, headers, { paths: [] })).json()).toEqual({ found: [] });
+  });
+
+  it('refuses a malformed path, too many paths or a bad body with 400, an unknown project or chat with 404, and answers 401 without a token', async () => {
+    const { server, headers, wsId } = await serverWithProject();
+    const url = `${server.url}${apiPath(API_ROUTES.workspaceFileLinks, { wsId })}`;
+    for (const body of [{ paths: ['../x'] }, { paths: ['/etc/passwd'] }, { paths: ['a\\b'] }, { paths: ['C:/x'] }, { paths: ['a//b', 'ok.ts'] }, { paths: 'src/a.ts' }, {}, { paths: [], extra: 1 }, { paths: Array.from({ length: MAX_WORKSPACE_FILE_LINKS + 1 }, (_, i) => `f${i}.ts`) }, 'not json', { paths: [], session: 'nope' }]) {
+      await expectError(await post(url, headers, body), 400, 'invalid_request');
+    }
+    expect((await post(url, headers, { paths: Array.from({ length: MAX_WORKSPACE_FILE_LINKS }, (_, i) => `f${i}.ts`) })).status).toBe(200);
+    const unknown = `${server.url}${apiPath(API_ROUTES.workspaceFileLinks, { wsId: 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' })}`;
+    await expectError(await post(unknown, headers, { paths: [FILE] }), 404, 'not_found');
+    await expectError(await post(unknown, headers, { paths: ['../x'] }), 404, 'not_found');
+    await expectError(await post(unknown, headers, 'not json'), 404, 'not_found');
+    await expectError(await post(url, headers, { paths: [FILE], session: 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3' }), 404, 'not_found');
+    const anonymous = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', origin: server.url }, body: JSON.stringify({ paths: [FILE] }) });
+    expect(anonymous.status).toBe(401);
+  });
+
+  it('never logs or stores the paths asked about', async () => {
+    const { server, headers, wsId, lines, dataDir } = await serverWithProject();
+    const url = `${server.url}${apiPath(API_ROUTES.workspaceFileLinks, { wsId })}`;
+    await post(url, headers, { paths: [FILE, 'asked-5e6f.ts', '.git/asked-5e6f'] });
+    await post(url, headers, { paths: ['../asked-5e6f'] });
+    for (const haystack of [lines.join('\n'), JSON.stringify(server.core.events.readAfter(0)), everything(dataDir)]) {
+      expect(haystack).not.toContain('asked-5e6f');
+      expect(haystack).not.toContain('workbench-path-9b2c');
+    }
   });
 });

@@ -9,6 +9,9 @@
  * - `GET /workspaces/:wsId/files/content?path=&session=` → `WorkspaceFileResponse`.
  * - `GET /workspaces/:wsId/files/search?q=&mode=&matchCase=&session=` →
  *   `WorkspaceSearchResponse` (epic 8 entry 2; 501 until the port can search, 8.8).
+ * - `POST /workspaces/:wsId/files/links` `WorkspaceFileLinksRequest` →
+ *   `WorkspaceFileLinksResponse` (8.7): which candidate paths are files the
+ *   viewer would open, and nothing else (501 until the port can locate).
  *
  * Both files routes' query is read through `WorkspaceFilesQuery`.
  * `session` roots a request at that chat's worktree when it has one; a
@@ -34,15 +37,19 @@ import {
   EDITOR_NONE_FOUND_TEXT,
   EDITOR_UNAVAILABLE_MESSAGE,
   HUNK_OUTDATED_TEXT,
+  SessionId,
   WORKSPACE_PATH_HARD_LINK_MESSAGE,
   WORKSPACE_PATH_NOT_FOUND_MESSAGE,
   WORKSPACE_PATH_PROTECTED_MESSAGE,
+  WorkspaceFileLinksRequest,
+  WorkspaceFileLinksResponse,
   WorkspaceFileResponse,
   WorkspaceFilesQuery,
   WorkspaceFolderResponse,
   WorkspaceSearchResponse,
 } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { apiError, notImplemented } from './errors.js';
 import type { Logger } from './log.js';
 
@@ -50,6 +57,12 @@ export interface WorkspaceFilesRoutesOptions {
   workspaceFiles?: WorkspaceFiles | undefined;
   log: Logger;
 }
+
+/**
+ * A links request's largest body: 100 paths of at most 4096 UTF-16 units,
+ * each up to 6 bytes once JSON-escaped (`\uXXXX`), is 2.4 MiB; 3 MiB covers it and a session.
+ */
+const MAX_LINKS_BODY_BYTES = 3 * 1024 * 1024;
 
 /** Neither a browser nor a proxy keeps a file's content, a diff or output. */
 export const NO_STORE = { 'Cache-Control': 'no-store' };
@@ -81,6 +94,7 @@ export function registerWorkspaceFilesRoutes(app: Hono, { workspaceFiles, log }:
     app.get(API_ROUTES.workspaceFiles, notImplemented);
     app.get(API_ROUTES.workspaceFileContent, notImplemented);
     app.get(API_ROUTES.workspaceFileSearch, notImplemented);
+    app.post(API_ROUTES.workspaceFileLinks, notImplemented);
     return;
   }
   const refusal = workbenchRefusal(log, 'workspace files');
@@ -111,6 +125,36 @@ export function registerWorkspaceFilesRoutes(app: Hono, { workspaceFiles, log }:
       return refusal(c, error);
     }
   });
+
+  const exists = workspaceFiles.exists;
+  if (exists === undefined) {
+    // The files port can't locate, so it can't confirm a path.
+    app.post(API_ROUTES.workspaceFileLinks, notImplemented);
+  } else {
+    const limit = bodyLimit({ maxSize: MAX_LINKS_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
+    app.post(API_ROUTES.workspaceFileLinks, limit, async (c) => {
+      // Not JSON is an invalid body like any other: the project is still checked first.
+      let body: unknown;
+      try {
+        body = JSON.parse(await c.req.text()) as unknown;
+      } catch {
+        body = undefined;
+      }
+      try {
+        const wsId = c.req.param('wsId');
+        const parsed = WorkspaceFileLinksRequest.safeParse(body);
+        if (!parsed.success) {
+          // The project (and a well-formed chat) first: an unknown one is 404 whatever the paths; a malformed one is 400.
+          const session = SessionId.safeParse((body as { session?: unknown } | null)?.session);
+          await exists(wsId, [], session.success ? session.data : undefined);
+          return apiError(c, 400, 'invalid_request', 'Those are not paths inside the project.');
+        }
+        return c.json(WorkspaceFileLinksResponse.parse({ found: await exists(wsId, parsed.data.paths, parsed.data.session) }), 200, NO_STORE);
+      } catch (error) {
+        return refusal(c, error);
+      }
+    });
+  }
 
   const search = workspaceFiles.search;
   if (search === undefined) {

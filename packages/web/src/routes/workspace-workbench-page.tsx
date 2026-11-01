@@ -9,13 +9,15 @@ import { WorkbenchFiles } from '@/workbench/workbench-files';
 /**
  * `/w/:wsId/workbench`: the project's Workbench (AD-36). Its one panel so
  * far is Files: the project's tree and one file read-only, the selected file
- * in `?path=`.
+ * in `?path=` (a `file:line` link's line in `?line=`, a worktree chat's
+ * folder by `?session=`).
  */
 export function WorkspaceWorkbenchPage() {
   const { wsId } = useParams({ strict: false }) as { wsId: string };
   const search = useSearch({ strict: false }) as WorkbenchSearch;
   const navigate = useNavigate();
-  const kept = search.path === undefined ? {} : { path: search.path };
+  // The panel tab keeps the file and the chat's worktree; choosing another file drops the line.
+  const kept = { ...(search.path === undefined ? {} : { path: search.path }), ...(search.session === undefined ? {} : { session: search.session }) };
   return (
     <>
       <WorkspaceHeader title={WORKBENCH_PAGE_TITLE} wsId={wsId} tab="workbench" />
@@ -27,7 +29,13 @@ export function WorkspaceWorkbenchPage() {
             </Link>
           </TabNavItem>
         </TabNav>
-        <WorkbenchFiles wsId={wsId} path={search.path} onSelect={(path) => void navigate({ to: '/w/$wsId/workbench', params: { wsId }, search: { path } })} />
+        <WorkbenchFiles
+          wsId={wsId}
+          path={search.path}
+          line={search.line}
+          session={search.session}
+          onSelect={(path) => void navigate({ to: '/w/$wsId/workbench', params: { wsId }, search: { path, ...(search.session === undefined ? {} : { session: search.session }) } })}
+        />
       </PageBody>
     </>
   );

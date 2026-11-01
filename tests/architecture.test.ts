@@ -1098,6 +1098,7 @@ describe('CAP-24: the remote-machine registry names no SSH library (epic 19 stor
 const WORKBENCH_ROUTE_KEYS = [
   'workspaceFiles',
   'workspaceFileContent',
+  'workspaceFileLinks',
   'workspaceFileSearch',
   'workspaceFileOpenInEditor',
   'workspaceChanges',
@@ -1117,6 +1118,7 @@ const WORKBENCH_REQUEST_SCHEMAS = [
   'WorkspaceFilesQuery',
   'WorkspaceSearchQuery',
   'OpenInEditorRequest',
+  'WorkspaceFileLinksRequest',
   'ChangesQuery',
   'FileDiffQuery',
   'HunkActionRequest',
@@ -1168,7 +1170,7 @@ describe('epic 8 entry 2: Workbench paths are workspace-relative and no git runs
         expect(inner, `${name}.${field}`).toBe(WorkspaceRelativePath);
       }
     }
-    expect(pathFields).toEqual(['WorkspaceFilesQuery.path', 'OpenInEditorRequest.path', 'FileDiffQuery.path', 'HunkActionRequest.path']);
+    expect(pathFields).toEqual(['WorkspaceFilesQuery.path', 'OpenInEditorRequest.path', 'WorkspaceFileLinksRequest.paths', 'FileDiffQuery.path', 'HunkActionRequest.path']);
     for (const key of WORKBENCH_ROUTE_KEYS) {
       expect(API_ROUTES[key], key).toBeDefined();
       expect(API_ROUTES[key], key).not.toMatch(/:path\b/);

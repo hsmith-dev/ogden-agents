@@ -495,6 +495,17 @@ export const API_ROUTES = {
    * folder answers 404. The content is only ever in this response.
    */
   workspaceFileContent: `${API_BASE}/workspaces/:wsId/files/content`,
+  /**
+   * `POST WorkspaceFileLinksRequest` → `WorkspaceFileLinksResponse` (8.7):
+   * which of at most `MAX_WORKSPACE_FILE_LINKS` candidate paths (from an
+   * agent's reply or a markdown file's links) are files the viewer would
+   * open, each checked as a read is (refused, missing, a folder or a hard
+   * link outside `node_modules`: absent). Nothing else is answered: no real
+   * path, size or content; `no-store`; the paths are never logged. 400
+   * `invalid_request` for a malformed path or too many, 404 for an unknown
+   * project or a foreign session.
+   */
+  workspaceFileLinks: `${API_BASE}/workspaces/:wsId/files/links`,
   // The Workbench's other lanes (epic 8 entry 2's contract): each is behind the gate only (AD-15), on no
   // paired-device allowlist (AD-34, epic 24), and answers 501 `not_implemented` until its lane wires it.
   // Every path is a `WorkspaceRelativePath` in the query or body; `session` roots it at that chat's worktree.

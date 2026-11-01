@@ -11,13 +11,63 @@ import { MAX_DEPTH, MAX_INLINE_LENGTH, splitCodeSpans } from './markdown-parse';
  * text, a soft break a space. `chat` (an agent's reply): a link whose address
  * is http, https or mailto opens in a new tab, any other is its text; an
  * image is a link to its address, never loaded; a bare web address is a
- * link; a soft break is a line break.
+ * link; a soft break is a line break. `file` (a markdown file in the
+ * Workbench viewer, 8.7): links, images and bare addresses as in the chat, a
+ * soft break a space.
+ *
+ * With {@link MarkdownLinks} (8.7), a link the safe rule refuses is offered
+ * to `links.resolve`, and (in the chat) a bare path or a code span that is one
+ * to `links.pathAt`: each answers a viewer target only for a path the server
+ * confirmed, rendered by `links.render` (an in-app link). This file never
+ * fetches and never builds an address itself.
  */
-export type MarkdownVariant = 'document' | 'chat';
+export type MarkdownVariant = 'document' | 'chat' | 'file';
+
+/** A file inside the project and, optionally, its 1-based line. */
+export interface FileTarget {
+  path: string;
+  line?: number | undefined;
+}
+
+/** Links to the Workbench viewer, given by the caller (who asks the server which paths exist). */
+export interface MarkdownLinks {
+  /** A link's destination as written: its viewer target when it is a confirmed file, else `null` (the link is its text). */
+  resolve(destination: string): FileTarget | null;
+  /** A bare path token or a whole code span: its viewer target when confirmed, else `null`. Absent: no bare path links. */
+  pathAt?(text: string): FileTarget | null;
+  /** The link element for a confirmed target. */
+  render(target: FileTarget, children: ReactNode, key: number): ReactNode;
+}
+
+/**
+ * A path-shaped token in text (8.7): `[A-Za-z0-9_@+.-/]` characters, then
+ * an optional `:line(:col)` or `#Lline`, never inside another token (so
+ * never after a URL's `://`). One greedy class, so no backtracking.
+ */
+export const PATH_TOKEN = /(?<![A-Za-z0-9_@+.\-/:#%~\\])[A-Za-z0-9_@+.\-/]+(?::\d+(?::\d+)?|#L\d+)?/g;
+
+/** The path tokens of `text`, a sentence's trailing dots left out of each. */
+export function pathTokens(text: string): { at: number; token: string }[] {
+  const found: { at: number; token: string }[] = [];
+  for (const match of text.matchAll(PATH_TOKEN)) {
+    let token = match[0];
+    // A sentence's full stop (or an ellipsis) after a plain path is not part of it.
+    if (!/(?::\d+|#L\d+)$/.test(token)) {
+      // A loop, not `/\.+$/`: that pattern is quadratic on a long run of dots ending in another character.
+      let end = token.length;
+      while (end > 0 && token[end - 1] === '.') end--;
+      token = token.slice(0, end);
+    }
+    if (token !== '') found.push({ at: match.index, token });
+  }
+  return found;
+}
 
 /** Inline rendering state for one {@link Markdown}: its variant and the lines already rendered. */
 export interface InlineContext {
   variant: MarkdownVariant;
+  /** Viewer links (8.7); a new value starts a new {@link cache}. */
+  links?: MarkdownLinks | undefined;
   /**
    * Rendered lines by their text, kept across renders of one message: while
    * a reply streams only its newest lines are rendered again, and an
@@ -52,7 +102,7 @@ const TRAILING = /[.,;:!?'"\]}*]/;
  * spaces and joiners, bidi overrides and isolates, line and paragraph
  * separators, the byte order mark).
  */
-const UNSAFE_CHARACTERS = /[\u0000-\u0020\u007f-\u00a0\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202f\u205f-\u2064\u2066-\u206f\u3000\u3164\ufeff\uffa0]/;
+export const UNSAFE_CHARACTERS = /[\u0000-\u0020\u007f-\u00a0\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202f\u205f-\u2064\u2066-\u206f\u3000\u3164\ufeff\uffa0]/;
 
 const SAFE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 
@@ -120,8 +170,26 @@ function SafeLink({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-/** Pushes plain `text` onto `nodes`, its bare web and mail addresses as links when `linking` (chat). */
-function pushText(nodes: ReactNode[], text: string, linking: boolean) {
+/** Pushes plain `text` onto `nodes`, its confirmed bare paths as viewer links when `links` can find them (chat). */
+function pushPaths(nodes: ReactNode[], text: string, links: MarkdownLinks | undefined) {
+  const pathAt = links?.pathAt;
+  if (links === undefined || pathAt === undefined) {
+    nodes.push(text);
+    return;
+  }
+  let last = 0;
+  for (const { at, token } of pathTokens(text)) {
+    const target = pathAt(token);
+    if (target === null) continue;
+    if (at > last) nodes.push(text.slice(last, at));
+    nodes.push(links.render(target, token, nodes.length));
+    last = at + token.length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+}
+
+/** Pushes plain `text` onto `nodes`, its bare web and mail addresses (and confirmed paths) as links when `linking` (chat, file). */
+function pushText(nodes: ReactNode[], text: string, linking: boolean, links?: MarkdownLinks) {
   if (!linking) {
     nodes.push(text);
     return;
@@ -148,7 +216,7 @@ function pushText(nodes: ReactNode[], text: string, linking: boolean) {
     // `<https://…>` (an autolink): the brackets go with the link.
     const bracketed = text[at - 1] === '<' && text[at + address.length] === '>';
     const from = bracketed ? at - 1 : at;
-    if (from > last) nodes.push(text.slice(last, from));
+    if (from > last) pushPaths(nodes, text.slice(last, from), links);
     nodes.push(
       <SafeLink key={nodes.length} href={href}>
         {address}
@@ -156,7 +224,7 @@ function pushText(nodes: ReactNode[], text: string, linking: boolean) {
     );
     last = at + address.length + (bracketed ? 1 : 0);
   }
-  if (last < text.length) nodes.push(text.slice(last));
+  if (last < text.length) pushPaths(nodes, text.slice(last), links);
 }
 
 /**
@@ -165,20 +233,29 @@ function pushText(nodes: ReactNode[], text: string, linking: boolean) {
  */
 function line(text: string, context: InlineContext, depth: number, linking: boolean): ReactNode[] {
   if (depth > MAX_DEPTH || text.length > MAX_INLINE_LENGTH) return [text];
-  const chat = context.variant === 'chat';
+  // Followable web and mail links: in the chat and in a markdown file, never in a document.
+  const following = context.variant !== 'document';
+  const links = context.links;
+  const pathAt = linking ? links?.pathAt : undefined;
   const nodes: ReactNode[] = [];
   for (const part of splitCodeSpans(text)) {
     if (part.kind === 'code') {
-      nodes.push(
+      const code = (
         <code key={nodes.length} className="rounded-sm bg-muted px-1 font-mono text-mono-compact">
           {part.value}
-        </code>,
+        </code>
       );
+      // A code span that is one confirmed path links to it (chat).
+      const target = pathAt === undefined ? null : pathAt(part.value.trim());
+      nodes.push(target === null || links === undefined ? code : links.render(target, code, nodes.length));
       continue;
     }
     const segment = part.value;
-    // Where bare addresses sit (chat): `_`, `__` or `*` inside one (`pkg/__init__.py`) is part of the address.
+    // Where bare addresses sit (chat): `_`, `__` or `*` inside one (`pkg/__init__.py`) is part of the address, and so of a confirmed path.
     const addresses = linking ? [...segment.matchAll(BARE_URL)].map((found) => [found.index, found.index + found[0].length] as const) : [];
+    if (pathAt !== undefined) {
+      for (const { at, token } of pathTokens(segment)) if (pathAt(token) !== null) addresses.push([at, at + token.length]);
+    }
     const insideAddress = (at: number) => addresses.some(([from, to]) => at > from && at < to);
     let last = 0;
     const pattern = new RegExp(INLINE);
@@ -188,12 +265,12 @@ function line(text: string, context: InlineContext, depth: number, linking: bool
         pattern.lastIndex = at + 1;
         continue;
       }
-      if (at > last) pushText(nodes, segment.slice(last, at), linking);
+      if (at > last) pushText(nodes, segment.slice(last, at), linking, links);
       const key = nodes.length;
       const [, alt, imageTarget, linkText, linkTarget, strong1, strong2, em1, em2] = match;
       if (alt !== undefined) {
-        // An image is never loaded: in the chat, a link to it.
-        const href = chat ? safeHref(imageTarget ?? '') : null;
+        // An image is never loaded: in the chat and a markdown file, a link to it.
+        const href = following ? safeHref(imageTarget ?? '') : null;
         nodes.push(
           href === null ? (
             alt
@@ -204,11 +281,15 @@ function line(text: string, context: InlineContext, depth: number, linking: bool
           ),
         );
       } else if (linkText !== undefined) {
-        const href = chat ? safeHref(linkTarget ?? '') : null;
+        const href = following ? safeHref(linkTarget ?? '') : null;
         const label = line(linkText, context, depth + 1, false);
-        // A link to anything but a web or mail address (and every link in a document) is its text only.
+        // Not a web or mail address: a confirmed file of the project links to the viewer.
+        const target = href === null && links !== undefined ? links.resolve(linkTarget ?? '') : null;
+        // Any other link (and every link in a document without viewer links) is its text only.
         nodes.push(
-          href === null ? (
+          target !== null && links !== undefined ? (
+            links.render(target, label, key)
+          ) : href === null ? (
             <span key={key}>{label}</span>
           ) : (
             <SafeLink key={key} href={href}>
@@ -223,7 +304,7 @@ function line(text: string, context: InlineContext, depth: number, linking: bool
       }
       last = at + match[0].length;
     }
-    if (last < segment.length) pushText(nodes, segment.slice(last), linking);
+    if (last < segment.length) pushText(nodes, segment.slice(last), linking, links);
   }
   return nodes;
 }
@@ -232,7 +313,7 @@ function line(text: string, context: InlineContext, depth: number, linking: bool
 function cachedLine(text: string, context: InlineContext): ReactNode[] {
   const hit = context.cache.get(text);
   if (hit !== undefined) return hit;
-  const nodes = line(text, context, 0, context.variant === 'chat');
+  const nodes = line(text, context, 0, context.variant !== 'document');
   // A long line is plain text: nothing to keep.
   if (text.length > MAX_INLINE_LENGTH) return nodes;
   if (context.cache.size >= MAX_CACHED_LINES || context.cachedChars + text.length > MAX_CACHED_CHARS) {

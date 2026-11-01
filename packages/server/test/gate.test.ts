@@ -600,6 +600,7 @@ const EXPECTED_API_ROUTES = [
   // The Workbench's Files (AD-36): behind the gate only, read-only.
   `GET ${API_ROUTES.workspaceFiles}`,
   `GET ${API_ROUTES.workspaceFileContent}`,
+  `POST ${API_ROUTES.workspaceFileLinks}`,
   // The Workbench's other lanes (epic 8 entry 2): behind the gate only, on no device allowlist; 501 until each lane wires it.
   `GET ${API_ROUTES.workspaceFileSearch}`,
   `POST ${API_ROUTES.workspaceFileOpenInEditor}`,

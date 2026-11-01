@@ -84,6 +84,7 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   // The Workbench's Files (AD-36): not a BMad piece, read-only, behind the gate only.
   `GET ${API_ROUTES.workspaceFiles}`,
   `GET ${API_ROUTES.workspaceFileContent}`,
+  `POST ${API_ROUTES.workspaceFileLinks}`,
   // The Workbench's other lanes (epic 8 entry 2): not a BMad piece, behind the gate only.
   `GET ${API_ROUTES.workspaceFileSearch}`,
   `POST ${API_ROUTES.workspaceFileOpenInEditor}`,

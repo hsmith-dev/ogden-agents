@@ -43,12 +43,12 @@ describe('resolveLinkedCommand', () => {
   });
 
   it('resolves an absolute path directly when it is runnable', () => {
-    const result = resolveLinkedCommand({ command: '/usr/local/bin/codex-acp --foo' }, {}, { isExecutable: (file) => file === '/usr/local/bin/codex-acp' });
+    const result = resolveLinkedCommand({ command: '/usr/local/bin/codex-acp --foo' }, {}, { platform: 'linux', isExecutable: (file) => file === '/usr/local/bin/codex-acp' });
     expect(result).toEqual({ ok: true, resolved: { command: '/usr/local/bin/codex-acp', args: ['--foo'] } });
   });
 
   it('refuses an absolute path that is not runnable', () => {
-    const result = resolveLinkedCommand({ command: '/usr/local/bin/codex-acp' }, {}, { isExecutable: () => false });
+    const result = resolveLinkedCommand({ command: '/usr/local/bin/codex-acp' }, {}, { platform: 'linux', isExecutable: () => false });
     expect(result).toEqual({ ok: false, reason: expect.stringContaining('codex-acp') });
   });
 
@@ -107,7 +107,7 @@ describe('resolveLinkedCommand', () => {
   });
 
   it('refuses a working directory given as a relative path, never resolving it against the server\'s own working directory', () => {
-    const result = resolveLinkedCommand({ command: '/bin/codex-acp', cwd: 'work' }, {}, { isExecutable: () => true, isDirectory: () => true });
+    const result = resolveLinkedCommand({ command: '/bin/codex-acp', cwd: 'work' }, {}, { platform: 'linux', isExecutable: () => true, isDirectory: () => true });
     expect(result).toEqual({ ok: false, reason: expect.stringContaining('work') });
   });
 
@@ -115,23 +115,23 @@ describe('resolveLinkedCommand', () => {
     const result = resolveLinkedCommand(
       { command: '/bin/codex-acp', cwd: '/home/user/project/work' },
       {},
-      { isExecutable: () => true, isDirectory: (dir) => dir === '/home/user/project/work' },
+      { platform: 'linux', isExecutable: () => true, isDirectory: (dir) => dir === '/home/user/project/work' },
     );
     expect(result).toEqual({ ok: true, resolved: { command: '/bin/codex-acp', args: [], cwd: '/home/user/project/work' } });
   });
 
   it('refuses a working directory that does not exist, persisting nothing', () => {
-    const result = resolveLinkedCommand({ command: '/bin/codex-acp', cwd: '/no/such/dir' }, {}, { isExecutable: () => true, isDirectory: () => false });
+    const result = resolveLinkedCommand({ command: '/bin/codex-acp', cwd: '/no/such/dir' }, {}, { platform: 'linux', isExecutable: () => true, isDirectory: () => false });
     expect(result).toEqual({ ok: false, reason: expect.stringContaining('/no/such/dir') });
   });
 
   it('carries the spec\'s own env into the resolved result, untouched', () => {
-    const result = resolveLinkedCommand({ command: '/bin/codex-acp', env: { FOO: 'bar' } }, {}, { isExecutable: () => true });
+    const result = resolveLinkedCommand({ command: '/bin/codex-acp', env: { FOO: 'bar' } }, {}, { platform: 'linux', isExecutable: () => true });
     expect(result).toEqual({ ok: true, resolved: { command: '/bin/codex-acp', args: [], env: { FOO: 'bar' } } });
   });
 
   it('never runs the command through a shell: the args are the literal tokens after the program', () => {
-    const result = resolveLinkedCommand({ command: '/bin/grok agent --no-leader stdio' }, {}, { isExecutable: () => true });
+    const result = resolveLinkedCommand({ command: '/bin/grok agent --no-leader stdio' }, {}, { platform: 'linux', isExecutable: () => true });
     expect(result).toEqual({ ok: true, resolved: { command: '/bin/grok', args: ['agent', '--no-leader', 'stdio'] } });
   });
 });

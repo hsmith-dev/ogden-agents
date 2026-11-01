@@ -366,6 +366,14 @@ export class InvalidOperationError extends CoreError {
 }
 
 /**
+ * A remote chat refused for an agent tied to this computer (epic 27, 27.5):
+ * created with a machine, or handed to such an agent. `invalid_operation`
+ * with the agent's own `localOnlyReason`; nothing was made and no connection
+ * was opened. The REST layer answers it 409 (the chat's state refuses it).
+ */
+export class LocalOnlyAgentError extends InvalidOperationError {}
+
+/**
  * A session event was refused: it was appended around the session-event
  * helper, or it names a workspace or stream other than its session's (E2-R7).
  * Nothing was written.

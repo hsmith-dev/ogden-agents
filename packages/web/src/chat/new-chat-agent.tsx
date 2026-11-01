@@ -45,9 +45,23 @@ export function useNewChatAgent(wsId: string, initial?: { agent?: string | undef
 /**
  * Why the chosen agent can't start a chat now, and where to fix it (epic 6,
  * entry 6), always mounted so a change is announced; and, for an agent that
- * runs the project's own settings and hooks, the trust prompt (epic 12, 12.3).
+ * runs the project's own settings and hooks, the trust prompt (epic 12, 12.3);
+ * and, when a remote machine is picked for an agent tied to this computer,
+ * that agent's reason (27.5: the server refuses the send with it).
  */
-export function NewChatAgentStatus({ wsId, blocked, chosen, trustChanged }: { wsId: string; blocked: AgentAvailability | undefined; chosen: ChatAgent | undefined; trustChanged: boolean }) {
+export function NewChatAgentStatus({
+  wsId,
+  blocked,
+  chosen,
+  trustChanged,
+  localOnlyConflict,
+}: {
+  wsId: string;
+  blocked: AgentAvailability | undefined;
+  chosen: ChatAgent | undefined;
+  trustChanged: boolean;
+  localOnlyConflict?: string | undefined;
+}) {
   const queryClient = useQueryClient();
   return (
     <>
@@ -65,6 +79,12 @@ export function NewChatAgentStatus({ wsId, blocked, chosen, trustChanged }: { ws
                 </Button>
               </>
             ) : null}
+          </span>
+        )}
+        {localOnlyConflict === undefined ? null : (
+          <span data-testid="agent-local-only">
+            {blocked === undefined ? '' : ' '}
+            {localOnlyConflict}
           </span>
         )}
       </Text>

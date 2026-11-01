@@ -9,6 +9,8 @@
  * own tests in `driver-toggle.dom.test.tsx` and `terminal-panel.dom.test.tsx`.
  */
 import {
+  CHAT_REMOTE_FIXED_TEXT,
+  chatOnMachineText,
   DELETE_AND_DISCARD_LABEL,
   DELETE_CHAT_CONFIRM_TITLE,
   DELETE_CHAT_NOT_DELETABLE_TEXT,
@@ -72,6 +74,10 @@ const fake = vi.hoisted(() => ({
   deleteResults: [] as Array<() => Promise<unknown>>,
   /** The new-chat drafts opened. */
   newChats: [] as string[],
+  /** The install's remote machines (27.5: a remote chat names its own). */
+  machines: [] as unknown[],
+  /** Host-key probes asked (a started chat's chip never probes). */
+  probes: 0,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -102,6 +108,13 @@ vi.mock('@/appearance/appearance-provider', () => ({
   useAppearance: () => ({ appearance: { developerMode: true, density: 'comfortable', terminalScreenReader: false } }),
 }));
 vi.mock('@/workspaces/workspace-api', () => ({ fetchWorkspace: async () => ({ id: 'ws_1', path: '/repo' }), workspaceName: () => 'repo' }));
+vi.mock('@/remote-machines/remote-machines-api', () => ({
+  useRemoteMachines: () => ({ data: fake.machines }),
+  checkRemoteMachineHostKey: async () => {
+    fake.probes++;
+    return { fingerprint: 'fp' };
+  },
+}));
 vi.mock('@/agents/agent-setup-api', () => ({ useAgents: () => ({ data: [] }), useSignIn: () => ({}) }));
 vi.mock('@/chat/chat-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/chat/chat-api')>()),
@@ -255,6 +268,8 @@ beforeEach(() => {
   fake.sent = [];
   fake.worktreePath = null;
   fake.machineId = null;
+  fake.machines = [];
+  fake.probes = 0;
   fake.kind = 'chat';
   fake.state = 'idle';
   fake.deletes = [];
@@ -565,6 +580,48 @@ describe('a worktree chat\'s branch badge (27.3)', () => {
     await screen.findByTestId('location-chip');
     expect(screen.queryByTestId('worktree-badge')).toBeNull();
     expect(screen.queryByTestId('location-branch')).toBeNull();
+  });
+});
+
+describe('a remote chat (27.5)', () => {
+  const MACHINE = 'mach_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
+  const buildBox = { id: MACHINE, host: 'box.local', port: 22, username: 'ada', label: 'build-box', hostKeyFingerprint: 'fp', publicKey: null, hostKeyConfirmed: true, createdAt: '' };
+
+  it('says its machine in the header and on the Location chip, where the place is fixed', async () => {
+    fake.machineId = MACHINE;
+    fake.machines = [buildBox];
+    await mount();
+    expect((await screen.findByTestId('machine-badge')).textContent).toBe(chatOnMachineText('build-box'));
+    const chip = screen.getByTestId('location-chip');
+    expect(chip.getAttribute('data-machine')).toBe(MACHINE);
+    expect(chip.textContent).toContain('build-box');
+    expect(chip.getAttribute('aria-label')).toBe('Location: build-box');
+    openMenu(chip);
+    const own = await screen.findByTestId('location-machine');
+    expect(own.getAttribute('aria-checked')).toBe('true');
+    expect(own.textContent).toContain(CHAT_REMOTE_FIXED_TEXT);
+    for (const place of ['location-this_folder', 'location-worktree']) {
+      expect(screen.getByTestId(place).getAttribute('aria-disabled')).toBe('true');
+      expect(screen.getByTestId(place).textContent).toContain(CHAT_REMOTE_FIXED_TEXT);
+    }
+    // A started chat lists no other machine, offers no Add, and probes nothing.
+    expect(screen.queryByTestId('location-add-machine')).toBeNull();
+    await flush();
+    expect(fake.probes).toBe(0);
+  });
+
+  it('whose machine was removed says "on a remote machine"', async () => {
+    fake.machineId = MACHINE;
+    await mount();
+    expect((await screen.findByTestId('machine-badge')).textContent).toBe('on a remote machine');
+  });
+
+  it('a local chat has no machine badge', async () => {
+    fake.machines = [buildBox];
+    await mount();
+    await screen.findByTestId('location-chip');
+    expect(screen.queryByTestId('machine-badge')).toBeNull();
+    expect(screen.getByTestId('location-chip').getAttribute('data-machine')).toBeNull();
   });
 });
 

@@ -1,5 +1,22 @@
-import { CHAT_LOCATION_DESCRIPTIONS, CHAT_LOCATION_FIXED_TEXT, CHAT_LOCATION_LABELS, CHAT_LOCATIONS, type ChatLocation } from '@ogden-agents/shared';
-import { ArrowsLeftRight, CaretDown, FolderSimple, GitBranch, Robot } from '@phosphor-icons/react';
+import {
+  CHAT_ADD_REMOTE_MACHINE_TEXT,
+  CHAT_LOCATION_DESCRIPTIONS,
+  CHAT_LOCATION_FIXED_TEXT,
+  CHAT_LOCATION_LABELS,
+  CHAT_LOCATIONS,
+  CHAT_MACHINE_STATE_WORDS,
+  CHAT_MACHINE_UNREACHABLE_TEXT,
+  CHAT_REMOTE_FIXED_TEXT,
+  CHAT_REMOTE_MACHINE_WORDS,
+  type ChatLocation,
+  type RemoteMachine,
+  type RemoteMachineId,
+} from '@ogden-agents/shared';
+import { ArrowsLeftRight, CaretDown, Desktop, FolderSimple, GitBranch, Plus, Robot } from '@phosphor-icons/react';
+import { Link } from '@tanstack/react-router';
+import { useState } from 'react';
+import { MACHINE_HOST_KEY_CHANGED_REASON, useMachineChecks, type MachineState } from '@/remote-machines/machine-checks';
+import { useRemoteMachines } from '@/remote-machines/remote-machines-api';
 import { Button } from '@/ui/button';
 import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/ui/dropdown-menu';
 import { cn } from '@/ui/utils';
@@ -10,7 +27,7 @@ import { CONTINUE_WITH_ANOTHER_AGENT } from './session-menu';
  * `setup-chip`): Agent, Model, Mode and Location chips under the prompt box,
  * in the new-chat draft and in every chat. Each chip is a small menu with
  * the current value checked; a choice that can't be taken is disabled with
- * its one-sentence reason. This file has the Location chip and a started
+ * its one-sentence reason (27.5 adds the remote machines to Location). This file has the Location chip and a started
  * chat's Agent chip; the Model and Mode chips are their pickers'.
  */
 
@@ -19,34 +36,72 @@ export const SETUP_CHIP_CLASS = 'h-(--setup-chip-height) min-w-0 shrink gap-1 px
 
 const LOCATION_GLYPHS = { this_folder: FolderSimple, worktree: GitBranch } as const;
 
+/** Where a chat works (27.5): This folder, Worktree, or a remote machine (then always `this_folder`, its home folder there). */
+export interface ChatPlace {
+  location: ChatLocation;
+  machineId: RemoteMachineId | null;
+}
+
 export interface LocationChipProps {
   /** Where the chat works (the draft's choice, or the started chat's place). */
   value: ChatLocation;
+  /** The remote machine it runs on (27.5): the draft's pick, or the started chat's; `null`/absent: this computer. */
+  machineId?: RemoteMachineId | null | undefined;
   /** The draft's choice; absent for a started chat, whose place is fixed. */
-  onChange?: ((location: ChatLocation) => void) | undefined;
-  /** Why Worktree can't be chosen now (a remote machine is picked, until 27.5). */
-  worktreeReason?: string | undefined;
+  onChange?: ((place: ChatPlace) => void) | undefined;
+  /** The chosen agent's reason it runs only on this computer (`ChatAgent.localOnly`): every machine is disabled with it. */
+  localOnlyReason?: string | undefined;
   /** A started worktree chat's branch (27.3), shown beside the word. */
   branch?: string | null | undefined;
 }
 
+/** A machine's words in the Location menu (27.5): its name with its live state, and the sentence under it. */
+function machineWords(machine: RemoteMachine, state: MachineState | undefined, localOnlyReason: string | undefined): { label: string; reason: string | undefined; description: string } {
+  const label = state === undefined ? machine.label : `${machine.label}, ${CHAT_MACHINE_STATE_WORDS[state]}`;
+  const address = `${machine.username}@${machine.host}`;
+  // The agent's refusal comes first: it holds whatever the machine's state.
+  if (localOnlyReason !== undefined) return { label, reason: localOnlyReason, description: localOnlyReason };
+  if (state === 'unreachable') return { label, reason: CHAT_MACHINE_UNREACHABLE_TEXT, description: CHAT_MACHINE_UNREACHABLE_TEXT };
+  if (state === 'host_key_changed') return { label, reason: MACHINE_HOST_KEY_CHANGED_REASON, description: MACHINE_HOST_KEY_CHANGED_REASON };
+  return { label, reason: undefined, description: address };
+}
+
 /**
- * The Location chip (27.1): This folder (the default) or Worktree. In the
- * draft it picks where the new chat works; in a started chat it shows the
- * place and the other item is disabled with why (moving a chat is 27.4).
+ * The Location chip (27.1, 27.5). In the draft it picks where the new chat
+ * works: This folder (the default), Worktree, or one of the confirmed remote
+ * machines (Settings, Remote machines), each with its live state, probed by
+ * the server when the menu opens; then Add a remote machine. A machine the
+ * chosen agent can't take, can't be reached, or whose host key changed is
+ * disabled but focusable with why. In a started chat it shows the place
+ * (a remote chat its machine) and the others are disabled with why.
  */
-export function LocationChip({ value, onChange, worktreeReason, branch }: LocationChipProps) {
+export function LocationChip({ value, machineId = null, onChange, localOnlyReason, branch }: LocationChipProps) {
   const started = onChange === undefined;
-  const Glyph = LOCATION_GLYPHS[value];
+  const [open, setOpen] = useState(false);
+  const machines = useRemoteMachines();
+  // Never an unconfirmed machine: it can't run anything yet.
+  const confirmed = (machines.data ?? []).filter((machine) => machine.hostKeyConfirmed);
+  // Probed only for the draft's menu (a started chat's place is fixed), and not for an agent that can't take any machine.
+  const checks = useMachineChecks(open, confirmed, !started && localOnlyReason === undefined);
+  const remote = machineId !== null;
+  const machine = remote ? (machines.data ?? []).find((each) => each.id === machineId) : undefined;
+  const Glyph = remote ? Desktop : LOCATION_GLYPHS[value];
+  const shownLabel = remote ? (machine?.label ?? CHAT_REMOTE_MACHINE_WORDS) : CHAT_LOCATION_LABELS[value];
   // A started worktree chat names its branch (27.3).
-  const shownBranch = started && value === 'worktree' && branch !== undefined && branch !== null ? branch : undefined;
+  const shownBranch = started && !remote && value === 'worktree' && branch !== undefined && branch !== null ? branch : undefined;
   const reasonFor = (each: ChatLocation): string | undefined => {
-    if (each === value) return undefined;
-    if (started) return CHAT_LOCATION_FIXED_TEXT;
-    return each === 'worktree' ? worktreeReason : undefined;
+    if (!remote && each === value) return undefined;
+    if (started) return remote ? CHAT_REMOTE_FIXED_TEXT : CHAT_LOCATION_FIXED_TEXT;
+    return undefined;
   };
+  // The draft lists every confirmed machine; a started remote chat its own (even once removed from Settings).
+  const listed: Array<{ id: RemoteMachineId; machine: RemoteMachine | undefined }> = started
+    ? remote
+      ? [{ id: machineId, machine }]
+      : []
+    : confirmed.map((each) => ({ id: each.id, machine: each }));
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
@@ -54,10 +109,11 @@ export function LocationChip({ value, onChange, worktreeReason, branch }: Locati
           className={SETUP_CHIP_CLASS}
           data-testid="location-chip"
           data-location={value}
-          aria-label={shownBranch === undefined ? `Location: ${CHAT_LOCATION_LABELS[value]}` : `Location: ${CHAT_LOCATION_LABELS[value]}, branch ${shownBranch}`}
+          data-machine={machineId ?? undefined}
+          aria-label={shownBranch === undefined ? `Location: ${shownLabel}` : `Location: ${shownLabel}, branch ${shownBranch}`}
         >
           <Glyph aria-hidden />
-          <span className={shownBranch === undefined ? 'truncate' : 'shrink-0'}>{CHAT_LOCATION_LABELS[value]}</span>
+          <span className={shownBranch === undefined ? 'truncate' : 'shrink-0'}>{shownLabel}</span>
           {shownBranch === undefined ? null : (
             <span className="min-w-0 truncate font-mono text-mono-compact" data-testid="location-branch">
               {shownBranch}
@@ -74,7 +130,7 @@ export function LocationChip({ value, onChange, worktreeReason, branch }: Locati
             <DropdownMenuChoiceItem
               key={each}
               data-testid={`location-${each}`}
-              checked={each === value}
+              checked={!remote && each === value}
               // Unavailable but focusable: the keyboard and a screen reader still reach its reason.
               aria-disabled={reason !== undefined || undefined}
               data-disabled={reason !== undefined ? '' : undefined}
@@ -85,11 +141,51 @@ export function LocationChip({ value, onChange, worktreeReason, branch }: Locati
                   event.preventDefault();
                   return;
                 }
-                if (each !== value) onChange?.(each);
+                if (remote || each !== value) onChange?.({ location: each, machineId: null });
               }}
             />
           );
         })}
+        {listed.map(({ id, machine: each }) => {
+          const own = id === machineId;
+          const words =
+            each === undefined
+              ? { label: CHAT_REMOTE_MACHINE_WORDS, reason: undefined, description: CHAT_REMOTE_FIXED_TEXT }
+              : started
+                ? { label: each.label, reason: undefined, description: CHAT_REMOTE_FIXED_TEXT }
+                : machineWords(each, checks[id]?.state, localOnlyReason);
+          const reason = started ? undefined : words.reason;
+          return (
+            <DropdownMenuChoiceItem
+              key={id}
+              data-testid="location-machine"
+              data-machine={id}
+              checked={own}
+              aria-disabled={reason !== undefined || undefined}
+              data-disabled={reason !== undefined ? '' : undefined}
+              label={words.label}
+              description={words.description}
+              onSelect={(event) => {
+                if (started || reason !== undefined) {
+                  event.preventDefault();
+                  return;
+                }
+                if (!own) onChange?.({ location: 'this_folder', machineId: id });
+              }}
+            />
+          );
+        })}
+        {started ? null : (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link to="/settings/remote-machines" data-testid="location-add-machine">
+                <Plus aria-hidden />
+                {CHAT_ADD_REMOTE_MACHINE_TEXT}
+              </Link>
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

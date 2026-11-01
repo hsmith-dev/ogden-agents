@@ -27,7 +27,7 @@ import type { AgentReadiness } from '../agent-setup-types.js';
 import { runShortId } from '../build-names.js';
 import { ensureChatWorktreesRoot, isChatWorktreePath } from '../chat-worktrees.js';
 import { canonicalWorkspacePath } from '../entities.js';
-import { AgentNotReadyError, CoreError, InvalidOperationError, UnknownAgentError, ValidationError } from '../errors.js';
+import { AgentNotReadyError, CoreError, InvalidOperationError, LocalOnlyAgentError, UnknownAgentError, ValidationError } from '../errors.js';
 import { newId } from '../ids.js';
 import { serializedByRepo } from '../repo-serialization.js';
 import { workspaceFolder } from '../workspace-root.js';
@@ -81,6 +81,8 @@ export function chatAgentOf(
     needsProjectTrust: descriptor.needsProjectTrust,
     ...(descriptor.noAccount === true ? { noAccount: true } : {}),
     ...(descriptor.interactiveOnly === undefined ? {} : { interactiveOnly: descriptor.interactiveOnly }),
+    // Tied to this computer (21.6, 27.5): the draft disables every machine for it with these words.
+    ...(agent.localOnlyReason === undefined ? {} : { localOnly: agent.localOnlyReason }),
     // Ask is every agent's (where every chat starts); the rest only as it declares them.
     permissionModes: PERMISSION_MODES.filter((mode) => mode === 'ask' || declared.includes(mode)),
     ...(unavailable === undefined ? {} : { unavailable }),
@@ -296,7 +298,10 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Models, 'initialMo
       const projectDefault = options.agentId === undefined ? ctx.permissions.getSettings(workspaceId).defaultAgentId : undefined;
       const agentId = options.agentId ?? effectiveDefaultAgent(agents, projectDefault);
       const descriptor = agents.describe(agentId);
-      if (agents.get(agentId) === undefined || descriptor === undefined) throw new UnknownAgentError();
+      const port = agents.get(agentId);
+      if (port === undefined || descriptor === undefined) throw new UnknownAgentError();
+      // An agent tied to this computer never gets a remote chat (27.5): refused before anything is made or connected.
+      if (options.machineId !== undefined && options.machineId !== null && port.localOnlyReason !== undefined) throw new LocalOnlyAgentError(port.localOnlyReason);
       await requireAgentReady(ctx, workspaceId, agentId, descriptor);
       // The workspace may have been removed while the readiness was read.
       getWorkspace(workspaceId);

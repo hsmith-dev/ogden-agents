@@ -42,8 +42,9 @@ export const API_ROUTES = {
   /** `GET` → `{ workspace }` (`WorkspaceResponse`; 2.5); 404 if there is no such workspace. */
   workspace: `${API_BASE}/workspaces/:wsId`,
   /**
-   * `DELETE` → `HistoryDeletedResponse` (2.5): deletes the workspace's
-   * events, sessions and runs; the workspace stays. Appends `workspace.history_deleted`.
+   * `DELETE` (body optional `DeleteChatRequest`, 27.3) → `HistoryDeletedResponse` (2.5): deletes the workspace's
+   * events, sessions and runs, and its chats' own worktrees (branches with commits kept); the workspace stays.
+   * Appends `workspace.history_deleted`. 409 `uncommitted_changes` as Delete chat.
    */
   workspaceHistory: `${API_BASE}/workspaces/:wsId/history`,
   /**
@@ -70,6 +71,14 @@ export const API_ROUTES = {
   /**
    * `GET` → `{ session, terminal }`: one session of the workspace, and whether
    * its terminal can work (story 3.2); 404 if it is another workspace's.
+   * `DELETE` (body optional `DeleteChatRequest`) → `ChatDeletedResponse`
+   * (Delete chat, 27.3): the chat, its events and, for a worktree chat, its
+   * copy (the branch kept when it has commits); appends
+   * `workspace.chat_deleted`. 409 `agent_mid_turn` while it works, waits, is
+   * busy or the terminal drives it; `uncommitted_changes` when its copy has
+   * uncommitted changes and the body doesn't say `discardUncommitted`;
+   * `invalid_operation` for a build or planning session or a chat an
+   * orchestration run names.
    */
   workspaceSession: `${API_BASE}/workspaces/:wsId/sessions/:sesId`,
   /**

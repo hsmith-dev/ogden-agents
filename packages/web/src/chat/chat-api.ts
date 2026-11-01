@@ -3,6 +3,7 @@ import {
   API_ROUTES,
   apiPath,
   ChatAgentsResponse,
+  ChatDeletedResponse,
   PermissionRulesResponse,
   SendMessageResponse,
   SessionResponse,
@@ -205,4 +206,19 @@ export async function setGlobalMcpServers(servers: unknown[], auth: Pick<TabAuth
     "Ogden Agents couldn't save global MCP servers",
   );
   return GlobalMcpServersResponse.parse(json).servers;
+}
+
+/**
+ * `DELETE /api/v1/workspaces/:wsId/sessions/:sesId` (Delete chat, 27.3): the
+ * chat and, for a worktree chat, its copy. `discardUncommitted` only after a
+ * confirmation that named the uncommitted changes; else 409 `uncommitted_changes`.
+ */
+export async function deleteChat(wsId: string, sesId: string, discardUncommitted = false, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ChatDeletedResponse> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSession, { wsId, sesId }),
+    { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ discardUncommitted }) },
+    "Ogden Agents couldn't delete this chat",
+  );
+  return ChatDeletedResponse.parse(json);
 }

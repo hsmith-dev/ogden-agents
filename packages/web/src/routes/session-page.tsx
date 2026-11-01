@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ArrowsLeftRight, ChatCircle, House, Stop } from '@phosphor-icons/react';
-import type { PermissionMode } from '@ogden-agents/shared';
+import { DELETE_CHAT_NOT_DELETABLE_TEXT, DELETE_CHAT_REMOTE_TEXT, DELETE_CHAT_TERMINAL_TEXT, deleteChatBusyText, WORKTREE_BADGE_TOOLTIP_TEXT, worktreeBadgeLabel, type PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
@@ -14,6 +14,8 @@ import { chatDraftKey } from '@/chat/drafts';
 import { HandoffDialog } from '@/chat/handoff-dialog';
 import { onBeforeChatDetailChange, setChatDetail, useChatDetail } from '@/chat/detail-level';
 import { NewChatButton } from '@/chat/new-chat-button';
+import { useOpenNewChat } from '@/chat/new-chat';
+import { DeleteChatDialog } from '@/chat/delete-chat-dialog';
 import { CONTINUE_WITH_ANOTHER_AGENT, SessionMenu } from '@/chat/session-menu';
 import { LocationChip, SessionAgentChip } from '@/chat/setup-row';
 import { ReadOnlyConversation } from '@/chat/read-only';
@@ -38,12 +40,14 @@ import { TerminalPanel } from '@/terminal/terminal-panel';
 import { conversationProps, TerminalPane } from '@/terminal/terminal-pane';
 import { focusComposer, useSessionDriver } from '@/terminal/use-session-driver';
 import { needsYouOpenCount, subscribeNeedsYouOpened } from '@/shell/needs-you-target';
+import { BranchBadge, BranchBadgeName } from '@/ui/badge';
 import { Banner } from '@/ui/banner';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { EmptyState, PageBody, PageFooter } from '@/ui/page';
 import { Skeleton } from '@/ui/skeleton';
 import { StateGlyph } from '@/ui/state-glyph';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { Text } from '@/ui/typography';
 import { fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
 
@@ -135,6 +139,8 @@ export function SessionPage() {
   const agentRemoved = agentId !== undefined && chatAgents.data !== undefined && !chatAgents.data.agents.some((agent) => agent.agentId === agentId);
   const queryClient = useQueryClient();
   const [handoffOpen, setHandoffOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const openNewChat = useOpenNewChat();
   // Continue with another agent stays open for a chat whose agent was removed: the server hands it over.
   const severalAgents = (chatAgents.data?.agents.length ?? 0) > 1;
   // Sign in again (9.4) signs in to the chat's own agent, when it has a setup (entry 6); otherwise the plain error notice.
@@ -501,6 +507,19 @@ export function SessionPage() {
             ? 'This chat is finished.'
             : undefined;
   const nameOf = (id: string | undefined) => (id === undefined ? agentName : agentNameOf(chatAgents.data, id));
+  // Delete chat (27.3): a plain local chat only (a planning or remote one says why; a build's has no item), never mid-turn or while the terminal drives.
+  const sessionKind = session.data?.session.kind;
+  const branch = session.data?.session.branch ?? null;
+  const deleteBlocked =
+    sessionKind !== 'chat'
+      ? DELETE_CHAT_NOT_DELETABLE_TEXT
+      : (session.data?.session.machineId ?? null) !== null
+        ? DELETE_CHAT_REMOTE_TEXT
+        : terminalDrives
+        ? DELETE_CHAT_TERMINAL_TEXT
+        : busy || switchingTo !== undefined
+          ? deleteChatBusyText(agentName)
+          : undefined;
 
   /** A send refused with `agent_removed` (story 21.4): read the agent list again, so the page closes the chat. */
   const noteAgentRemoved = (failure: unknown) => {
@@ -542,6 +561,19 @@ export function SessionPage() {
             {modelWords}
           </Text>
         ) : null}
+        {/* A worktree chat's branch (27.3): it opens the Workbench rooted at the chat's copy (AD-36). */}
+        {branch !== null && !isBuild ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <BranchBadge asChild>
+                <Link to="/w/$wsId/workbench" params={{ wsId }} search={{ session: sesId }} aria-label={worktreeBadgeLabel(branch)} data-testid="worktree-badge">
+                  <BranchBadgeName>{branch}</BranchBadgeName>
+                </Link>
+              </BranchBadge>
+            </TooltipTrigger>
+            <TooltipContent data-testid="worktree-badge-hint">{WORKTREE_BADGE_TOOLTIP_TEXT}</TooltipContent>
+          </Tooltip>
+        ) : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
         {driverShown ? (
           <DriverToggle
@@ -568,9 +600,22 @@ export function SessionPage() {
             onDetail={(next) => setChatDetail(sesId, next)}
             blockedReason={handoffBlocked}
             onContinue={severalAgents ? () => setHandoffOpen(true) : undefined}
+            onDelete={isBuild ? undefined : () => setDeleteOpen(true)}
+            deleteBlockedReason={deleteBlocked}
           />
         ) : null}
       </WorkspaceHeader>
+      <DeleteChatDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        wsId={wsId}
+        sesId={sesId}
+        branch={branch}
+        onDeleted={() => {
+          void queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
+          openNewChat(wsId);
+        }}
+      />
       <HandoffDialog
         open={handoffOpen}
         onOpenChange={setHandoffOpen}
@@ -826,7 +871,7 @@ export function SessionPage() {
                 />
                 {/* A remote chat's place is its machine (27.5 adds it to this chip). */}
                 {session.data === undefined || (session.data.session.machineId ?? null) !== null ? null : (
-                  <LocationChip value={(session.data.session.worktreePath ?? null) === null ? 'this_folder' : 'worktree'} />
+                  <LocationChip value={(session.data.session.worktreePath ?? null) === null ? 'this_folder' : 'worktree'} branch={branch} />
                 )}
               </>
             }

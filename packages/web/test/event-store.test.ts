@@ -132,6 +132,24 @@ describe('event store (E2-R8)', () => {
     expect(seqs(mergedEvents(state))).toEqual([1, 2, 3, 11, 20]);
   });
 
+  it('a deleted chat (27.3) drops only its own events, stream and cursor, applied alone or in a batch', () => {
+    const chatDeleted = (seq: number) =>
+      ({ id: `evt_${seq}`, seq, at, workspaceId: 'ws_a', streamId: 'ws_a', type: 'workspace.chat_deleted', payload: { sessionId: 'ses_2', worktreeRemoved: true, branchKept: false } }) as unknown as CoreEvent;
+    let state = loaded();
+    state = applyHistoryPage(state, { workspaceId: 'ws_a', events: [delta(6, 'ws_a', 'ses_2')], hasMore: true }, 'ses_2');
+    const kept = streamEvents(state, 'ws_a', 'ses_1');
+    const one = applyEvent(state, chatDeleted(20));
+    const batched = applyEvents(state, [delta(19, 'ws_a', 'ses_1'), chatDeleted(20)]);
+    for (const next of [one, batched]) {
+      expect(streamEvents(next, 'ws_a', 'ses_2')).toEqual([]);
+      expect(next.workspaces.get('ws_a')!.events.some((e) => e.streamId === 'ses_2')).toBe(false);
+      expect(next.workspaces.get('ws_a')!.events.at(-1)!.type).toBe('workspace.chat_deleted');
+      expect(pageCursor(next, 'ws_a', 'ses_2')).toEqual({ beforeSeq: 10, hasEarlier: true });
+    }
+    expect(streamEvents(one, 'ws_a', 'ses_1')).toBe(kept);
+    expect(seqs(streamEvents(batched, 'ws_a', 'ses_1'))).toEqual([10, 19]);
+  });
+
   it('a reconnect keeps the paging cursor, and drops a workspace whose window never finished', () => {
     let state = loaded();
     state = applyEvent(state, delta(30, 'ws_c', 'ses_9'));

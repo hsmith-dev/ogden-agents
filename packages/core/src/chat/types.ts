@@ -3,7 +3,7 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { AgentId, ChatAgent, ChatLocation, HandoffPreviewResponse, PermissionMode, RemoteMachineId, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, ChatAgent, ChatDeletedResponse, ChatLocation, HandoffPreviewResponse, PermissionMode, RemoteMachineId, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentModels } from '../agent-models.js';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -15,7 +15,7 @@ import type { Permissions } from '../permissions.js';
 import type { RemoteHostConnection } from '../remote-host-port.js';
 import type { SessionEvents } from '../session-events.js';
 import type { TerminalPort, TerminalProcess } from '../terminal-port.js';
-import type { VcsPort } from '../vcs-port.js';
+import type { VcsPort, VcsWorkingTreePort } from '../vcs-port.js';
 import type { TurnSnapshots } from '../turn-snapshots.js';
 
 export interface ChatOptions {
@@ -115,7 +115,22 @@ export interface ChatOptions {
    * project's top folder and commit, and the worktree made in
    * `<data>/cw`. Absent: a worktree chat is refused (`InvalidOperationError`).
    */
-  vcs?: Pick<VcsPort, 'topLevel' | 'head' | 'addWorktree'>;
+  vcs?: Pick<VcsPort, 'topLevel' | 'head' | 'addWorktree' | 'removeWorktree' | 'isMerged'>;
+  /**
+   * The working tree's changes (AD-37; 27.3): whether a worktree chat's copy
+   * has uncommitted changes before Delete chat or Delete history removes it
+   * (staged, unstaged and untracked). Absent: every copy counts as changed,
+   * so it is removed only with `discardUncommitted`.
+   */
+  vcsWorkingTree?: Pick<VcsWorkingTreePort, 'changedFiles'> | undefined;
+  /**
+   * Called when removing a deleted chat's worktree (or cleaning up one a
+   * failed creation left) failed or was refused, after its rows went
+   * (27.3): for the log, the session id and a step only. The folder is left.
+   */
+  /** How long Delete chat waits for a deleted chat's agent and terminal to exit before it leaves the copy instead (27.3). Default 10 s. */
+  stopBeforeRemovalMs?: number | undefined;
+  onWorktreeCleanupError?: (sessionId: SessionId, step: 'outside_data' | 'remove', error?: unknown) => void;
   /**
    * Each prompt's snapshots (AD-37; story 8.4, `core.turnSnapshots`): taken
    * just before a prompt goes out and once it settled, each waited for at
@@ -192,9 +207,27 @@ export interface Chat {
    * `WorkspaceBusyError`, deleting nothing, while one of its sessions is
    * `working` or `waiting` or its agent is still answering, and
    * `NotFoundError` for an unknown workspace. The deleted sessions'
-   * idle agents are then stopped.
+   * idle agents are then stopped. Its chats' own worktrees are removed after
+   * the rows (27.3; branches with commits kept): `UncommittedChangesError`,
+   * deleting nothing, when one has uncommitted changes and
+   * `discardUncommitted` isn't set; a worktree chat the terminal drives is
+   * `WorkspaceBusyError`.
    */
-  deleteHistory(workspaceId: WorkspaceId): Omit<HistoryDeleted, 'event'>;
+  deleteHistory(workspaceId: WorkspaceId, options?: { discardUncommitted?: boolean | undefined }): Promise<Omit<HistoryDeleted, 'event'>>;
+  /**
+   * Delete chat (27.3; EXPERIENCE.md): one plain chat, its events and, for
+   * a worktree chat, its copy through `VcsPort` (its branch deleted only
+   * when merged into the checked-out branch, else kept). Refuses, deleting
+   * nothing: `InvalidOperationError` for a build or planning session, a
+   * remote chat or a chat an orchestration run names; `AgentMidTurnError`
+   * while it works, waits, is busy, the terminal drives it or it switches,
+   * or when a turn ran while its copy was read; `UncommittedChangesError`
+   * when its copy has uncommitted changes (or they can't be read) without
+   * `discardUncommitted`; `NotFoundError` for a chat of another project.
+   * The rows go first, in one transaction; a copy outside `<data>/cw` is
+   * never touched, and a removal that fails after is logged, never thrown.
+   */
+  deleteChat(workspaceId: WorkspaceId, sessionId: SessionId, options?: { discardUncommitted?: boolean | undefined }): Promise<ChatDeletedResponse>;
   /**
    * A new session in the workspace, `idle`, with the agent `agentId` (the
    * registry's default when absent), fixed for its life (epic 6): a `chat`

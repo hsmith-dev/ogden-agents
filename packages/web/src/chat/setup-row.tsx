@@ -26,6 +26,8 @@ export interface LocationChipProps {
   onChange?: ((location: ChatLocation) => void) | undefined;
   /** Why Worktree can't be chosen now (a remote machine is picked, until 27.5). */
   worktreeReason?: string | undefined;
+  /** A started worktree chat's branch (27.3), shown beside the word. */
+  branch?: string | null | undefined;
 }
 
 /**
@@ -33,9 +35,11 @@ export interface LocationChipProps {
  * draft it picks where the new chat works; in a started chat it shows the
  * place and the other item is disabled with why (moving a chat is 27.4).
  */
-export function LocationChip({ value, onChange, worktreeReason }: LocationChipProps) {
+export function LocationChip({ value, onChange, worktreeReason, branch }: LocationChipProps) {
   const started = onChange === undefined;
   const Glyph = LOCATION_GLYPHS[value];
+  // A started worktree chat names its branch (27.3).
+  const shownBranch = started && value === 'worktree' && branch !== undefined && branch !== null ? branch : undefined;
   const reasonFor = (each: ChatLocation): string | undefined => {
     if (each === value) return undefined;
     if (started) return CHAT_LOCATION_FIXED_TEXT;
@@ -44,9 +48,21 @@ export function LocationChip({ value, onChange, worktreeReason }: LocationChipPr
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className={SETUP_CHIP_CLASS} data-testid="location-chip" data-location={value} aria-label={`Location: ${CHAT_LOCATION_LABELS[value]}`}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={SETUP_CHIP_CLASS}
+          data-testid="location-chip"
+          data-location={value}
+          aria-label={shownBranch === undefined ? `Location: ${CHAT_LOCATION_LABELS[value]}` : `Location: ${CHAT_LOCATION_LABELS[value]}, branch ${shownBranch}`}
+        >
           <Glyph aria-hidden />
-          <span className="truncate">{CHAT_LOCATION_LABELS[value]}</span>
+          <span className={shownBranch === undefined ? 'truncate' : 'shrink-0'}>{CHAT_LOCATION_LABELS[value]}</span>
+          {shownBranch === undefined ? null : (
+            <span className="min-w-0 truncate font-mono text-mono-compact" data-testid="location-branch">
+              {shownBranch}
+            </span>
+          )}
           <CaretDown aria-hidden />
         </Button>
       </DropdownMenuTrigger>

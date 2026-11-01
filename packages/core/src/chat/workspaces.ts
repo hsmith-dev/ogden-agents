@@ -1,4 +1,4 @@
-/** Workspaces and their sessions, and deleting a workspace's history (moved from `chat.ts`, story 3.11). */
+/** Workspaces and their sessions (moved from `chat.ts`, story 3.11); deleting a chat or a workspace's history is `delete-chat.ts`'s (27.3). */
 import { existsSync, realpathSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
@@ -25,13 +25,12 @@ import { apiKeyMethod, type AgentDescriptor } from '../agent-descriptor.js';
 import { effectiveDefaultAgent, type AgentPort } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
 import { runShortId } from '../build-names.js';
-import { ensureChatWorktreesRoot } from '../chat-worktrees.js';
+import { ensureChatWorktreesRoot, isChatWorktreePath } from '../chat-worktrees.js';
 import { canonicalWorkspacePath } from '../entities.js';
-import { AgentNotReadyError, CoreError, InvalidOperationError, UnknownAgentError, ValidationError, WorkspaceBusyError } from '../errors.js';
+import { AgentNotReadyError, CoreError, InvalidOperationError, UnknownAgentError, ValidationError } from '../errors.js';
 import { newId } from '../ids.js';
 import { serializedByRepo } from '../repo-serialization.js';
 import { workspaceFolder } from '../workspace-root.js';
-import type { Agents } from './agents.js';
 import type { Models } from './model.js';
 import type { ChatContext } from './context.js';
 import type { Chat } from './types.js';
@@ -210,7 +209,8 @@ async function makeChatWorktree(ctx: ChatContext, workspaceId: WorkspaceId): Pro
     try {
       await vcs.addWorktree(repoPath, { path, branch, base: head.revision });
     } catch {
-      removeFolder(path);
+      // Already in the repo's chain: cleaned up here, not through `discardChatWorktree`.
+      await removeUnusedWorktree(ctx, repoPath, { id, worktreePath: path, branch });
       throw new InvalidOperationError(CHAT_WORKTREE_FAILED_TEXT);
     }
     return { id, worktreePath: realOrUndefined(path) ?? path, branch };
@@ -226,13 +226,37 @@ function removeFolder(path: string): void {
   }
 }
 
-export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & Pick<Models, 'initialModel'> & { stopTerminal: (sessionId: SessionId) => Promise<void> }) {
-  const { entities, agents, live, busy, dataHome, getWorkspace, getSession } = ctx;
-  const { drop, stopTerminal, initialModel } = deps;
+/**
+ * A worktree no chat got (27.3): git's record of it and its branch through
+ * `VcsPort` (the branch has no commit yet), then whatever of the folder is
+ * left, best effort. Only a path `isChatWorktreePath` accepts; the caller
+ * holds the repo's chain.
+ */
+async function removeUnusedWorktree(ctx: ChatContext, repoPath: string, worktree: MadeChatWorktree): Promise<void> {
+  if (!isChatWorktreePath(ctx.options.dataDir, worktree.worktreePath)) return;
+  try {
+    await ctx.options.vcs?.removeWorktree(repoPath, worktree.worktreePath, { deleteBranch: worktree.branch });
+  } catch (error) {
+    try {
+      ctx.options.onWorktreeCleanupError?.(worktree.id, 'remove', error);
+    } catch {
+      // The log never changes the refusal.
+    }
+  }
+  removeFolder(worktree.worktreePath);
+}
+
+/** {@link removeUnusedWorktree} with the repo's other git work serialized: a creation that failed after its worktree was made. */
+const discardChatWorktree = (ctx: ChatContext, repoPath: string, worktree: MadeChatWorktree): Promise<void> =>
+  serializedByRepo(repoPath, () => removeUnusedWorktree(ctx, repoPath, worktree));
+
+export function createWorkspaces(ctx: ChatContext, deps: Pick<Models, 'initialModel'>) {
+  const { entities, agents, dataHome, getWorkspace, getSession } = ctx;
+  const { initialModel } = deps;
   const readiness = (agentId: AgentId) => agentReadiness(ctx, agentId);
   const { projectTrusted } = ctx;
 
-  const methods: Pick<Chat, 'openWorkspace' | 'listWorkspaces' | 'getWorkspace' | 'listSessions' | 'deleteHistory' | 'createChatSession' | 'getSession' | 'chatAgents'> = {
+  const methods: Pick<Chat, 'openWorkspace' | 'listWorkspaces' | 'getWorkspace' | 'listSessions' | 'createChatSession' | 'getSession' | 'chatAgents'> = {
     openWorkspace(input, options) {
       const path = input === '~' ? homedir() : input.startsWith('~/') || input.startsWith('~\\') ? join(homedir(), input.slice(2)) : input;
       if (!isAbsolute(path)) throw new InvalidOperationError('Enter the full path of the folder, starting from the top of the disk.');
@@ -261,19 +285,6 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
       return entities.listSessions(workspaceId);
     },
 
-    deleteHistory(workspaceId) {
-      const sessionIds = entities.listSessions(workspaceId).map((session) => session.id);
-      // A turn can be starting before its state reads `working`: the busy set covers that gap.
-      if (sessionIds.some((id) => busy.has(id))) throw new WorkspaceBusyError(workspaceId);
-      const { deletedEvents, deletedSessions, deletedRuns } = entities.deleteWorkspaceHistory(workspaceId);
-      for (const sessionId of sessionIds) {
-        const entry = live.get(sessionId);
-        if (entry !== undefined) drop(sessionId, entry);
-        void stopTerminal(sessionId);
-      }
-      return { deletedEvents, deletedSessions, deletedRuns };
-    },
-
     async createChatSession(workspaceId, options = {}) {
       getWorkspace(workspaceId);
       // A model given (an agent handoff's target, story 11) must be a model id; whether the agent offers it is the agent's to say.
@@ -291,18 +302,21 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
       getWorkspace(workspaceId);
       // Its own worktree (27.1): only a plain local chat; made before the step below, which never awaits.
       let worktree: MadeChatWorktree | undefined;
+      let worktreeRepo: string | undefined;
       if (options.location === 'worktree') {
         if ((options.kind ?? 'chat') !== 'chat') throw new InvalidOperationError(CHAT_WORKTREE_KIND_TEXT);
         if (options.machineId !== undefined && options.machineId !== null) {
           throw new ValidationError(CHAT_WORKTREE_REMOTE_TEXT, [{ path: ['location'], message: CHAT_WORKTREE_REMOTE_TEXT }]);
         }
+        const repoPath = workspaceFolder(getWorkspace(workspaceId));
         worktree = await makeChatWorktree(ctx, workspaceId);
         try {
           getWorkspace(workspaceId);
         } catch (error) {
-          removeFolder(worktree.worktreePath);
+          await discardChatWorktree(ctx, repoPath, worktree);
           throw error;
         }
+        worktreeRepo = repoPath;
       }
       // Its model (story 11): the one given, else the project's default for the agent, else the install's, else its own choice.
       const model = options.model !== undefined ? options.model : initialModel(workspaceId, agentId);
@@ -333,11 +347,12 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
         // A worktree chat's id is its branch's (27.1); its path and branch are set here at creation; changed only by Hand off (`setSessionWorktree`, recorded as `session.location_changed`).
         ...(worktree === undefined ? {} : { id: worktree.id, worktreePath: worktree.worktreePath, branch: worktree.branch }),
       });
-      if (worktree === undefined) return create();
+      if (worktree === undefined || worktreeRepo === undefined) return create();
       try {
         return create();
       } catch (error) {
-        removeFolder(worktree.worktreePath);
+        // Its folder, git's record of it and its branch go (27.3); the original error is the answer.
+        await discardChatWorktree(ctx, worktreeRepo, worktree);
         throw error;
       }
     },

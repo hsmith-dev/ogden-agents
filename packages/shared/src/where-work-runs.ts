@@ -60,6 +60,19 @@ export type HandOffRequest = z.infer<typeof HandOffRequest>;
 export const HandOffResponse = z.object({ session: Session });
 export type HandOffResponse = z.infer<typeof HandOffResponse>;
 
+/**
+ * `DELETE …/sessions/:sesId` (Delete chat, 27.3) and `DELETE …/history`:
+ * the body is optional. A chat's own worktree with uncommitted changes is
+ * removed only with `discardUncommitted: true`, which the UI sends only
+ * after a confirmation naming that; otherwise 409 `uncommitted_changes`.
+ */
+export const DeleteChatRequest = z.object({ discardUncommitted: z.boolean().default(false) }).strict();
+export type DeleteChatRequest = z.infer<typeof DeleteChatRequest>;
+
+/** What Delete chat did: whether the chat's copy is removed, and whether its branch is kept (it has commits of its own). No path. */
+export const ChatDeletedResponse = z.object({ sessionId: SessionId, worktreeRemoved: z.boolean(), branchKept: z.boolean() }).strict();
+export type ChatDeletedResponse = z.infer<typeof ChatDeletedResponse>;
+
 /** How many chat worktrees the install keeps before it puts the oldest idle one away (EXPERIENCE.md's assumption, as Codex). */
 export const WORKTREE_RETENTION_DEFAULT = 15;
 
@@ -157,6 +170,45 @@ export const RESTORE_PATH_TAKEN_TEXT = "Restore couldn't finish: something else 
 export const RESTORE_FAILED_MESSAGE = "Restore couldn't finish. The saved changes are kept.";
 /** The retention setting's label. */
 export const worktreeRetentionLabel = (keep: number): string => `Keep the last ${keep} ${keep === 1 ? 'worktree' : 'worktrees'}`;
+
+/** The branch badge's tooltip (27.3): the branch is Ogden's and stays local. */
+export const WORKTREE_BADGE_TOOLTIP_TEXT = 'Never pushed. Merge it yourself when ready.';
+/** The branch badge's accessible name: it opens the Workbench rooted at the chat's copy. */
+export const worktreeBadgeLabel = (branch: string): string => `Branch ${branch}. Open this chat's copy in the Workbench`;
+
+/** Delete chat (27.3): the header menu's item, its confirmation and its refusals. */
+export const DELETE_CHAT_LABEL = 'Delete chat';
+export const DELETE_CHAT_CONFIRM_TITLE = 'Delete chat?';
+/** The confirmation's one sentence: a plain chat, or a worktree chat (its copy goes with its uncommitted changes, so confirming sends `discardUncommitted`; its branch stays when it has commits). */
+export const deleteChatConfirmText = (branch: string | null): string =>
+  branch === null
+    ? "Deletes this chat and its history. This can't be undone."
+    : `Deletes this chat, its history and its copy of the project with any changes not committed, keeping the branch ${branch} if it has commits.`;
+/** The fallback once the server said the copy has uncommitted changes (409 `uncommitted_changes`: a copy made since the dialog opened). */
+export const DELETE_CHAT_UNCOMMITTED_TEXT = "This chat's copy has changes that aren't committed. Deleting it discards them.";
+/** The confirm button once those changes are named. */
+export const DELETE_AND_DISCARD_LABEL = 'Delete and discard changes';
+/** The 409 `uncommitted_changes` message for Delete chat. */
+export const UNCOMMITTED_CHANGES_MESSAGE = "This chat's copy has changes that aren't committed, so nothing was deleted.";
+/** The 409 `uncommitted_changes` message for Delete history. */
+export const HISTORY_UNCOMMITTED_CHANGES_MESSAGE = "A chat's copy in this project has changes that aren't committed, so nothing was deleted.";
+/** The 409 `agent_mid_turn` message for Delete chat. */
+export const DELETE_CHAT_MID_TURN_MESSAGE = 'This chat can be deleted once its agent has finished.';
+/** The menu's reason while the agent works or waits, or the terminal drives. */
+export const deleteChatBusyText = (agentName: string): string => `Delete this chat once ${agentName} has finished.`;
+/** The menu's reason while the terminal drives the chat. */
+export const DELETE_CHAT_TERMINAL_TEXT = 'Switch back to the chat first: the terminal is driving it.';
+/** The 409 `invalid_operation` message: a build or planning session, or a chat an orchestration run names. */
+export const DELETE_CHAT_NOT_DELETABLE_TEXT = 'Only a chat you started can be deleted on its own. Delete history removes the rest.';
+/** The 409 `invalid_operation` message and the menu's reason for a chat on a remote machine. */
+export const DELETE_CHAT_REMOTE_TEXT = "A chat on a remote machine can't be deleted on its own yet. Delete history removes it.";
+/** Delete history's confirmation, with the copies sentence when any chat has its own worktree. */
+export const deleteHistoryConfirmText = (name: string, worktrees: boolean): string =>
+  worktrees
+    ? `Deletes every chat in ${name} and their copies of the project with any changes not committed, keeping branches that have commits. This can't be undone.`
+    : `Deletes every chat in ${name}. This can't be undone.`;
+/** Delete history's confirmation once the server said a copy has uncommitted changes. */
+export const DELETE_HISTORY_UNCOMMITTED_TEXT = "A chat's copy has changes that aren't committed. Deleting the history discards them.";
 
 /** The branch badge's tooltip line when the copy has its own port. */
 export const worktreePortText = (port: number): string => `Runs on port ${port} in this copy`;

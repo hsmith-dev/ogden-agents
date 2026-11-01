@@ -41,12 +41,27 @@ export interface VcsWorktreeGitPaths {
  */
 export type VcsCheck = { ok: true; version: string } | { ok: false; reason: 'missing' } | { ok: false; reason: 'too_old'; version: string };
 
-/** How a run's worktree is removed (story 5.5). */
+/** How a run's or a chat's worktree is removed (story 5.5; chat worktrees 27.3). */
 export interface RemoveWorktreeOptions {
-  /** Its branch too (one Ogden made, `ogden/…`; any other name is refused). */
+  /**
+   * Its branch too (one Ogden made: a run's `ogden/<run8>/…` for a folder in
+   * the runs' worktrees folder, a chat's `ogden/chat/<ses_…>` for one in
+   * `<data>/cw`; any other name is refused).
+   */
   deleteBranch?: string | undefined;
-  /** Delete that branch only when it is merged into the checked-out branch (an approved run's). */
+  /** Delete that branch only when it is merged into the checked-out branch (an approved run's, a deleted chat's). */
   mergedOnly?: boolean | undefined;
+  /**
+   * With `mergedOnly`: a branch git won't delete because it has commits of
+   * its own is kept and reported (`branchKept: true`), not thrown (Delete
+   * chat, 27.3: committed work is never lost).
+   */
+  keepUnmerged?: boolean | undefined;
+}
+
+/** What a removal did: whether the branch asked to go was kept (`keepUnmerged`). */
+export interface RemovedWorktree {
+  branchKept: boolean;
 }
 
 /** A branch's changes against where it started. */
@@ -83,13 +98,16 @@ export interface VcsPort {
   /** The worktree's git folders, for its branch `branch` (one of the form `<prefix>/<folder>/<name>`). */
   worktreeGitPaths(worktreePath: string, branch: string): Promise<VcsWorktreeGitPaths>;
   /**
-   * Removes the run's worktree at `path` (forced: its own changes go with
-   * it) and only its own metadata in the repo (never a prune of others);
-   * with `deleteBranch`, that branch too. Missing is fine. The adapter
-   * refuses a `path` outside the folder it was given for worktrees, and
-   * never follows a link there (story 5.5).
+   * Removes the run's or the chat's worktree at `path` (forced: its own
+   * changes go with it) and only its own metadata in the repo (never a
+   * prune of others); with `deleteBranch`, that branch too. Missing is
+   * fine. The adapter refuses a `path` outside the folders it was given for
+   * worktrees (the runs' `<data>/w`, chats' `<data>/cw`), and never follows
+   * a link there: a link in its place is unlinked, its target untouched
+   * (story 5.5; 27.3). Answers whether the branch was kept (`keepUnmerged`),
+   * or nothing (an adapter from before 27.3: never kept).
    */
-  removeWorktree(repoPath: string, path: string, options?: RemoveWorktreeOptions): Promise<void>;
+  removeWorktree(repoPath: string, path: string, options?: RemoveWorktreeOptions): Promise<RemovedWorktree | void>;
   /** The paths with uncommitted changes (staged, unstaged or untracked), repo-relative, `/`-separated. */
   status(repoPath: string): Promise<string[]>;
   /** `branch`'s changes since `base`. */

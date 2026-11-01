@@ -38,6 +38,9 @@ import {
   type CoreEventType,
   type SessionAgentChangedEvent,
   type SessionLocationChangedEvent,
+  type WorkspaceChatDeletedEvent,
+  DELETE_CHAT_MID_TURN_MESSAGE,
+  DELETE_CHAT_NOT_DELETABLE_TEXT,
   type DriverChangeCause,
   type MessageRole,
   type ModelChangeCause,
@@ -59,9 +62,9 @@ import {
   type Workspace,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { and, asc, eq, inArray, isNull, like, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, like, ne, or } from 'drizzle-orm';
 import type { Database } from './db/database.js';
-import { events, runs, sessions, workspaceBuildSettings, workspaces } from './db/schema.js';
+import { events, orchestrationSteps, runs, sessions, workspaceBuildSettings, workspaces } from './db/schema.js';
 import { AgentMidTurnError, InvalidOperationError, NotFoundError, ValidationError, WorkspaceBusyError } from './errors.js';
 import type { EventLog, HistoryDeleted } from './event-log.js';
 import { check } from './entity-check.js';
@@ -199,6 +202,19 @@ export interface Entities {
    * `working` or `waiting`, and {@link NotFoundError} for an unknown workspace.
    */
   deleteWorkspaceHistory(workspaceId: WorkspaceId): HistoryDeleted;
+
+  /**
+   * Delete chat (27.3): deletes one chat's row and its stream's events and
+   * appends `workspace.chat_deleted` (with `outcome`: whether its worktree
+   * is being removed and its branch kept, the caller's to decide and do
+   * after), in one transaction. Refuses, deleting nothing:
+   * {@link InvalidOperationError} for a build or planning session or a chat
+   * an orchestration run names (a step's `chat` or `session_id`);
+   * {@link AgentMidTurnError} while it is `working` or `waiting`;
+   * {@link NotFoundError} for an unknown session. A remote chat is not
+   * refused here: Delete chat refuses one before it gets here (27.3).
+   */
+  deleteChatSession(id: SessionId, outcome: { worktreeRemoved: boolean; branchKept: boolean }): { session: Session; deletedEvents: number; event: WorkspaceChatDeletedEvent };
 
   /** Creates a session and appends `session.created`. */
   createSession(input: NewSession): Session;
@@ -544,6 +560,34 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           .get();
         if (busy !== undefined) throw new WorkspaceBusyError(workspaceId);
         return log.deleteWorkspaceHistory(workspaceId);
+      });
+    },
+
+    deleteChatSession(id, { worktreeRemoved, branchKept }) {
+      check(SessionIdSchema, id, 'session id');
+      if (typeof worktreeRemoved !== 'boolean' || typeof branchKept !== 'boolean') {
+        throw new ValidationError('invalid outcome', [{ path: ['outcome'], message: 'Whether the copy goes and the branch stays are true or false.' }]);
+      }
+      return log.transaction(() => {
+        const session = requireSession(id);
+        if (session.kind !== 'chat') throw new InvalidOperationError(DELETE_CHAT_NOT_DELETABLE_TEXT);
+        if (session.state === 'working' || session.state === 'waiting') throw new AgentMidTurnError(DELETE_CHAT_MID_TURN_MESSAGE);
+        const named = orm
+          .select({ stepId: orchestrationSteps.stepId })
+          .from(orchestrationSteps)
+          .where(or(eq(orchestrationSteps.sessionId, id), eq(orchestrationSteps.chat, id)))
+          .limit(1)
+          .get();
+        if (named !== undefined) throw new InvalidOperationError(DELETE_CHAT_NOT_DELETABLE_TEXT);
+        const deletedEvents = orm.delete(events).where(eq(events.streamId, id)).run().changes;
+        orm.delete(sessions).where(eq(sessions.id, id)).run();
+        const event = log.append({
+          type: 'workspace.chat_deleted',
+          workspaceId: session.workspaceId,
+          streamId: session.workspaceId,
+          payload: { sessionId: id, worktreeRemoved, branchKept },
+        });
+        return { session, deletedEvents, event };
       });
     },
 

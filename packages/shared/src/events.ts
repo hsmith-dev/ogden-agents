@@ -182,6 +182,8 @@ import {
   WorkspaceTrialStartedInput,
   WorkspaceTrialKeptEvent,
   WorkspaceTrialKeptInput,
+  WorkspaceChatDeletedEvent,
+  WorkspaceChatDeletedInput,
 } from './events-where-work-runs.js';
 import { ApiErrorCode } from './errors.js';
 import { PermissionRuleId, RunId, SessionId, WorkspaceId } from './ids.js';
@@ -280,6 +282,7 @@ export {
   SettingsWorktreeRetentionChangedEvent,
   WorkspaceTrialStartedEvent,
   WorkspaceTrialKeptEvent,
+  WorkspaceChatDeletedEvent,
   PutAwayCause,
   PUT_AWAY_CAUSES,
   TcpPort,
@@ -496,6 +499,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SettingsWorktreeRetentionChangedEvent,
   WorkspaceTrialStartedEvent,
   WorkspaceTrialKeptEvent,
+  WorkspaceChatDeletedEvent,
   WorkspaceProjectCommandsChangedEvent,
   SettingsDeveloperModeChangedEvent,
   SettingsAgentDefaultModelChangedEvent,
@@ -585,6 +589,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SettingsWorktreeRetentionChangedInput,
   WorkspaceTrialStartedInput,
   WorkspaceTrialKeptInput,
+  WorkspaceChatDeletedInput,
   WorkspaceProjectCommandsChangedInput,
   SettingsDeveloperModeChangedInput,
   SettingsAgentDefaultModelChangedInput,

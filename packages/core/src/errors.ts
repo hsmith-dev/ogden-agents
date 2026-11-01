@@ -781,6 +781,18 @@ export class EditorUnavailableError extends CoreError {
 }
 
 /**
+ * Delete chat and Delete history (27.3): a chat's own worktree has
+ * uncommitted changes (or its state can't be read) and the request didn't
+ * say `discardUncommitted`. 409 `uncommitted_changes`; nothing was deleted.
+ */
+export class UncommittedChangesError extends CoreError {
+  override readonly name = 'UncommittedChangesError';
+  constructor(message: string) {
+    super('uncommitted_changes', message);
+  }
+}
+
+/**
  * Hand off (CAP-35, epic 27): the place the chat moves to has its own
  * uncommitted changes to `files` of the same files. 409 `handoff_conflict`;
  * nothing moved.

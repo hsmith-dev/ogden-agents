@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { AgentError, PROTECTED_PATHS, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import type { PermissionMode } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { PROCESS_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import { acpReasons, createGrokAgent, GROK_ARGS, GROK_ATTENDED_ONLY_REASON } from '../src/index.js';
 
 const FAKE_GROK = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-grok.mjs');
@@ -198,7 +199,7 @@ describe("Grok's chat port (epic 12 entry 7)", () => {
     expect(asked).toEqual(['npm test']);
   });
 
-  it('reopens in a new process with resume, else load, else a new one, with the mode in _meta each time', async () => {
+  it('reopens in a new process with resume, else load, else a new one, with the mode in _meta each time', { timeout: PROCESS_TEST_TIMEOUT_MS }, async () => {
     const cwd = tempDir();
     const { session } = await start({ cwd });
     const id = session.agentSessionId;

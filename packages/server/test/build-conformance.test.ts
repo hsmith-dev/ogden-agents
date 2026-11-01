@@ -26,7 +26,8 @@ import {
 } from '@ogden-agents/adapters';
 import type { AgentSetupPort, TicketStorePort } from '@ogden-agents/core';
 import { API_ROUTES, ApiErrorBody, apiPath, BuildAgentsResponse, BuildResponse, ReviewResponse, RunResponse, WorkspaceResponse } from '@ogden-agents/shared';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { PROCESS_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import { startFakeServer, type FakeServer } from '../../../tests/fixtures/fake-openai-server.mjs';
 import type { StartOptions } from '../src/start-types.js';
 import type { AntigravityPorts } from '../src/antigravity-wiring.js';
@@ -36,6 +37,9 @@ import type { LocalPorts } from '../src/local-wiring.js';
 import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_WAITING_PLAN, FAKE_BUILD_REPO_FILES, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
 import { removeAfterTest, signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type TestServer } from './helpers.js';
+
+// Each test starts a server and its agents' processes (test-timeouts.ts): a hang limit, not a measurement.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const fixture = (name: string) => join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', name);
 const temp = (prefix: string) => removeAfterTest(mkdtempSync(join(tmpdir(), prefix)));

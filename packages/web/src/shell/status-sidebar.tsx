@@ -15,10 +15,10 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarStatusRow,
   SidebarText,
   SidebarWorkspaceGroup,
 } from '@/ui/sidebar';
+import { SidebarStatusRow } from '@/ui/sidebar-rows';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { AddProjectDialog } from '@/workspaces/add-project-dialog';

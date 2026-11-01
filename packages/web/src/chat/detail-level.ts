@@ -1,4 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react';
+import { storageOf } from '@/ui/stored';
 
 /**
  * A chat's detail level (EXPERIENCE.md Detail level, epic 26 story 4): how
@@ -30,13 +31,7 @@ export interface ChatDetailEnv {
 }
 
 const browserEnv: ChatDetailEnv = {
-  storage: () => {
-    try {
-      return window.localStorage;
-    } catch {
-      return undefined;
-    }
-  },
+  storage: storageOf,
 };
 
 const isDetail = (value: unknown): value is ChatDetail => value === 'normal' || value === 'verbose';

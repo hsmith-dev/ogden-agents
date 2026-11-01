@@ -36,6 +36,17 @@ afterEach(() => {
 });
 
 describe('composer drafts', () => {
+  it('disabled (the page is leaving, story 26.10): the field is read-only and Enter sends nothing', () => {
+    const sent: string[] = [];
+    const view = mount({ draftKey: 'ws:a', onSend: async (text) => void sent.push(text) });
+    type('kept');
+    view.rerender({ draftKey: 'ws:a', disabled: true });
+    expect(input().readOnly).toBe(true);
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    expect(sent).toEqual([]);
+    expect(readDraft('ws:a')).toBe('kept');
+  });
+
   it('shows each chat its own draft when the page moves between chats', () => {
     const view = mount({ draftKey: 'ws:a' });
     type('for chat a');

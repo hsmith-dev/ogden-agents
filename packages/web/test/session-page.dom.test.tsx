@@ -46,14 +46,16 @@ const fake = vi.hoisted(() => ({
   hash: '',
   /** The chat's own worktree (27.1), or `null` for one in the project's folder. */
   worktreePath: null as string | null,
+  /** The location's path: another page's while the router is on its way there (story 26.10). */
+  pathname: '/w/ws_1/s/ses_1',
 }));
 
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ wsId: 'ws_1', sesId: 'ses_1' }),
   useSearch: () => fake.search,
   useNavigate: () => fake.navigate,
-  useRouterState: ({ select }: { select: (state: { location: { hash: string; href: string; state: Record<string, string> } }) => unknown }) =>
-    select({ location: { hash: fake.hash, href: `/w/ws_1/s/ses_1#${fake.hash}`, state: { __TSR_key: 'key_1' } } }),
+  useRouterState: ({ select }: { select: (state: { location: { pathname: string; hash: string; href: string; state: Record<string, string> } }) => unknown }) =>
+    select({ location: { pathname: fake.pathname, hash: fake.hash, href: `${fake.pathname}#${fake.hash}`, state: { __TSR_key: 'key_1' } } }),
   Link: ({ children }: { children: ReactNode }) => <a href="/">{children}</a>,
 }));
 vi.mock('@/shell/workspace-header', () => ({ WorkspaceHeader: ({ children }: { children?: ReactNode }) => <header>{children}</header> }));
@@ -204,6 +206,7 @@ beforeEach(() => {
   fake.events = [created()];
   fake.search = {};
   fake.hash = '';
+  fake.pathname = '/w/ws_1/s/ses_1';
   fake.navigations = [];
   fake.fetches = 0;
   fake.driver = 'ui';
@@ -362,6 +365,18 @@ describe('a Needs you row opens its chat on its card (epic 26, story 26.1)', () 
     fake.events.push(driverChanged('terminal'));
     await mount();
     expect(document.activeElement?.closest('[data-testid="permission-card"]') ?? null).toBeNull();
+  });
+});
+
+describe('a page on its way to another one (story 26.10)', () => {
+  it('disables the composer while the location is no longer this chat, so nothing typed reaches it', async () => {
+    fake.pathname = '/w/ws_1/new';
+    await mount();
+    expect(composerInput()?.readOnly).toBe(true);
+    cleanup();
+    fake.pathname = '/w/ws_1/s/ses_1/';
+    await mount();
+    expect(composerInput()?.readOnly).toBe(false);
   });
 });
 

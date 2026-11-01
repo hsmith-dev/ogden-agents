@@ -26,6 +26,7 @@ The v1 release is being finalized. Implementation and release evidence are track
 - Run a chat or an attended build on another computer you own over SSH (Settings > Remote machines), with a key Ogden makes for each machine and its host key confirmed once.
 - Choose Ogden, Forest or Ember appearance presets, or build a custom theme with paired light/dark colors, contrast validation and JSON import/export.
 - Use native terminal tabs and splits in Developer mode, or the optional desktop shell.
+- Move fast from the keyboard: Needs you rows say what each waiting item needs and where, and `g y` opens the next one; `g n` (or New chat in the chat header) starts a new chat; Cmd/Ctrl+K opens a palette of projects, chats and actions; Settings is grouped in a left navigation; and Always allow can cover commands starting with the same one or two words (never a chained command or a protected path).
 
 The code for these features is present; [v1 readiness](docs/v1-readiness.md) distinguishes automated checks from remaining real-provider and operating-system evidence.
 

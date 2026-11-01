@@ -112,10 +112,10 @@ Pass 1 (2026-11-01; lenses: quick and defensive, fresh subagents given the diff;
 
 ## Deferred (for the sweep)
 
-- The sidebar tooltip's "Try: <task>, 1 of 3" (EXPERIENCE.md): the sidebar reads no trials yet; the session page links to its try instead.
-- The column's latest activity line (EXPERIENCE.md): no such line exists in the web yet; the column shows the state glyph and word.
-- "Waits for a free slot": chats have no concurrency limit (decision 3); if one is added, trial chats past it should wait with those words.
-- A copy restored during a Keep is recorded `put_away` (review 10); Keep's idle check for a put-away other skips busy and switching (review 7).
+- The sidebar tooltip's "Try: <task>, 1 of 3" (EXPERIENCE.md): the sidebar reads no trials yet; the session page links to its try instead. 27.9: logged in `deferred-work.md`.
+- The column's latest activity line (EXPERIENCE.md): no such line exists in the web yet; the column shows the state glyph and word. 27.9: logged in `deferred-work.md`.
+- "Waits for a free slot": chats have no concurrency limit (decision 3); if one is added, trial chats past it should wait with those words. 27.9: its unused `TRIAL_WAITING_TEXT` removed as dead code; logged in `deferred-work.md` for when chats get a limit.
+- A copy restored during a Keep is recorded `put_away` (review 10); Keep's idle check for a put-away other skips busy and switching (review 7). 27.9: logged in `deferred-work.md`.
 
 ## Design Notes
 

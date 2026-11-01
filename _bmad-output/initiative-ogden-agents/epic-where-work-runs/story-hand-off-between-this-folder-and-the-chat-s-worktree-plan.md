@@ -150,10 +150,10 @@ Pass 2 (2026-11-01, after loop 1; lenses: quick and defensive, fresh subagents g
 
 ## Deferred (for the sweep)
 
-- Agent CLIs in Developer-mode terminal panes in the project folder are not counted as working there, so a hand-off can run beside one (review 14).
-- A server crash between a hand-off's apply and its row write leaves the changes in a copy no row names, with the snapshot ids unlogged; a copy left behind keeps its branch checked out, so the next move to a worktree fails (pass 2 row 15).
-- An orchestration dispatch, planning or retrospective start that lands during a hand-off's folder hold fails its step or leaves an empty session (pass 2 row 16).
-- Changes under a clean/smudge filter (git-lfs) can't be handed off (a false `handoff_conflict`); a copy left behind after moving back keeps the branch checked out, so the next move to a worktree fails with the generic sentence (review 15).
+- Agent CLIs in Developer-mode terminal panes in the project folder are not counted as working there, so a hand-off can run beside one (review 14). 27.9: logged in `deferred-work.md`.
+- A server crash between a hand-off's apply and its row write leaves the changes in a copy no row names, with the snapshot ids unlogged; a copy left behind keeps its branch checked out, so the next move to a worktree fails (pass 2 row 15). 27.9: logged in `deferred-work.md`.
+- An orchestration dispatch, planning or retrospective start that lands during a hand-off's folder hold fails its step or leaves an empty session (pass 2 row 16). 27.9: logged in `deferred-work.md`.
+- Changes under a clean/smudge filter (git-lfs) can't be handed off (a false `handoff_conflict`); a copy left behind after moving back keeps the branch checked out, so the next move to a worktree fails with the generic sentence (review 15). 27.9: logged in `deferred-work.md`.
 
 ## Design Notes
 

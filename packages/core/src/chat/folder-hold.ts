@@ -9,7 +9,7 @@
 import { sep } from 'node:path';
 import type { Session, Workspace } from '@ogden-agents/shared';
 import { SessionNotIdleError } from '../errors.js';
-import { sessionFolder } from '../workspace-root.js';
+import { localFolderOf } from '../workspace-root.js';
 import type { ChatContext } from './context.js';
 
 /** The refusal's plain sentence. */
@@ -21,7 +21,8 @@ export const isSameOrInside = (folder: string, outer: string): boolean => folder
 /** Throws `SessionNotIdleError` when a hand-off holds the folder `session` works in now (or one it is inside). */
 export function refuseWhileFolderMoves(ctx: Pick<ChatContext, 'movingFolders'>, workspace: Workspace, session: Session): void {
   // A build runs in its own run folder, a remote chat on its machine: neither is held.
-  if (ctx.movingFolders.size === 0 || session.kind === 'build' || session.machineId !== null) return;
-  const folder = sessionFolder(workspace, session);
+  if (ctx.movingFolders.size === 0) return;
+  const folder = localFolderOf(workspace, session);
+  if (folder === undefined) return;
   for (const held of ctx.movingFolders) if (isSameOrInside(folder, held)) throw new SessionNotIdleError(FOLDER_MOVING_MESSAGE);
 }

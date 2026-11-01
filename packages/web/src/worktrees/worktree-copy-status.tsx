@@ -14,7 +14,7 @@ import { useProjectCommandRun } from '@/workbench/problems-api';
  * setup command ran in the copy, its state with Show output (the run's
  * masked output, read only while shown).
  */
-export function WorktreeCopyStatusView({
+function WorktreeCopyStatusView({
   port,
   setup,
   output,

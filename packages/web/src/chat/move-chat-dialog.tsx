@@ -16,7 +16,7 @@ import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent 
 import { handOffChat } from './chat-api';
 import { CopyIgnoredFiles } from './copy-ignored-files';
 
-export interface HandOffDialogProps {
+export interface MoveChatDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   wsId: string;
@@ -28,7 +28,7 @@ export interface HandOffDialogProps {
 }
 
 /**
- * Hand off's confirmation (27.4; EXPERIENCE.md State Patterns: confirm once,
+ * Move this chat (Hand off's confirmation, 27.4; renamed in 27.9 from `hand-off-dialog.tsx`, one hyphen from Continue with another agent's `handoff-dialog.tsx`; EXPERIENCE.md State Patterns: confirm once,
  * the consequence in one sentence): the item's own line. A refusal stays in
  * the dialog in plain words: the other place's own changes to the same
  * files (409 `handoff_conflict`, with how many: this folder's own, or the
@@ -36,7 +36,7 @@ export interface HandOffDialogProps {
  * the folder (409 `agent_mid_turn`), or the server's sentence; nothing moved.
  * Moving to this folder lists the copy's ignored files it loses.
  */
-export function HandOffDialog({ open, onOpenChange, wsId, sesId, to, onMoved }: HandOffDialogProps) {
+export function MoveChatDialog({ open, onOpenChange, wsId, sesId, to, onMoved }: MoveChatDialogProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 

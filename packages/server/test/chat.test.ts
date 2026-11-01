@@ -8,7 +8,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { openCore, RESTARTED_REASON } from '@ogden-agents/core';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import {
   API_ROUTES,
   ApiErrorBody,
@@ -19,7 +19,8 @@ import {
   type CoreEvent,
   type SessionId,
 } from '@ogden-agents/shared';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { absolutePathFolders } from '@ogden-agents/adapters';
 import { agentEnvironment, type StartOptions } from '../src/start.js';
 import { signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -253,6 +254,34 @@ describe('chat through the fake ACP agent', () => {
     expect(Object.keys(agentEnvironment({ Path: 'C:\\bin', Anthropic_Api_Key: 'k' }, 'win32'))).toEqual(['Path']);
     const windows = agentEnvironment({ Path: 'C:\\bin', SYSTEMROOT: 'C:\\Windows', ComSpec: 'cmd', PATHEXT: '.EXE', USERPROFILE: 'C:\\u', APPDATA: 'x' }, 'win32');
     expect(Object.keys(windows).sort()).toEqual(['ComSpec', 'PATHEXT', 'Path', 'SYSTEMROOT', 'USERPROFILE']);
+  });
+
+  it("the agent environment's PATH keeps only absolute folders, by the launch rule (27.9)", () => {
+    expect(agentEnvironment({ PATH: '/usr/bin::rel:./bin:.:/opt/bin:' }, 'darwin').PATH).toBe('/usr/bin:/opt/bin');
+    // Windows: only drive-letter folders, in each spelling of the name; no share, no root-relative or relative one.
+    expect(agentEnvironment({ Path: 'C:\\bin;;rel;\\\\share\\x;\\top;"D:\\tools"' }, 'win32').Path).toBe('C:\\bin;D:\\tools');
+  });
+
+  it("an agent's process gets that PATH: no empty or relative entry reaches it (27.9)", async () => {
+    const real = process.env.PATH ?? '';
+    vi.stubEnv('PATH', `${real}::rel:.`);
+    try {
+      const { server, tab } = await startChatServer();
+      const { workspace, session } = await openChat(server, tab);
+      expect((await send(server, tab, workspace.id, session.id, 'session-start')).status).toBe(202);
+      const reply = () => server.core.events.readAfter(0).find((event) => event.type === 'session.message_completed' && event.streamId === session.id && event.payload.role === 'agent');
+      await waitFor(() => reply() !== undefined, 'the reply', 15_000);
+      const event = reply()!;
+      const started = JSON.parse(event.type === 'session.message_completed' ? event.payload.content : '{}') as { env: Record<string, string> };
+      const separator = process.platform === 'win32' ? ';' : ':';
+      const folders = (started.env.PATH ?? started.env.Path ?? '').split(separator);
+      // Exactly the real PATH's absolute folders, in order: the empty and relative ones dropped, every other one kept.
+      expect(folders).toEqual(absolutePathFolders(real, process.platform));
+      expect(folders.length).toBeGreaterThan(0);
+      expect(folders.filter((folder) => folder === '' || !isAbsolute(folder))).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('a failed prompt keeps the agent: error with a plain reason, and the next message works on the same agent session', async () => {

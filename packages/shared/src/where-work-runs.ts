@@ -13,16 +13,14 @@
  * brings it back (AD-17 CAP-33 note's one exception).
  */
 import { z } from 'zod';
-import { ChatLocation } from './chat.js';
+import { CHAT_REMOTE_FIXED_TEXT, ChatLocation } from './chat.js';
 import { Session } from './entities.js';
 import { AgentId } from './events-common.js';
-import { PutAwayCause, TcpPort, TRIAL_AGENTS_MAX, TRIAL_AGENTS_MIN, TrialSessionIds, WorktreeRetentionKeep } from './events-where-work-runs.js';
+import { PutAwayCause, TcpPort, TRIAL_AGENTS_MAX, TRIAL_AGENTS_MIN, TrialSessionIds, WorktreeBranch, WorktreeRetentionKeep } from './events-where-work-runs.js';
 import { ProjectCommandRunId, RemoteMachineId, SessionId, TrialId, WorkspaceId, WorktreeSnapshotId } from './ids.js';
 import { ProjectCommandRunState } from './project-commands.js';
 import { IsoUtcTimestamp } from './time.js';
 
-/** A chat worktree's branch, a name (never a path). */
-const Branch = z.string().min(1).max(255);
 
 /** A worktree chat's latest setup run in its copy (27.7): the run's id (its output is `GET …/project-command-runs/:runId`) and its state. */
 export const WorktreeSetupRun = z.object({ runId: ProjectCommandRunId, state: ProjectCommandRunState }).strict();
@@ -38,7 +36,7 @@ export const SessionLocation = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('worktree'),
-      branch: Branch,
+      branch: WorktreeBranch,
       /** The copy's own port (27.7), `null` when it has none. */
       port: TcpPort.nullable(),
       /** The project's setup command's latest run in this copy since the server started (27.7), `null` when none ran. */
@@ -50,6 +48,32 @@ export const SessionLocation = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('remote'), machineId: RemoteMachineId }).strict(),
 ]);
 export type SessionLocation = z.infer<typeof SessionLocation>;
+
+/**
+ * Where a chat works, as one word (27.9): the location response's `kind`,
+ * so the response, the composer and core say the same thing. The picker's
+ * and the hand-off's two places stay `ChatLocation`.
+ */
+export type ChatPlace = SessionLocation['kind'];
+
+/** The fields a chat's place is read from (absent reads as `null`, as in rows from before them). */
+type PlacedSession = { machineId?: Session['machineId'] | undefined; worktreePath?: Session['worktreePath'] | undefined; branch?: Session['branch'] | undefined };
+
+/**
+ * Whether the chat works in its own worktree on this computer: no machine,
+ * and a path with its branch (core's rule; a row has both or neither), so
+ * exactly when {@link chatPlaceOf} says `worktree`. Says nothing of whether
+ * retention put the copy away (a server fact: the location response and
+ * the put-away list).
+ */
+export const inOwnWorktree = <T extends PlacedSession>(session: T): session is T & { worktreePath: string; branch: string } =>
+  (session.machineId ?? null) === null && (session.worktreePath ?? null) !== null && (session.branch ?? null) !== null;
+
+/** A local chat's place, as a hand-off names it: its own worktree, else this folder. */
+export const localPlaceOf = (session: PlacedSession): ChatLocation => (inOwnWorktree(session) ? 'worktree' : 'this_folder');
+
+/** A chat's place: a remote machine first, then its own worktree (a path with its branch), else this folder. */
+export const chatPlaceOf = (session: PlacedSession): ChatPlace => ((session.machineId ?? null) !== null ? 'remote' : localPlaceOf(session));
 
 export const SessionLocationResponse = z.object({ location: SessionLocation });
 export type SessionLocationResponse = z.infer<typeof SessionLocationResponse>;
@@ -93,7 +117,7 @@ export const PutAwayWorktree = z
     id: WorktreeSnapshotId,
     sessionId: SessionId,
     workspaceId: WorkspaceId,
-    branch: Branch,
+    branch: WorktreeBranch,
     files: z.number().int().nonnegative(),
     cause: PutAwayCause,
     putAwayAt: IsoUtcTimestamp,
@@ -247,6 +271,14 @@ export const HANDOFF_CONFLICT_MESSAGE = 'This folder has its own changes to some
 /** A hand-off to its own worktree refused because the chat's kept branch changed the same files (409 `handoff_conflict`). */
 export const handOffWorktreeConflictText = (files: number): string =>
   `This chat's branch changed ${files} of the same files since, so its changes can't go there. Commit or set them aside first, then move.`;
+/** A hand-off refused (409 `invalid_operation`) for a build or planning session. */
+export const HANDOFF_CHAT_ONLY_TEXT = 'Only a chat can move between this folder and its own worktree.';
+/** A hand-off refused (409 `invalid_operation`) for a chat on a remote machine. */
+export const HANDOFF_REMOTE_TEXT = CHAT_REMOTE_FIXED_TEXT;
+/** A hand-off refused (409 `invalid_operation`) for a chat already in the place asked for. */
+export const handOffAlreadyThereText = (to: ChatLocation): string => (to === 'worktree' ? 'This chat already works in its own worktree.' : 'This chat already works in this folder.');
+/** A hand-off refused (409 `agent_mid_turn`) while the chat's agent works or waits. */
+export const HANDOFF_MID_TURN_MESSAGE = 'The chat moves once its agent has finished.';
 /** A hand-off asked for while the agent works or waits. */
 export const handOffMidTurnText = (agentName: string): string => `Move once ${agentName} has finished.`;
 /** A hand-off refused (409 `worktree_put_away`) because the chat's copy is put away (27.6), or being put away or restored. */
@@ -423,7 +455,6 @@ export const TRIAL_START_LABEL = 'Start';
 export const TRIAL_KEEP_LABEL = 'Keep this one';
 export const trialKeepConfirmText = (agentName: string): string => `Keep ${agentName}'s result? The other copies are put away; you can restore them.`;
 export const TRIAL_NOT_KEPT_TEXT = 'Not kept';
-export const TRIAL_WAITING_TEXT = 'Waits for a free slot';
 /** A trial chat's tooltip line in the sidebar. */
 export const trialTooltipText = (task: string, index: number, count: number): string => `Try: ${task}, ${index} of ${count}`;
 /** The Try dialog's title, its agents' label and its count line. */

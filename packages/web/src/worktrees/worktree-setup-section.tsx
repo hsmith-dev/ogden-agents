@@ -33,7 +33,7 @@ export function withSetup(data: ProjectCommandsResponse, text: string | null): P
 type Status = { kind: 'saved' | 'error'; text: string } | undefined;
 
 /** The section's body: the command field with Save and Remove, or the trust prompt in a project not trusted yet. */
-export function WorktreeSetupView({
+function WorktreeSetupView({
   wsId,
   current,
   untrusted,

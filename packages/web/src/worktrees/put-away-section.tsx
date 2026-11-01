@@ -10,7 +10,7 @@ import { useRestoreWorktree, usePutAwayWorktrees } from './worktree-retention';
 const putAwayOn = (at: string) => new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
 /** The list of a project's put-away copies, newest first, each with its branch, its saved files and Restore. */
-export function PutAwayCopiesView({
+function PutAwayCopiesView({
   worktrees,
   onRestore,
   restoring,

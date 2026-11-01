@@ -12,13 +12,13 @@ import { useEventInvalidation } from '@/events/use-event-invalidation';
  */
 
 export const trialsQueryKey = (wsId: string) => ['trials', wsId] as const;
-export const trialQueryKey = (wsId: string, tryId: string) => ['trials', wsId, tryId] as const;
+const trialQueryKey = (wsId: string, tryId: string) => ['trials', wsId, tryId] as const;
 
-export async function fetchTrials(wsId: string, auth: Auth = tabAuth): Promise<Trial[]> {
+async function fetchTrials(wsId: string, auth: Auth = tabAuth): Promise<Trial[]> {
   return TrialsResponse.parse(await call(auth, apiPath(API_ROUTES.workspaceTrials, { wsId }), {}, "Ogden Agents couldn't load this project's tries")).trials;
 }
 
-export async function fetchTrial(wsId: string, tryId: string, auth: Auth = tabAuth): Promise<Trial> {
+async function fetchTrial(wsId: string, tryId: string, auth: Auth = tabAuth): Promise<Trial> {
   return TrialResponse.parse(await call(auth, apiPath(API_ROUTES.workspaceTrial, { wsId, tryId }), {}, "Ogden Agents couldn't load this try")).trial;
 }
 

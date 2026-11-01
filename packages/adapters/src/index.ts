@@ -20,6 +20,8 @@ export * from './build-memory/index.js';
 export * from './buildrunner-acp/index.js';
 export * from './catalog-memory/index.js';
 export * from './child-env.js';
+// The launch rule's PATH filter (8.12), for the agent environment the server builds (27.9).
+export { absolutePathFolders, withAbsolutePath } from './program-launch.js';
 export * from './local-model-memory/index.js';
 export * from './local-model-openai/index.js';
 export * from './manager-memory/index.js';

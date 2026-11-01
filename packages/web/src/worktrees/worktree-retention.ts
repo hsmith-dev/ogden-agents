@@ -26,7 +26,7 @@ import { useEventInvalidation } from '@/events/use-event-invalidation';
 export const worktreeRetentionQueryKey = ['worktree-retention'] as const;
 export const putAwayWorktreesQueryKey = (wsId: string) => ['put-away-worktrees', wsId] as const;
 
-export async function fetchWorktreeRetention(auth: Auth = tabAuth): Promise<WorktreeRetentionSettingType> {
+async function fetchWorktreeRetention(auth: Auth = tabAuth): Promise<WorktreeRetentionSettingType> {
   return WorktreeRetentionSetting.parse(await call(auth, API_ROUTES.worktreeRetention, {}, "Ogden Agents couldn't load the worktree setting"));
 }
 
@@ -34,12 +34,12 @@ export async function saveWorktreeRetention(keep: number, auth: Auth = tabAuth):
   return WorktreeRetentionSetting.parse(await call(auth, API_ROUTES.worktreeRetention, { ...postJson({ keep }), method: 'PUT' }, "Ogden Agents couldn't save the worktree setting"));
 }
 
-export async function fetchPutAwayWorktrees(wsId: string, auth: Auth = tabAuth): Promise<PutAwayWorktree[]> {
+async function fetchPutAwayWorktrees(wsId: string, auth: Auth = tabAuth): Promise<PutAwayWorktree[]> {
   return PutAwayWorktreesResponse.parse(await call(auth, apiPath(API_ROUTES.workspacePutAwayWorktrees, { wsId }), {}, "Ogden Agents couldn't load the put-away copies")).worktrees;
 }
 
 /** Restore: the copy back with its saved changes, and where it went; a `ChatApiError` (`restore_failed`, its sentence) when it couldn't. */
-export async function restoreWorktree(wsId: string, sesId: string, auth: Auth = tabAuth): Promise<RestoreWorktreeResponseType> {
+async function restoreWorktree(wsId: string, sesId: string, auth: Auth = tabAuth): Promise<RestoreWorktreeResponseType> {
   return RestoreWorktreeResponse.parse(await call(auth, apiPath(API_ROUTES.sessionWorktreeRestore, { wsId, sesId }), postJson({}), "Ogden Agents couldn't restore this chat's copy"));
 }
 

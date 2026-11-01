@@ -6,17 +6,17 @@
  * changes or editor opens at a chat reads the folder through here.
  */
 import { useQuery } from '@tanstack/react-query';
-import type { Session, Workspace } from '@ogden-agents/shared';
+import { inOwnWorktree, type Session, type Workspace } from '@ogden-agents/shared';
 import { fetchSession } from '@/chat/chat-api';
 
 /** The chat query's key (the chat page, its name, Commit and the palette share it). */
 export const sessionKey = (wsId: string, sesId: string) => ['session', wsId, sesId] as const;
 
-/** A chat's own worktree, or `null` when it works in its project's folder. */
-export const chatWorktree = (session: Pick<Session, 'worktreePath'> | undefined): string | null => session?.worktreePath ?? null;
+/** A chat's own worktree (a path with its branch, shared `inOwnWorktree`), or `null` when it works in its project's folder. */
+export const chatWorktree = (session: Pick<Session, 'worktreePath' | 'branch'> | undefined): string | null => (session !== undefined && inOwnWorktree(session) ? session.worktreePath : null);
 
 /** The folders an agent's absolute path in this chat may start with: its worktree, else the project's path and real path. */
-export function chatRoots(session: Pick<Session, 'worktreePath'> | undefined, workspace: Pick<Workspace, 'path' | 'realPath'> | undefined): string[] {
+export function chatRoots(session: Pick<Session, 'worktreePath' | 'branch'> | undefined, workspace: Pick<Workspace, 'path' | 'realPath'> | undefined): string[] {
   const worktree = chatWorktree(session);
   if (worktree !== null) return [worktree];
   if (workspace === undefined) return [];

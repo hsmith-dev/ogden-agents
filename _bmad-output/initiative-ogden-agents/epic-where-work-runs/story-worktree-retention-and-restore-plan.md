@@ -132,13 +132,13 @@ Pass 1 (2026-11-01; lenses: quick and defensive, fresh subagents given the diff;
 
 ## Deferred (for the sweep)
 
-- ~~Restore refuses for good when the branch is gone or has moved and saved changes exist (review 20).~~ Settled by the user's decision (2026-11-01, Implementation Notes): restored at the newer tip or on a new branch at the saved commit. The unchanged files' blobs still live in the repo's objects, so a saved commit gc'd after a rewrite answers `restore_failed` `failed`.
-- A half put-away copy whose `.git` file went (a crash mid-removal) answers `path_taken` on every Restore; the saved changes are kept but need a repair path (review 21).
-- The snapshot cleanup runs outside `serializedByRepo`, relying on fresh mtimes, the busy skip and the 24 h grace (review 22).
-- Files normalized by `text=auto` come back with git's line endings, not byte for byte (review 23).
-- A process the agent started (a dev server) or the user's editor can still write in the copy in the moment between the last save and the removal (review 9 residual; 27.3 review 15).
-- 27.4's `ChatLocations.location` should read `putAway` from `core.worktreePutAway`; `moveChanges` in `vcs-git/chat-worktree.ts` throws until 27.4 builds it there.
-- Orchestration's message route doesn't map `worktree_put_away` to its own 409.
+- ~~Restore refuses for good when the branch is gone or has moved and saved changes exist (review 20).~~ Settled by the user's decision (2026-11-01, Implementation Notes): restored at the newer tip or on a new branch at the saved commit. The unchanged files' blobs still live in the repo's objects, so a saved commit gc'd after a rewrite answers `restore_failed` `failed`. 27.9: settled (the user decision of 2026-11-01, built in 27.6).
+- A half put-away copy whose `.git` file went (a crash mid-removal) answers `path_taken` on every Restore; the saved changes are kept but need a repair path (review 21). 27.9: logged in `deferred-work.md`.
+- The snapshot cleanup runs outside `serializedByRepo`, relying on fresh mtimes, the busy skip and the 24 h grace (review 22). 27.9: logged in `deferred-work.md`.
+- Files normalized by `text=auto` come back with git's line endings, not byte for byte (review 23). 27.9: logged in `deferred-work.md`.
+- A process the agent started (a dev server) or the user's editor can still write in the copy in the moment between the last save and the removal (review 9 residual; 27.3 review 15). 27.9: logged in `deferred-work.md` (with 27.3 review 15, one entry).
+- 27.4's `ChatLocations.location` should read `putAway` from `core.worktreePutAway`; `moveChanges` in `vcs-git/chat-worktree.ts` throws until 27.4 builds it there. 27.9: done by 27.4 (`chat/location.ts` `chatLocation` reads `worktreePutAway`; `vcs-git` builds `moveChanges`).
+- Orchestration's message route doesn't map `worktree_put_away` to its own 409. 27.9: fixed (`orchestration-routes.ts` answers 409 `worktree_put_away`; `orchestration-contract.test.ts`).
 
 ## Design Notes
 

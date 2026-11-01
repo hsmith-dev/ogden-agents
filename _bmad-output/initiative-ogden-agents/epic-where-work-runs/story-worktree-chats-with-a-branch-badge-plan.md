@@ -128,12 +128,12 @@ Order of delete: refuse and check changes under the repo chain, then delete rows
 
 ## Deferred (for the sweep)
 
-- `workspace.chat_deleted` is written with the planned outcome before the copy goes, so a failed removal or a branch `-d` kept disagrees with the log (review 12).
-- Ignored files are not counted as uncommitted, so a copy holding only ignored files (`.env`, notes) is removed without the changes step (review 13).
-- Commits made on a detached HEAD in the copy become unreachable on delete (review 14).
-- Processes the agent started in the copy (dev servers) may outlive it during removal (review 15).
-- The web event store sets no floor for a deleted chat; an in-flight history page can bring its events back (review 16).
-- A chat copy whose removal failed after its rows went (logged `a chat worktree was left in place`) stays in `<data>/cw` with its git record; nothing removes it later (no startup sweep, by this story's Never). A later story's retention or a manual cleanup has to handle it.
+- `workspace.chat_deleted` is written with the planned outcome before the copy goes, so a failed removal or a branch `-d` kept disagrees with the log (review 12). 27.9: logged in `deferred-work.md`.
+- Ignored files are not counted as uncommitted, so a copy holding only ignored files (`.env`, notes) is removed without the changes step (review 13). 27.9: settled by the user decision of 2026-11-01 (Move to this folder and Delete chat list the ignored files the copy loses; `chat/ignored-files.ts`).
+- Commits made on a detached HEAD in the copy become unreachable on delete (review 14). 27.9: logged in `deferred-work.md`.
+- Processes the agent started in the copy (dev servers) may outlive it during removal (review 15). 27.9: logged in `deferred-work.md`.
+- The web event store sets no floor for a deleted chat; an in-flight history page can bring its events back (review 16). 27.9: logged in `deferred-work.md`.
+- A chat copy whose removal failed after its rows went (logged `a chat worktree was left in place`) stays in `<data>/cw` with its git record; nothing removes it later (no startup sweep, by this story's Never). A later story's retention or a manual cleanup has to handle it. 27.9: logged in `deferred-work.md`.
 
 ## Verification
 

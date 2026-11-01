@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ArrowsLeftRight, ChatCircle, House, Stop } from '@phosphor-icons/react';
-import { chatOnMachineText, DELETE_CHAT_NOT_DELETABLE_TEXT, DELETE_CHAT_REMOTE_TEXT, DELETE_CHAT_TERMINAL_TEXT, deleteChatBusyText, HANDOFF_PUT_AWAY_TEXT, handOffMidTurnText, WORKTREE_BADGE_TOOLTIP_TEXT, WORKTREE_PUT_AWAY_COMPOSER_TEXT, worktreeBadgeLabel, type PermissionMode } from '@ogden-agents/shared';
+import { chatOnMachineText, chatPlaceOf, localPlaceOf, WORKTREE_BADGE_TOOLTIP_TEXT, WORKTREE_PUT_AWAY_COMPOSER_TEXT, worktreeBadgeLabel, type PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
@@ -15,8 +15,9 @@ import { HandoffDialog } from '@/chat/handoff-dialog';
 import { onBeforeChatDetailChange, setChatDetail, useChatDetail } from '@/chat/detail-level';
 import { NewChatButton } from '@/chat/new-chat-button';
 import { useOpenNewChat } from '@/chat/new-chat';
+import { continueBlockedReason, deleteBlockedReason, moveBlockedReason, type ChatActionState } from '@/chat/chat-actions';
 import { DeleteChatDialog } from '@/chat/delete-chat-dialog';
-import { HandOffDialog } from '@/chat/hand-off-dialog';
+import { MoveChatDialog } from '@/chat/move-chat-dialog';
 import { CONTINUE_WITH_ANOTHER_AGENT, SessionMenu } from '@/chat/session-menu';
 import { LocationChip, SessionAgentChip } from '@/chat/setup-row';
 import { ReadOnlyConversation } from '@/chat/read-only';
@@ -149,7 +150,7 @@ export function SessionPage() {
   const queryClient = useQueryClient();
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [handOffOpen, setHandOffOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
   const openNewChat = useOpenNewChat();
   // Continue with another agent stays open for a chat whose agent was removed: the server hands it over.
   const severalAgents = (chatAgents.data?.agents.length ?? 0) > 1;
@@ -522,44 +523,18 @@ export function SessionPage() {
     );
   };
 
-  // Handoff: offered while the chat is idle or in error and the chat drives it.
-  const handoffBlocked = terminalDrives
-    ? 'Switch back to the chat first: the terminal is driving it.'
-    : switchingTo !== undefined
-      ? 'This chat is switching to or from the terminal.'
-      : state === 'waiting'
-        ? `${agentName} is waiting for your answer. Answer it or stop it first.`
-        : state === 'working'
-          ? `${agentName} is working. Stop it first.`
-          : state === 'done'
-            ? 'This chat is finished.'
-            : undefined;
+  // The header's actions (`chat-actions.ts`): Continue with another agent, Delete chat (27.3) and Hand off (27.4).
+  const actionState: ChatActionState = { agentName, state, terminalDrives, switching: switchingTo !== undefined };
+  const handoffBlocked = continueBlockedReason(actionState);
   const nameOf = (id: string | undefined) => (id === undefined ? agentName : agentNameOf(chatAgents.data, id));
-  // Delete chat (27.3): a plain local chat only (a planning or remote one says why; a build's has no item), never mid-turn or while the terminal drives.
   const sessionKind = session.data?.session.kind;
   const branch = session.data?.session.branch ?? null;
   const putAway = branch !== null && (putAwayList.data ?? []).some((worktree) => worktree.sessionId === sesId);
-  const deleteBlocked =
-    sessionKind !== 'chat'
-      ? DELETE_CHAT_NOT_DELETABLE_TEXT
-      : (session.data?.session.machineId ?? null) !== null
-        ? DELETE_CHAT_REMOTE_TEXT
-        : terminalDrives
-        ? DELETE_CHAT_TERMINAL_TEXT
-        : busy || switchingTo !== undefined
-          ? deleteChatBusyText(agentName)
-          : undefined;
-  // Hand off (27.4): a started local chat, never while its copy is put away (27.6), mid-turn, switching or while the terminal drives.
-  const location = (session.data?.session.worktreePath ?? null) === null ? 'this_folder' : 'worktree';
-  const handOffReason = putAway
-    ? HANDOFF_PUT_AWAY_TEXT
-    : terminalDrives
-    ? DELETE_CHAT_TERMINAL_TEXT
-    : switchingTo !== undefined
-      ? 'This chat is switching to or from the terminal.'
-      : busy
-        ? handOffMidTurnText(agentName)
-        : undefined;
+  const deleteBlocked = deleteBlockedReason(session.data?.session, actionState);
+  // Where the chat works on this computer (`localPlaceOf`: its own worktree is a path with its branch).
+  const place = session.data === undefined ? undefined : chatPlaceOf(session.data.session);
+  const location = session.data === undefined ? 'this_folder' : localPlaceOf(session.data.session);
+  const moveReason = moveBlockedReason(putAway, actionState);
 
   /** A send refused with `agent_removed` (story 21.4): read the agent list again, so the page closes the chat. */
   const noteAgentRemoved = (failure: unknown) => {
@@ -619,7 +594,7 @@ export function SessionPage() {
         {/* The try it is part of (27.8). */}
         {branch !== null && !isBuild ? <TrialLink wsId={wsId} sesId={sesId} /> : null}
         {/* A remote chat's machine (27.5): it stays on that machine. */}
-        {machineId !== null && !isBuild ? <MachineBadge data-testid="machine-badge">{chatOnMachineText(machineName)}</MachineBadge> : null}
+        {place === 'remote' && !isBuild ? <MachineBadge data-testid="machine-badge">{chatOnMachineText(machineName)}</MachineBadge> : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
         {driverShown ? (
           <DriverToggle
@@ -662,9 +637,9 @@ export function SessionPage() {
           openNewChat(wsId);
         }}
       />
-      <HandOffDialog
-        open={handOffOpen}
-        onOpenChange={setHandOffOpen}
+      <MoveChatDialog
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
         wsId={wsId}
         sesId={sesId}
         to={location === 'worktree' ? 'this_folder' : 'worktree'}
@@ -950,8 +925,8 @@ export function SessionPage() {
                     value={location}
                     machineId={machineId}
                     branch={branch}
-                    onHandOff={sessionKind === 'chat' ? () => setHandOffOpen(true) : undefined}
-                    handOffReason={handOffReason}
+                    onHandOff={sessionKind === 'chat' ? () => setMoveOpen(true) : undefined}
+                    handOffReason={moveReason}
                   />
                 )}
               </>

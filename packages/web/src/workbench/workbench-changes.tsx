@@ -1,4 +1,5 @@
 import {
+  chatPlaceOf,
   agentMidTurnText,
   agentStartedHereText,
   CHANGES_DIFFS_FETCHED,
@@ -155,7 +156,7 @@ function useBusyAgent(wsId: string, session: string | undefined): string | undef
   const agents = useChatAgents(wsId);
   if (sessions === undefined) return undefined;
   const folder = chatWorktree(sessions.find((one) => one.id === session));
-  const busy = sessions.find((one) => one.kind !== 'build' && one.machineId === null && isBusy(one) && chatWorktree(one) === folder);
+  const busy = sessions.find((one) => one.kind !== 'build' && chatPlaceOf(one) !== 'remote' && isBusy(one) && chatWorktree(one) === folder);
   return busy === undefined ? undefined : agentNameOf(agents.data, busy.agentId ?? undefined);
 }
 

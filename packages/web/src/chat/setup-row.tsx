@@ -40,8 +40,8 @@ export const SETUP_CHIP_CLASS = 'h-(--setup-chip-height) min-w-0 shrink gap-1 px
 
 const LOCATION_GLYPHS = { this_folder: FolderSimple, worktree: GitBranch } as const;
 
-/** Where a chat works (27.5): This folder, Worktree, or a remote machine (then always `this_folder`, its home folder there). */
-export interface ChatPlace {
+/** The draft's Location pick (27.5): This folder, Worktree, or a remote machine (then always `this_folder`, its home folder there). Shared `ChatPlace` is the started chat's place, as one word. */
+export interface LocationChoice {
   location: ChatLocation;
   machineId: RemoteMachineId | null;
 }
@@ -52,7 +52,7 @@ export interface LocationChipProps {
   /** The remote machine it runs on (27.5): the draft's pick, or the started chat's; `null`/absent: this computer. */
   machineId?: RemoteMachineId | null | undefined;
   /** The draft's choice; absent for a started chat, whose place is fixed. */
-  onChange?: ((place: ChatPlace) => void) | undefined;
+  onChange?: ((choice: LocationChoice) => void) | undefined;
   /** The chosen agent's reason it runs only on this computer (`ChatAgent.localOnly`): every machine is disabled with it. */
   localOnlyReason?: string | undefined;
   /** A started worktree chat's branch (27.3), shown beside the word. */

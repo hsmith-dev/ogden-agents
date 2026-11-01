@@ -46,6 +46,17 @@ export function createStarter(ctx: BuildCtx) {
   }
 
   /**
+   * An agent tied to this computer (the Local model: its `localOnlyReason`,
+   * 21.6, 27.5) never builds on a machine: refused in its own words before
+   * any connection opens or the repo is pushed (27.9; 27.5 review 5 and 6).
+   */
+  const refuseLocalOnly = async (workspaceId: WorkspaceId, agent: BuildAgent): Promise<void> => {
+    const { agents } = await chat.chatAgents(workspaceId);
+    const localOnly = agents.find((each) => each.agentId === agent)?.localOnly;
+    if (localOnly !== undefined) throw new BuildRefusedError('sandbox_unavailable', localOnly);
+  };
+
+  /**
    * Everything a start refuses for before it writes anything (see the
    * header); the guards run last, right before the first write.
    *
@@ -61,6 +72,11 @@ export function createStarter(ctx: BuildCtx) {
     if (machineId !== null) {
       if (mode !== 'attended') throw new BuildRefusedError('sandbox_unavailable', UNATTENDED_REMOTE_MESSAGE);
       if (remote === undefined) throw new BuildRefusedError('sandbox_unavailable', REMOTE_UNAVAILABLE_MESSAGE);
+      await refuseLocalOnly(workspaceId, agent);
+      // A queued run's session may have gone to another agent since it was queued (Continue with another agent): that one is checked too.
+      const queuedRun = self === undefined ? undefined : entities.getRun(self);
+      const sessionAgent = queuedRun === undefined ? undefined : entities.getSession(queuedRun.sessionId)?.agentId;
+      if (sessionAgent !== undefined && sessionAgent !== agent) await refuseLocalOnly(workspaceId, sessionAgent);
       try {
         const probe = await remote.connect(machineId);
         await probe.close();
@@ -267,6 +283,8 @@ export function createStarter(ctx: BuildCtx) {
     if (noSkill !== undefined) throw new BuildRefusedError('plan_uncommitted', noSkill);
     if (run.machineId !== null) {
       if (remote === undefined) throw new BuildRefusedError('sandbox_unavailable', REMOTE_UNAVAILABLE_MESSAGE);
+      // The session's agent, which Continue with another agent may have changed since the run started.
+      await refuseLocalOnly(workspaceId, entities.getSession(run.sessionId)?.agentId ?? run.agent ?? runner.agent);
       const existing = buildSessions.get(run.sessionId);
       // The dead connection from before the drop (if any) is closed independently of the fresh one below.
       if (existing?.attended === true && existing.remote !== undefined) await existing.remote.close().catch(() => undefined);

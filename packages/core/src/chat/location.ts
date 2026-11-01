@@ -40,12 +40,18 @@
 import { lstatSync } from 'node:fs';
 import {
   chatWorktreeBranch,
+  inOwnWorktree,
   isChatWorktreeBranchOf,
+  localPlaceOf,
   DELETE_CHAT_TERMINAL_TEXT,
+  handOffAlreadyThereText,
+  HANDOFF_CHAT_ONLY_TEXT,
   HANDOFF_CONFLICT_MESSAGE,
   HANDOFF_FAILED_TEXT,
   HANDOFF_FOLDER_BUSY_TEXT,
+  HANDOFF_MID_TURN_MESSAGE,
   HANDOFF_PUT_AWAY_TEXT,
+  HANDOFF_REMOTE_TEXT,
   type ChatLocation,
   type Session,
   type SessionId,
@@ -57,7 +63,7 @@ import { isChatWorktreePath } from '../chat-worktrees.js';
 import { AgentMidTurnError, CoreError, HandOffConflictError, InvalidOperationError, WorktreePutAwayError } from '../errors.js';
 import { serializedByRepo } from '../repo-serialization.js';
 import { VcsError, type VcsFolder, type VcsMoveChanges } from '../vcs-port.js';
-import { sessionFolder, vcsFolderOf, workspaceFolder } from '../workspace-root.js';
+import { localFolderOf, vcsFolderOf, workspaceFolder } from '../workspace-root.js';
 import type { Agents } from './agents.js';
 import type { ChatContext } from './context.js';
 import { readyCopy, releasePort, stopSetup } from './copy-port.js';
@@ -66,7 +72,7 @@ import type { Chat } from './types.js';
 import { addChatWorktree, removeUnusedWorktree } from './workspaces.js';
 
 /** The 409 `agent_mid_turn` message when this chat works (another chat in the project folder: `HANDOFF_FOLDER_BUSY_TEXT`). */
-const MID_TURN_MESSAGE = 'The chat moves once its agent has finished.';
+const MID_TURN_MESSAGE = HANDOFF_MID_TURN_MESSAGE;
 
 const TREE = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 
@@ -114,11 +120,10 @@ export function createChatLocation(ctx: ChatContext, deps: Pick<Agents, 'release
   /** Throws unless the chat can move to `to` now (no await: the state as it is). */
   const requireMovable = (workspace: Workspace, session: Session, to: ChatLocation): void => {
     if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
-    if (session.kind !== 'chat') throw new InvalidOperationError('Only a chat can move between this folder and its own worktree.');
-    if (session.machineId !== null) throw new InvalidOperationError('A chat on a remote machine stays on that machine.');
+    if (session.kind !== 'chat') throw new InvalidOperationError(HANDOFF_CHAT_ONLY_TEXT);
+    if (session.machineId !== null) throw new InvalidOperationError(HANDOFF_REMOTE_TEXT);
     if (session.driver === 'terminal') throw new InvalidOperationError(DELETE_CHAT_TERMINAL_TEXT);
-    const here: ChatLocation = session.worktreePath === null ? 'this_folder' : 'worktree';
-    if (here === to) throw new InvalidOperationError(to === 'worktree' ? 'This chat already works in its own worktree.' : 'This chat already works in this folder.');
+    if (localPlaceOf(session) === to) throw new InvalidOperationError(handOffAlreadyThereText(to));
     // A copy put away, or being put away or restored (27.6): nothing to move until Restore brings it back.
     if (ctx.puttingAway.has(session.id) || ctx.options.worktreePutAway?.get(session.id) !== undefined) throw new WorktreePutAwayError(HANDOFF_PUT_AWAY_TEXT);
     // A row naming a copy outside `<data>/cw` (or `<data>/cw` a link, or the copy itself one): nothing is written anywhere.
@@ -136,7 +141,10 @@ export function createChatLocation(ctx: ChatContext, deps: Pick<Agents, 'release
       .listWorkspaces()
       .filter((other) => isSameOrInside(workspaceFolder(other), project))
       .flatMap((other) =>
-        entities.listSessions(other.id).filter((one) => one.id !== session.id && one.kind !== 'build' && one.machineId === null && isSameOrInside(sessionFolder(other, one), project)),
+        entities.listSessions(other.id).filter((one) => {
+          const folder = localFolderOf(other, one);
+          return one.id !== session.id && folder !== undefined && isSameOrInside(folder, project);
+        }),
       );
     if (others.some(holds)) throw new AgentMidTurnError(HANDOFF_FOLDER_BUSY_TEXT);
   };
@@ -286,8 +294,9 @@ export function createChatLocation(ctx: ChatContext, deps: Pick<Agents, 'release
   const methods: Pick<Chat, 'chatLocation' | 'moveChat'> = {
     chatLocation(workspaceId, sessionId): SessionLocation {
       const session = getSession(workspaceId, sessionId);
+      // `chatPlaceOf`'s order: the machine, then its own worktree (`inOwnWorktree`: a local chat's path with its branch), else this folder.
       if (session.machineId !== null) return { kind: 'remote', machineId: session.machineId };
-      if (session.worktreePath !== null && session.branch !== null) {
+      if (inOwnWorktree(session)) {
         const putAway = ctx.options.worktreePutAway?.get(session.id) !== undefined;
         // The setup run is the server's (`createChatLocations` adds it); the chat knows none.
         return { kind: 'worktree', branch: session.branch, port: putAway ? null : (ctx.options.worktreePorts?.portOf(session.id) ?? null), setup: null, putAway };
@@ -319,7 +328,9 @@ export function createChatLocation(ctx: ChatContext, deps: Pick<Agents, 'release
           await releaseAgent(sessionId);
           const resumes = storedAgentSessionId(sessionId) !== undefined;
           if (to === 'worktree') await toWorktree(workspace, session, resumes, hold);
-          else await toThisFolder(workspace, session as Session & { worktreePath: string; branch: string }, resumes);
+          else if (inOwnWorktree(session)) await toThisFolder(workspace, session, resumes);
+          // `requireMovable` let only a chat in its own worktree move to this folder.
+          else throw new InvalidOperationError(HANDOFF_FAILED_TEXT);
         } finally {
           switching.delete(sessionId);
           for (const folder of held) ctx.movingFolders.delete(folder);

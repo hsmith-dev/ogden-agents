@@ -27,6 +27,7 @@
  * transaction (user decision 2026-11-01).
  */
 import {
+  inOwnWorktree,
   DELETE_CHAT_MID_TURN_MESSAGE,
   RESTORE_FAILED_MESSAGE,
   RESTORE_PATH_TAKEN_TEXT,
@@ -89,10 +90,10 @@ export function createPutAway(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { s
   /** The session as a local chat worktree Ogden owns, or a refusal. */
   const ownCopy = (session: Session | undefined): Session & { worktreePath: string; branch: string } => {
     if (session === undefined) throw new NotFoundError('session', 'requested');
-    if (session.kind !== 'chat' || session.machineId !== null || session.worktreePath === null || session.branch === null || !isChatWorktreePath(ctx.options.dataDir, session.worktreePath)) {
+    if (session.kind !== 'chat' || !inOwnWorktree(session) || !isChatWorktreePath(ctx.options.dataDir, session.worktreePath)) {
       throw new InvalidOperationError(NOT_A_WORKTREE_CHAT);
     }
-    return session as Session & { worktreePath: string; branch: string };
+    return session;
   };
 
   /** Waits (bounded) for the chat's agent, terminal and setup run (27.7) to exit; whether they did. */

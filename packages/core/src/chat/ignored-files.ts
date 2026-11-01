@@ -8,7 +8,7 @@
  * rebuildable folders left out); any other chat answers none. A copy whose
  * names can't be read answers `listed: false`, never a throw.
  */
-import { IGNORED_FILES_SHOWN, isChatWorktreeBranchOf, type CopyIgnoredFilesResponse } from '@ogden-agents/shared';
+import { inOwnWorktree, IGNORED_FILES_SHOWN, isChatWorktreeBranchOf, type CopyIgnoredFilesResponse } from '@ogden-agents/shared';
 import { isRealFolder } from '../build-worktrees.js';
 import { isChatWorktreePath } from '../chat-worktrees.js';
 import { vcsFolderOf } from '../workspace-root.js';
@@ -22,7 +22,7 @@ export function createCopyIgnoredFiles(ctx: ChatContext): Pick<Chat, 'copyIgnore
     async copyIgnoredFiles(workspaceId, sessionId) {
       const workspace = ctx.getWorkspace(workspaceId);
       const session = ctx.getSession(workspaceId, sessionId);
-      if (session.machineId !== null || session.worktreePath === null || session.branch === null) return NONE;
+      if (!inOwnWorktree(session)) return NONE;
       if (!isChatWorktreeBranchOf(session.id, session.branch) || !isChatWorktreePath(ctx.options.dataDir, session.worktreePath)) return NONE;
       // Put away (27.6): the folder is gone, nothing of it left to lose.
       if (ctx.options.worktreePutAway?.get(session.id) !== undefined) return NONE;

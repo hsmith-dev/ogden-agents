@@ -109,8 +109,8 @@ Decisions (autonomous, 2026-11-01): chat worktrees live at `<data>/cw/<8 base32>
 
 ## Deferred (for the sweep)
 
-- A failure after `addWorktree` succeeded (workspace removed meanwhile, or the insert throwing) removes the folder but leaves git's `.git/worktrees/<short>` record and the `ogden/chat/<ses>` branch; 27.3's removal through `VcsPort` should clean both (review 6).
-- The workspace-files adapter still only checks a chat-worktree root is strictly inside the data folder; creation now always makes it in `<data>/cw`, so the adapter could tighten to that folder (8.2's deferred check, settled at creation here).
+- A failure after `addWorktree` succeeded (workspace removed meanwhile, or the insert throwing) removes the folder but leaves git's `.git/worktrees/<short>` record and the `ogden/chat/<ses>` branch; 27.3's removal through `VcsPort` should clean both (review 6). 27.9: done by 27.3 (`chat/workspaces.ts` `removeUnusedWorktree` removes the record and the branch through `VcsPort`).
+- The workspace-files adapter still only checks a chat-worktree root is strictly inside the data folder; creation now always makes it in `<data>/cw`, so the adapter could tighten to that folder (8.2's deferred check, settled at creation here). 27.9: fixed (`workspace-files-node` takes `chatWorktreesRoot`; the server passes `<data>/cw`).
 
 ## Verification
 

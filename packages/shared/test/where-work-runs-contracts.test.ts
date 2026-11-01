@@ -51,7 +51,14 @@ import {
   WorktreeRetentionSetting,
   WorktreeSnapshotId,
   chatOfWorktreeBranch,
+  chatPlaceOf,
   chatWorktreeBranch,
+  handOffAlreadyThereText,
+  HANDOFF_CHAT_ONLY_TEXT,
+  HANDOFF_MID_TURN_MESSAGE,
+  HANDOFF_REMOTE_TEXT,
+  inOwnWorktree,
+  localPlaceOf,
   restoredChatWorktreeBranch,
   RestoreWorktreeResponse,
   worktreeRestoredText,
@@ -214,6 +221,41 @@ describe('where work runs contracts (epic 27 entry 2)', () => {
     const [moved, , , , , retention] = EVENTS;
     expect(NewCoreEvent.safeParse({ ...moved, payload: { ...moved.payload, location: 'remote' } }).success).toBe(false);
     expect(NewCoreEvent.safeParse({ ...retention, payload: { keep: 0, previous: 15 } }).success).toBe(false);
+  });
+});
+
+describe("a chat's place (27.9: one model for core and the web)", () => {
+  const MACH = 'mach_01J9Z3K4M5N6P7Q8R9S0T1V2W9' as never;
+  const copy = { worktreePath: '/data/cw/abcdefgh', branch: `ogden/chat/${SES}` };
+
+  it('reads a machine first, then a worktree path with its branch, else this folder', () => {
+    expect(chatPlaceOf({ machineId: MACH, worktreePath: null, branch: null })).toBe('remote');
+    expect(chatPlaceOf({ machineId: MACH, ...copy })).toBe('remote');
+    expect(chatPlaceOf({ machineId: null, ...copy })).toBe('worktree');
+    expect(chatPlaceOf({ machineId: null, worktreePath: null, branch: null })).toBe('this_folder');
+    // A path without its branch (or a branch without its path) is not a worktree of its own.
+    expect(chatPlaceOf({ machineId: null, worktreePath: copy.worktreePath, branch: null })).toBe('this_folder');
+    expect(chatPlaceOf({ machineId: null, worktreePath: null, branch: copy.branch })).toBe('this_folder');
+    // Rows from before the fields read as none of them.
+    expect(chatPlaceOf({})).toBe('this_folder');
+    // Every place is a location response's kind.
+    for (const kind of ['this_folder', 'worktree', 'remote'] as const) expect(SessionLocation.options.map((option) => option.shape.kind.value)).toContain(kind);
+  });
+
+  it("names the hand-off's place and tells a local chat in a worktree of its own", () => {
+    expect(localPlaceOf(copy)).toBe('worktree');
+    expect(localPlaceOf({ worktreePath: null, branch: null })).toBe('this_folder');
+    expect(inOwnWorktree(copy)).toBe(true);
+    expect(inOwnWorktree({ machineId: null, ...copy })).toBe(true);
+    expect(inOwnWorktree({ machineId: MACH, ...copy })).toBe(false);
+    expect(inOwnWorktree({ worktreePath: copy.worktreePath, branch: null })).toBe(false);
+    expect(inOwnWorktree({ worktreePath: undefined, branch: copy.branch })).toBe(false);
+  });
+
+  it("says the hand-off's refusals in plain words, without dashes", () => {
+    for (const text of [HANDOFF_CHAT_ONLY_TEXT, HANDOFF_REMOTE_TEXT, HANDOFF_MID_TURN_MESSAGE, handOffAlreadyThereText('worktree'), handOffAlreadyThereText('this_folder')]) expect(text).not.toMatch(/[\u2013\u2014]/);
+    expect(handOffAlreadyThereText('worktree')).toBe('This chat already works in its own worktree.');
+    expect(handOffAlreadyThereText('this_folder')).toBe('This chat already works in this folder.');
   });
 });
 

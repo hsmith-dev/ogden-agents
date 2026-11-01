@@ -495,6 +495,17 @@ export const API_ROUTES = {
    * folder answers 404. The content is only ever in this response.
    */
   workspaceFileContent: `${API_BASE}/workspaces/:wsId/files/content`,
+  /**
+   * `POST WorkspaceFileLinksRequest` → `WorkspaceFileLinksResponse` (8.7):
+   * which of at most `MAX_WORKSPACE_FILE_LINKS` candidate paths (from an
+   * agent's reply or a markdown file's links) are files the viewer would
+   * open, each checked as a read is (refused, missing, a folder or a hard
+   * link outside `node_modules`: absent). Nothing else is answered: no real
+   * path, size or content; `no-store`; the paths are never logged. 400
+   * `invalid_request` for a malformed path or too many, 404 for an unknown
+   * project or a foreign session.
+   */
+  workspaceFileLinks: `${API_BASE}/workspaces/:wsId/files/links`,
   // The Workbench's other lanes (epic 8 entry 2's contract): each is behind the gate only (AD-15), on no
   // paired-device allowlist (AD-34, epic 24), and answers 501 `not_implemented` until its lane wires it.
   // Every path is a `WorkspaceRelativePath` in the query or body; `session` roots it at that chat's worktree.
@@ -530,9 +541,15 @@ export const API_ROUTES = {
    * `invalid_operation` for a chat without a worktree, `agent_mid_turn`.
    */
   sessionWorktreeCommit: `${API_BASE}/workspaces/:wsId/sessions/:sesId/worktree/commit`,
-  /** `GET` → `ProjectCommandsResponse`; `PUT SetProjectCommandsRequest` → the same (AD-38; 8.9). */
+  /**
+   * `GET` → `ProjectCommandsResponse`; `PUT SetProjectCommandsRequest` → the
+   * same (AD-38; 8.9). Every Problems route answers 409 `scripts_not_trusted`
+   * in a project not trusted yet; `PUT` 400 `invalid_request` with the plain
+   * reason for a command that needs a shell, 409 `command_changed` for a
+   * script whose text isn't the one confirmed.
+   */
   workspaceProjectCommands: `${API_BASE}/workspaces/:wsId/project-commands`,
-  /** `POST` → 202 `ProjectCommandRunResponse`: runs a confirmed command in a trusted project. */
+  /** `POST` → 202 `ProjectCommandRunResponse`: runs a confirmed command in a trusted project. 409 `command_changed` (nothing ran), 409 `invalid_operation` while it already runs, 404 an unknown command. */
   workspaceProjectCommandRuns: `${API_BASE}/workspaces/:wsId/project-commands/:commandId/runs`,
   /** `GET` → `ProjectCommandRunDetail`: a run, its masked output and parsed failures (`no-store`). */
   workspaceProjectCommandRun: `${API_BASE}/workspaces/:wsId/project-command-runs/:runId`,

@@ -1,12 +1,12 @@
 import { reviewTabLabel, type BmadPiece, type BmadPieceAvailability } from '@ogden-agents/shared';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { useAppearance } from '@/appearance/appearance-provider';
 import { useTerminalsSettings } from '@/terminal/terminals-settings';
 import { Kbd } from '@/ui/kbd';
 import { TabNav, TabNavItem } from '@/ui/tab-nav';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { useBmadPieces, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
-import { useGoShortcuts } from './use-go-shortcuts';
+import { useGoKeys, useGoShortcuts } from './use-go-shortcuts';
 
 /**
  * The project's section tabs in the workspace header (E10-R6; story 10.6).
@@ -17,7 +17,8 @@ import { useGoShortcuts } from './use-go-shortcuts';
  * so does any project while its settings load or fail to.
  *
  * Story 4.6: `g` then a shown tab's `key` opens it (`g c`, `g p`, `g b`,
- * `g r`, Developer mode's `g t`); a tab that isn't shown has no shortcut. In Developer mode only,
+ * `g r`, Developer mode's `g t`); a tab that isn't shown has no shortcut. `g s` (8.8) opens the
+ * Workbench's Search panel, which every project has. In Developer mode only,
  * each tab's tooltip (on hover and keyboard focus) shows its keys.
  */
 
@@ -180,5 +181,8 @@ export function WorkspaceTabs({
   const terminalsSettings = useTerminalsSettings(appearance.developerMode);
   const tabs = visibleWorkspaceTabs(pieces, availability, slots, appearance.developerMode && !terminalsSettings.isPending && terminalsSettings.data?.hidden !== true, !settings.isError && settings.data?.orchestrationEnabled === true);
   useGoShortcuts(wsId, tabs);
+  const navigate = useNavigate();
+  // The Workbench is every project's, so its Search is always a `g s` away.
+  useGoKeys([{ key: 's', run: () => void navigate({ to: '/w/$wsId/workbench', params: { wsId }, search: { panel: 'search' } }) }]);
   return <WorkspaceTabsView wsId={wsId} tabs={tabs} active={active} hints={appearance.developerMode} reviewRef={reviewRef} crowded={crowded} />;
 }

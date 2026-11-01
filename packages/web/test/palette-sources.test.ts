@@ -2,16 +2,19 @@
  * What each command palette source offers in each context (epic 26 story
  * 3): chats from every project (on the empty query, the last 5 opened that
  * still exist), projects, the current project's tickets (none without a
- * project or on the empty query), and actions: New chat only in a project,
- * Go to Needs you only with something waiting, the detail level only on a
+ * project or on the empty query), the current project's files (8.11: by
+ * name, folder in caption, the best 8), and actions: New chat, Workbench and
+ * Search the project only in a project, Go to Needs you only with something waiting, the detail level only on a
  * chat (naming the other level), each Settings group, the themes not in use.
- * The sources are a constant list with the reserved Files slot in the order.
+ * The sources are a constant list; Files shows in its slot by the group order.
  */
 import type { TicketRow } from '@ogden-agents/shared';
 import { describe, expect, it, vi } from 'vitest';
 import {
   actionItems,
   chatItems,
+  fileItems,
+  PALETTE_FILES_SHOWN,
   PALETTE_EMPTY_ORDER,
   PALETTE_GROUP_ORDER,
   PALETTE_SOURCES,
@@ -38,8 +41,8 @@ const GROUPS: SidebarWorkspace[] = [
 ];
 
 describe('the sources', () => {
-  it('are a constant list in group order, with Files reserved between Projects and Tickets', () => {
-    expect(PALETTE_SOURCES.map((source) => source.group)).toEqual(['chats', 'projects', 'tickets', 'actions']);
+  it('are a constant list, Files appended, shown between Projects and Tickets by the group order', () => {
+    expect(PALETTE_SOURCES.map((source) => source.group)).toEqual(['chats', 'projects', 'tickets', 'actions', 'files']);
     expect(PALETTE_GROUP_ORDER).toEqual(['chats', 'projects', 'files', 'tickets', 'actions']);
     expect(PALETTE_EMPTY_ORDER).toEqual(['chats', 'actions', 'projects']);
   });
@@ -106,6 +109,40 @@ describe('tickets', () => {
   });
 });
 
+describe('files', () => {
+  it('each by its name with its folder in caption (none at the root); Enter opens it', () => {
+    const open = vi.fn();
+    const items = fileItems('ws_a', ['src/ui/palette.ts', 'palette.md'], 'palet', open);
+    expect(items.map((item) => [item.id, item.group, item.label, item.context, item.keywords])).toEqual([
+      ['file:src/ui/palette.ts', 'files', 'palette.ts', 'src/ui', ['src/ui/palette.ts']],
+      ['file:palette.md', 'files', 'palette.md', undefined, ['palette.md']],
+    ]);
+    expect('icon' in items[0]!.glyph).toBe(true);
+    items[0]!.run!();
+    expect(open).toHaveBeenCalledWith('ws_a', 'src/ui/palette.ts');
+  });
+
+  it('a name match before a folder match; one that no longer matches is left out', () => {
+    const items = fileItems('ws_a', ['ui/pal/other.ts', 'src/ui.ts', 'docs/readme.md'], 'ui', vi.fn());
+    expect(items.map((item) => item.label)).toEqual(['ui.ts', 'other.ts']);
+  });
+
+  it('at most 8, the best ones', () => {
+    const paths = Array.from({ length: 500 }, (_, index) => `deep/folder/x-note-${index}.md`);
+    paths.push('note.md');
+    const items = fileItems('ws_a', paths, 'note', vi.fn());
+    expect(items).toHaveLength(PALETTE_FILES_SHOWN);
+    expect(PALETTE_FILES_SHOWN).toBe(8);
+    expect(items[0]!.label).toBe('note.md');
+  });
+
+  it('none outside a project, without results, or on the empty query', () => {
+    expect(fileItems(undefined, ['a.ts'], 'a', vi.fn())).toEqual([]);
+    expect(fileItems('ws_a', undefined, 'a', vi.fn())).toEqual([]);
+    expect(fileItems('ws_a', ['a.ts'], '  ', vi.fn())).toEqual([]);
+  });
+});
+
 describe('actions', () => {
   const inputs = (change: Partial<ActionInputs> = {}): ActionInputs => ({
     wsId: undefined,
@@ -115,6 +152,7 @@ describe('actions', () => {
     settingsGroups: visibleSettingsGroups('/', false),
     theme: 'system',
     newChat: vi.fn(),
+    openWorkbench: vi.fn(),
     goToNeedsYou: vi.fn(),
     setDetail: vi.fn(),
     openPage: vi.fn(),
@@ -139,20 +177,26 @@ describe('actions', () => {
     expect(actionItems(inputs()).find((item) => item.label === 'New chat in...')?.mode).toBe('new-chat-in');
   });
 
-  it('in a project on a chat with Needs you: New chat, Go to Needs you, Show every step', () => {
+  it('in a project on a chat with Needs you: New chat, Go to Needs you, Workbench, Search the project, Show every step', () => {
     const given = inputs({ wsId: 'ws_a', sesId: 'ses_1', hasNeedsYou: true });
     const items = actionItems(given);
-    expect(items.slice(0, 4).map((item) => [item.label, item.keys])).toEqual([
+    expect(items.slice(0, 6).map((item) => [item.label, item.keys])).toEqual([
       ['New chat', ['g', 'n']],
       ['New chat in...', undefined],
       ['Go to Needs you', ['g', 'y']],
+      ['Workbench', ['g', 'w']],
+      ['Search the project', ['g', 's']],
       ['Show every step', undefined],
     ]);
     items[0]!.run!();
     expect(given.newChat).toHaveBeenCalledWith('ws_a');
     items[2]!.run!();
     expect(given.goToNeedsYou).toHaveBeenCalled();
-    const detail = items[3]!;
+    items[3]!.run!();
+    expect(given.openWorkbench).toHaveBeenLastCalledWith('ws_a');
+    items[4]!.run!();
+    expect(given.openWorkbench).toHaveBeenLastCalledWith('ws_a', 'search');
+    const detail = items[5]!;
     expect(detail.returnFocus).toBe(true);
     detail.run!();
     expect(given.setDetail).toHaveBeenCalledWith('ses_1', 'verbose');

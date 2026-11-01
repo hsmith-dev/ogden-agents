@@ -7,9 +7,10 @@
  * use-case; nothing is appended to the event log.
  */
 import { realpathSync } from 'node:fs';
-import { WORKSPACE_PATH_HARD_LINK_MESSAGE } from '@ogden-agents/shared';
+import { join } from 'node:path';
+import { chatWorktreeBranch, WORKSPACE_PATH_HARD_LINK_MESSAGE } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { isRefusedWorkspacePath, NotFoundError, PathProtectedError, ValidationError, type WorkspaceFilesPort, type WorkspacePathRefusal } from '../src/index.js';
+import { isRefusedWorkspacePath, newId, NotFoundError, PathProtectedError, ValidationError, type WorkspaceFilesPort, type WorkspacePathRefusal } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
 
 /** A port that records each call and answers `answer`. */
@@ -170,5 +171,71 @@ describe('workspace files use-case: review rows (defensive check)', () => {
     const ws = core.entities.ensureWorkspace(tempDir());
     await expect(core.workspaceFiles!.read(ws.id, '.\u017f\u017fh/id_rsa')).rejects.toBeInstanceOf(PathProtectedError);
     expect(calls).toEqual([]);
+  });
+});
+
+describe('workspace files exists (8.7)', () => {
+  /** A port whose `locate` answers from `table` (a missing row is not found) and records each path asked. */
+  function locatingPort(table: Record<string, WorkspacePathRefusal | 'file' | 'throws'>) {
+    const asked: Array<{ root: string; path: string; kind: string | undefined }> = [];
+    const { port } = recordingPort();
+    port.locate = async (root, path, kind) => {
+      asked.push({ root, path, kind });
+      const row = table[path] ?? { refused: 'not_found' };
+      if (row === 'throws') throw new Error(`EIO ${path}`);
+      return row === 'file' ? { realPath: `${root}/${path}` } : row;
+    };
+    return { port, asked };
+  }
+
+  it('answers the asked files that exist, once each, in order; refused names, refusals, folders, missing and failures are absent', async () => {
+    const { port, asked } = locatingPort({
+      'src/a.ts': 'file',
+      'README.md': 'file',
+      'out.ts': { refused: 'protected' },
+      'hard.ts': { refused: 'protected', reason: 'hard_link' },
+      src: { refused: 'not_found' },
+      'broken.ts': 'throws',
+    });
+    const core = openTestCore(undefined, undefined, { workspaceFilesPort: port });
+    const repo = tempDir();
+    const ws = core.entities.ensureWorkspace(repo);
+    const seq = core.events.readAfter(0).length;
+    const found = await core.workspaceFiles!.exists!(ws.id, ['README.md', '.git/config', 'src/a.ts', 'out.ts', 'hard.ts', 'src', 'missing.ts', '.ssh/id_rsa', 'broken.ts', 'README.md']);
+    expect(found).toEqual(['README.md', 'src/a.ts']);
+    // `.git` and the credential folders are never asked of the port; each path is asked once.
+    expect(asked.map((each) => each.path).sort()).toEqual(['README.md', 'broken.ts', 'hard.ts', 'missing.ts', 'out.ts', 'src', 'src/a.ts']);
+    expect(new Set(asked.map((each) => each.root))).toEqual(new Set([realpathSync.native(repo)]));
+    expect(core.events.readAfter(0)).toHaveLength(seq);
+  });
+
+  it('is NotFoundError for an unknown workspace or chat whatever the paths, and ValidationError for malformed or too many paths, asking the port nothing', async () => {
+    const { port, asked } = locatingPort({ 'a.ts': 'file' });
+    const core = openTestCore(undefined, undefined, { workspaceFilesPort: port });
+    const ws = core.entities.ensureWorkspace(tempDir());
+    await expect(core.workspaceFiles!.exists!('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3', ['a.ts'])).rejects.toBeInstanceOf(NotFoundError);
+    await expect(core.workspaceFiles!.exists!('nope', ['../x'])).rejects.toBeInstanceOf(NotFoundError);
+    await expect(core.workspaceFiles!.exists!(ws.id, ['a.ts'], 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3')).rejects.toBeInstanceOf(NotFoundError);
+    for (const paths of [['../x'], ['/etc/passwd'], ['a\\b'], ['C:/x'], ['a.ts', 7], 'a.ts', undefined, Array.from({ length: 101 }, (_, i) => `f${i}.ts`)]) {
+      await expect(core.workspaceFiles!.exists!(ws.id, paths), JSON.stringify(paths)).rejects.toBeInstanceOf(ValidationError);
+    }
+    expect(asked).toEqual([]);
+    expect(await core.workspaceFiles!.exists!(ws.id, [])).toEqual([]);
+  });
+
+  it("roots a chat's paths at its worktree", async () => {
+    const { port, asked } = locatingPort({ 'a.ts': 'file' });
+    const core = openTestCore(undefined, undefined, { workspaceFilesPort: port });
+    const ws = core.entities.ensureWorkspace(tempDir());
+    const id = newId('ses');
+    const worktreePath = join(tempDir(), 'worktree');
+    const chat = core.entities.createSession({ workspaceId: ws.id, kind: 'chat', id, worktreePath, branch: chatWorktreeBranch(id) });
+    expect(await core.workspaceFiles!.exists!(ws.id, ['a.ts'], chat.id)).toEqual(['a.ts']);
+    expect(asked).toEqual([{ root: worktreePath, path: 'a.ts', kind: 'chat_worktree' }]);
+  });
+
+  it('is absent when the port cannot locate', () => {
+    const core = openTestCore(undefined, undefined, { workspaceFilesPort: recordingPort().port });
+    expect(core.workspaceFiles!.exists).toBeUndefined();
   });
 });

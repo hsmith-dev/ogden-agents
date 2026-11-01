@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, createWorkspaceFilesNode, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, createProjectCommandsNode, createWorkspaceFilesNode, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
@@ -15,6 +15,7 @@ import {
   createOnboarding,
   createRemoteWorktreeSync,
   clampCheckInDelay,
+  CoreError,
   openRemoteConnection,
   RESTARTED_REASON,
   createToolchain,
@@ -48,7 +49,7 @@ import { wireAgents } from './start-agents.js';
 import { createPanesWiring } from './start-panes.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
-import { createBuildsWiring, createServerVcs } from './start-builds.js';
+import { createBuildsWiring, createServerVcs, createServerWorkingTree } from './start-builds.js';
 import { createNotificationsWiring } from './start-notifications.js';
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
@@ -187,6 +188,12 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
   // The pinned BMad Method source, the catalog and setup's script runner holder (`start-planning.ts`).
   const bmadWiring = createBmadSourceAndCatalog(options, dataDir, log, hooks.bmadSource);
   const { bmadCatalog } = bmadWiring;
+  // Problems' runner (AD-38; 8.9): argv only, no shell, the allowlisted environment; closed on stop and on a failed start.
+  const projectCommandRunner = options.projectCommandRunner ?? createProjectCommandsNode();
+  // A crash (`uncaughtException` → `process.exit(1)`) skips shutdown: no detached command group may outlive it. Removed on a normal stop.
+  const killCommandsOnExit = () => projectCommandRunner.killAll?.();
+  process.on('exit', killCommandsOnExit);
+  const releaseCrashKill = () => void process.off('exit', killCommandsOnExit);
   const core =
     options.core ??
     openCore(dataDir, {
@@ -198,6 +205,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       bmadCatalog,
       onBmadSetupFailure: bmadSetupFailureLogger(log),
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
+      // A turn snapshot that failed (story 8.4): its code only, never a message that could name a path.
+      onTurnSnapshotError: (sessionId, error) => log.warn('a turn snapshot failed', { sessionId, code: error instanceof CoreError ? error.code : 'unexpected' }),
       // The request is declined all the same; the reason names no command.
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
       // A project's default agent (epic 6, entry 6) is one this server registers: Claude Code and any extra agent.
@@ -206,13 +215,20 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       devToolsPort: options.devToolsPort ?? createDevToolsAdapter(),
       // The Workbench's Files (AD-36): confined to each project, with the home credential and data-folder fences.
       workspaceFilesPort: options.workspaceFilesPort ?? createWorkspaceFilesNode({ home: homedir(), dataDir }),
+      // The Workbench's Changes (AD-37, story 8.4): the user's git, no hook, snapshots in the data folder.
+      vcsWorkingTreePort: createServerWorkingTree(options, dataDir),
+      projectCommandRunner,
       agentConfigFolders: () => agentConfigFolders(descriptors.current),
       agentProjectFiles: () => agentProjectFiles(descriptors.current),
       projectFilesFingerprint,
     });
   try {
-    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadWiring, descriptors });
+    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadWiring, descriptors, releaseCrashKill });
   } catch (error) {
+    // No project command outlives a server that failed to start (AD-3).
+    await core.projectCommands?.close().catch(() => {});
+    await projectCommandRunner.close().catch(() => {});
+    releaseCrashKill();
     if (ownsCore) core.close();
     throw error;
   }
@@ -228,6 +244,7 @@ async function listenAndAnnounce({
   hooks,
   bmadWiring,
   descriptors,
+  releaseCrashKill,
 }: {
   options: StartOptions;
   dataDir: string;
@@ -241,6 +258,8 @@ async function listenAndAnnounce({
   bmadWiring: BmadWiring;
   /** Filled with the registered agents' descriptors once they are wired. */
   descriptors: DescriptorsRef;
+  /** Removes the crash kill of project commands, once they are closed on a normal stop. */
+  releaseCrashKill: () => void;
 }): Promise<RunningServer> {
   const { bmadCatalog, bmadSourcePort, setupRunner } = bmadWiring;
   const requested = options.port ?? DEFAULT_PORT;
@@ -399,6 +418,8 @@ async function listenAndAnnounce({
     remote,
     // A chat started in its own worktree (27.1): the same git as builds, made in `<data>/cw`.
     vcs,
+    // Each prompt's snapshots for This turn (AD-37, story 8.4).
+    turnSnapshots: core.turnSnapshots,
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   stopChats.current = (agentId) => chat.stopAgent(agentId);
@@ -521,6 +542,8 @@ async function listenAndAnnounce({
     // Changes and Open in editor (epic 8 entry 2): undefined until their lanes wire a port (8.4, 8.10), so 501.
     workspaceChanges: core.workspaceChanges,
     editorLaunch: core.editorLaunch,
+    // Problems (AD-38; 8.9): only in a trusted project, only the confirmed text.
+    projectCommands: core.projectCommands,
     notifications,
     remoteMachines,
     ...endpointApi,
@@ -597,6 +620,7 @@ async function listenAndAnnounce({
     builds.close();
     notifications.close();
     await scriptRunner.close().catch(() => {});
+    await core.projectCommands?.close().catch(() => {});
     await watching;
     // Nothing may stay listening on a server that failed to start.
     await closeServer(server, wss);
@@ -628,6 +652,9 @@ async function listenAndAnnounce({
       })
       // Every terminal pane and what it started stops with the server (AD-3).
       .finally(() => panes.dispose())
+      // So does every project command and its tree (AD-38): their finish is recorded first.
+      .finally(() => core.projectCommands?.close().catch((error: unknown) => log.warn('stopping project commands failed', { reason: String(error) })))
+      .finally(releaseCrashKill)
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
       // An outcome being worked out finishes (bounded by its own reads), then the builds stop following the log.
       .finally(async () => {

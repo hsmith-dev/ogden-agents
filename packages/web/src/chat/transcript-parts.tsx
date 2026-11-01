@@ -1,16 +1,19 @@
 /**
  * Parts of the session page's transcript (moved out of
  * `routes/session-page.tsx` by story 6.9 to keep it under 600 lines): Show
- * earlier, the resumed marker, the handoff divider, and one message.
+ * earlier, the resumed marker, the handoff divider, and one message; the
+ * Changed row at the end of a turn that changed files (story 8.4).
  */
-import { ORCHESTRATION_MANAGER_AUTO_MARK, ORCHESTRATION_MANAGER_MARK } from '@ogden-agents/shared';
-import { ArrowClockwise } from '@phosphor-icons/react';
+import { ORCHESTRATION_MANAGER_AUTO_MARK, ORCHESTRATION_MANAGER_MARK, REVIEW_CHANGES_LABEL, turnChangedText } from '@ogden-agents/shared';
+import { ArrowClockwise, FileText } from '@phosphor-icons/react';
+import { Link } from '@tanstack/react-router';
 import type { TranscriptMessage } from '@/chat/transcript';
 import { Button } from '@/ui/button';
 import { Markdown } from '@/ui/markdown';
 import { AgentMessage, UserMessage } from '@/ui/message';
 import { Separator } from '@/ui/separator';
 import { Text } from '@/ui/typography';
+import { useChatPathLinks } from '@/workbench/path-links';
 
 /** The marker at the break where a reopened chat continues (EXPERIENCE.md). */
 const RESUMED_FROM_HISTORY = 'Resumed from history';
@@ -83,8 +86,11 @@ const QUEUE_WORDS = { queued: 'Queued', not_sent: 'Not sent' } as const;
  * One message: the user's in a muted block on the right, as typed; the
  * agent's as Markdown under its name (DESIGN.md Message), the same for a
  * reply brought back from the terminal. A queued or unsent one says so under it.
+ * With the chat's `wsId` and `sesId` (8.7), the paths and `file:line` targets
+ * an agent's reply names link to the Workbench viewer once the server
+ * confirms each is a file of the project (or of the chat's worktree).
  */
-export function Message({ message, agentName }: { message: TranscriptMessage; agentName: string }) {
+export function Message({ message, agentName, wsId, sesId }: { message: TranscriptMessage; agentName: string; wsId?: string | undefined; sesId?: string | undefined }) {
   if (message.role === 'user' && message.status !== undefined) {
     return (
       <div className="flex max-w-[85%] flex-col items-end gap-1 self-end" data-testid="message-queued" data-status={message.status}>
@@ -137,9 +143,19 @@ export function Message({ message, agentName }: { message: TranscriptMessage; ag
   if (message.role === 'user') return <UserMessage data-testid="message-user">{message.text}</UserMessage>;
   return (
     <AgentMessage name={agentName} data-testid="message-agent" data-streaming={message.streaming} aria-busy={message.streaming}>
-      <Markdown source={message.text} variant="chat" streaming={message.streaming} />
+      {wsId === undefined || sesId === undefined ? (
+        <Markdown source={message.text} variant="chat" streaming={message.streaming} />
+      ) : (
+        <LinkedReply wsId={wsId} sesId={sesId} text={message.text} streaming={message.streaming} />
+      )}
     </AgentMessage>
   );
+}
+
+/** An agent's reply with links to the viewer for the files it names that exist (asked once it has finished streaming). */
+function LinkedReply({ wsId, sesId, text, streaming }: { wsId: string; sesId: string; text: string; streaming: boolean }) {
+  const links = useChatPathLinks(wsId, sesId, text, streaming);
+  return <Markdown source={text} variant="chat" streaming={streaming} links={links} />;
 }
 
 /** Where the agent's step was stopped so a message sent right away went at once (send now or wait). */
@@ -152,6 +168,27 @@ export function InterruptedNote({ cancelledRequest = false }: { cancelledRequest
         {cancelledRequest ? ' A pending approval request was cancelled; the agent can ask again.' : ''}
       </Text>
       <Separator className="flex-1" />
+    </div>
+  );
+}
+
+/**
+ * The end of a turn that changed files (story 8.4): "Changed N files +A -D"
+ * and Review changes, which opens the Workbench's Changes on This turn of
+ * that very turn.
+ */
+export function TurnChangesRow({ wsId, sesId, turnId, files, additions, deletions }: { wsId: string; sesId: string; turnId: string; files: number; additions: number; deletions: number }) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1" data-testid="turn-changes" data-turn={turnId}>
+      <FileText aria-hidden className="shrink-0 text-muted-foreground" />
+      <Text as="span" variant="caption" data-testid="turn-changes-text">
+        {turnChangedText(files, additions, deletions)}
+      </Text>
+      <Button asChild variant="link" size="sm" className="h-auto px-0">
+        <Link to="/w/$wsId/workbench" params={{ wsId }} search={{ panel: 'changes', session: sesId, view: 'turn', turn: turnId }} data-testid="turn-changes-review">
+          {REVIEW_CHANGES_LABEL}
+        </Link>
+      </Button>
     </div>
   );
 }

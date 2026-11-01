@@ -1,0 +1,23 @@
+ FAIL  src/wrap.test.ts
+  wrap
+    ✓ wraps long lines (2 ms)
+    ✕ keeps spaces (3 ms)
+
+  ● wrap › keeps spaces
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "a  b"
+    Received: "a b"
+
+      86 |   it('keeps spaces', () => {
+      87 |     const out = wrap('a b');
+    > 88 |     expect(out).toBe('a  b');
+         |                 ^
+      89 |   });
+
+      at Object.toBe (src/wrap.test.ts:88:17)
+      at Promise.then.completed (node_modules/jest-circus/build/utils.js:298:28)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 passed, 2 total

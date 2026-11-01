@@ -33,8 +33,10 @@ import { recordRecentChat } from './recent-chats';
  * The command palette (epic 26 story 3; EXPERIENCE.md Command palette):
  * Cmd/Ctrl+K anywhere, the composer too, opens it (and closes it again).
  * The empty query shows Recent chats, Actions and Projects; typing matches
- * Chats, Projects, Tickets (the current project's, with the Board on) and
- * Actions. `↑` `↓` move (wrapping), Enter runs, Esc closes with focus back
+ * Chats, Projects, Files (the current project's, by name; 8.11), Tickets
+ * (the current project's, with the Board on) and Actions. `↑` `↓` move
+ * (wrapping), staying on the same row as later results (Files) arrive;
+ * Enter runs, Esc closes with focus back
  * where it was; a run that navigates leaves focus to the destination.
  * "New chat in..." lists the projects; Esc or Backspace on its empty field
  * goes back to everything. Mounted once per tab in the shell, where it also
@@ -42,7 +44,7 @@ import { recordRecentChat } from './recent-chats';
  */
 
 export const PALETTE_TITLE = 'Command palette';
-export const PALETTE_PLACEHOLDER = 'Search projects, chats, tickets and actions';
+export const PALETTE_PLACEHOLDER = 'Search projects, chats, files and actions';
 export const NEW_CHAT_IN_PREFIX = 'New chat in...';
 export const NEW_CHAT_IN_PLACEHOLDER = 'Search projects';
 
@@ -89,7 +91,8 @@ export function CommandPalette() {
   const sesId = useChatOnScreen(pathname, params.wsId, params.sesId);
   const { appearance } = useAppearance();
   const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState(0);
+  // The selected row's id (`null`: the first row), so rows arriving later (Files) never move it.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   // Whether closing puts focus back where it was: not after a run that navigates.
   const returnFocus = useRef(true);
   const baseId = useId();
@@ -121,11 +124,11 @@ export function CommandPalette() {
   // Each open, and each mode, starts on an empty field at the first row.
   useEffect(() => {
     setQuery('');
-    setSelected(0);
+    setSelectedId(null);
     if (open) returnFocus.current = true;
   }, [open, mode]);
 
-  const ctx: PaletteContext = { open, query, wsId: params.wsId, sesId, pathname, developerMode: appearance.developerMode };
+  const ctx: PaletteContext = { open, mode, query, wsId: params.wsId, sesId, pathname, developerMode: appearance.developerMode };
   // A constant list: the same hooks in the same order on every render.
   const sourced: PaletteItem[] = [];
   for (const source of PALETTE_SOURCES) sourced.push(...source.useItems(ctx));
@@ -135,7 +138,13 @@ export function CommandPalette() {
   const results: RankedItem<PaletteItem>[] =
     mode === 'new-chat-in' ? rankItems(query, newChatIn, ['projects']) : rankItems(query, sourced, query.trim() === '' ? PALETTE_EMPTY_ORDER : PALETTE_GROUP_ORDER);
 
-  const current = Math.min(selected, Math.max(results.length - 1, 0));
+  const found = selectedId === null ? -1 : results.findIndex((ranked) => ranked.item.id === selectedId);
+  const current = found === -1 ? 0 : found;
+  const firstId = results[0]?.item.id;
+  // Nothing chosen yet: the first row as it is now is the one chosen.
+  useEffect(() => {
+    if (selectedId === null && firstId !== undefined) setSelectedId(firstId);
+  }, [selectedId, firstId]);
   const optionId = (index: number) => `${baseId}-option-${index}`;
 
   useEffect(() => {
@@ -166,7 +175,7 @@ export function CommandPalette() {
       event.preventDefault();
       if (results.length === 0) return;
       const step = event.key === 'ArrowDown' ? 1 : -1;
-      setSelected((current + step + results.length) % results.length);
+      setSelectedId(results[(current + step + results.length) % results.length]!.item.id);
       return;
     }
     if (event.key === 'Enter') {
@@ -226,7 +235,7 @@ export function CommandPalette() {
         value={query}
         onChange={(event) => {
           setQuery(event.target.value);
-          setSelected(0);
+          setSelectedId(null);
         }}
         onKeyDown={onKeyDown}
         data-testid="command-palette-field"
@@ -246,7 +255,7 @@ export function CommandPalette() {
                 context={ranked.item.context}
                 keys={appearance.developerMode ? ranked.item.keys : undefined}
                 onMouseMove={() => {
-                  if (index !== current) setSelected(index);
+                  if (index !== current) setSelectedId(ranked.item.id);
                 }}
                 onClick={() => run(ranked.item)}
                 data-testid="command-palette-option"

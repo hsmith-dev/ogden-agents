@@ -41,3 +41,5 @@ export * from './editors.js';
 export * from './workbench-changes.js';
 export * from './project-commands.js';
 export * from './where-work-runs.js';
+export * from './command-line.js';
+export * from './terminal-escapes.js';

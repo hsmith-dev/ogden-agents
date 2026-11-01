@@ -162,6 +162,8 @@ import {
   WorkspaceProjectCommandFinishedInput,
   WorkspaceProjectCommandStartedEvent,
   WorkspaceProjectCommandStartedInput,
+  WorkspaceProjectCommandsChangedEvent,
+  WorkspaceProjectCommandsChangedInput,
 } from './events-workbench.js';
 import {
   SessionLocationChangedEvent,
@@ -266,7 +268,7 @@ export {
 export { DevToolsCatalogChangedEvent, DevToolsCatalogChangeReason, WorkspaceDevToolUnattendedAllowChangedEvent } from './events-dev-tools.js';
 
 // The Workbench's events (epic 8 entry 2): ids, states and counts only.
-export { SessionTurnChangesRecordedEvent, SessionWorktreeCommittedEvent, WorkspaceProjectCommandStartedEvent, WorkspaceProjectCommandFinishedEvent } from './events-workbench.js';
+export { SessionTurnChangesRecordedEvent, SessionWorktreeCommittedEvent, WorkspaceProjectCommandStartedEvent, WorkspaceProjectCommandFinishedEvent, WorkspaceProjectCommandsChangedEvent } from './events-workbench.js';
 
 // Where work runs (epic 27 entry 2): ids, states, branches, ports and counts only.
 export {
@@ -494,6 +496,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SettingsWorktreeRetentionChangedEvent,
   WorkspaceTrialStartedEvent,
   WorkspaceTrialKeptEvent,
+  WorkspaceProjectCommandsChangedEvent,
   SettingsDeveloperModeChangedEvent,
   SettingsAgentDefaultModelChangedEvent,
   SettingsAgentLinkedCommandChangedEvent,
@@ -582,6 +585,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SettingsWorktreeRetentionChangedInput,
   WorkspaceTrialStartedInput,
   WorkspaceTrialKeptInput,
+  WorkspaceProjectCommandsChangedInput,
   SettingsDeveloperModeChangedInput,
   SettingsAgentDefaultModelChangedInput,
   SettingsAgentLinkedCommandChangedInput,

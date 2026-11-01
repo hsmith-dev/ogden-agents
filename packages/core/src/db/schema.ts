@@ -118,6 +118,14 @@ export const workspaces = sqliteTable(
     orchestrationRoster: text('orchestration_roster'),
     /** The project's routing rules as JSON (`RoutingRules`, 15.12), or NULL for none. Read only through `readRoutingRules`. */
     orchestrationRouting: text('orchestration_routing'),
+    /**
+     * The project's declared Problems commands (AD-38; 8.9), as JSON array
+     * text: each a settings command with its confirmed text, or a
+     * `package.json` script with the script text the user confirmed. `[]`
+     * for new and upgraded workspaces. Parsed only by `readProjectCommands`,
+     * so a damaged value reads as none; changed only by `projectCommands.set`.
+     */
+    projectCommands: text('project_commands').notNull().default('[]'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],

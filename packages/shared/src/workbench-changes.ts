@@ -202,6 +202,40 @@ export const COMMIT_WORKTREE_LABEL = 'Commit these changes';
 export const WORKTREE_NEVER_PUSHED_TEXT = 'Never pushed. Merge it yourself when ready.';
 /** Commit asked of a chat without a worktree of its own (409 `invalid_operation`). */
 export const COMMIT_NEEDS_WORKTREE_MESSAGE = 'Only a chat that works in its own copy can commit here.';
+/** Commit asked with nothing changed in the worktree (409 `invalid_operation`). */
+export const COMMIT_NOTHING_MESSAGE = 'There are no changes to commit.';
+/** The project's `.git` file points at no standard linked worktree or submodule, so the views and Commit refuse (409 `invalid_operation`; user decision 2026-11-01, AD-37). */
+export const GIT_POINTER_UNUSUAL_MESSAGE = "Ogden can't read this project's git: its .git file points somewhere unusual.";
+/** A hunk action before story 8.5 ships them (501 `not_implemented`). */
+export const HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE = "Ogden Agents can't stage, unstage or revert a change yet.";
+/** The Workbench's Changes panel (story 8.4). */
+export const WORKBENCH_CHANGES_LABEL = 'Changes';
+/** The view switch's accessible name. */
+export const CHANGES_VIEW_SWITCH_LABEL = 'Changes view';
+/** The turn picker's label. */
+export const CHANGES_TURN_PICKER_LABEL = 'Turn';
+/** The latest turn in the turn picker. */
+export const CHANGES_LATEST_TURN_LABEL = 'Latest turn';
+/** This turn for a chat that has recorded no turn yet. */
+export const CHANGES_NO_TURNS_TEXT = 'No turns recorded yet. Ogden records a turn once the agent finishes one in a project that uses git.';
+/** The screen-reader lines while a view's files, then their diffs, load. */
+export const CHANGES_LOADING_TEXT = 'Loading the changes';
+export const CHANGES_DIFFS_LOADING_TEXT = 'Loading the diffs';
+/** A view or a file's diff that couldn't be read. */
+export const CHANGES_READ_FAILED = "Ogden Agents couldn't read the changes.";
+export const CHANGES_TURNS_READ_FAILED = "Ogden Agents couldn't read this chat's turns.";
+export const COMMIT_FAILED = "Ogden Agents couldn't commit the changes.";
+/** Under a view listing more files than the viewer opens (it fetches the first {@link CHANGES_DIFFS_FETCHED}). */
+export const CHANGES_DIFFS_FETCHED = 100;
+export const changesMoreFilesText = (shown: number): string => `Only the first ${shown} files are shown here.`;
+/** The commit message field and the commit's result. */
+export const COMMIT_MESSAGE_LABEL = 'Commit message';
+export const committedText = (files: number): string => `Committed ${files} ${files === 1 ? 'file' : 'files'} on this chat's branch.`;
+/** The end of a turn that changed files (the chat's Changed row) and its link. */
+export const turnChangedText = (files: number, additions: number, deletions: number): string => `Changed ${files} ${files === 1 ? 'file' : 'files'} +${additions} -${deletions}`;
+export const REVIEW_CHANGES_LABEL = 'Review changes';
+/** A turn in the picker: its time and counts. */
+export const turnPickerText = (time: string, files: number): string => `${time}, ${files} ${files === 1 ? 'file' : 'files'}`;
 /** Side by side below `lg`. */
 export const SIDE_BY_SIDE_NARROW_TEXT = 'Side by side needs a wider window.';
 /** Each view with no changes (Branch names its base). */

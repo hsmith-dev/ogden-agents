@@ -3,11 +3,16 @@
  * a project's root listed and one file read; 401 without a token; 400, 403
  * and 404 refusals in the API's error shape; and neither a file's content
  * nor its path in the event log, the data folder or a log line.
+ *
+ * 8.8: the search route on `workspace-files-node`: `matchCase` and `regex`
+ * read as booleans, an invalid pattern 400 with the shared sentence, an
+ * unknown project or chat 404, `no-store`, and neither the query nor a
+ * result in a log line, an event or the data folder.
  */
 import { linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { API_ROUTES, apiPath, ApiErrorBody, WORKSPACE_PATH_HARD_LINK_MESSAGE, WORKSPACE_PATH_PROTECTED_MESSAGE, WorkspaceFileResponse, WorkspaceFolderResponse, WorkspaceResponse } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, ApiErrorBody, MAX_WORKSPACE_FILE_LINKS, WORKSPACE_SEARCH_INVALID_REGEX_TEXT, WorkspaceSearchResponse, WorkspaceFileLinksResponse, WORKSPACE_PATH_HARD_LINK_MESSAGE, WORKSPACE_PATH_PROTECTED_MESSAGE, WorkspaceFileResponse, WorkspaceFolderResponse, WorkspaceResponse } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { signIn, startTestServer, tempDataDir } from './helpers.js';
 
@@ -213,5 +218,114 @@ describe('workspace files routes: review rows (defensive check)', () => {
       await fetch(`${server.url}${apiPath(API_ROUTES.workspaceFiles, { wsId })}?${query}`, { headers });
     }
     expect(lines.join('\n')).not.toContain('4d1e');
+  });
+});
+
+describe('workspace file links route (8.7)', () => {
+  const post = (url: string, headers: Record<string, string>, body: unknown) => fetch(url, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body) });
+
+  it('answers only the asked paths that are files the viewer would open, once each, no-store, and nothing else', async () => {
+    const { server, headers, wsId, repo } = await serverWithProject();
+    const outside = realpathSync.native(mkdtempSync(join(tmpdir(), 'ogden-agents-links-out-')));
+    repos.push(outside);
+    writeFileSync(join(outside, 'secret'), 'OUTSIDE_SECRET');
+    symlinkSync(join(outside, 'secret'), join(repo, 'out-link.ts'));
+    mkdirSync(join(repo, '.ssh'));
+    writeFileSync(join(repo, '.ssh', 'id_rsa'), 'KEY');
+    let hardLinked = true;
+    try {
+      linkSync(join(outside, 'secret'), join(repo, 'hard.ts'));
+    } catch {
+      hardLinked = false; // Different volumes: no hard link here.
+    }
+    const url = `${server.url}${apiPath(API_ROUTES.workspaceFileLinks, { wsId })}`;
+    const paths = [FILE, '.git/config', 'src', 'src/missing-9b2c.ts', '.ssh/id_rsa', 'out-link.ts', 'README.md', FILE, ...(hardLinked ? ['hard.ts'] : [])];
+    const response = await post(url, headers, { paths });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const text = await response.text();
+    expect(WorkspaceFileLinksResponse.parse(JSON.parse(text))).toEqual({ found: [FILE, 'README.md'] });
+    expect(Object.keys(JSON.parse(text) as object)).toEqual(['found']);
+    for (const needle of [repo, 'OUTSIDE_SECRET', 'WORKBENCH_CONTENT_7f3a']) expect(text).not.toContain(needle);
+    expect(await (await post(url, headers, { paths: [] })).json()).toEqual({ found: [] });
+  });
+
+  it('refuses a malformed path, too many paths or a bad body with 400, an unknown project or chat with 404, and answers 401 without a token', async () => {
+    const { server, headers, wsId } = await serverWithProject();
+    const url = `${server.url}${apiPath(API_ROUTES.workspaceFileLinks, { wsId })}`;
+    for (const body of [{ paths: ['../x'] }, { paths: ['/etc/passwd'] }, { paths: ['a\\b'] }, { paths: ['C:/x'] }, { paths: ['a//b', 'ok.ts'] }, { paths: 'src/a.ts' }, {}, { paths: [], extra: 1 }, { paths: Array.from({ length: MAX_WORKSPACE_FILE_LINKS + 1 }, (_, i) => `f${i}.ts`) }, 'not json', { paths: [], session: 'nope' }]) {
+      await expectError(await post(url, headers, body), 400, 'invalid_request');
+    }
+    expect((await post(url, headers, { paths: Array.from({ length: MAX_WORKSPACE_FILE_LINKS }, (_, i) => `f${i}.ts`) })).status).toBe(200);
+    const unknown = `${server.url}${apiPath(API_ROUTES.workspaceFileLinks, { wsId: 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' })}`;
+    await expectError(await post(unknown, headers, { paths: [FILE] }), 404, 'not_found');
+    await expectError(await post(unknown, headers, { paths: ['../x'] }), 404, 'not_found');
+    await expectError(await post(unknown, headers, 'not json'), 404, 'not_found');
+    await expectError(await post(url, headers, { paths: [FILE], session: 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3' }), 404, 'not_found');
+    const anonymous = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', origin: server.url }, body: JSON.stringify({ paths: [FILE] }) });
+    expect(anonymous.status).toBe(401);
+  });
+
+  it('never logs or stores the paths asked about', async () => {
+    const { server, headers, wsId, lines, dataDir } = await serverWithProject();
+    const url = `${server.url}${apiPath(API_ROUTES.workspaceFileLinks, { wsId })}`;
+    await post(url, headers, { paths: [FILE, 'asked-5e6f.ts', '.git/asked-5e6f'] });
+    await post(url, headers, { paths: ['../asked-5e6f'] });
+    for (const haystack of [lines.join('\n'), JSON.stringify(server.core.events.readAfter(0)), everything(dataDir)]) {
+      expect(haystack).not.toContain('asked-5e6f');
+      expect(haystack).not.toContain('workbench-path-9b2c');
+    }
+  });
+});
+
+describe('workspace file search route (8.8)', () => {
+  const searchUrl = (server: { url: string }, wsId: string, query: Record<string, string>) => `${server.url}${apiPath(API_ROUTES.workspaceFileSearch, { wsId })}?${new URLSearchParams(query)}`;
+
+  it('searches the project through the gate, no-store, with matchCase and regex read as booleans', async () => {
+    const { server, headers, wsId, repo } = await serverWithProject();
+    writeFileSync(join(repo, '.gitignore'), 'dist/\n');
+    mkdirSync(join(repo, 'dist'));
+    writeFileSync(join(repo, 'dist', 'marker.js'), 'WORKBENCH_CONTENT_7f3a\n');
+    expect((await fetch(searchUrl(server, wsId, { q: 'marker' }))).status).toBe(401);
+    const response = await fetch(searchUrl(server, wsId, { q: 'WORKBENCH_content' }), { headers });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(WorkspaceSearchResponse.parse(await response.json())).toEqual({ files: [{ path: FILE, matches: [{ line: 1, column: 24, preview: CONTENT.trimEnd() }] }], truncated: false, limit: 500 });
+    const cased = WorkspaceSearchResponse.parse(await (await fetch(searchUrl(server, wsId, { q: 'WORKBENCH_content', matchCase: 'true' }), { headers })).json());
+    expect(cased.files).toEqual([]);
+    const regex = WorkspaceSearchResponse.parse(await (await fetch(searchUrl(server, wsId, { q: 'marker = "\\w+"', regex: 'true' }), { headers })).json());
+    expect(regex.files.map((file) => file.path)).toEqual([FILE]);
+    // Off, a pattern is a literal.
+    const literal = WorkspaceSearchResponse.parse(await (await fetch(searchUrl(server, wsId, { q: 'marker = "\\w+"', regex: 'false' }), { headers })).json());
+    expect(literal.files).toEqual([]);
+    const names = WorkspaceSearchResponse.parse(await (await fetch(searchUrl(server, wsId, { q: 'readme', mode: 'names' }), { headers })).json());
+    expect(names.files).toEqual([{ path: 'README.md', matches: [] }]);
+    // The environment file only in its masked text.
+    const secret = WorkspaceSearchResponse.parse(await (await fetch(searchUrl(server, wsId, { q: 'WORKBENCH_ENV_SECRET' }), { headers })).json());
+    expect(secret.files).toEqual([]);
+  });
+
+  it('refuses an invalid pattern, a bad flag or query with 400, and an unknown project or chat with 404', async () => {
+    const { server, headers, wsId } = await serverWithProject();
+    const invalid = await fetch(searchUrl(server, wsId, { q: 'add(', regex: 'true' }), { headers });
+    expect(invalid.status).toBe(400);
+    expect(ApiErrorBody.parse(await invalid.json()).error).toEqual({ code: 'invalid_request', message: WORKSPACE_SEARCH_INVALID_REGEX_TEXT });
+    // Not a regex: the same text is a literal.
+    expect((await fetch(searchUrl(server, wsId, { q: 'add(' }), { headers })).status).toBe(200);
+    for (const query of [{ q: 'x', regex: 'yes' } as Record<string, string>, { q: 'x', matchCase: '1' }, { q: '' }, { q: 'x'.repeat(201) }, { q: 'x', mode: 'paths' }]) {
+      await expectError(await fetch(searchUrl(server, wsId, query), { headers }), 400, 'invalid_request');
+    }
+    await expectError(await fetch(searchUrl(server, 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3', { q: 'x' }), { headers }), 404, 'not_found');
+    await expectError(await fetch(searchUrl(server, wsId, { q: 'x', session: 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3' }), { headers }), 404, 'not_found');
+  });
+
+  it('never logs or stores the query or a result', async () => {
+    const { server, headers, wsId, lines, dataDir } = await serverWithProject();
+    expect((await fetch(searchUrl(server, wsId, { q: 'WORKBENCH_CONTENT_7f3a' }), { headers })).status).toBe(200);
+    expect((await fetch(searchUrl(server, wsId, { q: 'workbench-path-9b2c', mode: 'names' }), { headers })).status).toBe(200);
+    await fetch(searchUrl(server, wsId, { q: 'query-5e6f(', regex: 'true' }), { headers });
+    for (const haystack of [lines.join('\n'), JSON.stringify(server.core.events.readAfter(0)), everything(dataDir)]) {
+      for (const needle of ['WORKBENCH_CONTENT_7f3a', 'workbench-path-9b2c', 'query-5e6f']) expect(haystack, needle).not.toContain(needle);
+    }
   });
 });

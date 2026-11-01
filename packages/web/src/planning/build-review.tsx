@@ -16,9 +16,11 @@ import {
 } from '@ogden-agents/shared';
 import { ArrowsClockwise, CheckCircle, XCircle } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
+import { parseUnifiedDiff } from '@/ui/diff/parse-unified';
+import { DiffFileList, DiffViewer, type DiffViewerHandle } from '@/ui/diff-viewer';
 import { Notice } from '@/ui/notice';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
@@ -35,6 +37,49 @@ export function canApproveReview(review: Pick<ReviewResponse, 'outcome' | 'merge
   const checks = review.verification?.checks;
   if (checks === undefined) return true;
   return checks.every((check) => check.result === 'pass' || (review.verification?.attended === true && check.id === 'tests_pass' && check.result === 'not_run'));
+}
+
+/** Under the cut diff's last file: the text stops partway. */
+export const REVIEW_DIFF_CUT_TEXT = 'Only the start of these changes is shown.';
+
+/**
+ * The diff behind Show the code changes (story 8.3): the file list (each
+ * file the diff holds a button that opens and scrolls to its section), then
+ * the shared diff viewer, without hunk actions (the build's branch is not
+ * edited from Review). Text that isn't a unified diff shows as it was, in a
+ * wrapped block that never scrolls sideways.
+ */
+function ReviewChanges({ files, diff, truncated }: Pick<ReviewResponse, 'files' | 'diff' | 'truncated'>) {
+  const parsed = useMemo(() => parseUnifiedDiff(diff, truncated), [diff, truncated]);
+  const viewer = useRef<DiffViewerHandle>(null);
+  const items = useMemo(() => {
+    const byPath = new Map((parsed?.files ?? []).map(({ file }) => [file.path, file]));
+    return files.map((path) => {
+      const file = byPath.get(path);
+      return file === undefined ? { path, jumpable: false } : { path, change: file.change, additions: file.additions, deletions: file.deletions, jumpable: true };
+    });
+  }, [files, parsed]);
+  if (files.length === 0) return <Text variant="caption">{REVIEW_NO_CHANGES_TEXT}</Text>;
+  return (
+    <div className="mt-2 flex min-w-0 flex-col gap-3">
+      <DiffFileList items={items} onSelect={(path) => viewer.current?.jumpTo(path)} data-testid="review-files" />
+      {diff === '' ? null : parsed === null ? (
+        <pre data-testid="review-diff" className="m-0 rounded-md border border-border bg-card p-3 font-mono text-mono-compact whitespace-pre-wrap [overflow-wrap:anywhere]">
+          {diff}
+          {truncated ? '\n...' : ''}
+        </pre>
+      ) : (
+        <div data-testid="review-diff" className="flex min-w-0 flex-col gap-2">
+          <DiffViewer ref={viewer} files={parsed.files} label="The build's changes" />
+          {parsed.cut ? (
+            <Text variant="caption" data-testid="review-diff-cut">
+              {REVIEW_DIFF_CUT_TEXT}
+            </Text>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -140,25 +185,9 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
           </ul>
         )}
       </section>
-      <details className="flex flex-col gap-2" data-testid="review-changes">
+      <details className="flex min-w-0 flex-col gap-2" data-testid="review-changes">
         <summary className="cursor-pointer text-label">{REVIEW_SHOW_CHANGES_LABEL(files.length)}</summary>
-        {files.length === 0 ? (
-          <Text variant="caption">{REVIEW_NO_CHANGES_TEXT}</Text>
-        ) : (
-          <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0" data-testid="review-files">
-            {files.map((file) => (
-              <li key={file} className="font-mono text-mono-compact">
-                {file}
-              </li>
-            ))}
-          </ul>
-        )}
-        {diff === '' ? null : (
-          <pre data-testid="review-diff" className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-card p-3 font-mono text-mono-compact whitespace-pre">
-            {diff}
-            {truncated ? '\n…' : ''}
-          </pre>
-        )}
+        <ReviewChanges files={files} diff={diff} truncated={truncated} />
       </details>
       {asking ? (
         <div className="flex flex-col gap-2" data-testid="review-reject-form">

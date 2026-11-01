@@ -21,6 +21,7 @@ export function keyboardShortcuts(platform?: string): readonly KeyboardShortcutG
         { keys: [['g'], ['n']], action: 'New chat', where: 'In a project; elsewhere opens the palette' },
         { keys: [[modifierShortcutLabel('N', platform)]], action: 'New chat', where: 'In the desktop app; a browser tab keeps it' },
         { keys: [['g'], ['c']], action: 'Chats', where: 'In a project' },
+        { keys: [['g'], ['s']], action: 'Workbench Search', where: 'In a project' },
         { keys: [['g'], ['p']], action: 'Plan', where: 'In a project, with Planning on' },
         { keys: [['g'], ['b']], action: 'Board', where: 'In a project, with the Board on' },
         { keys: [['g'], ['r']], action: 'Runs', where: 'In a project, with Builds on' },

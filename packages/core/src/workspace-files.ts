@@ -11,12 +11,18 @@
  * that chat's worktree when it has one (a foreign or unknown chat is
  * {@link NotFoundError}); `search` exists only when the port can search,
  * and `locate` only when it can locate (the editor launcher's).
+ *
+ * 8.7: `exists` (built on `locate`, so only when the port can locate)
+ * answers which candidate paths are files the viewer would open, for links
+ * from an agent's reply or a markdown file. It answers nothing else.
  */
 import {
+  MAX_WORKSPACE_FILE_LINKS,
   WorkspaceRelativePath,
   WorkspaceSearchQuery,
   WORKSPACE_PATH_HARD_LINK_MESSAGE,
   WORKSPACE_PATH_PROTECTED_MESSAGE,
+  WORKSPACE_SEARCH_INVALID_REGEX_TEXT,
   WORKSPACE_SEARCH_MAX_MATCHES,
   WORKSPACE_SEARCH_MAX_PREVIEW,
   type WorkspaceFileResponse,
@@ -73,11 +79,24 @@ export interface WorkspaceFiles {
    * Project search (8.8): `query` checked against `WorkspaceSearchQuery`
    * ({@link ValidationError}), the answer clamped to
    * `WORKSPACE_SEARCH_MAX_MATCHES` matches (`truncated` past it) and each
-   * preview to `WORKSPACE_SEARCH_MAX_PREVIEW`. Absent when the port can't search.
+   * preview to `WORKSPACE_SEARCH_MAX_PREVIEW`. A `regex` query that doesn't
+   * compile is {@link ValidationError} with the shared sentence. `signal`
+   * (the client's request) stops the search when it goes away. Absent when
+   * the port can't search.
    */
-  search?(workspaceId: unknown, query: unknown): Promise<WorkspaceSearchResponse>;
+  search?(workspaceId: unknown, query: unknown, signal?: AbortSignal): Promise<WorkspaceSearchResponse>;
   /** The absolute real path of an allowed file, for the editor launcher only; the same refusals as {@link read}. Absent when the port can't locate. */
   locate?(workspaceId: unknown, path: unknown, session?: unknown): Promise<string>;
+  /**
+   * Which of `paths` (an array of at most `MAX_WORKSPACE_FILE_LINKS`
+   * `WorkspaceRelativePath`s, else {@link ValidationError}) are files
+   * {@link read} would open, each once, in the order asked: a refused name,
+   * a refusal of the port's (outside the root, a fence, a hard link), a
+   * folder or a missing path is absent. The root is resolved first, so an
+   * unknown workspace or session is {@link NotFoundError} whatever the paths.
+   * Absent when the port can't locate.
+   */
+  exists?(workspaceId: unknown, paths: unknown, session?: unknown): Promise<string[]>;
 }
 
 export interface WorkspaceFilesOptions {
@@ -162,7 +181,7 @@ export function createWorkspaceFiles({ entities, port }: WorkspaceFilesOptions):
   };
   const search = port.search?.bind(port);
   if (search !== undefined) {
-    files.search = async (workspaceId, query) => {
+    files.search = async (workspaceId, query, signal) => {
       const parsed = WorkspaceSearchQuery.safeParse(query);
       // The workspace and the chat are checked first: an unknown one is 404 whatever the query.
       const root = rootOf(workspaceId, (query as { session?: unknown } | null | undefined)?.session);
@@ -170,8 +189,9 @@ export function createWorkspaceFiles({ entities, port }: WorkspaceFilesOptions):
         const message = 'That search is not one Ogden can run.';
         throw new ValidationError(message, parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })));
       }
-      const { q, mode, matchCase } = parsed.data;
-      const found = await search(root.path, { q, mode, matchCase }, root.kind);
+      const { q, mode, matchCase, regex } = parsed.data;
+      if (regex && !compiles(q, matchCase)) throw new ValidationError(WORKSPACE_SEARCH_INVALID_REGEX_TEXT, [{ path: ['q'], message: WORKSPACE_SEARCH_INVALID_REGEX_TEXT }]);
+      const found = await search(root.path, { q, mode, matchCase, regex, ...(signal === undefined ? {} : { signal }) }, root.kind);
       const clamped = clampSearchFiles(found.files);
       return { files: clamped.files, truncated: found.truncated || clamped.truncated, limit: WORKSPACE_SEARCH_MAX_MATCHES };
     };
@@ -182,6 +202,41 @@ export function createWorkspaceFiles({ entities, port }: WorkspaceFilesOptions):
       const root = rootOf(workspaceId, session);
       return workspaceAnswer(await locate(root.path, checkedWorkspacePath(path, { rootAllowed: false }), root.kind)).realPath;
     };
+    files.exists = async (workspaceId, paths, session) => {
+      const root = rootOf(workspaceId, session);
+      if (!Array.isArray(paths) || paths.length > MAX_WORKSPACE_FILE_LINKS || !paths.every((path) => WorkspaceRelativePath.safeParse(path).success)) {
+        const message = `At most ${MAX_WORKSPACE_FILE_LINKS} paths inside the project.`;
+        throw new ValidationError(message, [{ path: ['paths'], message }]);
+      }
+      const unique = [...new Set(paths as string[])].filter((path) => !isRefusedWorkspacePath(path.split('/')));
+      const found = new Set<string>();
+      // A few at a time: a message's paths are checked without holding many files open at once.
+      for (let start = 0; start < unique.length; start += LOCATE_BATCH) {
+        await Promise.all(
+          unique.slice(start, start + LOCATE_BATCH).map(async (path) => {
+            try {
+              if (!isWorkspacePathRefusal(await locate(root.path, path, root.kind))) found.add(path);
+            } catch {
+              // Unreadable is absent, like any refusal.
+            }
+          }),
+        );
+      }
+      return unique.filter((path) => found.has(path));
+    };
   }
   return files;
 }
+
+/** Whether `pattern` compiles as a search's regular expression (`u`, and `i` unless Match case). Compiling never runs it. */
+function compiles(pattern: string, matchCase: boolean): boolean {
+  try {
+    new RegExp(pattern, matchCase ? 'u' : 'iu');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** How many paths {@link WorkspaceFiles.exists} locates at once. */
+const LOCATE_BATCH = 10;

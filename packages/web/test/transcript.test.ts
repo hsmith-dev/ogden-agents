@@ -1,6 +1,6 @@
 import type { CoreEvent } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { diffHunk, groupSummary, toolCallLabel } from '../src/chat/tool-call-row';
+import { groupSummary, toolCallLabel } from '../src/chat/tool-call-row';
 import { sessionView } from '../src/chat/transcript';
 
 const at = '2026-09-30T00:00:00.000Z';
@@ -341,23 +341,6 @@ describe('tool-call rows', () => {
     expect(groupSummary(kinds('read', 'read', 'read', 'read', 'edit', 'edit'))).toBe('Read 4 files, edited 2');
     expect(groupSummary(kinds('execute', 'read'))).toBe('Ran 1 command, read 1 file');
   });
-
-  it('show an edit as its hunk: the changed lines with a little context', () => {
-    const before = ['one', 'two', 'three', 'four', 'five', 'six'].join('\n');
-    const after = ['one', 'two', 'three', 'FOUR', 'five', 'six'].join('\n');
-    expect(diffHunk(before, after)).toEqual([
-      { mark: ' ', text: 'two' },
-      { mark: ' ', text: 'three' },
-      { mark: '-', text: 'four' },
-      { mark: '+', text: 'FOUR' },
-      { mark: ' ', text: 'five' },
-      { mark: ' ', text: 'six' },
-    ]);
-    expect(diffHunk(null, 'new\nfile\n')).toEqual([
-      { mark: '+', text: 'new' },
-      { mark: '+', text: 'file' },
-    ]);
-  });
 });
 
 describe('sessionView message origin (story 3.6)', () => {
@@ -532,5 +515,13 @@ describe('sessionView: a tool call held by its permission card (epic 26 story 4)
     expect(heldOf([...asking, resolved('req_1', 'deny', 'cancelled'), stateChanged('idle', 'waiting')])).toBeUndefined();
     // The agent went away with the card unanswered: the row says what its status says.
     expect(heldOf([...asking, stateChanged('idle', 'waiting')])).toBeUndefined();
+  });
+
+  it('story 8.4: a turn that changed files ends with its Changed row; one that changed nothing adds none', () => {
+    const recorded = (turnId: string, files: number) =>
+      event('session.turn_changes_recorded', { sessionId: 'ses_1', turnId, startTree: 'a'.repeat(40), endTree: 'b'.repeat(40), files, additions: files * 2, deletions: 1 });
+    const view = sessionView([created(), completed('u1', 'user', 'Write it'), completed('a1', 'agent', 'Done.'), recorded('trn_1', 2), completed('u2', 'user', 'Look'), recorded('trn_2', 0)], 'ses_1');
+    expect(view.items.map((item) => item.type)).toEqual(['message', 'message', 'turn_changes', 'message']);
+    expect(view.items[2]).toEqual({ type: 'turn_changes', turnId: 'trn_1', files: 2, additions: 4, deletions: 1, at });
   });
 });

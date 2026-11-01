@@ -7,8 +7,13 @@
  *
  * - `GET /workspaces/:wsId/files?path=&session=` → `WorkspaceFolderResponse`.
  * - `GET /workspaces/:wsId/files/content?path=&session=` → `WorkspaceFileResponse`.
- * - `GET /workspaces/:wsId/files/search?q=&mode=&matchCase=&session=` →
- *   `WorkspaceSearchResponse` (epic 8 entry 2; 501 until the port can search, 8.8).
+ * - `GET /workspaces/:wsId/files/search?q=&mode=&matchCase=&regex=&session=` →
+ *   `WorkspaceSearchResponse` (8.8; 501 when the port can't search). The
+ *   request's signal stops the search when the client goes away; neither
+ *   the query nor a result is logged.
+ * - `POST /workspaces/:wsId/files/links` `WorkspaceFileLinksRequest` →
+ *   `WorkspaceFileLinksResponse` (8.7): which candidate paths are files the
+ *   viewer would open, and nothing else (501 until the port can locate).
  *
  * Both files routes' query is read through `WorkspaceFilesQuery`.
  * `session` roots a request at that chat's worktree when it has one; a
@@ -19,30 +24,41 @@
  */
 import {
   AgentMidTurnError,
+  CommandChangedError,
   CoreError,
   EditorUnavailableError,
   HunkOutdatedError,
   InvalidOperationError,
+  NotImplementedError,
   NotFoundError,
   PathProtectedError,
+  ScriptsNotTrustedError,
   ValidationError,
+  VcsError,
   type WorkspaceFiles,
 } from '@ogden-agents/core';
 import {
   AGENT_MID_TURN_MESSAGE,
   API_ROUTES,
+  COMMAND_CHANGED_MESSAGE,
+  PROBLEMS_UNTRUSTED_TEXT,
   EDITOR_NONE_FOUND_TEXT,
   EDITOR_UNAVAILABLE_MESSAGE,
+  GIT_POINTER_UNUSUAL_MESSAGE,
   HUNK_OUTDATED_TEXT,
+  SessionId,
   WORKSPACE_PATH_HARD_LINK_MESSAGE,
   WORKSPACE_PATH_NOT_FOUND_MESSAGE,
   WORKSPACE_PATH_PROTECTED_MESSAGE,
+  WorkspaceFileLinksRequest,
+  WorkspaceFileLinksResponse,
   WorkspaceFileResponse,
   WorkspaceFilesQuery,
   WorkspaceFolderResponse,
   WorkspaceSearchResponse,
 } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { apiError, notImplemented } from './errors.js';
 import type { Logger } from './log.js';
 
@@ -50,6 +66,12 @@ export interface WorkspaceFilesRoutesOptions {
   workspaceFiles?: WorkspaceFiles | undefined;
   log: Logger;
 }
+
+/**
+ * A links request's largest body: 100 paths of at most 4096 UTF-16 units,
+ * each up to 6 bytes once JSON-escaped (`\uXXXX`), is 2.4 MiB; 3 MiB covers it and a session.
+ */
+const MAX_LINKS_BODY_BYTES = 3 * 1024 * 1024;
 
 /** Neither a browser nor a proxy keeps a file's content, a diff or output. */
 export const NO_STORE = { 'Cache-Control': 'no-store' };
@@ -69,6 +91,13 @@ export function workbenchRefusal(log: Logger, what: string): (c: Context, error:
     if (error instanceof HunkOutdatedError) return apiError(c, 409, 'hunk_outdated', HUNK_OUTDATED_TEXT);
     // Core's own plain message (never a path).
     if (error instanceof InvalidOperationError) return apiError(c, 409, 'invalid_operation', error.message);
+    // The project's `.git` file points somewhere unusual (AD-37): the fixed sentence, never the path.
+    if (error instanceof VcsError && error.message === GIT_POINTER_UNUSUAL_MESSAGE) return apiError(c, 409, 'invalid_operation', GIT_POINTER_UNUSUAL_MESSAGE);
+    // A lane not shipped yet (hunk actions before 8.5): core's own plain message.
+    if (error instanceof NotImplementedError) return apiError(c, 501, 'not_implemented', error.message);
+    // Problems (AD-38; 8.9): an untrusted project ran nothing; a script that changed since it was confirmed ran nothing.
+    if (error instanceof ScriptsNotTrustedError) return apiError(c, 409, 'scripts_not_trusted', PROBLEMS_UNTRUSTED_TEXT);
+    if (error instanceof CommandChangedError) return apiError(c, 409, 'command_changed', COMMAND_CHANGED_MESSAGE);
     if (error instanceof EditorUnavailableError) return apiError(c, 409, 'editor_unavailable', error.message === EDITOR_NONE_FOUND_TEXT ? EDITOR_NONE_FOUND_TEXT : EDITOR_UNAVAILABLE_MESSAGE);
     // Never the path or the reason's text, which could name it.
     log.error(`a ${what} request failed`, { code: error instanceof CoreError ? error.code : 'unexpected' });
@@ -81,6 +110,7 @@ export function registerWorkspaceFilesRoutes(app: Hono, { workspaceFiles, log }:
     app.get(API_ROUTES.workspaceFiles, notImplemented);
     app.get(API_ROUTES.workspaceFileContent, notImplemented);
     app.get(API_ROUTES.workspaceFileSearch, notImplemented);
+    app.post(API_ROUTES.workspaceFileLinks, notImplemented);
     return;
   }
   const refusal = workbenchRefusal(log, 'workspace files');
@@ -112,6 +142,36 @@ export function registerWorkspaceFilesRoutes(app: Hono, { workspaceFiles, log }:
     }
   });
 
+  const exists = workspaceFiles.exists;
+  if (exists === undefined) {
+    // The files port can't locate, so it can't confirm a path.
+    app.post(API_ROUTES.workspaceFileLinks, notImplemented);
+  } else {
+    const limit = bodyLimit({ maxSize: MAX_LINKS_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
+    app.post(API_ROUTES.workspaceFileLinks, limit, async (c) => {
+      // Not JSON is an invalid body like any other: the project is still checked first.
+      let body: unknown;
+      try {
+        body = JSON.parse(await c.req.text()) as unknown;
+      } catch {
+        body = undefined;
+      }
+      try {
+        const wsId = c.req.param('wsId');
+        const parsed = WorkspaceFileLinksRequest.safeParse(body);
+        if (!parsed.success) {
+          // The project (and a well-formed chat) first: an unknown one is 404 whatever the paths; a malformed one is 400.
+          const session = SessionId.safeParse((body as { session?: unknown } | null)?.session);
+          await exists(wsId, [], session.success ? session.data : undefined);
+          return apiError(c, 400, 'invalid_request', 'Those are not paths inside the project.');
+        }
+        return c.json(WorkspaceFileLinksResponse.parse({ found: await exists(wsId, parsed.data.paths, parsed.data.session) }), 200, NO_STORE);
+      } catch (error) {
+        return refusal(c, error);
+      }
+    });
+  }
+
   const search = workspaceFiles.search;
   if (search === undefined) {
     // The files port has no search yet (8.8).
@@ -120,14 +180,17 @@ export function registerWorkspaceFilesRoutes(app: Hono, { workspaceFiles, log }:
   }
   app.get(API_ROUTES.workspaceFileSearch, async (c) => {
     try {
-      const { q, mode, matchCase, session } = c.req.query();
+      const { q, mode, matchCase, regex, session } = c.req.query();
+      /** `true` and `false` as booleans; anything else as given, which the schema refuses. */
+      const flag = (value: string) => (value === 'true' ? true : value === 'false' ? false : value);
       const query = {
         ...(q === undefined ? {} : { q }),
         ...(mode === undefined ? {} : { mode }),
-        ...(matchCase === undefined ? {} : { matchCase: matchCase === 'true' ? true : matchCase === 'false' ? false : matchCase }),
+        ...(matchCase === undefined ? {} : { matchCase: flag(matchCase) }),
+        ...(regex === undefined ? {} : { regex: flag(regex) }),
         ...(session === undefined ? {} : { session }),
       };
-      return c.json(WorkspaceSearchResponse.parse(await search(c.req.param('wsId'), query)), 200, NO_STORE);
+      return c.json(WorkspaceSearchResponse.parse(await search(c.req.param('wsId'), query, c.req.raw.signal)), 200, NO_STORE);
     } catch (error) {
       return refusal(c, error);
     }

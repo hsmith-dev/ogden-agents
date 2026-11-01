@@ -1,5 +1,6 @@
 import {
   BMAD_DOWNLOAD_INTEGRITY_MESSAGE,
+  COMMAND_CHANGED_MESSAGE,
   BMAD_DOWNLOAD_OFFLINE_MESSAGE,
   BMAD_NOT_DOWNLOADED_MESSAGE,
   BMAD_ALREADY_SET_UP_MESSAGE,
@@ -805,5 +806,17 @@ export class RestoreFailedError extends CoreError {
     readonly reason: 'branch_missing' | 'path_taken',
   ) {
     super('restore_failed', message);
+  }
+}
+
+/**
+ * Problems (AD-38; 8.9): a detected script's text in `package.json` is not
+ * the one the user confirmed, or a saved command no longer matches what
+ * would run. 409 `command_changed`; nothing ran and nothing was stored.
+ */
+export class CommandChangedError extends CoreError {
+  override readonly name = 'CommandChangedError';
+  constructor() {
+    super('command_changed', COMMAND_CHANGED_MESSAGE);
   }
 }

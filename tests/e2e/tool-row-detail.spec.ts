@@ -60,8 +60,10 @@ test('Show every step lists every call with the hunk open, survives a reload, an
     await expect(page.getByTestId('tool-call-group')).toHaveCount(0);
     await expect(page.getByTestId('tool-call-row')).toHaveCount(4);
     const hunk = page.getByTestId('tool-call-detail');
-    await expect(hunk.locator('[data-mark="removed"]')).toHaveText('- export const a = 1;');
-    await expect(hunk.locator('[data-mark="added"]')).toHaveText('+ export const a = 2;');
+    await expect(hunk.locator('[data-mark="removed"] [data-slot="diff-sign"]')).toHaveText('-');
+    await expect(hunk.locator('[data-mark="removed"] [data-slot="diff-code"]')).toHaveText('Removed line 1: export const a = 1;');
+    await expect(hunk.locator('[data-mark="added"] [data-slot="diff-sign"]')).toHaveText('+');
+    await expect(hunk.locator('[data-mark="added"] [data-slot="diff-code"]')).toHaveText('Added line 1: export const a = 2;');
 
     await page.reload();
     await expect(page.getByTestId('message-agent')).toContainText('Changed src/a.ts.');

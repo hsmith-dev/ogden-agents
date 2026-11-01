@@ -51,8 +51,10 @@ test('a multi-file change groups its rows in Normal detail, in Compact density t
     const edit = rows.nth(3).getByRole('button');
     await edit.click();
     const hunk = page.getByTestId('tool-call-detail');
-    await expect(hunk.locator('[data-mark="removed"]')).toHaveText('- export const a = 1;');
-    await expect(hunk.locator('[data-mark="added"]')).toHaveText('+ export const a = 2;');
+    await expect(hunk.locator('[data-mark="removed"] [data-slot="diff-sign"]')).toHaveText('-');
+    await expect(hunk.locator('[data-mark="removed"] [data-slot="diff-code"]')).toHaveText('Removed line 1: export const a = 1;');
+    await expect(hunk.locator('[data-mark="added"] [data-slot="diff-sign"]')).toHaveText('+');
+    await expect(hunk.locator('[data-mark="added"] [data-slot="diff-code"]')).toHaveText('Added line 1: export const a = 2;');
 
     // Compact density keeps the group: the detail level decides, not density.
     await page.evaluate((key) => localStorage.setItem(key, JSON.stringify({ theme: 'system', density: 'compact', developerMode: false })), APPEARANCE_KEY);

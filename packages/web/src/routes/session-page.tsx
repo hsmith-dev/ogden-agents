@@ -20,7 +20,7 @@ import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
 import { sessionView, type TranscriptCheckIn, type TranscriptItem } from '@/chat/transcript';
-import { AgentChangedMarker, EarlierHistory, InterruptedNote, Message, ResumedMarker } from '@/chat/transcript-parts';
+import { AgentChangedMarker, EarlierHistory, InterruptedNote, Message, ResumedMarker, TurnChangesRow } from '@/chat/transcript-parts';
 import { QueuedMessages } from '@/chat/queued-messages';
 import { otherWayShortcutLabel, useWhileWorking } from '@/chat/send-mode';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
@@ -64,6 +64,8 @@ const itemKey = (item: TranscriptItem, index: number): string =>
             ? `agent-${item.at}-${index}`
           : item.type === 'interrupted'
             ? `interrupted-${item.messageId}`
+          : item.type === 'turn_changes'
+            ? `turn-changes-${item.turnId}`
             : item.permission.requestId;
 
 /** What the composer says while the terminal drives (DESIGN.md Composer). */
@@ -627,7 +629,7 @@ export function SessionPage() {
               ) : (
                 view.items.map((item, index) =>
                   item.type === 'message' ? (
-                    <Message key={item.message.messageId} message={item.message} agentName={nameOf(item.message.agentId)} />
+                    <Message key={item.message.messageId} message={item.message} agentName={nameOf(item.message.agentId)} wsId={wsId} sesId={sesId} />
                   ) : item.type === 'tools' ? (
                     <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} detail={detail} />
                   ) : item.type === 'resumed' ? (
@@ -636,6 +638,8 @@ export function SessionPage() {
                     <AgentChangedMarker key={`agent-${item.at}-${index}`} agentName={nameOf(item.agentId)} />
                   ) : item.type === 'interrupted' ? (
                     <InterruptedNote key={`interrupted-${item.messageId}`} cancelledRequest={item.cancelledRequest} />
+                  ) : item.type === 'turn_changes' ? (
+                    <TurnChangesRow key={`turn-changes-${item.turnId}`} wsId={wsId} sesId={sesId} turnId={item.turnId} files={item.files} additions={item.additions} deletions={item.deletions} />
                   ) : item.type === 'document' ? (
                     <DocumentCard
                       key={`document-${item.path}`}

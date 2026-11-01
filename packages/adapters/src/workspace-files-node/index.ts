@@ -28,25 +28,53 @@
  * every other check holds, and nothing outside that root is ever shown. Such
  * a root must lie strictly inside the data folder, else every call is `protected`.
  * `locate` checks a file exactly as `read` does and answers its real path,
- * for the editor launcher. Search is 8.8's: this port has none yet.
+ * for the editor launcher.
+ *
+ * `search` (8.8) walks the root breadth-first in pure Node (no git, no
+ * child process), entries by name, honouring every `.gitignore` on the way
+ * ({@link isIgnored}); a folder is entered only when it is not a link, not
+ * refused, not ignored and allowed. Every candidate goes through this
+ * port's own `read` (Text) or `locate` (File names), so a refused path, a
+ * fence, a hard link, a binary or too large file never gives a result, and
+ * an environment file is searched in its masked text only. A literal is
+ * escaped and matched linearly; a Regex runs in a worker
+ * ({@link createRegexMatcher}) terminated at the deadline or on abort. At
+ * most {@link MAX_CONCURRENT_SEARCHES} run at once per port, the rest wait.
  */
 import { constants as fsConstants, realpathSync } from 'node:fs';
 import { lstat, opendir, open, readlink, realpath, stat } from 'node:fs/promises';
 import type { BigIntStats } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { credentialReadFences, foldSegment, isRefusedWorkspacePath, type WorkspaceFilesPort, type WorkspacePathRefusal, type WorkspaceRootKind } from '@ogden-agents/core';
+import {
+  credentialReadFences,
+  foldSegment,
+  isRefusedWorkspacePath,
+  previewAround,
+  type WorkspaceFilesPort,
+  type WorkspacePathRefusal,
+  type WorkspaceRootKind,
+  type WorkspaceSearchPortQuery,
+  type WorkspaceSearchPortResult,
+} from '@ogden-agents/core';
 import {
   MAX_WORKSPACE_FILE_BYTES,
   MAX_WORKSPACE_FOLDER_ENTRIES,
   REDACTED_SECRET,
   WORKSPACE_BINARY_SNIFF_BYTES,
+  WORKSPACE_SEARCH_MAX_FILES,
+  WORKSPACE_SEARCH_MAX_MATCHES,
+  WORKSPACE_SEARCH_TIMEOUT_MS,
   type WorkspaceFileEntry,
   type WorkspaceFileResponse,
   type WorkspaceFolderResponse,
+  type WorkspaceSearchFile,
+  type WorkspaceSearchMatch,
 } from '@ogden-agents/shared';
 import { sameFile } from '../bmad-catalog/document.js';
 import { realRepoRoot } from '../bmad-catalog/skills.js';
 import { codeOf, NON_BLOCK, NO_FOLLOW } from '../fs-safe.js';
+import { isIgnored, readGitignore, type GitignoreLevel } from './gitignore.js';
+import { createRegexMatcher, type RegexMatcher } from './regex-worker.js';
 
 export interface WorkspaceFilesNodeOptions {
   /** The user's home folder: its credential folders are fenced wherever a link leads. */
@@ -55,7 +83,31 @@ export interface WorkspaceFilesNodeOptions {
   dataDir: string;
   /** Tests only: runs after a file's path is checked and before it is opened (to swap a link in). */
   afterCheck?: (realPath: string) => Promise<void> | void;
+  /** Tests only: a search's limits (time in ms, files looked at) in place of the shared caps. */
+  searchLimits?: { timeoutMs?: number; maxFiles?: number };
 }
+
+/** How many searches run at once per port (per server); the rest wait their turn. */
+export const MAX_CONCURRENT_SEARCHES = 2;
+/** How many files one search reads (or locates) at once. */
+const SEARCH_READS_AT_ONCE = 8;
+/** The longest workspace-relative path a client can ask for back (`WorkspaceRelativePath`). */
+const MAX_RELATIVE_PATH = 4096;
+
+/** A file's lines, as the viewer numbers them: one last line ending ends the last line, it doesn't start another. */
+const linesOf = (text: string): string[] => {
+  const end = text.endsWith('\r\n') ? text.length - 2 : text.endsWith('\n') || text.endsWith('\r') ? text.length - 1 : text.length;
+  return text.slice(0, end).split(/\r\n|\r|\n/);
+};
+/** The most entries read from one folder; past it the answer is `truncated`. */
+const MAX_SEARCH_FOLDER_ENTRIES = 50_000;
+/** How many entries are sorted out between turns given back to the event loop. */
+const ENTRIES_PER_TURN = 256;
+/** A turn of the event loop. */
+const nextTurn = (): Promise<void> => new Promise((done) => setImmediate(done));
+
+/** A literal query as a pattern of plain characters: every syntax character escaped (valid with `u`). */
+const escapeLiteral = (text: string): string => text.replace(/[\\^$.*+?()[\]{}|/]/g, '\\$&');
 
 const PROTECTED: WorkspacePathRefusal = { refused: 'protected' };
 const NOT_FOUND: WorkspacePathRefusal = { refused: 'not_found' };
@@ -100,27 +152,44 @@ const remoteTarget = (target: string): boolean => target.startsWith('\\\\') || t
 /** Whether the file name (folded as core folds a segment) is an environment file whose values are masked. */
 export function isEnvironmentFileName(name: string): boolean {
   const folded = foldSegment(name);
-  return /^\.env([._-]|$)/.test(folded) || /\.env(\.|$)/.test(folded) || folded === '.envrc' || folded === '.flaskenv';
+  return /^\.env([._~#-]|$)/.test(folded) || /^\.envrc([._-]|$)/.test(folded) || /\.env(\.|$)/.test(folded) || folded === '.flaskenv';
 }
 
 /** `NAME=` (optionally `export NAME=`) at a line's start: the part kept. */
 const ASSIGNMENT = /^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_.-]*\s*=)(.*)$/;
-/** A comment line: its `#` and what follows. */
-const COMMENT = /^(\s*#+\s*)(.*)$/;
+/**
+ * A comment line split into its lead (spaces, `#`s, spaces) and its text,
+ * or `null`: by hand, in one pass (a RegExp here backtracked on a long run
+ * of `#` before a lone `\r`). The text may hold no line terminator, as `.` can't.
+ */
+function parseComment(line: string): [string, string] | null {
+  let at = 0;
+  while (at < line.length && /\s/.test(line[at]!)) at++;
+  if (line[at] !== '#') return null;
+  while (line[at] === '#') at++;
+  while (at < line.length && /\s/.test(line[at]!)) at++;
+  const text = line.slice(at);
+  return /[\n\r\u2028\u2029]/.test(text) ? null : [line.slice(0, at), text];
+}
 
 /** One assignment's line with its value masked (an empty value stays empty). */
 const maskAssignment = (name: string, value: string): string => (value.trim() === '' ? name : `${name}${REDACTED_SECRET}`);
 
 /** The quote a value opens and leaves open at its line's end (`KEY="line one`), if any. */
-function openQuote(value: string): '"' | "'" | undefined {
+type Quote = '"' | "'" | '`';
+
+function openQuote(value: string): Quote | undefined {
   const trimmed = value.trimStart();
   const quote = trimmed[0];
-  if (quote !== '"' && quote !== "'") return undefined;
+  if (quote !== '"' && quote !== "'" && quote !== '`') return undefined;
   return closes(trimmed.slice(1), quote) ? undefined : quote;
 }
 
-/** Whether `text` holds the closing `quote` (for `"`, one not escaped with `\\`). */
-const closes = (text: string, quote: '"' | "'"): boolean => (quote === "'" ? text.includes("'") : /(^|[^\\])"/.test(text));
+/** Whether `text` holds the closing `quote`: one not escaped with `\\` (for `"`, `'` and `` ` `` alike). */
+const closes = (text: string, quote: Quote): boolean => {
+  for (let at = text.indexOf(quote); at !== -1; at = text.indexOf(quote, at + 1)) if (at === 0 || text[at - 1] !== '\\') return true;
+  return false;
+};
 
 /**
  * An environment file's text with every value masked: an assignment keeps
@@ -130,7 +199,7 @@ const closes = (text: string, quote: '"' | "'"): boolean => (quote === "'" ? tex
  * blank line stays; any other line is masked whole. Line endings are kept.
  */
 export function maskEnvironmentText(text: string): string {
-  let open: '"' | "'" | undefined;
+  let open: Quote | undefined;
   return text
     .split(/(\r?\n)/)
     .map((part, index) => {
@@ -142,8 +211,8 @@ export function maskEnvironmentText(text: string): string {
         return part.trim() === '' ? part : REDACTED_SECRET;
       }
       if (part.trim() === '') return part;
-      const comment = COMMENT.exec(part);
-      if (comment !== null) return comment[2] === '' ? part : `${comment[1]!}${REDACTED_SECRET}`;
+      const comment = parseComment(part);
+      if (comment !== null) return comment[1] === '' ? part : `${comment[0]}${REDACTED_SECRET}`;
       const assignment = ASSIGNMENT.exec(part);
       if (assignment === null) return REDACTED_SECRET;
       open = openQuote(assignment[2]!);
@@ -152,7 +221,7 @@ export function maskEnvironmentText(text: string): string {
     .join('');
 }
 
-export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: WorkspaceFilesNodeOptions): WorkspaceFilesPort {
+export function createWorkspaceFilesNode({ home, dataDir, afterCheck, searchLimits }: WorkspaceFilesNodeOptions): WorkspaceFilesPort {
   /**
    * The fenced folders, worked out at each call (a credential folder may
    * appear later): the home credential folders, and the data folder unless
@@ -231,7 +300,7 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
     }
   };
 
-  return {
+  const port: WorkspaceFilesPort = {
     async list(rootPath, path, kind = 'project'): Promise<WorkspaceFolderResponse | WorkspacePathRefusal> {
       const checked = await resolveChecked(rootPath, path, kind);
       if ('refused' in checked) return checked;
@@ -341,8 +410,8 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
         if (refusedHardLink(root, real, opened)) return HARD_LINKED;
         const size = Number(opened.size);
         if (size > MAX_WORKSPACE_FILE_BYTES) return { kind: 'too_large', path, size, limit: MAX_WORKSPACE_FILE_BYTES };
-        // One byte more than the limit tells a file that grew past it since the stat.
-        const buffer = Buffer.alloc(MAX_WORKSPACE_FILE_BYTES + 1);
+        // One byte more than the limit tells a file that grew past it since the stat. Unzeroed: only the filled part is ever used.
+        const buffer = Buffer.allocUnsafe(MAX_WORKSPACE_FILE_BYTES + 1);
         let filled = 0;
         while (filled < buffer.length) {
           const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, filled);
@@ -379,4 +448,203 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
       }
     },
   };
+
+  // At most MAX_CONCURRENT_SEARCHES at once: a slot, or a place in the queue.
+  let running = 0;
+  const waiting: Array<() => void> = [];
+  const acquire = (signal: AbortSignal | undefined): Promise<boolean> => {
+    if (running < MAX_CONCURRENT_SEARCHES) {
+      running++;
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      const turn = () => {
+        signal?.removeEventListener('abort', gone);
+        running++;
+        resolve(true);
+      };
+      const gone = () => {
+        const at = waiting.indexOf(turn);
+        if (at !== -1) waiting.splice(at, 1);
+        resolve(false);
+      };
+      if (signal?.aborted === true) return resolve(false);
+      signal?.addEventListener('abort', gone, { once: true });
+      waiting.push(turn);
+    });
+  };
+  const release = () => {
+    running--;
+    waiting.shift()?.();
+  };
+
+  port.search = async (rootPath: string, query: WorkspaceSearchPortQuery, kind: WorkspaceRootKind = 'project'): Promise<WorkspaceSearchPortResult> => {
+    if (!(await acquire(query.signal))) return { files: [], truncated: true };
+    try {
+      return await runSearch(rootPath, query, kind);
+    } finally {
+      release();
+    }
+  };
+
+  /** One search, in its slot. */
+  const runSearch = async (rootPath: string, { q, mode, matchCase, regex, signal }: WorkspaceSearchPortQuery, kind: WorkspaceRootKind): Promise<WorkspaceSearchPortResult> => {
+    const root = await realRepoRoot(rootPath);
+    if (root === undefined) return { files: [], truncated: false };
+    if (kind === 'chat_worktree') {
+      const data = realOrUndefined(dataDir) ?? resolve(dataDir);
+      if (root === data || !within(root, data)) return { files: [], truncated: false };
+    }
+    const fenced = fences(kind);
+    const flags = matchCase ? 'u' : 'iu';
+    // A literal never backtracks: plain characters only, matched here. A user's pattern only ever runs in the worker.
+    const literal = regex ? undefined : new RegExp(escapeLiteral(q), flags);
+    let worker: RegexMatcher | undefined;
+    const maxFiles = searchLimits?.maxFiles ?? WORKSPACE_SEARCH_MAX_FILES;
+    // One over the cap tells the use-case's clamp the answer is cut.
+    const wanted = WORKSPACE_SEARCH_MAX_MATCHES + 1;
+    let stopped = false;
+    const stop = () => {
+      stopped = true;
+      worker?.terminate();
+    };
+    const timeoutMs = searchLimits?.timeoutMs ?? WORKSPACE_SEARCH_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    const timer = setTimeout(stop, timeoutMs);
+    timer.unref();
+    /** Whether the search must stop: the clock read too, for loops that keep the timer from firing. */
+    const late = (): boolean => {
+      if (!stopped && (Date.now() >= deadline || signal?.aborted === true)) stop();
+      return stopped;
+    };
+    signal?.addEventListener('abort', stop, { once: true });
+    if (signal?.aborted === true) stop();
+    const found: WorkspaceSearchFile[] = [];
+    let total = 0;
+    let lookedAt = 0;
+    let truncated = false;
+
+    /** The first match of each of `lines`, up to `max`, as 0-based `[line, column]`; `undefined` when the search was stopped. */
+    const matchLines = async (lines: readonly string[], max: number): Promise<Array<[number, number]> | undefined> => {
+      if (literal !== undefined) {
+        const hits: Array<[number, number]> = [];
+        for (let index = 0; index < lines.length && hits.length < max; index++) {
+          const at = literal.exec(lines[index]!);
+          if (at !== null) hits.push([index, at.index]);
+        }
+        return hits;
+      }
+      worker ??= createRegexMatcher(q, flags);
+      return stopped ? undefined : worker.match(lines, max);
+    };
+
+    try {
+      const queue: Array<{ segments: string[]; levels: GitignoreLevel[] }> = [{ segments: [], levels: [] }];
+      walk: while (queue.length > 0) {
+        if (late()) break;
+        const folder = queue.shift()!;
+        const folderPath = join(root, ...folder.segments);
+        // The folder is still where the walk found it: no link swapped in on the way, still allowed.
+        try {
+          if ((await lstat(folderPath)).isSymbolicLink() || (await realpath(folderPath)) !== folderPath || !allowed(root, folderPath, fenced)) continue;
+        } catch {
+          continue;
+        }
+        const entries: Array<{ name: string; folder: boolean; file: boolean }> = [];
+        try {
+          const dir = await opendir(folderPath);
+          try {
+            for await (const entry of dir) {
+              if (stopped) break;
+              if (entries.length >= MAX_SEARCH_FOLDER_ENTRIES) {
+                truncated = true;
+                break;
+              }
+              // A link is a candidate file, never a folder to enter: `read` and `locate` decide where it leads.
+              entries.push({ name: entry.name, folder: entry.isDirectory(), file: entry.isFile() || entry.isSymbolicLink() });
+            }
+          } finally {
+            await dir.close().catch(() => undefined);
+          }
+        } catch {
+          continue;
+        }
+        if (stopped) break;
+        entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+        const levels = entries.some((entry) => entry.name === '.gitignore' && entry.file)
+          ? [...folder.levels, { base: folder.segments, rules: await readGitignore(join(folderPath, '.gitignore')) }]
+          : folder.levels;
+        const candidates: string[] = [];
+        for (const [index, entry] of entries.entries()) {
+          // Many entries against many rules: the clock is read, and the event loop given a turn, every few hundred.
+          if (index % ENTRIES_PER_TURN === ENTRIES_PER_TURN - 1) {
+            if (late()) break walk;
+            await nextTurn();
+          }
+          if (unaskable(entry.name)) continue;
+          const segments = [...folder.segments, entry.name];
+          if (isRefusedWorkspacePath(segments)) continue;
+          if (entry.folder) {
+            if (!isIgnored(levels, segments, true)) queue.push({ segments, levels });
+            continue;
+          }
+          if (!entry.file || isIgnored(levels, segments, false)) continue;
+          const path = segments.join('/');
+          if (path.length <= MAX_RELATIVE_PATH) candidates.push(path);
+        }
+        // Stepped by the batch actually taken, so a batch cut short by the files cap leaves the rest to the cap check (truncated).
+        for (let start = 0; start < candidates.length; ) {
+          if (late()) break walk;
+          if (lookedAt >= maxFiles) {
+            truncated = true;
+            break walk;
+          }
+          const batch = candidates.slice(start, Math.min(start + SEARCH_READS_AT_ONCE, candidates.length, start + maxFiles - lookedAt));
+          start += batch.length;
+          lookedAt += batch.length;
+          if (mode === 'names') {
+            // Every path of the batch is matched (cheap), then only a match is located; the cap counts located ones only.
+            const hits = await matchLines(batch, batch.length);
+            if (hits === undefined) break walk;
+            const matched = hits.map(([index]) => batch[index]!);
+            const located = await Promise.all(matched.map((path) => port.locate!(root, path, kind).catch(() => NOT_FOUND)));
+            for (const [index, path] of matched.entries()) {
+              if ('refused' in located[index]!) continue;
+              found.push({ path, matches: [] });
+              if (++total >= wanted) {
+                truncated = true;
+                break walk;
+              }
+            }
+            continue;
+          }
+          const read = await Promise.all(batch.map((path) => port.read(root, path, kind).catch(() => NOT_FOUND)));
+          for (const [index, path] of batch.entries()) {
+            if (stopped) break walk;
+            const file = read[index]!;
+            // Refused, gone, binary or too large: skipped.
+            if ('refused' in file || file.kind !== 'text') continue;
+            const lines = linesOf(file.content);
+            const hits = await matchLines(lines, wanted - total);
+            if (hits === undefined) break walk;
+            if (hits.length === 0) continue;
+            const matches: WorkspaceSearchMatch[] = hits.map(([line, column]) => ({ line: line + 1, column: column + 1, preview: previewAround(lines[line]!, column + 1) }));
+            found.push({ path, matches });
+            total += matches.length;
+            if (total >= wanted) {
+              truncated = true;
+              break walk;
+            }
+          }
+        }
+      }
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', stop);
+      worker?.terminate();
+    }
+    return { files: found, truncated: truncated || stopped };
+  };
+
+  return port;
 }

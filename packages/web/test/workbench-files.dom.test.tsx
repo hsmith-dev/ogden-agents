@@ -15,13 +15,13 @@ import {
   WORKSPACE_FILE_MASKED_TEXT,
   WORKSPACE_FILE_NONE_SELECTED_TEXT,
   WORKSPACE_FILE_PROTECTED_TEXT,
-  WORKSPACE_FILE_TOO_LARGE_TEXT,
   WORKSPACE_PATH_HARD_LINK_MESSAGE,
+  workspaceFileTooLargeText,
   type WorkspaceFileResponse,
   type WorkspaceFolderResponse,
 } from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -105,6 +105,24 @@ describe('Workbench Files', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
   });
 
+  it("colours a file with 8.3's lazy highlighter, as a diff is, and leaves an unknown language plain", async () => {
+    fake.folders[''] = folder('', [fileEntry('a.ts'), fileEntry('notes.txt')]);
+    fake.files['a.ts'] = { kind: 'text', path: 'a.ts', content: '// note\nexport const a = "hi";\n', size: 30, masked: false };
+    fake.files['notes.txt'] = { kind: 'text', path: 'notes.txt', content: 'export const a = "hi";\n', size: 23, masked: false };
+    await mount('a.ts');
+    // Plain at once, coloured once the grammar has loaded; the text is kept whole.
+    await waitFor(() => expect(screen.getByTestId('code-lines').querySelector('[data-token="keyword"]')).not.toBeNull());
+    const tokens = [...screen.getByTestId('code-lines').querySelectorAll('[data-token]')].map((span) => [span.getAttribute('data-token'), span.textContent?.trim(), span.className]);
+    expect(tokens).toContainEqual(['comment', '// note', 'text-syntax-comment italic']);
+    expect(tokens).toContainEqual(['keyword', 'export', 'text-syntax-keyword']);
+    expect(tokens).toContainEqual(['string', '"hi"', 'text-syntax-string']);
+    expect(screen.getAllByTestId('code-line').map((row) => row.lastElementChild?.textContent)).toEqual(['// note', 'export const a = "hi";']);
+    fireEvent.click(screen.getByTestId('file-row-notes.txt'));
+    await flush();
+    expect(screen.getAllByTestId('code-line').map((row) => row.lastElementChild?.textContent)).toEqual(['export const a = "hi";']);
+    expect(screen.getByTestId('code-lines').querySelector('[data-token]')).toBeNull();
+  });
+
   it('splits CRLF and bare CR line endings, with no stray CR on the last line', async () => {
     fake.folders[''] = folder('', [fileEntry('crlf.txt'), fileEntry('cr.txt')]);
     fake.files['crlf.txt'] = { kind: 'text', path: 'crlf.txt', content: 'one\r\ntwo\r\n', size: 10, masked: false };
@@ -143,7 +161,7 @@ describe('Workbench Files', () => {
     expect(screen.getByTestId('code-view-path').textContent).toBe('docs/x.md');
     for (const [name, testId, text] of [
       ['img.png', 'file-binary', WORKSPACE_FILE_BINARY_TEXT],
-      ['big.log', 'file-too-large', WORKSPACE_FILE_TOO_LARGE_TEXT],
+      ['big.log', 'file-too-large', workspaceFileTooLargeText(2_000_000, 1_048_576)],
       ['empty.txt', 'file-empty', WORKSPACE_FILE_EMPTY_TEXT],
     ] as const) {
       fireEvent.click(screen.getByTestId(`file-row-${name}`));

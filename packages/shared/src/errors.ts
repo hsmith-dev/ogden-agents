@@ -244,6 +244,8 @@ export const API_ERROR_CODES = [
   'restore_failed',
   /** A request whose fields don't go together (400), such as a worktree chat on a remote machine (27.1). Nothing was created. */
   'validation_failed',
+  /** Problems (AD-38; 8.9): a detected script's text in `package.json` isn't the one the user confirmed, or the command saved no longer matches (409). Nothing ran or was stored; the UI asks again. */
+  'command_changed',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

@@ -114,7 +114,8 @@ test('Build on a ready card builds it unattended, the session streams read-only,
       await expect(page.getByTestId('review-approve')).toBeEnabled();
       await page.getByText('Show the code changes (2 files)').click();
       await expect(page.getByTestId('review-files')).toContainText('src/built-1.1.txt');
-      await expect(page.getByTestId('review-diff')).toContainText('Built 1.1 by the fake agent.');
+      // Story 8.3: each file its own section in the diff viewer.
+      await expect(page.locator('[data-testid="diff-file"][data-diff-file="src/built-1.1.txt"]')).toContainText('Built 1.1 by the fake agent.');
       const head = fixtureGit(repo, 'rev-parse', 'HEAD').trim();
       await page.getByTestId('review-approve').click();
       await expect(page.getByTestId('review-merged')).toBeVisible();

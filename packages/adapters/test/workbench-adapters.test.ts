@@ -89,7 +89,8 @@ describe('workspace-files-node: a chat worktree root (epic 8 entry 2)', () => {
     expect(await port.locate!(root, '.git/config')).toEqual(PROTECTED);
     expect(await port.locate!(root, 'src')).toEqual(NOT_FOUND);
     expect(await port.locate!(root, 'gone.ts')).toEqual(NOT_FOUND);
-    expect(port.search).toBeUndefined();
+    // 8.8 built it.
+    expect(port.search).toBeTypeOf('function');
     const outside = tempDir('ogden-wb-out-');
     writeFileSync(join(outside, 'secret'), 'S');
     try {
@@ -119,16 +120,18 @@ describe('the Workbench memory stubs', () => {
 
   it('vcs-memory working tree: stage moves a hunk to Staged, an outdated hunk is refused, commit clears', async () => {
     const vcs = createMemoryVcsWorkingTree();
+    const w = { path: '/w' };
     const hunk = { id: 'h1', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ kind: 'add' as const, text: 'x', newLine: 1 }] };
     vcs.folder('/w').unstaged.push({ file: { path: 'a.ts', change: 'changed', additions: 1, deletions: 0, binary: false, tooLarge: false }, hunks: [hunk, { ...hunk, id: 'h2' }] });
-    expect(await vcs.applyHunk('/w', { target: { view: 'unstaged' }, action: 'stage', path: 'a.ts', hunkId: 'h1' })).toBe('applied');
-    expect((await vcs.changedFiles('/w', { view: 'staged' })).files).toMatchObject([{ path: 'a.ts', additions: 1 }]);
+    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'stage', path: 'a.ts', hunkId: 'h1' })).toBe('applied');
+    expect((await vcs.changedFiles(w, { view: 'staged' })).files).toMatchObject([{ path: 'a.ts', additions: 1 }]);
     vcs.outdated.add('h2');
-    expect(await vcs.applyHunk('/w', { target: { view: 'unstaged' }, action: 'revert', path: 'a.ts', hunkId: 'h2' })).toBe('outdated');
-    expect(await vcs.applyHunk('/w', { target: { view: 'unstaged' }, action: 'revert', path: 'b.ts' })).toBe('not_found');
-    expect(await vcs.commitAll('/w', 'msg')).toMatchObject({ files: 1 });
-    expect((await vcs.changedFiles('/w', { view: 'unstaged' })).files).toEqual([]);
-    expect(await vcs.snapshot('/w')).toMatch(/^[0-9a-f]{40}$/);
+    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'revert', path: 'a.ts', hunkId: 'h2' })).toBe('outdated');
+    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'revert', path: 'b.ts' })).toBe('not_found');
+    expect(await vcs.commitAll(w, 'msg')).toMatchObject({ files: 1 });
+    expect((await vcs.changedFiles(w, { view: 'unstaged' })).files).toEqual([]);
+    expect(await vcs.snapshot(w)).toMatch(/^[0-9a-f]{40}$/);
+    expect(await vcs.commitAll(w, 'again')).toBe('nothing');
   });
 
   it('editor-launcher-memory records opens; project-commands-memory starts nothing until finished', async () => {
@@ -137,13 +140,18 @@ describe('the Workbench memory stubs', () => {
     expect(await launcher.open('zed', '/w/a.ts')).toBe('unavailable');
     expect(launcher.opens).toEqual([{ editorId: 'vscode', absolutePath: '/w/a.ts', line: 3, column: undefined }, { editorId: 'zed', absolutePath: '/w/a.ts', line: undefined, column: undefined }]);
     const runner = createMemoryProjectCommandRunner();
-    const started = runner.start({ cwd: '/w', command: 'npm test' });
+    const started = runner.start({ cwd: '/w', argv: ['npm', 'test'] });
     runner.starts[0]!.write('FAIL a.ts\n');
     runner.starts[0]!.finish({ exitCode: 1 });
     expect(await started.done).toEqual({ exitCode: 1, stopped: false });
     expect(started.output()).toEqual({ text: 'FAIL a.ts\n', truncated: false });
-    const stopped = runner.start({ cwd: '/w', command: 'npm run lint' });
+    const stopped = runner.start({ cwd: '/w', argv: ['npm', 'run', 'lint'] });
     stopped.stop();
     expect(await stopped.done).toEqual({ exitCode: null, stopped: true });
+    expect(runner.starts.map((start) => start.argv)).toEqual([['npm', 'test'], ['npm', 'run', 'lint']]);
+    const open = runner.start({ cwd: '/w', argv: ['npm', 'test'] });
+    await runner.close();
+    expect(runner.closed).toBe(true);
+    expect(await open.done).toEqual({ exitCode: null, stopped: true });
   });
 });

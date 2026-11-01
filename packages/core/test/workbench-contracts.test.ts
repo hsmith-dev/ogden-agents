@@ -8,7 +8,7 @@
  */
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { chatWorktreeBranch, type ChangedFile, type DiffHunk, type EditorInfo, type SessionId, type WorkspaceId, type WorkspaceSearchFile } from '@ogden-agents/shared';
+import { chatWorktreeBranch, COMMIT_NOTHING_MESSAGE, type ChangedFile, type DiffHunk, type EditorInfo, type SessionId, type WorkspaceId, type WorkspaceSearchFile, WORKSPACE_SEARCH_INVALID_REGEX_TEXT } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
   AgentMidTurnError,
@@ -17,14 +17,17 @@ import {
   InvalidOperationError,
   newId,
   NotFoundError,
+  NotImplementedError,
   PathProtectedError,
   ValidationError,
   type Core,
   type EditorLauncherPort,
   type VcsChangesTarget,
+  type VcsFolder,
   type VcsWorkingTreePort,
   type WorkspaceFilesPort,
   type WorkspaceRootKind,
+  type WorkspaceSearchPortQuery,
 } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
 
@@ -63,29 +66,30 @@ const file = (path: string): ChangedFile => ({ path, change: 'changed', addition
 const hunk = (id: string): DiffHunk => ({ id, oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ kind: 'remove', text: 'a', oldLine: 1 }, { kind: 'add', text: 'b', newLine: 1 }] });
 
 /** A working-tree port that records its calls; `outdated` hunks answer so. */
-function vcsPort() {
-  const calls: Array<{ op: string; root: string; target?: VcsChangesTarget; detail?: string }> = [];
+function vcsPort({ files = [file('src/a.ts')], commit = { revision: 'c'.repeat(40), files: 2 } }: { files?: ChangedFile[]; commit?: { revision: string; files: number } | 'nothing' } = {}) {
+  const calls: Array<{ op: string; root: string; worktree?: VcsFolder['worktree']; target?: VcsChangesTarget; detail?: string }> = [];
   const outdated = new Set<string>();
+  const at = (folder: VcsFolder) => ({ root: folder.path, ...(folder.worktree === undefined ? {} : { worktree: folder.worktree }) });
   const port: VcsWorkingTreePort = {
-    changedFiles: async (root, target) => {
-      calls.push({ op: 'changedFiles', root, target });
-      return { base: 'main', files: [file('src/a.ts')], truncated: false };
+    changedFiles: async (folder, target) => {
+      calls.push({ op: 'changedFiles', ...at(folder), target });
+      return { base: 'main', files, truncated: false };
     },
-    fileDiff: async (root, target, path) => {
-      calls.push({ op: 'fileDiff', root, target, detail: path });
+    fileDiff: async (folder, target, path) => {
+      calls.push({ op: 'fileDiff', ...at(folder), target, detail: path });
       return path === 'src/a.ts' ? { file: file(path), hunks: [hunk('h1')] } : undefined;
     },
-    applyHunk: async (root, input) => {
-      calls.push({ op: 'applyHunk', root, target: input.target, detail: `${input.action} ${input.path} ${input.hunkId ?? '*'}` });
+    applyHunk: async (folder, input) => {
+      calls.push({ op: 'applyHunk', ...at(folder), target: input.target, detail: `${input.action} ${input.path} ${input.hunkId ?? '*'}` });
       return input.hunkId !== undefined && outdated.has(input.hunkId) ? 'outdated' : 'applied';
     },
-    snapshot: async (root) => {
-      calls.push({ op: 'snapshot', root });
+    snapshot: async (folder) => {
+      calls.push({ op: 'snapshot', ...at(folder) });
       return TREE_A;
     },
-    commitAll: async (root, message) => {
-      calls.push({ op: 'commitAll', root, detail: message });
-      return { revision: 'c'.repeat(40), files: 2 };
+    commitAll: async (folder, message) => {
+      calls.push({ op: 'commitAll', ...at(folder), detail: message });
+      return commit;
     },
   };
   return { port, calls, outdated };
@@ -217,7 +221,7 @@ describe('workspace changes (AD-37)', () => {
     const turnId = newId('trn');
     core.sessionEvents.appendSessionEvent(chat.id, { type: 'session.turn_changes_recorded', payload: { sessionId: chat.id, turnId, startTree: TREE_A, endTree: TREE_B, files: 1, additions: 1, deletions: 1 } });
     expect(await core.workspaceChanges!.changes(workspace.id, { view: 'turn', session: chat.id })).toMatchObject({ view: 'turn', turn: turnId, files: [file('src/a.ts')] });
-    expect(vcs.calls.at(-1)).toEqual({ op: 'changedFiles', root: chat.worktreePath, target: { view: 'turn', startTree: TREE_A, endTree: TREE_B } });
+    expect(vcs.calls.at(-1)).toEqual({ op: 'changedFiles', root: chat.worktreePath, worktree: { repoPath: repo, branch: chat.branch }, target: { view: 'turn', startTree: TREE_A, endTree: TREE_B } });
     await expect(core.workspaceChanges!.changes(workspace.id, { view: 'turn', session: chat.id, turn: newId('trn') })).rejects.toBeInstanceOf(NotFoundError);
     expect((await core.workspaceChanges!.turns(workspace.id, chat.id)).turns).toEqual([expect.objectContaining({ id: turnId, sessionId: chat.id, files: 1 })]);
   });
@@ -277,10 +281,38 @@ describe('workspace changes (AD-37)', () => {
     core.entities.setSessionState(chat.id, 'idle');
     expect(vcs.calls.filter((call) => call.op === 'commitAll')).toEqual([]);
     expect(await core.workspaceChanges!.commit(workspace.id, chat.id, { message: 'Fix it' })).toEqual({ revision: 'c'.repeat(40), files: 2 });
-    expect(vcs.calls.at(-1)).toEqual({ op: 'commitAll', root: chat.worktreePath, detail: 'Fix it' });
+    expect(vcs.calls.at(-1)).toEqual({ op: 'commitAll', root: chat.worktreePath, worktree: { repoPath: realpathSync.native(workspace.realPath ?? workspace.path), branch: chat.branch }, detail: 'Fix it' });
     const committed = core.events.readAfter(0).filter((event) => event.type === 'session.worktree_committed');
     expect(committed.map((event) => event.payload)).toEqual([{ sessionId: chat.id, branch: chat.branch, revision: 'c'.repeat(40), files: 2 }]);
     expect(JSON.stringify(committed)).not.toContain('Fix it');
+  });
+});
+
+describe('workspace changes on the git port (story 8.4)', () => {
+  it("answers only paths Ogden shows: a refused or malformed path the port names is left out", async () => {
+    const files = ['src/a.ts', '.git/config', 'a/.ssh/id_rsa', '../up.txt', '/etc/passwd', 'a\\b'].map(file);
+    const vcs = vcsPort({ files: [...files, { ...file('moved.ts'), change: 'renamed', previousPath: '.git/HEAD' }] });
+    const core = openTestCore(undefined, undefined, { vcsWorkingTreePort: vcs.port });
+    const { workspace } = project(core);
+    expect((await core.workspaceChanges!.changes(workspace.id, { view: 'unstaged' })).files.map((one) => one.path)).toEqual(['src/a.ts']);
+  });
+
+  it('answers a hunk action 501 when the port has none, asking nothing', async () => {
+    const vcs = vcsPort();
+    delete (vcs.port as { applyHunk?: unknown }).applyHunk;
+    const core = openTestCore(undefined, undefined, { vcsWorkingTreePort: vcs.port });
+    const { workspace } = project(core);
+    await expect(core.workspaceChanges!.hunk(workspace.id, { action: 'stage', view: 'unstaged', path: 'src/a.ts' })).rejects.toBeInstanceOf(NotImplementedError);
+    expect(vcs.calls).toEqual([]);
+  });
+
+  it('refuses a commit with nothing to commit, appending nothing', async () => {
+    const vcs = vcsPort({ commit: 'nothing' });
+    const core = openTestCore(undefined, undefined, { vcsWorkingTreePort: vcs.port });
+    const { workspace } = project(core);
+    const chat = worktreeChat(core, workspace.id);
+    await expect(core.workspaceChanges!.commit(workspace.id, chat.id, { message: 'Fix it' })).rejects.toThrow(COMMIT_NOTHING_MESSAGE);
+    expect(core.events.readAfter(0).some((event) => event.type === 'session.worktree_committed')).toBe(false);
   });
 });
 
@@ -330,5 +362,33 @@ describe('open in editor (AD-39)', () => {
   it('is undefined without a launcher, or a files port that can locate', () => {
     expect(openTestCore(undefined, undefined, { workspaceFilesPort: filesPort().port }).editorLaunch).toBeUndefined();
     expect(openTestCore(undefined, undefined, { workspaceFilesPort: filesPort({ locate: false }).port, editorLauncherPort: launcher().port }).editorLaunch).toBeUndefined();
+  });
+});
+
+describe('workspace files search: regex and the client going away (8.8)', () => {
+  it('passes regex and the signal to the port; refuses a pattern that does not compile, asking the port nothing', async () => {
+    const seen: WorkspaceSearchPortQuery[] = [];
+    const { port } = filesPort({ search: [] });
+    port.search = async (_root, query) => {
+      seen.push(query);
+      return { files: [], truncated: false };
+    };
+    const core = openTestCore(undefined, undefined, { workspaceFilesPort: port });
+    const { workspace } = project(core);
+    const gone = new AbortController();
+    await core.workspaceFiles!.search!(workspace.id, { q: 'add\\(\\w+', regex: true }, gone.signal);
+    await core.workspaceFiles!.search!(workspace.id, { q: 'add(' });
+    expect(seen.map(({ q, regex, matchCase, signal }) => ({ q, regex, matchCase, signal }))).toEqual([
+      { q: 'add\\(\\w+', regex: true, matchCase: false, signal: gone.signal },
+      { q: 'add(', regex: false, matchCase: false, signal: undefined },
+    ]);
+    for (const q of ['add(', '[', '(?<', 'a{2,1}', '\\p{Nope}']) {
+      const refused = core.workspaceFiles!.search!(workspace.id, { q, regex: true });
+      await expect(refused, q).rejects.toBeInstanceOf(ValidationError);
+      await expect(refused, q).rejects.toThrow(WORKSPACE_SEARCH_INVALID_REGEX_TEXT);
+    }
+    // Under Match case too (`u` alone).
+    await expect(core.workspaceFiles!.search!(workspace.id, { q: '(', regex: true, matchCase: true })).rejects.toBeInstanceOf(ValidationError);
+    expect(seen).toHaveLength(2);
   });
 });

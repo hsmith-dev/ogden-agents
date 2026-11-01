@@ -16,6 +16,7 @@ import type { RemoteHostConnection } from '../remote-host-port.js';
 import type { SessionEvents } from '../session-events.js';
 import type { TerminalPort, TerminalProcess } from '../terminal-port.js';
 import type { VcsPort } from '../vcs-port.js';
+import type { TurnSnapshots } from '../turn-snapshots.js';
 
 export interface ChatOptions {
   entities: Entities;
@@ -115,6 +116,13 @@ export interface ChatOptions {
    * `<data>/cw`. Absent: a worktree chat is refused (`InvalidOperationError`).
    */
   vcs?: Pick<VcsPort, 'topLevel' | 'head' | 'addWorktree'>;
+  /**
+   * Each prompt's snapshots (AD-37; story 8.4, `core.turnSnapshots`): taken
+   * just before a prompt goes out and once it settled, each waited for at
+   * most `TURN_SNAPSHOT_TIMEOUT_MS`. Never for a turn the terminal drives.
+   * Absent: no turn is snapshotted.
+   */
+  turnSnapshots?: TurnSnapshots | undefined;
 }
 
 /** A terminal's size in character cells. */

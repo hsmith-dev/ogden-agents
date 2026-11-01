@@ -195,26 +195,46 @@ export interface VcsChangedFiles {
 export type VcsHunkResult = 'applied' | 'outdated' | 'not_found';
 
 /**
+ * The folder a working-tree call runs in (AD-37; story 8.4): the project's
+ * real path, or a chat's worktree, which git is run in only with folders
+ * Ogden pins (`GIT_DIR`, `GIT_COMMON_DIR`, `GIT_WORK_TREE`) after checking
+ * the worktree's own files still name `repoPath` and `branch` (5.3's check).
+ */
+export interface VcsFolder {
+  /** The folder itself (absolute): every path in an answer is relative to it. */
+  path: string;
+  /** A chat's worktree: the project's real path and the chat's branch (`ogden/chat/<ses_…>`). */
+  worktree?: { repoPath: string; branch: string } | undefined;
+}
+
+/**
  * The working-tree half of the VCS port (AD-37; epic 8 entry 2's contract,
- * 8.4 and 8.5 build it on git): kept apart from {@link VcsPort} so the
- * builds' adapters and fakes are untouched. `root` is always the folder
- * core resolved (the workspace's real path or a chat's worktree), and every
- * path is one core checked (`WorkspaceRelativePath`, no refused name).
- * Snapshots are tree objects kept in Ogden's data directory, never a commit
- * or a ref, never the repo's own object store. Every call keeps AD-17's
- * protections (no hook, serialized with the repo's other git work).
+ * 8.4 builds it on git, 8.5 adds hunk actions): kept apart from
+ * {@link VcsPort} so the builds' adapters and fakes are untouched. The
+ * folder is always the one core resolved, and core keeps only the paths
+ * `WorkspaceRelativePath` accepts and no refused name. Snapshots are tree
+ * objects kept in Ogden's data directory, never a commit or a ref, never
+ * the repo's own object store or index. Every call keeps AD-17's
+ * protections (no hook; core serializes snapshots and the commit with the
+ * repo's other git work). A folder that is in no repository answers no
+ * changes and no snapshot.
  */
 export interface VcsWorkingTreePort {
   /** The view's changed files. */
-  changedFiles(root: string, target: VcsChangesTarget): Promise<VcsChangedFiles>;
+  changedFiles(folder: VcsFolder, target: VcsChangesTarget): Promise<VcsChangedFiles>;
   /** One file's diff in the view (no hunks when it is binary or over `MAX_DIFF_FILE_BYTES`), or `undefined` when it has no change there. */
-  fileDiff(root: string, target: VcsChangesTarget, path: string): Promise<{ file: ChangedFile; hunks: DiffHunk[] } | undefined>;
-  /** Stages, unstages or reverts one hunk (`hunkId`) or the whole file, all or nothing. */
-  applyHunk(root: string, input: { target: VcsChangesTarget; action: HunkAction; path: string; hunkId?: string | undefined }): Promise<VcsHunkResult>;
-  /** Snapshots the folder's working tree (tracked and untracked, not ignored) as a tree object; its id. */
-  snapshot(root: string): Promise<string>;
-  /** Commits everything in the worktree on its checked-out branch with `message` (no hook, never pushed); the commit and how many files it holds. */
-  commitAll(root: string, message: string): Promise<{ revision: string; files: number }>;
+  fileDiff(folder: VcsFolder, target: VcsChangesTarget, path: string): Promise<{ file: ChangedFile; hunks: DiffHunk[] } | undefined>;
+  /** Stages, unstages or reverts one hunk (`hunkId`) or the whole file, all or nothing (8.5; absent until then: 501). */
+  applyHunk?(folder: VcsFolder, input: { target: VcsChangesTarget; action: HunkAction; path: string; hunkId?: string | undefined }): Promise<VcsHunkResult>;
+  /** Snapshots the folder's working tree (tracked and untracked, not ignored) as a tree object; its id, or `undefined` when the folder is in no repository. */
+  snapshot(folder: VcsFolder): Promise<string | undefined>;
+  /**
+   * Commits everything in the worktree (`folder.worktree` is required) on
+   * its checked-out branch with `message` (no hook, never pushed); the
+   * commit and how many files it holds, or `nothing` when there is nothing
+   * to commit.
+   */
+  commitAll(folder: VcsFolder, message: string): Promise<{ revision: string; files: number } | 'nothing'>;
 }
 
 /** What putting a chat worktree away saved: the snapshot of its uncommitted changes (`null` when it had none) and how many files that holds. */

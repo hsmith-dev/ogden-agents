@@ -1,14 +1,15 @@
 /**
  * The working-tree half of `vcs-memory` (AD-37; epic 8 entry 2): an
  * in-memory `VcsWorkingTreePort` for tests and the Changes lanes (8.4 and
- * 8.5 build it on git). It runs no git and touches no file. Each folder is
- * a record of each view's changed files and their hunks; This turn's are
+ * 8.5 build it on git). It runs no git and touches no file. Each folder
+ * (by its `path`) is a record of each view's changed files and their hunks; This turn's are
  * kept per `startTree..endTree`. Tests set the state (`folder(root)`),
  * mark hunks `outdated`, and read the calls. A hunk action removes the hunk
  * (or the whole file) from that view; staging moves it to Staged. A commit
- * clears Unstaged and Staged and answers a new revision.
+ * clears Unstaged and Staged and answers a new revision (`nothing` when
+ * both were empty).
  */
-import type { VcsChangesTarget, VcsHunkResult, VcsWorkingTreePort } from '@ogden-agents/core';
+import type { VcsChangesTarget, VcsFolder, VcsHunkResult, VcsWorkingTreePort } from '@ogden-agents/core';
 import type { ChangedFile, DiffHunk } from '@ogden-agents/shared';
 
 /** One changed file and its hunks. */
@@ -28,7 +29,9 @@ export interface MemoryFolder {
 }
 
 export interface MemoryVcsWorkingTree extends VcsWorkingTreePort {
-  /** Every call as `method root …`, in order. */
+  /** Always there in memory (the git adapter has none until 8.5). */
+  applyHunk: NonNullable<VcsWorkingTreePort['applyHunk']>;
+  /** Every call as `method <folder path> …`, in order. */
   readonly calls: string[];
   /** The folder at `root`, created (no changes) if new. */
   folder(root: string): MemoryFolder;
@@ -75,17 +78,17 @@ export function createMemoryVcsWorkingTree(): MemoryVcsWorkingTree {
     calls,
     folder,
     outdated,
-    async changedFiles(root, target) {
+    async changedFiles({ path: root }: VcsFolder, target) {
       calls.push(`changedFiles ${root} ${target.view}`);
       const files = changesOf(root, target).map((change) => change.file);
       return { ...(target.view === 'branch' ? { base: folder(root).base } : {}), files, truncated: false };
     },
-    async fileDiff(root, target, path) {
+    async fileDiff({ path: root }: VcsFolder, target, path) {
       calls.push(`fileDiff ${root} ${target.view} ${path}`);
       const change = changesOf(root, target).find((found) => found.file.path === path);
       return change === undefined ? undefined : { file: change.file, hunks: change.hunks };
     },
-    async applyHunk(root, { target, action, path, hunkId }): Promise<VcsHunkResult> {
+    async applyHunk({ path: root }: VcsFolder, { target, action, path, hunkId }): Promise<VcsHunkResult> {
       calls.push(`applyHunk ${root} ${target.view} ${action} ${path} ${hunkId ?? '*'}`);
       const changes = changesOf(root, target);
       const index = changes.findIndex((found) => found.file.path === path);
@@ -111,14 +114,15 @@ export function createMemoryVcsWorkingTree(): MemoryVcsWorkingTree {
       }
       return 'applied';
     },
-    async snapshot(root) {
+    async snapshot({ path: root }: VcsFolder) {
       calls.push(`snapshot ${root}`);
       return nextObject();
     },
-    async commitAll(root, message) {
+    async commitAll({ path: root }: VcsFolder, message) {
       calls.push(`commitAll ${root} ${message.length}`);
       const state = folder(root);
       const files = new Set([...state.unstaged, ...state.staged].map((change) => change.file.path)).size;
+      if (files === 0) return 'nothing';
       state.unstaged = [];
       state.staged = [];
       return { revision: nextObject(), files };

@@ -62,3 +62,4 @@ export * from './workspace-files-memory/index.js';
 export * from './editor-launcher-memory/index.js';
 export * from './project-commands-memory/index.js';
 export * from './port-probe-memory/index.js';
+export * from './project-commands-node/index.js';

@@ -43,6 +43,15 @@ import {
   ID_PREFIXES,
   TurnId,
   ProjectCommandRunId,
+  COMMAND_CHANGED_MESSAGE,
+  PROBLEMS_ASK_AGENT_LABEL,
+  PROBLEMS_ASK_NEW_CHAT_LABEL,
+  PROBLEMS_RUNNING_TEXT,
+  PROJECT_COMMAND_REFUSALS,
+  problemDraftText,
+  problemsFinishedText,
+  problemsResultText,
+  problemsScriptChangedText,
 } from '../src/index.js';
 
 const WS = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
@@ -52,12 +61,14 @@ const PCR = 'pcr_01J9Z3K4M5N6P7Q8R9S0T1V2W6';
 const TREE = 'a'.repeat(40);
 const envelope = { id: 'evt_01J9Z3K4M5N6P7Q8R9S0T1V2W7', seq: 1, at: '2026-11-01T00:00:00.000Z', workspaceId: WS };
 
-/** The four new events, each with a valid payload. */
+/** The new events, each with a valid payload. */
 const EVENTS = [
   { type: 'session.turn_changes_recorded', streamId: SES, payload: { sessionId: SES, turnId: TRN, startTree: TREE, endTree: 'b'.repeat(40), files: 3, additions: 12, deletions: 3 } },
   { type: 'session.worktree_committed', streamId: SES, payload: { sessionId: SES, branch: chatWorktreeBranch(SES), revision: 'c'.repeat(40), files: 2 } },
   { type: 'workspace.project_command_started', streamId: WS, payload: { runId: PCR, commandId: 'test' } },
   { type: 'workspace.project_command_finished', streamId: WS, payload: { runId: PCR, commandId: 'test', state: 'failed', exitCode: 1, itemCount: 2 } },
+  // 8.9: the declared commands saved, as a count.
+  { type: 'workspace.project_commands_changed', streamId: WS, payload: { count: 2 } },
 ] as const;
 
 describe('workbench contracts (epic 8 entry 2)', () => {
@@ -69,7 +80,7 @@ describe('workbench contracts (epic 8 entry 2)', () => {
     expect(WorkspaceSearchQuery.safeParse({ q: 'x'.repeat(200) }).success).toBe(true);
     expect(WorkspaceSearchQuery.safeParse({ q: 'x'.repeat(201) }).success).toBe(false);
     expect(WorkspaceSearchQuery.safeParse({ q: '' }).success).toBe(false);
-    expect(WorkspaceSearchQuery.parse({ q: 'a' })).toEqual({ q: 'a', mode: 'text', matchCase: false });
+    expect(WorkspaceSearchQuery.parse({ q: 'a' })).toEqual({ q: 'a', mode: 'text', matchCase: false, regex: false });
     expect(WorkspaceSearchResponse.safeParse({ files: [{ path: 'a.ts', matches: [{ line: 1, column: 1, preview: 'x'.repeat(241) }] }], truncated: false, limit: 500 }).success).toBe(false);
     expect(ProjectCommandRunDetail.shape.items.safeParse(Array.from({ length: 501 }, () => ({ path: 'a.ts', line: 1, message: 'x', format: 'typescript' }))).success).toBe(false);
   });
@@ -104,8 +115,13 @@ describe('workbench contracts (epic 8 entry 2)', () => {
   });
 
   it('confirms each project command with its exact text, once per id', () => {
-    const command = { id: 'test', label: 'Test', command: 'npm test', source: 'package_json', confirmedText: 'npm test' } as const;
+    const command = { id: 'test', label: 'Test', command: 'npm run test', source: 'package_json', confirmedText: 'npm run test', script: 'test', confirmedScript: 'vitest run' } as const;
     expect(SetProjectCommandsRequest.safeParse({ commands: [command] }).success).toBe(true);
+    // A script names its script; a settings command names none, and a script name is never an option.
+    expect(SetProjectCommandsRequest.safeParse({ commands: [{ ...command, script: undefined }] }).success).toBe(false);
+    expect(SetProjectCommandsRequest.safeParse({ commands: [{ ...command, source: 'settings' }] }).success).toBe(false);
+    expect(SetProjectCommandsRequest.safeParse({ commands: [{ ...command, script: '--inspect' }] }).success).toBe(false);
+    expect(SetProjectCommandsRequest.safeParse({ commands: [{ id: 'check', label: 'Check', command: 'node fail.js', source: 'settings', confirmedText: 'node fail.js' }] }).success).toBe(true);
     expect(SetProjectCommandsRequest.safeParse({ commands: [{ ...command, confirmedText: 'npm test && curl x' }] }).success).toBe(false);
     expect(SetProjectCommandsRequest.safeParse({ commands: [command, command] }).success).toBe(false);
   });
@@ -129,13 +145,30 @@ describe('workbench contracts (epic 8 entry 2)', () => {
     expect(changesEmptyText('branch', 'main')).toBe('This branch matches main.');
     // No em or en dash in a UI string.
     for (const text of [HUNK_OUTDATED_TEXT, EDITOR_NONE_FOUND_TEXT, WORKSPACE_SEARCH_CAPPED_TEXT]) expect(text).not.toMatch(/[\u2013\u2014]/);
+    // Problems (8.9): every text, refusal and built sentence.
+    const run = { state: 'failed', exitCode: 1, itemCount: 2 } as const;
+    const problems = [
+      ...Object.values(PROJECT_COMMAND_REFUSALS),
+      COMMAND_CHANGED_MESSAGE,
+      PROBLEMS_ASK_AGENT_LABEL,
+      PROBLEMS_ASK_NEW_CHAT_LABEL,
+      PROBLEMS_RUNNING_TEXT,
+      problemsResultText(run),
+      problemsFinishedText('Tests', run),
+      problemsScriptChangedText('test'),
+      problemDraftText('npm run test', { path: 'a.ts', line: 1, message: 'x' }),
+    ];
+    for (const text of problems) expect(text).not.toMatch(/[\u2013\u2014]/);
+    expect(problemsFinishedText('Tests', run)).toBe('Tests finished: 2 failures');
+    expect(problemsResultText({ state: 'failed', exitCode: 1, itemCount: 0 })).toBe('Failed (exit code 1)');
+    expect(API_ERROR_CODES).toContain('command_changed');
   });
 
-  it('puts the four events in both unions, and rejects any payload carrying content, output, a diff, a patch, a preview or a path', () => {
+  it('puts the new events in both unions, and rejects any payload carrying content, output, a diff, a patch, a preview or a path', () => {
     for (const event of EVENTS) {
       expect(NewCoreEvent.safeParse({ workspaceId: WS, ...event }).success, event.type).toBe(true);
       expect(CoreEvent.safeParse({ ...envelope, ...event }).success, event.type).toBe(true);
-      for (const field of ['content', 'output', 'diff', 'patch', 'preview', 'path']) {
+      for (const field of ['content', 'output', 'diff', 'patch', 'preview', 'path', 'command', 'script']) {
         const smuggled = { ...event, payload: { ...event.payload, [field]: 'src/secret.ts' } };
         expect(NewCoreEvent.safeParse({ workspaceId: WS, ...smuggled }).success, `${event.type} ${field}`).toBe(false);
         expect(CoreEvent.safeParse({ ...envelope, ...smuggled }).success, `${event.type} ${field}`).toBe(false);

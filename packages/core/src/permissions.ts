@@ -68,6 +68,7 @@ import {
 } from './permission-matching.js';
 import type { SessionEvents } from './session-events.js';
 import { createWorkspaceSettings, readCautionLevel, type WorkspaceSettingsAccess } from './workspace-settings.js';
+import { sessionFolder } from './workspace-root.js';
 
 // Moved to `permission-matching.ts` (story 10.8); still exported from here.
 export * from './permission-matching.js';
@@ -270,7 +271,8 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
         const owner = entities.getSession(sessionId);
         const project = owner === undefined ? undefined : entities.getWorkspace(owner.workspaceId);
         // A worktree chat (27.1) works in its worktree: every path check is against that folder, never the project's checkout.
-        const workspace = project === undefined || owner?.worktreePath == null ? project : { ...project, path: owner.worktreePath, realPath: owner.worktreePath };
+        const folder = project === undefined || owner === undefined || owner.worktreePath === null ? undefined : sessionFolder(project, owner);
+        const workspace = project === undefined || folder === undefined ? project : { ...project, path: folder, realPath: folder };
         const pathsInside = workspace !== undefined && PATH_KINDS.has(kind) && pathsInsideWorkspace(workspace, request.paths);
         const extraFolders = agentConfigFolders?.() ?? [];
         // AD-40: one check decides whether a command can be ruled at all, and

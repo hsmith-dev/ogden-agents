@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { isApiError } from '@/api/http';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent } from '@/ui/alert-dialog';
 import { deleteChat } from './chat-api';
+import { CopyIgnoredFiles } from './copy-ignored-files';
 
 export interface DeleteChatDialogProps {
   open: boolean;
@@ -21,7 +22,8 @@ export interface DeleteChatDialogProps {
  * its copy with any changes not committed, so its one confirmation sends
  * `discardUncommitted`. Only as a fallback (a 409 `uncommitted_changes` all
  * the same) does the dialog name the changes and ask again. Any other
- * refusal stays in the dialog.
+ * refusal stays in the dialog. A worktree chat's dialog lists the copy's
+ * ignored files it loses.
  */
 export function DeleteChatDialog({ open, onOpenChange, wsId, sesId, branch, onDeleted }: DeleteChatDialogProps) {
   const [pending, setPending] = useState(false);
@@ -65,6 +67,8 @@ export function DeleteChatDialog({ open, onOpenChange, wsId, sesId, branch, onDe
         data-uncommitted={uncommitted || undefined}
         title={DELETE_CHAT_CONFIRM_TITLE}
         description={uncommitted ? DELETE_CHAT_UNCOMMITTED_TEXT : deleteChatConfirmText(branch)}
+        // A worktree chat's copy goes: its ignored files (a .env) are listed first (user decision 2026-11-01).
+        details={<CopyIgnoredFiles wsId={wsId} sesId={sesId} enabled={open && branch !== null} />}
         error={error}
       >
         <AlertDialogCancel>Cancel</AlertDialogCancel>

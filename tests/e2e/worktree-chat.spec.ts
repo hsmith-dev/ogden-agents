@@ -10,10 +10,12 @@
  * the header or the dialog; at 390px the page never scrolls sideways.
  * Hand off (27.4): a this-folder chat's uncommitted file moves to its own
  * worktree and back from the Location chip, confirmed once, intact both
- * times, with a "Moved to" divider each time.
+ * times, with a "Moved to" divider each time. Removing a copy (Delete
+ * chat, Move to this folder) lists its ignored `.env` first, never what is
+ * in its `node_modules` (user decision 2026-11-01).
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
@@ -78,7 +80,13 @@ test('a worktree chat shows its branch, writes only in its copy, opens the Workb
     await expect(page.getByTestId('file-row-README.md')).toBeVisible();
     await expect(page.getByTestId('file-row-notes.md')).toHaveCount(0);
 
-    // Delete chat: one confirmation names the copy with its uncommitted file, and removes it.
+    // Ignored in the copy: a .env the user may want, and node_modules anything rebuilds.
+    writeFileSync(join(repo, '.git', 'info', 'exclude'), '.env\nnode_modules/\n');
+    writeFileSync(join(copy, '.env'), 'TOKEN=1\n');
+    mkdirSync(join(copy, 'node_modules', 'left-pad'), { recursive: true });
+    writeFileSync(join(copy, 'node_modules', 'left-pad', 'index.js'), 'x\n');
+
+    // Delete chat: one confirmation names the copy with its uncommitted file, lists its ignored .env, and removes it.
     await page.goto(`${server.url}/w/${wsId}/s/${sesId}`);
     await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
     await page.getByTestId('session-menu').click();
@@ -86,6 +94,8 @@ test('a worktree chat shows its branch, writes only in its copy, opens the Workb
     const dialog = page.getByTestId('delete-chat-confirm');
     await expect(dialog).toContainText(branch);
     await expect(dialog).toContainText('any changes not committed');
+    await expect(dialog.getByTestId('copy-ignored-file')).toHaveText(['.env']);
+    await expect(dialog).not.toContainText('node_modules');
     await noAxeViolations(page, '[data-testid="delete-chat-confirm"]');
     expect(existsSync(copy)).toBe(true);
     await page.getByTestId('delete-chat-confirm-button').click();
@@ -144,17 +154,22 @@ test('Hand off moves a chat and its edit to its own worktree and back, with a di
     await expectNoHorizontalOverflow(page);
     await page.setViewportSize({ width: 1280, height: 800 });
 
-    // And back to this folder: the edit intact, the clean copy gone.
+    // And back to this folder: its ignored .env is listed first; the edit intact, the clean copy gone.
+    writeFileSync(join(repo, '.git', 'info', 'exclude'), '.env\n');
+    writeFileSync(join(copy, '.env'), 'TOKEN=1\n');
     await chip.click();
     await expect(page.getByTestId('location-hand-off')).toContainText('Move to this folder');
     await page.getByTestId('location-hand-off').click();
+    await expect(dialog.getByTestId('copy-ignored-file')).toHaveText(['.env']);
+    await noAxeViolations(page, '[data-testid="hand-off-confirm"]');
     await page.getByTestId('hand-off-confirm-button').click();
     await expect(chip).toHaveAttribute('data-location', 'this_folder');
     await expect(page.getByTestId('worktree-badge')).toHaveCount(0);
     await expect(page.getByTestId('location-changed-marker')).toHaveText([`Moved to its own worktree: ${branch}`, 'Moved to this folder']);
     expect(readFileSync(join(repo, 'notes.md'), 'utf8')).toBe(edit);
-    expect(existsSync(copy)).toBe(false);
-    expect(git(repo, 'branch', '--list', branch)).toBe('');
+    // The copy goes once the row is written (after the divider): waited for, not raced.
+    await expect.poll(() => existsSync(copy)).toBe(false);
+    await expect.poll(() => git(repo, 'branch', '--list', branch)).toBe('');
     await noAxeViolations(page, '[data-testid="transcript"]');
   });
 });

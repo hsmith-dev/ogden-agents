@@ -8,6 +8,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  COPY_IGNORED_FILES_TEXT,
+  COPY_IGNORED_FILES_UNREAD_TEXT,
+  CopyIgnoredFilesResponse,
+  IGNORED_FILES_SHOWN,
+  ignoredFilesMoreText,
+  isRebuildableIgnoredPath,
   API_ERROR_CODES,
   API_ROUTES,
   CoreEvent,
@@ -192,5 +198,24 @@ describe("a chat worktree's branches (Restore onto a new branch, user decision 2
     expect(RestoreWorktreeResponse.parse({ location, restored: 'moved' })).toEqual({ location, restored: 'moved' });
     expect(RestoreWorktreeResponse.safeParse({ location }).success).toBe(false);
     expect(RestoreWorktreeResponse.safeParse({ location, restored: 'elsewhere' }).success).toBe(false);
+  });
+});
+
+describe("a copy's ignored files before it goes (user decision 2026-11-01)", () => {
+  it('leaves out paths in or of a rebuildable folder, anywhere in the path, and never a file of the same name', () => {
+    for (const path of ['node_modules/', 'packages/app/node_modules/', 'node_modules/x/index.js', 'dist/', '.next/', 'src/__pycache__/', 'vendor/bundle/', 'app/vendor/bundle/ruby/', '.venv/', 'target/']) {
+      expect(isRebuildableIgnoredPath(path), path).toBe(true);
+    }
+    for (const path of ['.env', 'build', 'packages/app/.env', 'vendor/', 'vendor/secrets.yml', 'logs/', 'my_node_modules/', 'bundle/']) {
+      expect(isRebuildableIgnoredPath(path), path).toBe(false);
+    }
+  });
+
+  it('caps the names at IGNORED_FILES_SHOWN, with the rest a count, and its words have no dashes', () => {
+    expect(IGNORED_FILES_SHOWN).toBe(20);
+    expect(CopyIgnoredFilesResponse.safeParse({ files: Array.from({ length: 21 }, (_, index) => `f${index}`), more: 0, listed: true }).success).toBe(false);
+    expect(CopyIgnoredFilesResponse.parse({ files: ['.env'], more: 4, listed: true })).toEqual({ files: ['.env'], more: 4, listed: true });
+    expect(ignoredFilesMoreText(4)).toBe('and 4 more');
+    for (const text of [COPY_IGNORED_FILES_TEXT, COPY_IGNORED_FILES_UNREAD_TEXT, ignoredFilesMoreText(2)]) expect(text).not.toMatch(/[–—]/);
   });
 });

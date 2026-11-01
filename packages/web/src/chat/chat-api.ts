@@ -4,6 +4,7 @@ import {
   apiPath,
   ChatAgentsResponse,
   ChatDeletedResponse,
+  CopyIgnoredFilesResponse,
   HandOffResponse,
   PermissionRulesResponse,
   SendMessageResponse,
@@ -230,6 +231,11 @@ export async function deleteChat(wsId: string, sesId: string, discardUncommitted
  * `agent_mid_turn`, `handoff_conflict` (`details.files`) or `invalid_operation`
  * move nothing.
  */
+/** The ignored files removing the chat's copy would lose (user decision 2026-11-01): names only, never contents. */
+export async function fetchCopyIgnoredFiles(wsId: string, sesId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<CopyIgnoredFilesResponse> {
+  return CopyIgnoredFilesResponse.parse(await call(auth, apiPath(API_ROUTES.sessionWorktreeIgnoredFiles, { wsId, sesId }), {}, "Ogden Agents couldn't list the ignored files"));
+}
+
 export async function handOffChat(wsId: string, sesId: string, to: ChatLocation, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<Session> {
   const json = await call(auth, apiPath(API_ROUTES.sessionLocation, { wsId, sesId }), postJson({ to }), "Ogden Agents couldn't move this chat");
   return HandOffResponse.parse(json).session;

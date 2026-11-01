@@ -22,6 +22,7 @@ import {
   restoreBranchMovedText,
   RestoreWorktreeResponse,
   SessionLocationResponse,
+  CopyIgnoredFilesResponse,
   TrialResponse,
   WorktreeRetentionSetting,
 } from '@ogden-agents/shared';
@@ -73,7 +74,16 @@ export function registerWhereWorkRunsRoutes(app: Hono, { chatLocations, worktree
   if (chatLocations === undefined) {
     app.get(API_ROUTES.sessionLocation, notImplemented);
     app.post(API_ROUTES.sessionLocation, notImplemented);
+    app.get(API_ROUTES.sessionWorktreeIgnoredFiles, notImplemented);
   } else {
+    // What removing a worktree chat's copy loses (user decision 2026-11-01): names only.
+    app.get(API_ROUTES.sessionWorktreeIgnoredFiles, async (c) => {
+      try {
+        return c.json(CopyIgnoredFilesResponse.parse(await chatLocations.ignoredFiles(c.req.param('wsId'), c.req.param('sesId'))), 200, NO_STORE);
+      } catch (error) {
+        return refusal(c, error);
+      }
+    });
     app.get(API_ROUTES.sessionLocation, async (c) => {
       try {
         return c.json(SessionLocationResponse.parse(await chatLocations.location(c.req.param('wsId'), c.req.param('sesId'))), 200, NO_STORE);

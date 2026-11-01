@@ -53,6 +53,11 @@
  * revert needs each hunk's lines in the folder's file exactly once. A
  * write to the folder keeps the file's own permission bits.
  *
+ * Ignored files (`ignoredFiles`, user decision 2026-11-01) are git's own
+ * list (`status --porcelain -z --ignored=matching`): names only, a folder an
+ * ignore rule matches as one entry, never a file's contents; rebuildable
+ * folders are left out.
+ *
  * Moving changes (27.4, a chat's hand-off): both folders are located (a
  * worktree by its pin, and only a real folder, never a link) and refused,
  * before anything is snapshotted, while a merge, rebase, cherry-pick or
@@ -102,6 +107,7 @@ import {
 import {
   GIT_POINTER_UNUSUAL_MESSAGE,
   HUNK_ACTIONS_BY_VIEW,
+  isRebuildableIgnoredPath,
   MAX_CHANGED_FILES,
   MAX_DIFF_FILE_BYTES,
   MAX_UNDOS_KEPT,
@@ -1078,6 +1084,28 @@ export function createGitWorkingTree(options: GitWorkingTreeOptions): GitWorking
       });
       if (result === undefined || !('value' in result)) return { files: [], truncated: false };
       return { ...(target.view === 'branch' && base !== undefined ? { base } : {}), ...result.value };
+    },
+
+    async ignoredFiles(folder, { limit }) {
+      const located = await locate(folder);
+      if (located === undefined) return { files: [], more: 0 };
+      // Names only, from git's ignore rules (`--ignored=matching`): a folder an ignore rule matches is one `dir/` entry,
+      // nothing in it listed; an ignored file deeper in a folder that is only untracked is listed by its own path. No
+      // file's contents are opened (status reads the index and the folders' entries, never writes: optional locks off).
+      const out = await must(
+        located.cwd,
+        [...located.flags, 'status', '--porcelain=v1', '-z', '--ignored=matching', '--untracked-files=all', '--no-renames', '--ignore-submodules=all'],
+        'list the ignored files',
+        16 * 1024 * 1024,
+        located.env,
+      );
+      const names = out
+        .split('\0')
+        .filter((record) => record.startsWith('!! '))
+        .map((record) => record.slice(3))
+        .filter((name) => name !== '' && !isRebuildableIgnoredPath(name))
+        .sort();
+      return { files: names.slice(0, Math.max(0, limit)), more: Math.max(0, names.length - Math.max(0, limit)) };
     },
 
     async fileDiff(folder, target, path) {

@@ -19,6 +19,8 @@ import {
   DELETE_CHAT_REMOTE_TEXT,
   deleteChatConfirmText,
   RESTORE_PATH_TAKEN_TEXT,
+  COPY_IGNORED_FILES_TEXT,
+  COPY_IGNORED_FILES_UNREAD_TEXT,
   HANDOFF_CONFIRM_TITLE,
   HANDOFF_TO_WORKTREE_DESCRIPTION,
   HANDOFF_FOLDER_BUSY_TEXT,
@@ -99,6 +101,9 @@ const fake = vi.hoisted(() => ({
   restoredText: 'Restored.',
   /** Each hand-off asked (27.4): where to. */
   handOffs: [] as string[],
+  /** The copy's ignored files as the server lists them (user decision 2026-11-01), and each read of them. */
+  ignored: { files: [] as string[], more: 0, listed: true },
+  ignoredReads: 0,
   /** What each hand-off answers, in turn (the last repeats). */
   handOffResults: [] as Array<() => Promise<unknown>>,
 }));
@@ -214,6 +219,10 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
     const result = fake.handOffResults[Math.min(fake.handOffs.length - 1, fake.handOffResults.length - 1)];
     return result === undefined ? { id: 'ses_1' } : result();
   },
+  fetchCopyIgnoredFiles: async () => {
+    fake.ignoredReads += 1;
+    return fake.ignored;
+  },
   deleteChat: async (_wsId: string, _sesId: string, discard: boolean) => {
     fake.deletes.push(discard);
     const result = fake.deleteResults[Math.min(fake.deletes.length - 1, fake.deleteResults.length - 1)];
@@ -323,6 +332,8 @@ beforeEach(() => {
   fake.restoreResult = () => Promise.resolve();
   fake.restoredText = 'Restored.';
   fake.handOffs = [];
+  fake.ignored = { files: [], more: 0, listed: true };
+  fake.ignoredReads = 0;
   fake.handOffResults = [];
   fake.agentId = undefined;
   fake.claudeListed = true;
@@ -705,6 +716,34 @@ describe('Delete chat (27.3)', () => {
     expect(fake.newChats).toEqual([WS]);
   });
 
+  it("a worktree chat's confirmation lists its copy's ignored files, capped, so they can be copied first (user decision 2026-11-01)", async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.ignored = { files: ['.env', 'secrets/'], more: 7, listed: true };
+    await mount();
+    const dialog = await openDelete();
+    await flush();
+    expect(dialog.textContent).toContain(COPY_IGNORED_FILES_TEXT);
+    expect(screen.getAllByTestId('copy-ignored-file').map((item) => item.textContent)).toEqual(['.env', 'secrets/']);
+    expect(screen.getByTestId('copy-ignored-files-more').textContent).toBe('and 7 more');
+    expect(dialog.textContent).not.toMatch(/[\u2013\u2014]/);
+  });
+
+  it('a plain chat reads no ignored files; one the server could not list says so', async () => {
+    fake.ignored = { files: ['.env'], more: 0, listed: true };
+    await mount();
+    await openDelete();
+    await flush();
+    expect(fake.ignoredReads).toBe(0);
+    expect(screen.queryByTestId('copy-ignored-files')).toBeNull();
+    cleanup();
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.ignored = { files: [], more: 0, listed: false };
+    await mount();
+    await openDelete();
+    await flush();
+    expect(screen.getByTestId('copy-ignored-files-unread').textContent).toBe(COPY_IGNORED_FILES_UNREAD_TEXT);
+  });
+
   it('a plain chat refused for uncommitted changes all the same names them and asks again (fallback)', async () => {
     fake.deleteResults = [() => Promise.reject(new ChatApiError('changes', 409, 'uncommitted_changes')), () => Promise.resolve({ sessionId: SES, worktreeRemoved: true, branchKept: false })];
     await mount();
@@ -837,6 +876,8 @@ describe('Hand off from the Location chip (27.4)', () => {
   it('confirms once, moves the chat and reads it again', async () => {
     await mount();
     const dialog = await openHandOff();
+    // To its own worktree nothing is removed: no ignored files read.
+    expect(fake.ignoredReads).toBe(0);
     expect(dialog.textContent).toContain(HANDOFF_CONFIRM_TITLE);
     expect(dialog.textContent).toContain(HANDOFF_TO_WORKTREE_DESCRIPTION);
     const before = fake.fetches;
@@ -849,8 +890,12 @@ describe('Hand off from the Location chip (27.4)', () => {
 
   it('a worktree chat moves to this folder', async () => {
     fake.worktreePath = '/data/cw/abcdefgh';
+    fake.ignored = { files: ['.env'], more: 0, listed: true };
     await mount();
     await openHandOff();
+    await flush();
+    // Its copy goes: the ignored .env is listed first (user decision 2026-11-01).
+    expect(screen.getAllByTestId('copy-ignored-file').map((item) => item.textContent)).toEqual(['.env']);
     fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
     await flush();
     expect(fake.handOffs).toEqual(['this_folder']);

@@ -21,6 +21,7 @@
  * - Events carry ids, states, branches, ports and counts only.
  */
 import type {
+  CopyIgnoredFilesResponse,
   HandOffResponse,
   PutAwayCause,
   PutAwayWorktree,
@@ -46,6 +47,8 @@ export interface ChatLocations {
    * when the chat is already there, is remote, or is not a chat.
    */
   handOff(workspaceId: unknown, sessionId: unknown, body: unknown): Promise<HandOffResponse>;
+  /** The ignored files removing the chat's copy would lose (user decision 2026-11-01; `Chat.copyIgnoredFiles`). */
+  ignoredFiles(workspaceId: unknown, sessionId: unknown): Promise<CopyIgnoredFilesResponse>;
 }
 
 /**

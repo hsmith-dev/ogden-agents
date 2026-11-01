@@ -238,6 +238,64 @@ export const WORKTREE_BADGE_TOOLTIP_TEXT = 'Never pushed. Merge it yourself when
 /** The branch badge's accessible name: it opens the Workbench rooted at the chat's copy. */
 export const worktreeBadgeLabel = (branch: string): string => `Branch ${branch}. Open this chat's copy in the Workbench`;
 
+/**
+ * Ignored files a copy's removal loses (user decision 2026-11-01): Move to
+ * this folder and Delete chat list them, names only, so the user can copy
+ * anything first. Folders anything can rebuild are left out of the list
+ * (matched as whole folder names anywhere in a path; `vcs-git` lists an
+ * ignored folder as one entry and never what is in it).
+ */
+export const REBUILDABLE_IGNORED_FOLDERS: readonly string[] = [
+  'node_modules',
+  'dist',
+  'build',
+  'out',
+  'target',
+  '.next',
+  '.nuxt',
+  '.svelte-kit',
+  '.turbo',
+  '.cache',
+  '.parcel-cache',
+  'coverage',
+  '__pycache__',
+  '.pytest_cache',
+  '.mypy_cache',
+  '.ruff_cache',
+  '.tox',
+  '.venv',
+  'venv',
+  '.gradle',
+  'vendor/bundle',
+];
+/** How many ignored names a confirmation shows before "and N more". */
+export const IGNORED_FILES_SHOWN = 20;
+
+/** Whether an ignored path (`dir/` for a folder) is in, or is, a rebuildable folder: its folder names hold one of {@link REBUILDABLE_IGNORED_FOLDERS}. */
+export const isRebuildableIgnoredPath = (path: string): boolean => {
+  // The last segment is a file's own name (never a folder: the file `build` is listed) or the empty one after a folder's `/`.
+  const folders = path.split('/').slice(0, -1);
+  return REBUILDABLE_IGNORED_FOLDERS.some((entry) => {
+    const pattern = entry.split('/');
+    for (let start = 0; start + pattern.length <= folders.length; start++) {
+      if (pattern.every((name, index) => folders[start + index] === name)) return true;
+    }
+    return false;
+  });
+};
+
+/** A copy's ignored files, as its removal's confirmation lists them; `listed: false` when they couldn't be read. */
+export const CopyIgnoredFilesResponse = z
+  .object({ files: z.array(z.string()).max(IGNORED_FILES_SHOWN), more: z.number().int().nonnegative(), listed: z.boolean() })
+  .strict();
+export type CopyIgnoredFilesResponse = z.infer<typeof CopyIgnoredFilesResponse>;
+/** The confirmation's line above the names. */
+export const COPY_IGNORED_FILES_TEXT = "These ignored files in this chat's copy aren't kept when the copy goes. Copy anything you need first.";
+/** The line after the shown names. */
+export const ignoredFilesMoreText = (more: number): string => `and ${more} more`;
+/** The line when the copy's ignored files couldn't be read. */
+export const COPY_IGNORED_FILES_UNREAD_TEXT = "Ogden Agents couldn't list the ignored files in this chat's copy (like .env). Copy anything you need first.";
+
 /** Delete chat (27.3): the header menu's item, its confirmation and its refusals. */
 export const DELETE_CHAT_LABEL = 'Delete chat';
 export const DELETE_CHAT_CONFIRM_TITLE = 'Delete chat?';

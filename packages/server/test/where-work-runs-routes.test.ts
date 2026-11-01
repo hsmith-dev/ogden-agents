@@ -79,6 +79,10 @@ describe('where work runs routes in-process, with stand-in use-cases', () => {
         calls.push(`handOff ${JSON.stringify(body)}`);
         return handOff();
       },
+      ignoredFiles: async (ws, ses) => {
+        calls.push(`ignoredFiles ${String(ws)} ${String(ses)}`);
+        return { files: ['.env'], more: 3, listed: true };
+      },
     };
     const worktreeRetention: WorktreeRetention = {
       setting: async () => ({ keep: 15 }),
@@ -124,6 +128,9 @@ describe('where work runs routes in-process, with stand-in use-cases', () => {
     expect(location.headers.get('cache-control')).toBe('no-store');
     expect(await location.json()).toEqual({ location: { kind: 'worktree', branch: chatWorktreeBranch(sesId), port: 41_000, putAway: false } });
     expect((await json('POST', apiPath(API_ROUTES.sessionLocation, { wsId, sesId }), { to: 'this_folder' })).status).toBe(200);
+    const ignored = await hono.request(apiPath(API_ROUTES.sessionWorktreeIgnoredFiles, { wsId, sesId }));
+    expect(ignored.headers.get('cache-control')).toBe('no-store');
+    expect(await ignored.json()).toEqual({ files: ['.env'], more: 3, listed: true });
     expect(await (await hono.request(API_ROUTES.worktreeRetention)).json()).toEqual({ keep: 15 });
     expect(await (await json('PUT', API_ROUTES.worktreeRetention, { keep: 20 })).json()).toEqual({ keep: 20 });
     expect(await (await hono.request(apiPath(API_ROUTES.workspacePutAwayWorktrees, { wsId }))).json()).toEqual({ worktrees: [] });
@@ -133,6 +140,7 @@ describe('where work runs routes in-process, with stand-in use-cases', () => {
     expect(calls).toEqual([
       `location ${wsId} ${sesId}`,
       'handOff {"to":"this_folder"}',
+      `ignoredFiles ${wsId} ${sesId}`,
       'setSetting {"keep":20}',
       'start {"text":"Fix it","agentIds":["a","b"]}',
     ]);

@@ -136,7 +136,7 @@ Pass 2 (2026-11-01, after loop 1; lenses: quick and defensive, fresh subagents g
 | 10 | Switching another chat's agent during the hold commits the switch, then the send fails | medium | patch | defensive G2, `handoff.ts:164`; refused in `checkNow` |
 | 11 | The moving chat gets "switching to or from the terminal" | low | patch | quick 6; hold checked first |
 | 12 | Test header contradicts the test (target put back) | low | patch | quick 4; reworded |
-| 13 | Ignored files in the copy (`.env`) deleted on moving back | medium | defer | carried from pass 1 row 13; a product call (node_modules in every copy) |
+| 13 | Ignored files in the copy (`.env`) deleted on moving back | medium | defer | carried from pass 1 row 13; a product call (node_modules in every copy); settled 2026-11-01 by the user's decision (Decisions after the build) |
 | 14 | Terminal panes and idle chats' background processes in the project folder not held | medium | defer | carried from pass 1 row 14; 27.3 deferred 15 |
 | 15 | Crash between the apply and the row write orphans the changes in an unreferenced copy, snapshot ids unlogged; a left-behind copy keeps the branch checked out so the next move fails | medium | defer | needs startup reconciliation of `<data>/cw`; 27.3 deferred the same orphan |
 | 16 | Orchestration dispatch, planning or retrospective start during the hold fails its step or leaves an empty session | medium | defer | a dispatch must land in a seconds-long window; needs those callers to wait on the hold |
@@ -144,9 +144,12 @@ Pass 2 (2026-11-01, after loop 1; lenses: quick and defensive, fresh subagents g
 | 18 | Move uses the destructive confirm style | low | reject | `AlertDialogConfirm` is destructive app-wide; a variant prop is new surface for a style |
 | 19 | Conflict count forced to 1 | low | reject | carried from pass 1 row 16 |
 
+## Decisions after the build
+
+- Decision (2026-11-01, user): ignored files in a removed copy. Removing a chat's worktree copy loses its ignored files (git doesn't keep them), so Move to this folder and Delete chat list them in their confirmation, names only, so the user can copy anything first; retention's put-away keeps saying plainly in Settings that ignored files aren't kept. The list skips rebuildable folders (node_modules, dist, build, out, target, .next, .turbo, .cache, coverage, __pycache__, .venv, venv, vendor/bundle and similar; one shared constant, `REBUILDABLE_IGNORED_FOLDERS`) and is capped (the first 20 names, then "and N more"). It is read through git (`VcsWorkingTreePort.ignoredFiles`: `git status --ignored=matching`, an ignored folder as one entry), never a shell, never a file's contents; a list that can't be read says so. Settles review 13 (pass 1 and 2) and 27.3 review 13 for ignored files; assume-unchanged entries still refuse a hand-off before anything moves.
+
 ## Deferred (for the sweep)
 
-- Moving a chat back removes ignored and assume-unchanged files in its copy (a `.env` the chat made), as Delete chat does (review 13; 27.3 review 13).
 - Agent CLIs in Developer-mode terminal panes in the project folder are not counted as working there, so a hand-off can run beside one (review 14).
 - A server crash between a hand-off's apply and its row write leaves the changes in a copy no row names, with the snapshot ids unlogged; a copy left behind keeps its branch checked out, so the next move to a worktree fails (pass 2 row 15).
 - An orchestration dispatch, planning or retrospective start that lands during a hand-off's folder hold fails its step or leaves an empty session (pass 2 row 16).

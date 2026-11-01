@@ -3,7 +3,7 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { AgentId, ChatAgent, ChatDeletedResponse, ChatLocation, HandoffPreviewResponse, PermissionMode, PutAwayCause, PutAwayWorktree, RemoteMachineId, RestoreWorktreeResponse, SessionLocation, SessionLocationResponse, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, ChatAgent, ChatDeletedResponse, ChatLocation, CopyIgnoredFilesResponse, HandoffPreviewResponse, PermissionMode, PutAwayCause, PutAwayWorktree, RemoteMachineId, RestoreWorktreeResponse, SessionLocation, SessionLocationResponse, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentModels } from '../agent-models.js';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -125,9 +125,10 @@ export interface ChatOptions {
    * The working tree's changes (AD-37; 27.3): whether a worktree chat's copy
    * has uncommitted changes before Delete chat or Delete history removes it
    * (staged, unstaged and untracked). Absent: every copy counts as changed,
-   * so it is removed only with `discardUncommitted`.
+   * so it is removed only with `discardUncommitted`. Its `ignoredFiles`
+   * lists what removing a copy loses (user decision 2026-11-01).
    */
-  vcsWorkingTree?: Pick<VcsWorkingTreePort, 'changedFiles'> | undefined;
+  vcsWorkingTree?: (Pick<VcsWorkingTreePort, 'changedFiles'> & Partial<Pick<VcsWorkingTreePort, 'ignoredFiles'>>) | undefined;
   /** How long Delete chat (and a put-away, 27.6) waits for the chat's agent and terminal to exit before it leaves the copy instead (27.3). Default 10 s. */
   stopBeforeRemovalMs?: number | undefined;
   /**
@@ -267,6 +268,14 @@ export interface Chat {
    * git that failed.
    */
   moveChat(workspaceId: WorkspaceId, sessionId: SessionId, to: ChatLocation): Promise<Session>;
+  /**
+   * The ignored files a local worktree chat's copy holds (user decision
+   * 2026-11-01), which Move to this folder and Delete chat would lose: names
+   * only, rebuildable folders left out, the first `IGNORED_FILES_SHOWN` and
+   * how many more; none for any other chat; `listed: false` when they
+   * couldn't be read. `NotFoundError` for a chat of another project.
+   */
+  copyIgnoredFiles(workspaceId: WorkspaceId, sessionId: SessionId): Promise<CopyIgnoredFilesResponse>;
   /**
    * A new session in the workspace, `idle`, with the agent `agentId` (the
    * registry's default when absent), fixed for its life (epic 6): a `chat`

@@ -593,6 +593,15 @@ export const API_ROUTES = {
    * `invalid_operation` for a chat with nothing put away.
    */
   sessionWorktreeRestore: `${API_BASE}/workspaces/:wsId/sessions/:sesId/worktree/restore`,
+  /**
+   * `GET` → `CopyIgnoredFilesResponse` (user decision 2026-11-01): the
+   * ignored files in a local worktree chat's copy that removing it (Move to
+   * this folder, Delete chat) would lose, names only, never contents,
+   * without rebuildable folders (`REBUILDABLE_IGNORED_FOLDERS`), the first
+   * `IGNORED_FILES_SHOWN` and how many more (`no-store`). Any other chat
+   * answers none.
+   */
+  sessionWorktreeIgnoredFiles: `${API_BASE}/workspaces/:wsId/sessions/:sesId/worktree/ignored-files`,
   /** `GET` → `PutAwayWorktreesResponse` (27.6): the project's put-away chat worktrees, newest first (`no-store`). */
   workspacePutAwayWorktrees: `${API_BASE}/workspaces/:wsId/worktrees/put-away`,
   /**

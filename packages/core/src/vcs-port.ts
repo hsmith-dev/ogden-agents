@@ -251,6 +251,16 @@ export interface VcsFolder {
 export interface VcsWorkingTreePort {
   /** The view's changed files. */
   changedFiles(folder: VcsFolder, target: VcsChangesTarget): Promise<VcsChangedFiles>;
+  /**
+   * The folder's ignored files (user decision 2026-11-01: listed before a
+   * chat's copy is removed), names only and never their contents, sorted:
+   * a folder an ignore rule matches is one `dir/` entry, nothing in it
+   * listed; paths
+   * in or of a rebuildable folder (`isRebuildableIgnoredPath`) left out.
+   * The first `limit` and how many more. No names when the folder is in no
+   * repository. Absent: none can be listed.
+   */
+  ignoredFiles?(folder: VcsFolder, options: { limit: number }): Promise<{ files: string[]; more: number }>;
   /** One file's diff in the view (no hunks when it is binary or over `MAX_DIFF_FILE_BYTES`), or `undefined` when it has no change there. */
   fileDiff(folder: VcsFolder, target: VcsChangesTarget, path: string): Promise<{ file: ChangedFile; hunks: DiffHunk[] } | undefined>;
   /**

@@ -19,11 +19,13 @@ export interface AlertDialogContentProps extends Omit<ComponentProps<typeof Aler
   title: ReactNode;
   /** The consequence, in one sentence. */
   description: ReactNode;
+  /** More of the consequence, below the description (a list of what goes). */
+  details?: ReactNode;
   /** Shown below the description when the action failed. */
   error?: ReactNode;
 }
 
-export function AlertDialogContent({ className, title, description, error, children, ...props }: AlertDialogContentProps) {
+export function AlertDialogContent({ className, title, description, details, error, children, ...props }: AlertDialogContentProps) {
   return (
     <AlertDialogPrimitive.Portal>
       <AlertDialogPrimitive.Overlay
@@ -42,6 +44,7 @@ export function AlertDialogContent({ className, title, description, error, child
       >
         <AlertDialogPrimitive.Title className="m-0 text-heading">{title}</AlertDialogPrimitive.Title>
         <AlertDialogPrimitive.Description className="m-0 text-body text-muted-foreground">{description}</AlertDialogPrimitive.Description>
+        {details ?? null}
         {error === undefined || error === null ? null : (
           <p role="alert" className="m-0 text-label text-destructive">
             {error}

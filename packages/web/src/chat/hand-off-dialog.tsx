@@ -14,6 +14,7 @@ import { useState } from 'react';
 import { isApiError } from '@/api/http';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent } from '@/ui/alert-dialog';
 import { handOffChat } from './chat-api';
+import { CopyIgnoredFiles } from './copy-ignored-files';
 
 export interface HandOffDialogProps {
   open: boolean;
@@ -33,6 +34,7 @@ export interface HandOffDialogProps {
  * files (409 `handoff_conflict`, with how many: this folder's own, or the
  * chat's kept branch when moving to its worktree), the agents working in
  * the folder (409 `agent_mid_turn`), or the server's sentence; nothing moved.
+ * Moving to this folder lists the copy's ignored files it loses.
  */
 export function HandOffDialog({ open, onOpenChange, wsId, sesId, to, onMoved }: HandOffDialogProps) {
   const [pending, setPending] = useState(false);
@@ -80,6 +82,8 @@ export function HandOffDialog({ open, onOpenChange, wsId, sesId, to, onMoved }: 
         data-to={to}
         title={HANDOFF_CONFIRM_TITLE}
         description={to === 'worktree' ? HANDOFF_TO_WORKTREE_DESCRIPTION : HANDOFF_TO_THIS_FOLDER_DESCRIPTION}
+        // Moving back removes the copy: its ignored files (a .env) are listed first (user decision 2026-11-01).
+        details={<CopyIgnoredFiles wsId={wsId} sesId={sesId} enabled={open && to === 'this_folder'} />}
         error={error}
       >
         <AlertDialogCancel>Cancel</AlertDialogCancel>

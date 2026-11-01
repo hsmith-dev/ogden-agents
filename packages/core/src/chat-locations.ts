@@ -6,12 +6,12 @@
  * `ValidationError`. The chat itself checks the project and the session
  * (another project's session is `NotFoundError`).
  */
-import { HandOffRequest, SessionId, WorkspaceId, type HandOffResponse, type SessionLocationResponse } from '@ogden-agents/shared';
+import { HandOffRequest, SessionId, WorkspaceId, type CopyIgnoredFilesResponse, type HandOffResponse, type SessionLocationResponse } from '@ogden-agents/shared';
 import type { Chat } from './chat/types.js';
 import { NotFoundError, ValidationError } from './errors.js';
 import type { ChatLocations } from './where-work-runs.js';
 
-export function createChatLocations(chat: Pick<Chat, 'chatLocation' | 'moveChat'>): ChatLocations {
+export function createChatLocations(chat: Pick<Chat, 'chatLocation' | 'moveChat' | 'copyIgnoredFiles'>): ChatLocations {
   const ids = (workspaceId: unknown, sessionId: unknown) => {
     const ws = WorkspaceId.safeParse(workspaceId);
     if (!ws.success) throw new NotFoundError('workspace', 'requested');
@@ -29,6 +29,10 @@ export function createChatLocations(chat: Pick<Chat, 'chatLocation' | 'moveChat'
       const request = HandOffRequest.safeParse(body);
       if (!request.success) throw new ValidationError('Choose where the chat moves: this_folder or worktree.', request.error.issues.map((issue) => ({ path: issue.path, message: issue.message })));
       return { session: await chat.moveChat(parsed.workspaceId, parsed.sessionId, request.data.to) };
+    },
+    async ignoredFiles(workspaceId, sessionId): Promise<CopyIgnoredFilesResponse> {
+      const parsed = ids(workspaceId, sessionId);
+      return chat.copyIgnoredFiles(parsed.workspaceId, parsed.sessionId);
     },
   };
 }

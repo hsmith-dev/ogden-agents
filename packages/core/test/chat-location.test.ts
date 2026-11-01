@@ -10,7 +10,7 @@
  */
 import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { chatWorktreeBranch, HANDOFF_PUT_AWAY_TEXT, restoredChatWorktreeBranch, type CoreEvent, type SessionId, type SessionLocationChangedEvent } from '@ogden-agents/shared';
+import { chatWorktreeBranch, HANDOFF_PUT_AWAY_TEXT, IGNORED_FILES_SHOWN, restoredChatWorktreeBranch, type CoreEvent, type SessionId, type SessionLocationChangedEvent } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { openDatabase } from '../src/db/database.js';
 import {
@@ -155,13 +155,21 @@ function fakeGit(repo: string) {
     },
   };
   /** Whether a folder has changes, as the Changes git reads it. */
-  const tree: Pick<VcsWorkingTreePort, 'changedFiles'> = {
+  /** Each folder's ignored names, as the Changes git lists them; a folder in `unreadable` throws. */
+  const ignored = new Map<string, string[]>();
+  const unreadable = new Set<string>();
+  const tree: Pick<VcsWorkingTreePort, 'changedFiles' | 'ignoredFiles'> = {
+    async ignoredFiles(folder, { limit }) {
+      if (unreadable.has(folder.path)) throw new VcsError("git couldn't list the ignored files.");
+      const names = ignored.get(folder.path) ?? [];
+      return { files: names.slice(0, limit), more: Math.max(0, names.length - limit) };
+    },
     async changedFiles(folder, target) {
       if (target.view !== 'unstaged') return { files: [], truncated: false };
       return { files: [...changes(folder.path)].map((path) => ({ path: path as never, change: 'changed' as const, additions: 1, deletions: 0, binary: false, tooLarge: false })), truncated: false };
     },
   };
-  return { vcs, mover, tree, calls, moves, branches, changes, failing, conflicts, leaving, gate, commitOn: (branch: string) => unmerged.add(branch) };
+  return { vcs, mover, tree, ignored, unreadable, calls, moves, branches, changes, failing, conflicts, leaving, gate, commitOn: (branch: string) => unmerged.add(branch) };
 }
 
 function setUp(options: { entities?: (entities: Entities) => Entities } = {}) {
@@ -690,5 +698,42 @@ describe('createChatLocations (27.4)', () => {
     expect(await refusal(locations.handOff(kit.workspace.id, session.id, { to: 'worktree', extra: 1 }))).toBeInstanceOf(ValidationError);
     const { session: moved } = await locations.handOff(kit.workspace.id, session.id, { to: 'worktree' });
     expect(moved.branch).toBe(chatWorktreeBranch(session.id));
+  });
+});
+
+describe("a copy's ignored files before it goes (user decision 2026-11-01)", () => {
+  it("lists a worktree chat's copy's ignored files, capped with how many more", async () => {
+    const kit = setUp();
+    const session = await kit.chat.createChatSession(kit.workspace.id, { location: 'worktree' });
+    kit.git.ignored.set(session.worktreePath!, ['.env']);
+    expect(await kit.chat.copyIgnoredFiles(kit.workspace.id, session.id)).toEqual({ files: ['.env'], more: 0, listed: true });
+    kit.git.ignored.set(session.worktreePath!, Array.from({ length: 25 }, (_, index) => `secret-${String(index).padStart(2, '0')}.key`));
+    const capped = await kit.chat.copyIgnoredFiles(kit.workspace.id, session.id);
+    expect(capped.files).toHaveLength(IGNORED_FILES_SHOWN);
+    expect(capped.more).toBe(5);
+    // Through the routes' parser too.
+    expect((await createChatLocations(kit.chat).ignoredFiles(kit.workspace.id, session.id)).more).toBe(5);
+  });
+
+  it('a this-folder chat, a put-away copy or a tampered row lists none; a copy git cannot read says so', async () => {
+    const kit = setUp();
+    const here = await kit.chat.createChatSession(kit.workspace.id);
+    kit.git.ignored.set(kit.repo, ['.env']);
+    expect(await kit.chat.copyIgnoredFiles(kit.workspace.id, here.id)).toEqual({ files: [], more: 0, listed: true });
+
+    const session = await kit.chat.createChatSession(kit.workspace.id, { location: 'worktree' });
+    kit.git.ignored.set(session.worktreePath!, ['.env']);
+    kit.git.unreadable.add(session.worktreePath!);
+    expect(await kit.chat.copyIgnoredFiles(kit.workspace.id, session.id)).toEqual({ files: [], more: 0, listed: false });
+    kit.git.unreadable.delete(session.worktreePath!);
+
+    kit.putAway.add(session.id);
+    expect((await kit.chat.copyIgnoredFiles(kit.workspace.id, session.id)).files).toEqual([]);
+    kit.putAway.delete(session.id);
+
+    const outside = realpathSync.native(tempDir('ogden-agents-outside-'));
+    kit.git.ignored.set(outside, ['.env']);
+    kit.tamper('UPDATE sessions SET worktree_path = ? WHERE id = ?', outside, session.id);
+    expect((await kit.chat.copyIgnoredFiles(kit.workspace.id, session.id)).files).toEqual([]);
   });
 });

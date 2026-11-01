@@ -96,6 +96,7 @@ import { createWorkspaces } from './chat/workspaces.js';
 import { createChatDeletion } from './chat/delete-chat.js';
 import { createPutAway } from './chat/put-away.js';
 import { createChatLocation } from './chat/location.js';
+import { createCopyIgnoredFiles } from './chat/ignored-files.js';
 
 export * from './chat/constants.js';
 export type { Chat, ChatOptions, TerminalSize, TerminalViewer } from './chat/types.js';
@@ -164,6 +165,7 @@ export function createChat(options: ChatOptions): Chat {
     deleteChat: deletion.deleteChat,
     chatLocation: location.chatLocation,
     moveChat: location.moveChat,
+    copyIgnoredFiles: createCopyIgnoredFiles(ctx).copyIgnoredFiles,
     createChatSession: async (workspaceId, options) => withAgentId(await workspaces.createChatSession(workspaceId, options)),
     chatAgents: workspaces.chatAgents,
     getSession: (workspaceId, sessionId) => withAgentId(workspaces.getSession(workspaceId, sessionId)),

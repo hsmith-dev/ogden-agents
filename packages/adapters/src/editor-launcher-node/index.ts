@@ -12,17 +12,17 @@
  * /c` with every argument quoted, verbatim; a shim path or an argument
  * holding a character cmd reads as its own is refused, nothing started. The
  * environment is AD-16's allowlist with the desktop session's variables (PATH
- * kept to absolute folders), the working folder the user's home (the temp
- * folder only without one), detached and unreferenced: Ogden never
+ * kept to absolute folders), the working folder the user's home (the
+ * filesystem's root without one; `program-launch.ts`), detached and unreferenced: Ogden never
  * waits on an editor. An editor is never probed with `--version` (a
  * JetBrains launcher would start the IDE). Nothing is logged here.
  */
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { posix, win32 } from 'node:path';
 import type { EditorLauncherPort } from '@ogden-agents/core';
 import type { EditorId, EditorInfo } from '@ogden-agents/shared';
-import { DESKTOP_SESSION, helperEnvironment } from '../child-env.js';
+import { DESKTOP_SESSION } from '../child-env.js';
+import { launchEnvironment, safeWorkingFolder, windowsCmd } from '../program-launch.js';
 import { candidatesFor, nodeDetectSystem, type DetectSystem } from '../pane-launchers/detect.js';
 
 /** How an editor takes a line: `goto` = `-g path:l:c`, `colon` = `path:l:c`, `jetbrains` = `--line l --column c path`. */
@@ -95,8 +95,6 @@ export const EDITORS: readonly EditorDefinition[] = [
 export interface EditorSystem extends Pick<DetectSystem, 'platform' | 'env' | 'runnable'> {
   /** Starts `file` with `args` (never a shell). */
   start(file: string, args: readonly string[], options: SpawnOptions): Pick<ChildProcess, 'once' | 'on' | 'unref'>;
-  /** The OS temp folder: where the editor starts when the environment names no absolute home. */
-  tmpdir(): string;
 }
 
 export const nodeEditorSystem: EditorSystem = {
@@ -108,7 +106,6 @@ export const nodeEditorSystem: EditorSystem = {
   },
   runnable: (path) => nodeDetectSystem.runnable(path),
   start: (file, args, options) => spawn(file, [...args], { ...options, env: options.env ?? {}, shell: false }),
-  tmpdir,
 };
 
 /** Only these start on Windows without a shell (as `linked-command.ts`). */
@@ -157,18 +154,9 @@ export function editorCommand(program: string, args: readonly string[], env: Rea
   if (!WINDOWS_SHIM.test(program)) return undefined;
   // Node won't start a batch file without a shell: cmd.exe, no AutoRun, delayed expansion off, the whole command in one more pair of quotes.
   if (CMD_UNSAFE.test(program) || args.some((arg) => CMD_UNSAFE.test(arg))) return undefined;
-  const lookup = (name: string) => Object.entries(env).find(([key]) => key.toUpperCase() === name)?.[1];
   // Only a drive-letter path (no share, no path relative to the current drive's root) for either.
-  const driveAbsolute = (value: string | undefined): value is string => value !== undefined && /^[A-Za-z]:\\/.test(value);
-  const systemRoot = lookup('SYSTEMROOT');
-  const comspec = lookup('COMSPEC');
-  const fallback = driveAbsolute(systemRoot) ? win32.join(systemRoot, 'System32', 'cmd.exe') : 'C:\\Windows\\System32\\cmd.exe';
-  const cmd = driveAbsolute(comspec) && /\\cmd\.exe$/i.test(comspec) ? comspec : fallback;
-  return { file: cmd, args: ['/d', '/s', '/v:off', '/c', `""${program}" ${args.map((arg) => `"${arg}"`).join(' ')}"`], verbatim: true };
+  return { file: windowsCmd(env), args: ['/d', '/s', '/v:off', '/c', `""${program}" ${args.map((arg) => `"${arg}"`).join(' ')}"`], verbatim: true };
 }
-
-/** Whether `dir` is an absolute folder (Windows: with a drive letter), as `candidatesFor` reads PATH. */
-const absoluteDir = (dir: string, platform: NodeJS.Platform): boolean => (platform === 'win32' ? /^[A-Za-z]:[\\/]/.test(dir) : posix.isAbsolute(dir));
 
 /**
  * The editor's environment: AD-16's allowlist with the desktop session, its
@@ -176,24 +164,7 @@ const absoluteDir = (dir: string, platform: NodeJS.Platform): boolean => (platfo
  * would let a launcher script's bare `dirname` run a program from its folder).
  */
 export function editorEnvironment(system: Pick<EditorSystem, 'platform' | 'env'>): Record<string, string> {
-  const env = helperEnvironment(DESKTOP_SESSION, system.env, system.platform);
-  const win = system.platform === 'win32';
-  for (const key of Object.keys(env)) {
-    if (win ? key.toUpperCase() !== 'PATH' : key !== 'PATH') continue;
-    env[key] = env[key]!.split(win ? ';' : ':')
-      .map((dir) => (win ? dir.replace(/^"(.*)"$/, '$1') : dir))
-      .filter((dir) => dir !== '' && absoluteDir(dir, system.platform))
-      .join(win ? ';' : ':');
-  }
-  return env;
-}
-
-/** The folder the editor starts in: the user's home (absolute), else the OS temp folder. */
-function homeOf(env: Readonly<Record<string, string>>, system: Pick<EditorSystem, 'platform' | 'tmpdir'>): string {
-  const win = system.platform === 'win32';
-  const lookup = (name: string) => Object.entries(env).find(([key]) => (win ? key.toUpperCase() === name : key === name))?.[1];
-  const home = win ? (lookup('USERPROFILE') ?? lookup('HOME')) : lookup('HOME');
-  return home !== undefined && absoluteDir(home, system.platform) ? home : system.tmpdir();
+  return launchEnvironment(DESKTOP_SESSION, system.env, system.platform);
 }
 
 export function createEditorLauncherNode({ system = nodeEditorSystem }: EditorLauncherNodeOptions = {}): EditorLauncherPort {
@@ -226,7 +197,7 @@ export function createEditorLauncherNode({ system = nodeEditorSystem }: EditorLa
         try {
           const child = system.start(command.file, command.args, {
             env,
-            cwd: homeOf(env, system),
+            cwd: safeWorkingFolder(env, system.platform),
             detached: true,
             stdio: 'ignore',
             windowsHide: true,

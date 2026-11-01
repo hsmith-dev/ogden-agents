@@ -12,7 +12,10 @@
  *   refused in plain words (it needs a shell; deferred);
  * - it is spawned with `shell: false`, stdin ignored, in its own process
  *   group on POSIX (`detached`), with `baseEnvironment()` plus `CI=1`,
- *   `NO_COLOR=1` and `FORCE_COLOR=0`: never `process.env`, never a key;
+ *   `NO_COLOR=1` and `FORCE_COLOR=0`, its `PATH` only the absolute folders
+ *   (so a bare name the command runs in turn, `node` behind npm's shim, is
+ *   never one planted in the project; `program-launch.ts`, 8.12): never
+ *   `process.env`, never a key;
  * - stdout and stderr together keep only their last
  *   `PROJECT_COMMAND_OUTPUT_MAX_BYTES` (`truncated` past it);
  * - Stop, the time limit and `close()` kill the whole tree
@@ -27,6 +30,7 @@ import { argvShellRefusal, type ProjectCommandExit, type ProjectCommandProcess, 
 import { PROJECT_COMMAND_MAX_RUN_MS, PROJECT_COMMAND_OUTPUT_MAX_BYTES, PROJECT_COMMAND_REFUSALS } from '@ogden-agents/shared';
 import { findProgram } from '../acp-base/linked-command.js';
 import { baseEnvironment } from '../child-env.js';
+import { withAbsolutePath } from '../program-launch.js';
 import { killProcessTree } from '../process-tree.js';
 
 /** How long a killed tree has to report its exit before the run gives up waiting. */
@@ -101,7 +105,7 @@ export function createProjectCommandsNode(options: ProjectCommandsNodeOptions = 
       const from = source();
       const found = findProgram(argv[0]!, from, { platform });
       if (!found.ok) return notStarted(found.reason);
-      const env: Record<string, string> = { ...baseEnvironment(from, platform), CI: '1', NO_COLOR: '1', FORCE_COLOR: '0' };
+      const env: Record<string, string> = { ...withAbsolutePath(baseEnvironment(from, platform), platform), CI: '1', NO_COLOR: '1', FORCE_COLOR: '0' };
       const args = argv.slice(1);
       const output = tail(maxOutputBytes);
 

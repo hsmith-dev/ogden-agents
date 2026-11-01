@@ -174,9 +174,8 @@ export type FoundProgram = { ok: true; file: string } | { ok: false; reason: str
 
 /**
  * Finds one program to start with no shell (8.9's Problems runner, AD-38):
- * an absolute path as given, a bare name on `env`'s `PATH`, searching only
- * its absolute entries (an empty or relative entry would mean the server's
- * own folder, or the project's). A relative path with a separator is refused.
+ * an absolute path as given, a bare name on the absolute folders of `env`'s
+ * `PATH` (as every resolution here). A relative path with a separator is refused.
  * On Windows a `.cmd`, `.bat` or npm shim is a script that needs a shell, so
  * it is refused in plain words, never run.
  */
@@ -188,15 +187,7 @@ export function findProgram(program: string, env: Readonly<Record<string, string
   if (program === '') return { ok: false, reason: 'Type the command to run.' };
   const hasSeparator = program.includes('/') || (windows && program.includes('\\'));
   if (hasSeparator && !paths.isAbsolute(program)) return { ok: false, reason: `Give an absolute path for "${program}", or just the program's name if it's on your PATH.` };
-  const pathValue = lookupEnv(env, 'PATH', windows) ?? '';
-  const absoluteOnly = pathValue
-    .split(paths.delimiter)
-    .filter((dir) => dir !== '' && paths.isAbsolute(dir))
-    .join(paths.delimiter);
-  const searched: Record<string, string | undefined> = { ...env };
-  if (windows) for (const name of Object.keys(searched)) if (name.toUpperCase() === 'PATH') delete searched[name];
-  searched.PATH = absoluteOnly;
-  const found = resolveProgram(program, searched, { windows, paths, isExecutable });
+  const found = resolveProgram(program, env, { windows, paths, isExecutable });
   if (found === undefined) return { ok: false, reason: `${program} wasn't found on this computer. Check that it's installed and on your PATH.` };
   if ('script' in found) return { ok: false, script: true, reason: `${paths.basename(found.script)} is a script that Windows can only start through a shell, so Ogden doesn't run it here yet.` };
   return { ok: true, file: found.file };

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createProjectCommandsNode } from '../src/index.js';
+import { plantedProgram, type PlantedProgram } from './planted-program.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -126,6 +127,20 @@ describe('project-commands-node', () => {
     expect((await relative.start({ cwd: tmpdir(), argv: ['node', '-e', '1'] }).done).error).toMatch(/wasn't found/);
     expect(spawned).toEqual([]);
   });
+
+  for (const kind of ['empty', 'relative'] as const) {
+    it.skipIf(process.platform === 'win32')(`hands the command only the absolute PATH folders: a bare name it runs is never one planted behind ${kind === 'empty' ? 'an empty' : 'a relative'} entry in the project (8.12)`, async () => {
+      const fixture: PlantedProgram = plantedProgram('ogden-tool', 'tool done');
+      dirs.push(fixture.root);
+      const seen: Array<Readonly<Record<string, string>>> = [];
+      const runner = createProjectCommandsNode({ source: () => ({ PATH: fixture.paths[kind], HOME: tmpdir() }), onSpawn: (_file, _args, env) => seen.push(env) });
+      const started = runner.start({ cwd: fixture.work, argv: ['ogden-tool'] });
+      expect(await started.done).toEqual({ exitCode: 0, stopped: false });
+      expect(started.output().text).toContain('tool done');
+      expect(seen[0]!.PATH).toBe(fixture.bin);
+      expect(fixture.ran()).toBe(false);
+    });
+  }
 
   it('keeps the last bytes of the output, and stops a run past its time limit with error', async () => {
     const runner = createProjectCommandsNode({ source, maxOutputBytes: 64 });

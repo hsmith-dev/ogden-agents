@@ -37,6 +37,8 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
     // Builds sits here: it limits the builds the projects run.
     pages: [
       { label: NEW_PROJECTS_SETTINGS_LABEL, to: '/settings/new-projects' },
+      // Every project's Always allow rules (epic 26 story 8, AD-40).
+      { label: 'Always allow rules', to: '/settings/always-allow' },
       { label: 'Builds', to: '/settings/builds' },
     ],
   },

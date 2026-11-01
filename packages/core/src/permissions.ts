@@ -27,12 +27,12 @@
  * The mode is read inside the same transaction as the level.
  */
 import {
-  alwaysAllowRefusal,
   DEFAULT_CAUTION_LEVEL,
   SKIP_ALL_REFUSAL,
   MAX_DENY_REASON_LENGTH,
   ToolKind as ToolKindSchema,
   type AgentId,
+  type AlwaysAllowChoice,
   type AlwaysAllowScope,
   type BmadPiece,
   type CoreEvent,
@@ -53,9 +53,13 @@ import { CoreError, NotFoundError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import { newId } from './ids.js';
 import {
+  alwaysAllowPrefixScope,
   alwaysAllowScope,
   cautionAllows,
+  COMMAND_REFUSALS,
   commandNamesProtectedPath,
+  commandPathsReach,
+  commandRuleRefusal,
   PATH_KINDS,
   pathsInsideWorkspace,
   ruleMatches,
@@ -79,10 +83,16 @@ export class PermissionNotPendingError extends CoreError {
   }
 }
 
-/** The user's answer on a card. `reason` is kept only with `deny`. */
+/**
+ * The user's answer on a card. `reason` is kept only with `deny`. `scope`
+ * goes only with `allow_always`: which offered scope to save (AD-40;
+ * absent: `current`). It is a choice, never a scope: core saves the one it
+ * computed for the request.
+ */
 export interface PermissionDecisionInput {
   decision: PermissionDecision;
   reason?: string | undefined;
+  scope?: AlwaysAllowChoice | undefined;
 }
 
 /** How one request is decided (story 5.6). */
@@ -102,7 +112,8 @@ export interface Permissions extends WorkspaceSettingsAccess {
    * The user's answer to a pending request of this session in this
    * workspace. Throws {@link PermissionNotPendingError} when it is not
    * pending there, and {@link ValidationError} for an `allow_always` the
-   * request does not offer (its scope is `null`) or a reason that is too long.
+   * request does not offer (its scope, or the chosen one, is `null`), a
+   * `scope` without `allow_always`, or a reason that is too long.
    */
   decide(workspaceId: WorkspaceId, sessionId: SessionId, requestId: string, input: PermissionDecisionInput): void;
   /** The workspace's always-allow rules, oldest first. {@link NotFoundError} for an unknown workspace. */
@@ -165,7 +176,10 @@ interface Pending {
   requestId: string;
   sessionId: SessionId;
   workspaceId: WorkspaceId;
+  /** The first scope (for a command, the exact command), or `null` when Always allow is not offered. */
   scope: AlwaysAllowScope | null;
+  /** The second scope a command offers: commands starting with its prefix (AD-40). */
+  prefixScope: AlwaysAllowScope | null;
   /** Why Always allow isn't offered, when a command rules it out. */
   refusal: string | undefined;
   answer: (decision: AgentPermissionDecision) => void;
@@ -251,20 +265,39 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
         const parsedKind = ToolKindSchema.safeParse(request.kind);
         const kind: ToolKind = parsedKind.success ? parsedKind.data : 'other';
         const command = typeof request.command === 'string' && request.command.trim() !== '' ? request.command : undefined;
-        const scope = alwaysAllowScope(kind, command);
         const requestId = newRequestId();
         // Resolved before the transaction: it reads the filesystem.
         const owner = entities.getSession(sessionId);
         const workspace = owner === undefined ? undefined : entities.getWorkspace(owner.workspaceId);
         const pathsInside = workspace !== undefined && PATH_KINDS.has(kind) && pathsInsideWorkspace(workspace, request.paths);
+        const extraFolders = agentConfigFolders?.() ?? [];
+        // AD-40: one check decides whether a command can be ruled at all, and
+        // both offering a scope and matching a rule use it.
+        const commandText = kind === 'execute' && command !== undefined ? commandRuleRefusal(command) : undefined;
+        const commandReach =
+          kind === 'execute' && command !== undefined && commandText === undefined && workspace !== undefined ? commandPathsReach(workspace, command, extraFolders) : undefined;
+        const commandRulable = commandReach === 'inside';
+        const commandRefusal =
+          kind !== 'execute' || command === undefined
+            ? undefined
+            : (commandText ??
+              (workspace === undefined
+                ? COMMAND_REFUSALS.unchecked
+                : commandReach === 'protected'
+                  ? COMMAND_REFUSALS.protected
+                  : commandRulable
+                    ? undefined
+                    : COMMAND_REFUSALS.outside));
+        const scope = kind === 'execute' && !commandRulable ? null : alwaysAllowScope(kind, command);
+        const prefixScope = kind === 'execute' && command !== undefined && commandRulable ? alwaysAllowPrefixScope(command) : null;
         // For the caution level: a path kind needs its paths inside; `think`
         // needs no path, but any path it names must be inside too.
         const named = Array.isArray(request.paths) ? request.paths : [];
-        // A write to a protected path, or a command naming one, always shows a card (F1).
-        const extraFolders = agentConfigFolders?.() ?? [];
+        // A write to a protected path, or a command naming one (a link to one too), always shows a card (F1).
         const protectedPath =
           (WRITE_KINDS.has(kind) && (workspace === undefined || touchesProtectedPath(workspace, request.paths, extraFolders))) ||
-          (command !== undefined && commandNamesProtectedPath(command, extraFolders));
+          (command !== undefined && commandNamesProtectedPath(command, extraFolders)) ||
+          commandReach === 'protected';
         const cautionPathsInside = PATH_KINDS.has(kind)
           ? pathsInside
           : workspace !== undefined && (named.length === 0 || pathsInsideWorkspace(workspace, named));
@@ -277,6 +310,8 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
           // Skip all: no caution level, no rule, and no Always allow (it never writes a rule).
           const skipAll = permissionMode === 'skip_all';
           const offered = skipAll || attended ? null : scope;
+          const offeredPrefix = offered === null ? null : prefixScope;
+          const refusal = skipAll ? SKIP_ALL_REFUSAL : commandRefusal;
           sessionEvents.appendSessionEvent(sessionId, {
             type: 'permission.requested',
             payload: {
@@ -290,6 +325,8 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
                 ...(protectedPath ? { protectedPath: true as const } : {}),
               },
               alwaysAllowScope: offered,
+              ...(offeredPrefix === null ? {} : { alwaysAllowPrefix: offeredPrefix }),
+              ...(refusal === undefined ? {} : { alwaysAllowRefusal: refusal }),
               cautionLevel,
               permissionMode,
             },
@@ -310,7 +347,9 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
             });
             return { type: 'caution' as const };
           }
-          const rule = protectedPath || skipAll || attended ? undefined : findRule(session.workspaceId, kind, command, pathsInside && session.workspaceId === workspace?.id);
+          // For a file kind, its paths are inside; for a command, it is rulable (AD-40). Either fails closed.
+          const ruleInside = (kind === 'execute' ? commandRulable : pathsInside) && session.workspaceId === workspace?.id;
+          const rule = protectedPath || skipAll || attended ? undefined : findRule(session.workspaceId, kind, command, ruleInside);
           if (rule !== undefined) {
             sessionEvents.appendSessionEvent(sessionId, {
               type: 'permission.resolved',
@@ -319,14 +358,13 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
             return { type: 'rule' as const };
           }
           entities.setSessionState(sessionId, 'waiting');
-          return { type: 'ask' as const, workspaceId: session.workspaceId, scope: offered, skipAll };
+          return { type: 'ask' as const, workspaceId: session.workspaceId, scope: offered, prefixScope: offeredPrefix, refusal };
         });
 
         if (outcome.type === 'rule' || outcome.type === 'caution') return { outcome: 'allow_once' };
         if (outcome.type === 'cancelled') return { outcome: 'cancelled' };
         return await new Promise<AgentPermissionDecision>((answer) => {
-          const refusal = outcome.skipAll ? SKIP_ALL_REFUSAL : kind === 'execute' && command !== undefined ? alwaysAllowRefusal(command) : undefined;
-          pending.set(requestId, { requestId, sessionId, workspaceId: outcome.workspaceId, scope: outcome.scope, refusal, answer });
+          pending.set(requestId, { requestId, sessionId, workspaceId: outcome.workspaceId, scope: outcome.scope, prefixScope: outcome.prefixScope, refusal: outcome.refusal, answer });
         });
       } catch (error) {
         reportError(error);
@@ -334,7 +372,7 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
       }
     },
 
-    decide(workspaceId, sessionId, requestId, { decision, reason }) {
+    decide(workspaceId, sessionId, requestId, { decision, reason, scope: choice }) {
       const entry = pending.get(requestId);
       if (entry === undefined || entry.sessionId !== sessionId || entry.workspaceId !== workspaceId) {
         throw new PermissionNotPendingError(requestId);
@@ -342,8 +380,19 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
       if (decision !== 'allow_once' && decision !== 'allow_always' && decision !== 'deny') {
         throw new ValidationError('Choose Allow once, Always allow or Deny.', [{ path: ['decision'], message: 'unknown decision' }]);
       }
+      if (choice !== undefined && choice !== 'current' && choice !== 'prefix') {
+        throw new ValidationError('Choose one of the scopes the card offers.', [{ path: ['scope'], message: 'unknown scope' }]);
+      }
+      if (choice !== undefined && decision !== 'allow_always') {
+        throw new ValidationError('A scope goes only with Always allow.', [{ path: ['scope'], message: 'scope without allow_always' }]);
+      }
       if (decision === 'allow_always' && entry.scope === null) {
         throw new ValidationError(entry.refusal ?? "Always allow isn't offered for this request.", [{ path: ['decision'], message: 'no always-allow scope' }]);
+      }
+      // The scope saved is the one core computed for this request; the client only chose which (AD-40).
+      const chosen = decision !== 'allow_always' ? null : choice === 'prefix' ? entry.prefixScope : entry.scope;
+      if (decision === 'allow_always' && chosen === null) {
+        throw new ValidationError("Commands starting with a prefix aren't offered for this request.", [{ path: ['scope'], message: 'prefix not offered' }]);
       }
       // A card shown before the chat moved to Skip all: a Skip-all chat never writes a rule. Read now, in
       // the same synchronous step as the write below (no await between), so nothing can change it in between.
@@ -359,8 +408,8 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
       try {
         events.transaction(() => {
           let ruleId: PermissionRuleId | undefined;
-          if (decision === 'allow_always' && entry.scope !== null) {
-            const { kind, value, label } = entry.scope;
+          if (decision === 'allow_always' && chosen !== null) {
+            const { kind, value, label } = chosen;
             const existing = orm
               .select({ id: permissionRules.id })
               .from(permissionRules)
@@ -388,6 +437,7 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
               by: 'user',
               ...(kept === undefined ? {} : { reason: kept }),
               ...(ruleId === undefined ? {} : { ruleId }),
+              ...(chosen === null ? {} : { scope: chosen }),
             },
           });
           if (![...pending.values()].some((other) => other.sessionId === sessionId)) entities.setSessionState(sessionId, 'working');

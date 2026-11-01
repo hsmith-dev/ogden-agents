@@ -10,11 +10,16 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CoreEvent, SessionId, WorkspaceId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { alwaysAllowRefusal, CAUTION_LEVELS, TOOL_KINDS, type CautionLevel, type ToolKind } from '@ogden-agents/shared';
+import { alwaysAllowRefusal, CAUTION_LEVELS, SKIP_ALL_REFUSAL, TOOL_KINDS, type CautionLevel, type ToolKind } from '@ogden-agents/shared';
 import {
+  alwaysAllowPrefixScope,
   alwaysAllowScope,
   cautionAllows,
+  COMMAND_REFUSALS,
   commandNamesProtectedPath,
+  commandPathsReach,
+  commandRuleRefusal,
+  prefixRuleRefusal,
   isProtectedSegment,
   commandPrefix,
   createDecliningPermissions,
@@ -70,7 +75,8 @@ describe('asking', () => {
     expect(requested.payload).toMatchObject({
       sessionId: session.id,
       toolCall: { toolCallId: 't-npm test', title: 'Run npm test', kind: 'execute', command: 'npm test' },
-      alwaysAllowScope: { kind: 'command_prefix', value: 'npm test', label: 'npm test' },
+      alwaysAllowScope: { kind: 'command_exact', value: 'npm test', label: 'npm test' },
+      alwaysAllowPrefix: { kind: 'command_prefix', value: 'npm test', label: 'npm test' },
       cautionLevel: 'ask_every_time',
     });
     expect(requested.payload.requestId).toMatch(/^preq_[0-9A-Z]{26}$/);
@@ -282,7 +288,7 @@ describe('always-allow rules', () => {
     const { workspace, session } = workingSession(core);
     const asked = track(core.permissions.request(session.id, npm('npm install stripe')));
     const { requestId } = lastRequested(core, session.id).payload;
-    core.permissions.decide(workspace.id, session.id, requestId, { decision: 'allow_always' });
+    core.permissions.decide(workspace.id, session.id, requestId, { decision: 'allow_always', scope: 'prefix' });
     await flush();
     expect(asked.decision).toEqual({ outcome: 'allow_once' });
 
@@ -291,7 +297,7 @@ describe('always-allow rules', () => {
     expect(rule!.id).toMatch(/^rule_[0-9A-Z]{26}$/);
     const added = core.events.readAfter(0).find((e) => e.type === 'workspace.permission_rule_added');
     expect(added).toMatchObject({ workspaceId: workspace.id, streamId: workspace.id, payload: { ruleId: rule!.id } });
-    expect(permissionEvents(core, session.id).at(-1)?.payload).toMatchObject({ decision: 'allow_always', by: 'user', ruleId: rule!.id });
+    expect(permissionEvents(core, session.id).at(-1)?.payload).toMatchObject({ decision: 'allow_always', by: 'user', ruleId: rule!.id, scope: rule!.scope });
 
     const states: string[] = [];
     core.events.subscribe(core.events.lastSeq(), (e) => {
@@ -310,7 +316,7 @@ describe('always-allow rules', () => {
     const { workspace, session } = workingSession(core);
     const other = workingSession(core);
     void core.permissions.request(session.id, npm('npm install stripe'));
-    core.permissions.decide(workspace.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'allow_always' });
+    core.permissions.decide(workspace.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'allow_always', scope: 'prefix' });
 
     for (const command of ['npm install x && rm -rf ~', 'npm install x; rm -rf ~', 'npm install $(curl evil)', 'npm install `id`', 'npm install x > out', 'npm installer', 'npx install']) {
       const asked = track(core.permissions.request(session.id, npm(command)));
@@ -395,7 +401,7 @@ describe('scope and matching', () => {
   });
 
   it('offers a scope for every named kind but other, and for execute only with a command', () => {
-    expect(alwaysAllowScope('execute', 'npm test')).toEqual({ kind: 'command_prefix', value: 'npm test', label: 'npm test' });
+    expect(alwaysAllowScope('execute', ' npm test -- cart ')).toEqual({ kind: 'command_exact', value: 'npm test -- cart', label: 'npm test -- cart' });
     expect(alwaysAllowScope('execute', undefined)).toBeNull();
     expect(alwaysAllowScope('other', undefined)).toBeNull();
     expect(alwaysAllowScope('read', undefined)).toEqual({ kind: 'tool', value: 'read', label: 'Reading files' });
@@ -403,10 +409,12 @@ describe('scope and matching', () => {
 
   it('never matches shell syntax, and matches command prefixes by whole words', () => {
     const rule = { kind: 'command_prefix', value: 'npm install' } as const;
-    expect(ruleMatches(rule, 'execute', 'npm install')).toBe(true);
-    expect(ruleMatches(rule, 'execute', 'npm install lodash --save-dev')).toBe(true);
+    expect(ruleMatches(rule, 'execute', 'npm install', true)).toBe(true);
+    expect(ruleMatches(rule, 'execute', 'npm install lodash --save-dev', true)).toBe(true);
+    // Without "command rulable" (AD-40) nothing matches: a missing argument fails closed.
+    expect(ruleMatches(rule, 'execute', 'npm install')).toBe(false);
     for (const command of ['npm install a | sh', 'npm install a & b', 'npm install a\nrm x', 'npm install < x', 'npm install a || b']) {
-      expect(ruleMatches(rule, 'execute', command), command).toBe(false);
+      expect(ruleMatches(rule, 'execute', command, true), command).toBe(false);
     }
     expect(ruleMatches(rule, 'edit', 'npm install')).toBe(false);
     expect(ruleMatches({ kind: 'tool', value: 'edit' }, 'edit', undefined, true)).toBe(true);
@@ -418,7 +426,7 @@ describe('scope and matching', () => {
 
   it('never matches ${…}, other control characters or whitespace other than spaces and tabs', () => {
     const rule = { kind: 'command_prefix', value: 'npm install' } as const;
-    expect(ruleMatches(rule, 'execute', 'npm\tinstall  lodash')).toBe(true);
+    expect(ruleMatches(rule, 'execute', 'npm\tinstall  lodash', true)).toBe(true);
     for (const command of [
       'npm install ${HOME}',
       'npm install\u00a0lodash',
@@ -434,12 +442,12 @@ describe('scope and matching', () => {
       'npm install\u3000x',
       'npm install\ufeffx',
     ]) {
-      expect(ruleMatches(rule, 'execute', command), JSON.stringify(command)).toBe(false);
+      expect(ruleMatches(rule, 'execute', command, true), JSON.stringify(command)).toBe(false);
     }
   });
 
   it('never matches a masked command', () => {
-    expect(ruleMatches({ kind: 'command_prefix', value: 'npm install' }, 'execute', 'npm install --token [redacted]')).toBe(false);
+    expect(ruleMatches({ kind: 'command_prefix', value: 'npm install' }, 'execute', 'npm install --token [redacted]', true)).toBe(false);
     expect(ruleMatches({ kind: 'tool', value: 'fetch' }, 'fetch', 'curl -H [redacted]')).toBe(false);
   });
 });
@@ -586,8 +594,8 @@ describe('no Always allow for interpreters, wrappers or variable assignments (re
     );
     await flush();
     expect(asked.decision).toBeUndefined();
-    expect(ruleMatches({ kind: 'command_prefix', value: 'bash' }, 'execute', 'bash -c ls')).toBe(false);
-    expect(ruleMatches({ kind: 'command_prefix', value: 'FOO=1' }, 'execute', 'FOO=1 npm test')).toBe(false);
+    expect(ruleMatches({ kind: 'command_prefix', value: 'bash' }, 'execute', 'bash -c ls', true)).toBe(false);
+    expect(ruleMatches({ kind: 'command_prefix', value: 'FOO=1' }, 'execute', 'FOO=1 npm test', true)).toBe(false);
   });
 });
 
@@ -792,7 +800,7 @@ describe('caution level (story 2.8)', () => {
     const { workspace, session } = project(core);
     core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' });
     void core.permissions.request(session.id, npm('npm test'));
-    core.permissions.decide(workspace.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'allow_always' });
+    core.permissions.decide(workspace.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'allow_always', scope: 'prefix' });
     expect(await core.permissions.request(session.id, npm('npm test -- --watch'))).toEqual({ outcome: 'allow_once' });
     expect(permissionEvents(core, session.id).at(-1)?.payload).toMatchObject({ by: 'rule' });
     expect(await answeredByCaution(core, workspace.id, session.id, npm('npm run build'))).toBe(false);
@@ -830,7 +838,7 @@ describe('protected paths always ask (user decision 2026-09-30, 2.8 F1)', () => 
   });
 
   /** How `request` was answered: `caution`, `rule`, or `card` (then denied, with its requested event). */
-  async function answer(core: Core, workspaceId: WorkspaceId, sessionId: SessionId, request: AgentPermissionRequest, decision: 'deny' | 'allow_always' = 'deny') {
+  async function answer(core: Core, workspaceId: WorkspaceId, sessionId: SessionId, request: AgentPermissionRequest, decision: 'deny' | 'allow_always' = 'deny', scope?: 'prefix') {
     const before = core.events.lastSeq();
     const asked = track(core.permissions.request(sessionId, request));
     await flush();
@@ -841,7 +849,7 @@ describe('protected paths always ask (user decision 2026-09-30, 2.8 F1)', () => 
       const resolved = events[1];
       return { by: resolved?.type === 'permission.resolved' ? resolved.payload.by : 'none', requested };
     }
-    core.permissions.decide(workspaceId, sessionId, requested.payload.requestId, { decision });
+    core.permissions.decide(workspaceId, sessionId, requested.payload.requestId, { decision, ...(scope === undefined ? {} : { scope }) });
     await flush();
     return { by: 'card', requested };
   }
@@ -922,10 +930,414 @@ describe('protected paths always ask (user decision 2026-09-30, 2.8 F1)', () => 
   it('a command naming one is never answered by its command rule', async () => {
     const core = openTestCore();
     const { workspace, session } = project(core);
-    await answer(core, workspace.id, session.id, call('execute', undefined, 'cp -r a b'), 'allow_always');
+    await answer(core, workspace.id, session.id, call('execute', undefined, 'cp -r a b'), 'allow_always', 'prefix');
     expect((await answer(core, workspace.id, session.id, call('execute', undefined, 'cp src/a.ts src/c.ts'))).by).toBe('rule');
     const hook = await answer(core, workspace.id, session.id, call('execute', undefined, 'cp evil .git/hooks/pre-commit'));
     expect(hook.by).toBe('card');
     expect(hook.requested.type === 'permission.requested' && hook.requested.payload.toolCall.protectedPath).toBe(true);
+  });
+});
+
+describe('Always allow by how a command starts (AD-40, epic 26 story 8)', () => {
+  /** A working session in a project with `src/a.ts`, `.git/hooks`, a link `out` escaping the project and a link `gitlink` to `.git`. */
+  function project(core: Core) {
+    const { workspace, session } = workingSession(core);
+    const repo = workspace.realPath ?? workspace.path;
+    mkdirSync(join(repo, 'src'));
+    writeFileSync(join(repo, 'src', 'a.ts'), 'a');
+    mkdirSync(join(repo, '.git', 'hooks'), { recursive: true });
+    const outside = tempDir('ogden-agents-outside-');
+    writeFileSync(join(outside, 'secret.txt'), 's');
+    symlinkSync(outside, join(repo, 'out'), 'junction');
+    symlinkSync(join(repo, '.git'), join(repo, 'gitlink'), 'junction');
+    return { workspace, session, repo, outside };
+  }
+
+  /** Requests `command` and returns its card (requested event) or the rule that answered it. */
+  async function ask(core: Core, workspaceId: WorkspaceId, sessionId: SessionId, command: string, answer?: { decision: 'allow_always' | 'deny'; scope?: 'current' | 'prefix' }) {
+    const before = core.events.lastSeq();
+    const asked = track(core.permissions.request(sessionId, npm(command)));
+    await flush();
+    const events = core.events.readAfter(before).filter((event) => event.streamId === sessionId && event.type.startsWith('permission.'));
+    const requested = events[0];
+    if (requested?.type !== 'permission.requested') throw new Error('no permission.requested');
+    if (asked.decision !== undefined) return { by: events[1]?.type === 'permission.resolved' ? events[1].payload.by : 'none', payload: requested.payload };
+    core.permissions.decide(workspaceId, sessionId, requested.payload.requestId, answer ?? { decision: 'deny' });
+    await flush();
+    return { by: 'card', payload: requested.payload };
+  }
+
+  it('offers two scopes for a rulable command: the exact command first, then its prefix', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    const { payload } = await ask(core, workspace.id, session.id, 'npm test -- cart');
+    expect(payload.alwaysAllowScope).toEqual({ kind: 'command_exact', value: 'npm test -- cart', label: 'npm test -- cart' });
+    expect(payload.alwaysAllowPrefix).toEqual({ kind: 'command_prefix', value: 'npm test', label: 'npm test' });
+    expect(payload.alwaysAllowRefusal).toBeUndefined();
+    expect(alwaysAllowPrefixScope('ls -la')).toEqual({ kind: 'command_prefix', value: 'ls', label: 'ls' });
+  });
+
+  it('Always allow without a choice saves the exact command, and npm test -- other still asks (acceptance 1)', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    await ask(core, workspace.id, session.id, 'npm test -- cart', { decision: 'allow_always' });
+    expect(core.permissions.listRules(workspace.id).map((rule) => rule.scope)).toEqual([{ kind: 'command_exact', value: 'npm test -- cart', label: 'npm test -- cart' }]);
+    expect(permissionEvents(core, session.id).at(-1)?.payload).toMatchObject({ decision: 'allow_always', scope: { kind: 'command_exact' } });
+    expect((await ask(core, workspace.id, session.id, 'npm test -- other')).by).toBe('card');
+    expect((await ask(core, workspace.id, session.id, 'npm test -- cart --watch')).by).toBe('card');
+    expect((await ask(core, workspace.id, session.id, 'npm test -- cart')).by).toBe('rule');
+    // `current` is the same choice, said out loud: the existing rule is reused.
+    await ask(core, workspace.id, session.id, 'npm test', { decision: 'allow_always', scope: 'current' });
+    expect((await ask(core, workspace.id, session.id, 'npm test --watch')).by).toBe('card');
+  });
+
+  it('a prefix rule allows arguments, and matches whole, token-equal words only', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    await ask(core, workspace.id, session.id, 'npm test -- cart', { decision: 'allow_always', scope: 'prefix' });
+    expect(core.permissions.listRules(workspace.id).map((rule) => rule.scope)).toEqual([{ kind: 'command_prefix', value: 'npm test', label: 'npm test' }]);
+    expect((await ask(core, workspace.id, session.id, 'npm test -- --watch')).by).toBe('rule');
+    expect((await ask(core, workspace.id, session.id, 'npm\ttest src/a.ts')).by).toBe('rule');
+    for (const command of ['npm testx', 'npm-test', 'npm "test"', "npm 'test'", 'NPM test', 'npm', 'npm tes t']) {
+      expect((await ask(core, workspace.id, session.id, command)).by, command).toBe('card');
+    }
+  });
+
+  it('chained, piped, redirected, substituted, expanded or globbed commands offer no Always allow, say why, and never match', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    await ask(core, workspace.id, session.id, 'npm test', { decision: 'allow_always', scope: 'prefix' });
+    const cases: Array<[string, string]> = [
+      ['npm test && x', COMMAND_REFUSALS.chained],
+      ['npm test || x', COMMAND_REFUSALS.chained],
+      ['npm test; x', COMMAND_REFUSALS.chained],
+      ['npm test & x', COMMAND_REFUSALS.chained],
+      ['npm test | x', COMMAND_REFUSALS.chained],
+      ['npm test\nx', COMMAND_REFUSALS.chained],
+      ['npm test\rx', COMMAND_REFUSALS.chained],
+      ['npm test > o', COMMAND_REFUSALS.redirected],
+      ['npm test 2> o', COMMAND_REFUSALS.redirected],
+      ['npm test < i', COMMAND_REFUSALS.redirected],
+      ['npm test $(x)', COMMAND_REFUSALS.expanded],
+      ['npm test `x`', COMMAND_REFUSALS.expanded],
+      ['npm test ${X}', COMMAND_REFUSALS.expanded],
+      ['npm test $X', COMMAND_REFUSALS.expanded],
+      ['npm test *', COMMAND_REFUSALS.expanded],
+      ['npm test src/?.ts', COMMAND_REFUSALS.expanded],
+      ['npm test src/[ab].ts', COMMAND_REFUSALS.expanded],
+      ['npm test {a,b}', COMMAND_REFUSALS.expanded],
+      ['npm test src(e:x:)', COMMAND_REFUSALS.expanded],
+      ['npm test %1', COMMAND_REFUSALS.expanded],
+      ['npm test =ls', COMMAND_REFUSALS.expanded],
+      ['npm test "=ls"', COMMAND_REFUSALS.expanded],
+      ['npm test a\\ b', COMMAND_REFUSALS.unchecked],
+      ['npm test \u2066x\u2069', COMMAND_REFUSALS.unchecked],
+      ['npm test\u00a0x', COMMAND_REFUSALS.unchecked],
+      ['npm test caf\u00e9', COMMAND_REFUSALS.unchecked],
+      ['npm test --token [redacted]', COMMAND_REFUSALS.masked],
+    ];
+    for (const [command, reason] of cases) {
+      expect(commandRuleRefusal(command), JSON.stringify(command)).toBe(reason);
+      const { by, payload } = await ask(core, workspace.id, session.id, command);
+      expect(by, JSON.stringify(command)).toBe('card');
+      expect(payload.alwaysAllowScope, JSON.stringify(command)).toBeNull();
+      expect(payload.alwaysAllowPrefix, JSON.stringify(command)).toBeUndefined();
+      expect(payload.alwaysAllowRefusal, JSON.stringify(command)).toBe(reason);
+      expect(ruleMatches({ kind: 'command_prefix', value: 'npm test' }, 'execute', command, true), JSON.stringify(command)).toBe(false);
+      expect(ruleMatches({ kind: 'command_exact', value: command }, 'execute', command, true), JSON.stringify(command)).toBe(false);
+    }
+  });
+
+  it('a command naming a path outside the project, or that a link leads out of, offers no Always allow and never matches', async () => {
+    const core = openTestCore();
+    const { workspace, session, outside } = project(core);
+    await ask(core, workspace.id, session.id, 'cat src/a.ts', { decision: 'allow_always', scope: 'prefix' });
+    expect((await ask(core, workspace.id, session.id, 'cat ./src/a.ts src/new.ts .')).by).toBe('rule');
+    for (const command of [
+      'cat ../x',
+      'cat src/../../x',
+      'cat /etc/passwd',
+      `cat ${join(outside, 'secret.txt')}`,
+      'cat --f=/etc/x',
+      'cat --file=../x',
+      'cat -I../x',
+      'cat -I/etc',
+      'cat -I~/x',
+      'cat out/secret.txt',
+      'cat ~/x',
+      'cat ~',
+      'cat "../x"',
+      'cat a"/../../"x',
+      'cat x:../y',
+      'cat -d@../x',
+      'cat -Wl,-rpath,/x',
+      'cat ..',
+    ]) {
+      expect(commandPathsReach(workspace, command), command).toBe('outside');
+      const { by, payload } = await ask(core, workspace.id, session.id, command);
+      expect(by, command).toBe('card');
+      expect(payload.alwaysAllowScope, command).toBeNull();
+      expect(payload.alwaysAllowPrefix, command).toBeUndefined();
+      expect(payload.alwaysAllowRefusal, command).toBe(COMMAND_REFUSALS.outside);
+    }
+  });
+
+  it('a command naming a protected path, through a link too, shows the protected caption and no Always allow', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    await ask(core, workspace.id, session.id, 'cp src/a.ts src/b.ts', { decision: 'allow_always', scope: 'prefix' });
+    for (const command of ['cp x .git/hooks/y', 'cp x gitlink/hooks/pre-commit', 'cp x gitlink', 'cp --target-directory=.git/hooks x', 'cp x src/../.claude/settings.json', 'cp x CLAUDE.md']) {
+      expect(commandPathsReach(workspace, command), command).toBe('protected');
+      const { by, payload } = await ask(core, workspace.id, session.id, command);
+      expect(by, command).toBe('card');
+      expect(payload.toolCall.protectedPath, command).toBe(true);
+      expect(payload.alwaysAllowScope, command).toBeNull();
+      expect(payload.alwaysAllowRefusal, command).toBe(COMMAND_REFUSALS.protected);
+    }
+  });
+
+  it('wrappers, interpreters, two-word wrappers and assignments offer nothing and are never matched', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    for (const command of [
+      'env X=1 npm test',
+      'X=1 npm test',
+      'sudo npm test',
+      'bash -c ls',
+      'sh -c ls',
+      'xargs rm',
+      'eval ls',
+      'timeout 5 npm test',
+      'stdbuf -oL npm test',
+      'nice npm test',
+      'awk x',
+      'gawk x',
+      'source x.sh',
+      '. x.sh',
+      'uvx ruff',
+      'pipx run x',
+      'npm exec x',
+      'npm x y',
+      'npm -y exec x',
+      'npm "exec" x',
+      'npm init x',
+      'pnpm dlx x',
+      'pnpm exec x',
+      'yarn dlx x',
+      'uv run x',
+      'uv tool run x',
+      'poetry run x',
+      'bundle exec x',
+      'docker run x',
+      'node18 x.js',
+    ]) {
+      const { by, payload } = await ask(core, workspace.id, session.id, command);
+      expect(by, command).toBe('card');
+      expect(payload.alwaysAllowScope, command).toBeNull();
+      expect(payload.alwaysAllowPrefix, command).toBeUndefined();
+      expect(payload.alwaysAllowRefusal, command).toMatch(/^Always allow isn't offered for /);
+      const first = command.split(' ')[0]!;
+      for (const rule of [{ kind: 'command_prefix', value: first }, { kind: 'command_prefix', value: command.split(' ').slice(0, 2).join(' ') }, { kind: 'command_exact', value: command }] as const) {
+        expect(ruleMatches(rule, 'execute', command, true), `${rule.kind} ${rule.value} / ${command}`).toBe(false);
+      }
+    }
+    expect(alwaysAllowRefusal('npm exec x')).toBe("Always allow isn't offered for npm exec, because it can run anything.");
+    expect(alwaysAllowRefusal('npm test')).toBeUndefined();
+  });
+
+  it('a prefix never covers an option or program that runs another command; the exact command is still offered (security review)', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    const cases: Array<[string, string]> = [
+      ['find . -name x', 'find . -exec rm -rf src +'],
+      ['find . -name x', 'find . -execdir touch x +'],
+      ['sed -n 1p src/a.ts', 'sed s/x/y/e src/a.ts'],
+      ['git status', 'git -c core.pager=x status'],
+      ['git --no-pager log', 'git -c core.pager=x log'],
+      ['git --no-pager log', 'git --config-env=core.pager=X log'],
+      ['git --no-pager log', 'git --exec-path=src log'],
+      ['git --no-pager log', 'git config core.hooksPath src'],
+      ['git rebase main', 'git rebase --exec x main'],
+      ['git rebase main', 'git rebase -x x main'],
+      ['git fetch origin', 'git fetch --upload-pack=x origin'],
+      ['git --no-pager log', 'git bisect run x'],
+      ['git --no-pager log', 'git submodule foreach x'],
+      ['tar -tf a.tar', 'tar -xf a.tar --to-command=x'],
+      ['tar -tf a.tar', 'tar -cf a.tar --checkpoint-action=exec=x src'],
+      ['tar -tf a.tar', 'tar -cIx -f a.tar src'],
+      ['rsync -a src dst', 'rsync -e x src dst'],
+      ['rsync -a src dst', 'rsync -ae x src dst'],
+      ['rsync -a src dst', 'rsync --rsync-path=x src dst'],
+      ['zip a.zip src', 'zip -T --unzip-command=x a.zip src'],
+      ['npm test', 'npm test --script-shell=x.sh'],
+      ['npm test', 'npm test --node-options=--require=x.js'],
+      ['make build', 'make build --eval=x'],
+      ['ssh host ls', 'ssh host rm x'],
+      ['vim src/a.ts', 'vim -c x src/a.ts'],
+    ];
+    for (const [saved, bypass] of cases) {
+      const { payload } = await ask(core, workspace.id, session.id, bypass);
+      expect(payload.alwaysAllowPrefix, bypass).toBeUndefined();
+      expect(payload.alwaysAllowScope?.kind, bypass).toBe('command_exact');
+      expect(prefixRuleRefusal(bypass), bypass).toMatch(/aren't offered, because its options can run another command\.$/);
+      const prefix = saved === 'ssh host ls' || saved === 'vim src/a.ts' ? saved.split(' ')[0]! : alwaysAllowPrefixScope(saved)?.value ?? saved.split(' ')[0]!;
+      expect(ruleMatches({ kind: 'command_prefix', value: prefix }, 'execute', bypass, true), `${prefix} / ${bypass}`).toBe(false);
+      expect(ruleMatches({ kind: 'command_exact', value: bypass }, 'execute', bypass, true), bypass).toBe(true);
+    }
+    // Ordinary uses of the same programs keep their prefix.
+    for (const command of ['find . -name x', 'git status', 'git switch -c topic', 'git commit -m x', 'tar -tf a.tar', 'rsync -a src dst', 'npm test']) {
+      expect(prefixRuleRefusal(command), command).toBeUndefined();
+    }
+    expect(alwaysAllowPrefixScope('sed -n 1p src/a.ts')).toBeNull();
+  });
+
+  it('every bypass tried in review is blocked, or allowed where harmless (review round 2)', async () => {
+    const core = openTestCore();
+    const { workspace, session, repo } = project(core);
+    // A link `etclink` to /etc (or another folder outside), read as `cat etclink` and in another case.
+    symlinkSync(tempDir('ogden-agents-etc-'), join(repo, 'etclink'), 'junction');
+    const npmTest = { kind: 'command_prefix', value: 'npm test' } as const;
+    const gitRule = { kind: 'command_prefix', value: 'git' } as const;
+    const rulable = (command: string) => commandRuleRefusal(command) === undefined && commandPathsReach(workspace, command) === 'inside';
+
+    // Refused outright: no scope at all, and never matched.
+    for (const command of [
+      '"bash" -c x',
+      "b'a'sh -c x",
+      "'sudo' rm x",
+      '"npm" exec x',
+      'npm -y exec x',
+      'npm --prefix src exec x',
+      'docker compose exec web sh',
+      'docker-compose run web sh',
+      'npm test\v',
+      'npm test\r',
+      'npm test\u00a0x',
+      'npm test\u200bx',
+      'npm t\u0435st',
+      '/usr/bin/env npm test',
+      'env.exe npm test',
+      'BASH.EXE -c x',
+      'python3.12 x',
+      'pypy3 x',
+      'node22 x',
+      'busybox sh',
+      'command -v x',
+    ]) {
+      expect(alwaysAllowScope('execute', command), JSON.stringify(command)).toBeNull();
+      expect(alwaysAllowPrefixScope(command), JSON.stringify(command)).toBeNull();
+      const first = command.split(' ')[0]!;
+      for (const rule of [{ kind: 'command_prefix', value: first }, { kind: 'command_exact', value: command }] as const) {
+        expect(ruleMatches(rule, 'execute', command, true), `${rule.kind} / ${JSON.stringify(command)}`).toBe(false);
+      }
+    }
+    // The card names the wrapper behind the quotes.
+    expect(alwaysAllowRefusal('"bash" -c x')).toBe("Always allow isn't offered for bash, because it can run anything.");
+    expect(ruleMatches({ kind: 'command_prefix', value: '"bash"' }, 'execute', '"bash" -c anything', true)).toBe(false);
+
+    // A quote in the first two words: the exact command only, never a prefix (not even the wider one-word one).
+    for (const command of ['npm "test"', 'ls "-la"']) {
+      expect(alwaysAllowScope('execute', command)?.kind, command).toBe('command_exact');
+      expect(alwaysAllowPrefixScope(command), command).toBeNull();
+    }
+    // Options hidden in quotes still stop a prefix.
+    for (const command of ['find . "-exec" x', 'git "-c" x log']) expect(alwaysAllowPrefixScope(command), command).toBeNull();
+
+    // Git pointed at another repo: no prefix offered, and a `git` rule doesn't match.
+    for (const command of ['git -C src status', 'git --git-dir=sub log', 'git --work-tree=src status', 'git --namespace=x log', 'git --bare log', 'git --super-prefix=x log']) {
+      expect(alwaysAllowPrefixScope(command), command).toBeNull();
+      expect(ruleMatches(gitRule, 'execute', command, true), command).toBe(false);
+      expect(alwaysAllowScope('execute', command)?.kind, command).toBe('command_exact');
+    }
+
+    // The subcommand is the first non-flag word: these are `npm test`, matched by its rule.
+    for (const command of ['npm test -- x', 'npm test init', 'npm\ttest', ' npm test ', 'npm test #x', 'npm test !x']) {
+      expect(alwaysAllowRefusal(command), JSON.stringify(command)).toBeUndefined();
+      expect(rulable(command), JSON.stringify(command)).toBe(true);
+      expect(ruleMatches(npmTest, 'execute', command, true), JSON.stringify(command)).toBe(true);
+    }
+    // Not `npm test`.
+    for (const command of ['npm testx', 'npm-test', 'npm "test"', 'NPM test', 'npm.cmd test']) expect(ruleMatches(npmTest, 'execute', command, true), command).toBe(false);
+
+    // Outside the project.
+    const outsideCommands = ['cat ~root/x', 'cat ~', 'cat C:/x', 'cat @/etc', 'cat x:/etc', 'cat --f=/etc', 'cat -I/etc', 'cat etclink', 'cat etclink/passwd'];
+    if (isCaseInsensitivePath(repo)) outsideCommands.push('cat ETCLINK/passwd');
+    for (const command of outsideCommands) {
+      expect(commandPathsReach(workspace, command), command).toBe('outside');
+      expect((await ask(core, workspace.id, session.id, command)).payload.alwaysAllowScope, command).toBeNull();
+    }
+    // Protected, in any case and behind `./` or `..`.
+    for (const command of ['cat .GIT/config', 'cat "./.git"', 'cat src/../AGENTS.MD']) {
+      expect(commandPathsReach(workspace, command), command).toBe('protected');
+      const { payload } = await ask(core, workspace.id, session.id, command);
+      expect(payload.alwaysAllowScope, command).toBeNull();
+      expect(payload.toolCall.protectedPath, command).toBe(true);
+    }
+  });
+
+  it('an exact rule matches only the same command', () => {
+    const rule = { kind: 'command_exact', value: 'npm test' } as const;
+    expect(ruleMatches(rule, 'execute', 'npm test', true)).toBe(true);
+    expect(ruleMatches(rule, 'execute', '  npm test ', true)).toBe(true);
+    for (const command of ['npm test --watch', 'npm  test', 'npm testx', 'npm', 'npm test x']) expect(ruleMatches(rule, 'execute', command, true), command).toBe(false);
+    // Without "command rulable" nothing matches.
+    expect(ruleMatches(rule, 'execute', 'npm test')).toBe(false);
+    expect(ruleMatches(rule, 'edit', 'npm test', true)).toBe(false);
+  });
+
+  it('a pre-existing command_prefix rule still answers a rulable command it matched before, and asks for one that is not (acceptance 2)', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    // As a rule saved before AD-40: Always allow on `npm install stripe` saved `npm install`.
+    await ask(core, workspace.id, session.id, 'npm install stripe', { decision: 'allow_always', scope: 'prefix' });
+    expect(core.permissions.listRules(workspace.id).map((rule) => rule.scope.kind)).toEqual(['command_prefix']);
+    expect((await ask(core, workspace.id, session.id, 'npm install lodash --save-dev')).by).toBe('rule');
+    for (const command of ['npm install ../x', 'npm install *', 'npm install x && y', 'npm install --prefix=/tmp x', 'npm install gitlink/x']) {
+      expect((await ask(core, workspace.id, session.id, command)).by, command).toBe('card');
+    }
+    expect(core.permissions.listRules(workspace.id)).toHaveLength(1);
+  });
+
+  it('the choice is checked against what the card offered: no prefix on a tool card, no scope without Always allow, nothing written', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    void core.permissions.request(session.id, { toolCallId: 'f1', title: 'Fetch a page', kind: 'fetch' });
+    const fetch = lastRequested(core, session.id).payload;
+    expect(fetch.alwaysAllowPrefix).toBeUndefined();
+    expect(() => core.permissions.decide(workspace.id, session.id, fetch.requestId, { decision: 'allow_always', scope: 'prefix' })).toThrow(ValidationError);
+    expect(() => core.permissions.decide(workspace.id, session.id, fetch.requestId, { decision: 'allow_once', scope: 'current' })).toThrow(ValidationError);
+    expect(core.permissions.listRules(workspace.id)).toEqual([]);
+    core.permissions.decide(workspace.id, session.id, fetch.requestId, { decision: 'deny' });
+
+    void core.permissions.request(session.id, npm('sed -n 1p src/a.ts'));
+    const sed = lastRequested(core, session.id).payload;
+    expect(() => core.permissions.decide(workspace.id, session.id, sed.requestId, { decision: 'allow_always', scope: 'prefix' })).toThrow(ValidationError);
+    expect(core.permissions.listRules(workspace.id)).toEqual([]);
+    expect(core.entities.getSession(session.id)?.state).toBe('waiting');
+  });
+
+  it('attended builds and Skip all offer neither scope, and Skip all writes no rule', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    await ask(core, workspace.id, session.id, 'npm test', { decision: 'allow_always', scope: 'prefix' });
+
+    const attended = track(core.permissions.request(session.id, npm('npm test -- cart'), { attended: true }));
+    await flush();
+    expect(attended.decision).toBeUndefined();
+    const card = lastRequested(core, session.id).payload;
+    expect(card.alwaysAllowScope).toBeNull();
+    expect(card.alwaysAllowPrefix).toBeUndefined();
+    expect(() => core.permissions.decide(workspace.id, session.id, card.requestId, { decision: 'allow_always', scope: 'prefix' })).toThrow(ValidationError);
+    core.permissions.decide(workspace.id, session.id, card.requestId, { decision: 'deny' });
+
+    core.entities.setSessionPermissionMode(session.id, 'skip_all', 'user');
+    const skip = track(core.permissions.request(session.id, npm('npm test -- cart')));
+    await flush();
+    expect(skip.decision).toBeUndefined();
+    const skipCard = lastRequested(core, session.id).payload;
+    expect(skipCard).toMatchObject({ alwaysAllowScope: null, alwaysAllowRefusal: SKIP_ALL_REFUSAL });
+    expect(skipCard.alwaysAllowPrefix).toBeUndefined();
+    expect(() => core.permissions.decide(workspace.id, session.id, skipCard.requestId, { decision: 'allow_always', scope: 'prefix' })).toThrow(ValidationError);
+    expect(core.permissions.listRules(workspace.id)).toHaveLength(1);
   });
 });

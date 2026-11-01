@@ -112,11 +112,14 @@ export type PermissionRequestId = z.infer<typeof PermissionRequestId>;
 
 /**
  * What an "Always allow" would cover (EXPERIENCE.md Permission card: the
- * scope written under the button): a command prefix, or a tool, in this
- * workspace. `label` is plain words for the user.
+ * scope written under the button), in this workspace: one exact command
+ * (`command_exact`, AD-40), every command starting with a prefix
+ * (`command_prefix`), or a tool. `label` is plain words for the user; for a
+ * command kind it is the command or prefix itself.
  */
+export const ALWAYS_ALLOW_SCOPE_KINDS = ['command_exact', 'command_prefix', 'tool'] as const;
 export const AlwaysAllowScope = z.object({
-  kind: z.enum(['command_prefix', 'tool']),
+  kind: z.enum(ALWAYS_ALLOW_SCOPE_KINDS),
   value: z.string().min(1),
   label: z.string().min(1),
 });

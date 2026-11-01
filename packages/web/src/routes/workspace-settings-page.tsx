@@ -11,6 +11,7 @@ import { appDefaultWords, DefaultModelsSection } from '@/chat/default-models';
 import { ProjectWhileWorkingSection } from '@/chat/while-working-section';
 import { projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
 import { DefaultPermissionModeView, type DefaultPermissionModeViewProps } from '@/permissions/default-permission-mode';
+import { ScopeText, scopeWords } from '@/permissions/scope-words';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent, AlertDialogTrigger } from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
@@ -327,36 +328,53 @@ export interface AlwaysAllowRulesViewProps {
   /** The rule being removed, if any. */
   removing: string | undefined;
   error: string | undefined;
+  /** A rule was just removed: the polite status says Ogden will ask again. */
+  removed?: boolean | undefined;
+  /** The section's heading; the project's own settings say "Always allow rules", Settings names the project. */
+  title?: string | undefined;
+  /** Whether the section says what rules do (Settings says it once, above every project). Default: yes. */
+  explained?: boolean | undefined;
 }
 
-/** The project's Always allow rules, oldest first, each with Remove. */
-export function AlwaysAllowRulesView({ rules, name, onRemove, removing, error }: AlwaysAllowRulesViewProps) {
+/** The day a rule was added, as "31 Oct 2026". */
+const addedOn = (at: string) => new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+/** What the rules do, in one sentence. */
+export const RULES_EXPLAINED = 'Requests these rules cover run without asking. Remove a rule and the next such request asks again.';
+
+/** What an empty list says (EXPERIENCE.md Always allow rules). */
+export const NO_RULES_TEXT = 'No Always allow rules. Ogden asks before each action.';
+
+/**
+ * The project's Always allow rules, oldest first, each in its words ("Commands
+ * starting with `npm test`", AD-40) with Remove. Removing needs no
+ * confirmation: it only makes Ogden ask again.
+ */
+export function AlwaysAllowRulesView({ rules, name, onRemove, removing, error, removed = false, title = 'Always allow rules', explained = true }: AlwaysAllowRulesViewProps) {
   return (
-    <PageSection title="Always allow rules" data-testid="rules-section">
-      <Text>Requests these rules cover run without asking. Remove a rule and the next such request asks again.</Text>
+    <PageSection title={title} data-testid="rules-section">
+      {explained ? <Text>{RULES_EXPLAINED}</Text> : null}
       {rules === undefined ? null : rules.length === 0 ? (
         <Text variant="caption" data-testid="rules-empty">
-          No rules yet.
+          {NO_RULES_TEXT}
         </Text>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-1 p-0" data-testid="rules-list">
           {rules.map((rule) => (
-            <li key={rule.id} className="flex min-h-(--control-height) items-center justify-between gap-3" data-testid="rule-row">
-              <Text as="span" variant="label" className="min-w-0 truncate">
-                {rule.scope.kind === 'command_prefix' ? (
-                  <Text as="code" variant="mono">
-                    {rule.scope.label}
-                  </Text>
-                ) : (
-                  rule.scope.label
-                )}{' '}
-                in {name}
-              </Text>
+            <li key={rule.id} className="flex min-h-(--control-height) items-center justify-between gap-3" data-testid="rule-row" data-kind={rule.scope.kind}>
+              <span className="flex min-w-0 flex-col">
+                <Text as="span" variant="label" className="break-words">
+                  <ScopeText scope={rule.scope} /> in {name}
+                </Text>
+                <Text as="span" variant="caption" data-testid="rule-added">
+                  Added <time dateTime={rule.createdAt}>{addedOn(rule.createdAt)}</time>
+                </Text>
+              </span>
               <Button
                 variant="outline"
                 size="sm"
                 data-testid="rule-remove"
-                aria-label={`Remove ${rule.scope.label} in ${name}`}
+                aria-label={`Remove ${scopeWords(rule.scope)} in ${name}`}
                 aria-disabled={removing === rule.id}
                 onClick={removing === rule.id ? undefined : () => onRemove(rule)}
               >
@@ -366,6 +384,11 @@ export function AlwaysAllowRulesView({ rules, name, onRemove, removing, error }:
           ))}
         </ul>
       )}
+      {removed ? (
+        <Text variant="caption" role="status" data-testid="rules-removed">
+          Removed. Ogden will ask next time.
+        </Text>
+      ) : null}
       {error === undefined ? null : (
         <Notice variant="blocked" role="alert" data-testid="rules-error">
           {error}
@@ -375,20 +398,25 @@ export function AlwaysAllowRulesView({ rules, name, onRemove, removing, error }:
   );
 }
 
-/** Loads the rules; Remove undoes one and the list refreshes (also when it was already gone). */
-function AlwaysAllowRulesSection({ wsId, name }: { wsId: string; name: string }) {
+/** Loads the rules; Remove undoes one and the list refreshes (also when it was already gone). Settings' Always allow page lists one per project. */
+export function AlwaysAllowRulesSection({ wsId, name, title, explained }: { wsId: string; name: string; title?: string | undefined; explained?: boolean | undefined }) {
   const rules = usePermissionRules(wsId);
   const queryClient = useQueryClient();
   const [removing, setRemoving] = useState<string | undefined>(undefined);
+  // The rules' load the "Removed" status belongs to: it goes once the list changes again.
+  const [removedAt, setRemovedAt] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
 
   const onRemove = (rule: PermissionRule) => {
     setRemoving(rule.id);
+    setRemovedAt(undefined);
     setError(undefined);
     removePermissionRule(wsId, rule.id).then(
       () => {
         setRemoving(undefined);
-        void queryClient.invalidateQueries({ queryKey: ['permission-rules', wsId] });
+        void queryClient.invalidateQueries({ queryKey: ['permission-rules', wsId] }).then(() => {
+          setRemovedAt(queryClient.getQueryState(['permission-rules', wsId])?.dataUpdatedAt);
+        });
       },
       (failure: unknown) => {
         setRemoving(undefined);
@@ -400,7 +428,7 @@ function AlwaysAllowRulesSection({ wsId, name }: { wsId: string; name: string })
   };
 
   const loadError = rules.error instanceof Error ? rules.error.message : undefined;
-  return <AlwaysAllowRulesView rules={rules.data} name={name} onRemove={onRemove} removing={removing} error={error ?? loadError} />;
+  return <AlwaysAllowRulesView rules={rules.data} name={name} onRemove={onRemove} removing={removing} removed={removedAt !== undefined && removedAt === rules.dataUpdatedAt} error={error ?? loadError} title={title} explained={explained} />;
 }
 
 /**

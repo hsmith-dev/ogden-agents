@@ -65,7 +65,7 @@ test('Ask for commands lets a read inside the project run without a card; a comm
 test('an Always allow rule is listed on the settings page; Remove it and the next such command asks', async ({ page }) => {
   await withChat(page, async (chatUrl) => {
     await page.goto(settingsUrl(chatUrl));
-    await expect(page.getByTestId('rules-empty')).toHaveText('No rules yet.');
+    await expect(page.getByTestId('rules-empty')).toHaveText('No Always allow rules. Ogden asks before each action.');
 
     await page.goto(chatUrl);
     await idle(page);
@@ -78,9 +78,10 @@ test('an Always allow rule is listed on the settings page; Remove it and the nex
     await page.goto(settingsUrl(chatUrl));
     const row = page.getByTestId('rule-row');
     await expect(row).toHaveCount(1);
-    await expect(row).toContainText('npm test in ogden-agents-e2e-repo-');
-    await row.getByRole('button', { name: /^Remove npm test in / }).click();
-    await expect(page.getByTestId('rules-empty')).toHaveText('No rules yet.');
+    await expect(row).toContainText('Exactly npm test in ogden-agents-e2e-repo-');
+    await row.getByRole('button', { name: /^Remove Exactly npm test in / }).click();
+    await expect(page.getByTestId('rules-removed')).toHaveText('Removed. Ogden will ask next time.');
+    await expect(page.getByTestId('rules-empty')).toHaveText('No Always allow rules. Ogden asks before each action.');
 
     await page.goto(chatUrl);
     await idle(page);

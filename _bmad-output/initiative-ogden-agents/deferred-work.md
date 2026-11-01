@@ -131,6 +131,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 21.7 (refactor sweep): make the fake OpenCode honour Ogden's permission config so the Local build row proves every tool call asks. From the 21.6 review. (log: "The fake OpenCode asks on every tool call whatever Ogden's permission config says")
 - 14.11 (live check): The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model. From 14.9 review. (log: "The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model")
 - 26.5 (Help menu): move Welcome out of the settings nav (Advanced's last sub-link) into Help, and drop it from `SETTINGS_GROUPS`. From 26.7 design. (log: "Welcome stays as the settings nav's last Advanced sub-link until Help exists")
+- Unowned (Always allow rules list): show in which chat each rule was added; the rule row stores none. From 26.8 review Q5. (log: "Show in which chat each Always allow rule was added")
 
 ## Log
 
@@ -1055,3 +1056,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-settings-with-grouped-navigation-plan.md`
   summary: Welcome stays as the settings nav's last Advanced sub-link until Help exists (26.5 adds the Help menu and moves it there).
   evidence: 26.7 Design Notes; `packages/web/src/settings/settings-groups.ts` (`SETTINGS_GROUPS`, Advanced's `/welcome` page). Welcome is not a `/settings` route, so the nav and phone select link to it but never wrap it.
+
+- source_plan: `/Users/harrisonsmith/Documents/GitHub/ogden-agents/_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-always-allow-scoped-to-a-command-prefix-ad-40-with-a-securit-plan.md`
+  summary: Show in which chat each Always allow rule was added, in the Settings rules list (EXPERIENCE.md Always allow rules row).
+  evidence: `permission_rules` stores no session id; adding one needs a migration and a payload change, which 26.8's plan ruled out. The date is shown.

@@ -3,13 +3,14 @@ import type { QueryObserverResult } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatApiError, switchDriver } from '@/chat/chat-api';
+import { focusComposer } from '@/chat/focus-composer';
 import type { SessionSearch } from '@/router';
 import { notIdleReason } from './driver-toggle';
 import { useDriverShortcut } from './use-driver-shortcut';
 import { useDriverSwitch } from './use-driver-switch';
 
-/** Puts the cursor back in the composer. */
-export const focusComposer = () => document.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')?.focus();
+/** Puts the cursor back in the composer (moved to `chat/focus-composer.ts` so the shell can use it without this module). */
+export { focusComposer };
 
 export interface SessionDriverOptions {
   wsId: string;

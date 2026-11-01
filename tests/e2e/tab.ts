@@ -4,7 +4,8 @@
  * launch link comes from the shared server's handshake, with its launcher
  * token, exactly as `npx ogden-agents` asks for one.
  */
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
+import { isApplePlatform } from '../../packages/web/src/ui/platform.js';
 import { launchLink as handshakeLink } from '../support.js';
 
 /** Where the page's boot script keeps this tab's token (sessionStorage). */
@@ -16,6 +17,15 @@ export const DARK_BG = 'rgb(15, 18, 16)';
 
 /** The sidebar column (md and up), not its sheet copy. */
 export const sidebarOf = (page: Page) => page.locator('aside[data-slot="sidebar"]');
+
+/** Takes focus off whatever has it (the body has it then), so a page-wide key reaches no field. */
+export const blur = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+/**
+ * The command palette's key as the page's own platform reads it: Cmd+K on Apple devices, Ctrl+K elsewhere. Read
+ * from the page, not the host: the Desktop Chrome profile reports a Windows browser on every host.
+ */
+export const paletteKey = async (page: Page) => (isApplePlatform(await page.evaluate(() => navigator.userAgent)) ? 'Meta+k' : 'Control+k');
 
 /** This tab's stored token, or null. */
 export const storedToken = (page: Page) => page.evaluate((key) => sessionStorage.getItem(key), TOKEN_KEY);
@@ -55,4 +65,47 @@ export async function openConnected(page: Page, path = '/', link?: string): Prom
   const launch = link ?? (await launchLink());
   await landConnected(page, launch);
   if (path !== '/') await page.goto(new URL(launch).origin + path);
+}
+
+/** The sidebar footer's Settings link (epic 26, E26-R7), not a project's settings gear. */
+export const settingsLinkOf = (page: Page) => sidebarOf(page).getByRole('link', { name: 'Settings', exact: true });
+
+/** The grouped settings nav beside every settings page (md and up). */
+export const settingsNavOf = (page: Page) => page.getByRole('navigation', { name: 'Settings', exact: true });
+
+/**
+ * Opens Settings from the sidebar footer (it lands on Appearance), then
+ * follows each named link in the settings nav in turn: a group, then one of
+ * its pages ('Advanced', 'Tools').
+ */
+export async function openFromSettings(page: Page, ...links: string[]): Promise<void> {
+  await settingsLinkOf(page).click();
+  await expect(page).toHaveURL(/\/settings\/appearance$/);
+  for (const name of links) await settingsNavOf(page).getByRole('link', { name, exact: true }).click();
+}
+
+/**
+ * Opens the sidebar footer's Help menu (epic 26, 26.5) and chooses `item`
+ * ('Keyboard shortcuts', 'Add the app shortcut', 'Welcome').
+ */
+export async function openFromHelp(page: Page, item: string): Promise<void> {
+  await sidebarOf(page).getByTestId('help-menu').click();
+  await page.getByRole('menu').getByRole('menuitem', { name: item, exact: true }).click();
+}
+
+/**
+ * The status rows among `rows` of chats with `agent` (epic 26): a one-line
+ * row shows only the agent's mark, so its name is read from the accessible
+ * name ("<chat>, <State>, <Agent>, <activity>", or "<Agent> on <model>").
+ */
+export const rowsWithAgent = (rows: Locator, agent: string): Locator =>
+  rows.and(rows.page().locator(`[aria-label*=${JSON.stringify(`, ${agent}, `)}], [aria-label*=${JSON.stringify(`, ${agent} on `)}]`));
+
+/** Fails when the page scrolls sideways (no horizontal overflow at the current width). */
+export async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(scrollWidth, 'page scrolls horizontally').toBeLessThanOrEqual(clientWidth);
 }

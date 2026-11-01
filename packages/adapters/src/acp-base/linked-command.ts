@@ -10,9 +10,10 @@
  * resolved path, so an edit or a removal outside Ogden Agents is always
  * re-checked.
  */
+import { absolutePathFolders } from '../program-launch.js';
 import { accessSync, constants, statSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
-import type { LinkedCommandSpec } from '@ogden-agents/shared';
+import { splitCommandLine, type LinkedCommandSpec } from '@ogden-agents/shared';
 
 /** What a resolved linked command gives a launch: an absolute program, its arguments, and (optionally) a folder and extra environment. */
 export interface ResolvedLinkedCommand {
@@ -67,50 +68,8 @@ function windowsExtensions(env: Readonly<Record<string, string | undefined>>): r
   return [...list, ''];
 }
 
-/**
- * Splits a command line into a program and its arguments, quote-aware (`'`
- * and `"`; `\"` and `\\` inside double quotes), never through a shell. A
- * backslash outside quotes is literal, so an unquoted Windows path keeps its
- * separators; a path with a space needs quoting, as in a shell.
- */
-export function splitCommandLine(line: string): string[] {
-  const tokens: string[] = [];
-  let current = '';
-  let quote: '"' | "'" | undefined;
-  let hasToken = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]!;
-    if (quote !== undefined) {
-      if (ch === quote) {
-        quote = undefined;
-        continue;
-      }
-      if (quote === '"' && ch === '\\' && (line[i + 1] === '"' || line[i + 1] === '\\')) {
-        current += line[++i];
-        continue;
-      }
-      current += ch;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      hasToken = true;
-      continue;
-    }
-    if (ch === ' ' || ch === '\t') {
-      if (hasToken) {
-        tokens.push(current);
-        current = '';
-        hasToken = false;
-      }
-      continue;
-    }
-    current += ch;
-    hasToken = true;
-  }
-  if (hasToken) tokens.push(current);
-  return tokens;
-}
+/** The quote-aware splitter, shared with core's Problems check (AD-38). */
+export { splitCommandLine };
 
 /** What Windows can start with no shell: `.cmd`, `.bat`, `.ps1` and npm's extensionless shims all need one (Node refuses them, EINVAL). */
 const WINDOWS_STARTABLE = new Set(['.exe', '.com']);
@@ -120,7 +79,9 @@ type Found = { file: string } | { script: string } | undefined;
 
 /**
  * An already-absolute program resolved directly; a bare name (no path
- * separator) searched on `env`'s `PATH`, in `PATHEXT` order on Windows. On
+ * separator) searched on the absolute folders of `env`'s `PATH` only (an
+ * empty or relative entry would mean the server's own folder;
+ * `program-launch.ts`, 8.12), in `PATHEXT` order on Windows. On
  * Windows only a `.exe` or `.com` counts (epic 21 audit): an npm shim, a
  * `.cmd` or a `.bat` can't be started without a shell, so it is reported as
  * a script rather than resolved to something every start would fail on. A
@@ -139,8 +100,7 @@ function resolveProgram(
     if (!isExecutable(program)) return undefined;
     return startable(program) ? { file: program } : { script: program };
   }
-  const pathValue = lookupEnv(env, 'PATH', windows) ?? '';
-  const dirs = pathValue.split(paths.delimiter).filter((dir) => dir !== '');
+  const dirs = absolutePathFolders(lookupEnv(env, 'PATH', windows), windows ? 'win32' : 'linux');
   const extensions = windows ? windowsExtensions(env) : [''];
   let script: string | undefined;
   for (const dir of dirs) {
@@ -207,4 +167,28 @@ export function resolveLinkedCommand(
     ok: true,
     resolved: { command, args, ...(cwd === undefined ? {} : { cwd }), ...(spec.env === undefined ? {} : { env: spec.env }) },
   };
+}
+
+/** A program found on its own (no command line to split): its absolute file, or plain words why not. */
+export type FoundProgram = { ok: true; file: string } | { ok: false; reason: string; script?: true };
+
+/**
+ * Finds one program to start with no shell (8.9's Problems runner, AD-38):
+ * an absolute path as given, a bare name on the absolute folders of `env`'s
+ * `PATH` (as every resolution here). A relative path with a separator is refused.
+ * On Windows a `.cmd`, `.bat` or npm shim is a script that needs a shell, so
+ * it is refused in plain words, never run.
+ */
+export function findProgram(program: string, env: Readonly<Record<string, string | undefined>>, options: Pick<ResolveLinkedCommandOptions, 'platform' | 'isExecutable'> = {}): FoundProgram {
+  const platform = options.platform ?? process.platform;
+  const windows = platform === 'win32';
+  const paths = windows ? win32 : posix;
+  const isExecutable = options.isExecutable ?? ((file: string) => runnableFile(file, windows));
+  if (program === '') return { ok: false, reason: 'Type the command to run.' };
+  const hasSeparator = program.includes('/') || (windows && program.includes('\\'));
+  if (hasSeparator && !paths.isAbsolute(program)) return { ok: false, reason: `Give an absolute path for "${program}", or just the program's name if it's on your PATH.` };
+  const found = resolveProgram(program, env, { windows, paths, isExecutable });
+  if (found === undefined) return { ok: false, reason: `${program} wasn't found on this computer. Check that it's installed and on your PATH.` };
+  if ('script' in found) return { ok: false, script: true, reason: `${paths.basename(found.script)} is a script that Windows can only start through a shell, so Ogden doesn't run it here yet.` };
+  return { ok: true, file: found.file };
 }

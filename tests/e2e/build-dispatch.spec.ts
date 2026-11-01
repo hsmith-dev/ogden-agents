@@ -5,6 +5,8 @@
  * same worktree and ends Ready for review after Ogden Agents re-ran the
  * project's tests; a build whose tests fail when re-run ends Failed with the
  * count and has no Approve; Settings, Builds saves the install's limits.
+ * Story 8.6: a line comment on the build's diff goes with Reject and retry,
+ * in the note the reject request carries.
  *
  * Real `git`; a ticket store that reads and writes the plan files (no uv);
  * a fixed sandbox answer that runs the fixture's test command with no
@@ -138,6 +140,43 @@ test('Reject and retry with a note discards the build and builds the ticket agai
       const session = (await (await call('GET', apiPath(API_ROUTES.workspaceSessions, { wsId }))).json()) as { sessions: Array<{ id: string }> };
       expect(session.sessions.length).toBe(2);
       void newer;
+    },
+    { files: FILES, extra: { ticketStore: store as never, bmadSource, sandbox: fixedSandbox({ available: true, kind: 'test' }) } },
+  );
+});
+
+test("a line comment on a build's diff goes with Reject and retry in its note (8.6)", async ({ page }) => {
+  test.setTimeout(120_000);
+  const store = createPlanFileTicketStore(TICKETS);
+  const bmadSource = (await serverModule()).createMemoryBmadSource({ ready: true });
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const { call, wsId } = await prepare(page, repo);
+      expect((await call('POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1' })).status).toBe(201);
+      await page.goto(`${server.url}/w/${wsId}/review/1.1`);
+      await expect(page.getByTestId('review-outcome')).toHaveText('Ready for review', { timeout: 60_000 });
+      await page.getByTestId('review-changes').locator('summary').click();
+      const button = page.getByTestId('diff-comment-button').first();
+      const name = (await button.getAttribute('aria-label')) ?? '';
+      const line = /line (\d+)$/.exec(name)?.[1];
+      const path = await button.locator('xpath=ancestor::*[@data-diff-file][1]').getAttribute('data-diff-file');
+      expect(line).toBeDefined();
+      await button.click();
+      await page.getByTestId('diff-comment-input').fill('Use the blue one here.');
+      await page.getByTestId('diff-comment-save').click();
+      await expect(page.getByTestId('comments-bar-title')).toHaveText('Comments to send (1)');
+      await expect(page.getByTestId('review-comments-go-with')).toHaveText('Your comment goes with it.');
+
+      await page.getByTestId('review-reject').click();
+      await expect(page.getByTestId('review-note')).toHaveValue(/^Please address these review comments:/);
+      await expect(page.getByTestId('review-note-comments')).toHaveText('Your comment goes with it.');
+      const rejected = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/builds/1.1/reject'));
+      await page.getByTestId('review-reject-confirm').click();
+      const note = ((await rejected).postDataJSON() as { note?: string }).note ?? '';
+      expect(note).toContain(`${path}:${line}`);
+      expect(note).toContain('Use the blue one here.');
+      await expect(page.getByTestId('comments-bar')).toHaveCount(0);
     },
     { files: FILES, extra: { ticketStore: store as never, bmadSource, sandbox: fixedSandbox({ available: true, kind: 'test' }) } },
   );

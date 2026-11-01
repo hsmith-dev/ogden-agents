@@ -82,13 +82,15 @@ test('a confirmed remote machine runs a chat and an attended build, pulled back 
       await page.getByTestId('machine-picker').click();
       await page.locator(`[data-testid="machine-option"][data-machine="${machineId}"]`).click();
       await expect(page.getByTestId('machine-picker')).toContainText('Build bench');
+      // New chat opens the draft with the machine picked (epic 26); its first message starts the chat there.
       await page.getByTestId('new-chat').click();
-      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_`));
-      await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/new\\?machine=${machineId}$`));
+      await expect(page.getByTestId('machine-picker')).toContainText('Build bench');
 
       const remoteComposer = page.getByRole('textbox', { name: 'Message Claude Code' });
       await remoteComposer.fill('session-start');
       await remoteComposer.press('Enter');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_`));
       // The remote chat's own cwd (this story's design call: the machine's own home directory, never the
       // workspace's folder, which names nothing on the remote machine) -- proof the agent really ran elsewhere,
       // through the fake remote host's real local `sh -c`, not a scripted stand-in.

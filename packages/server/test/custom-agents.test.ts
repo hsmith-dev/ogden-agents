@@ -534,6 +534,22 @@ describe("a custom agent's tool calls always ask (epic 21 story 21.5)", () => {
     const asked = eventsOf(server, session.id).find((event) => event.type === 'permission.requested');
     expect(asked).toMatchObject({ payload: { alwaysAllowScope: null, cautionLevel: 'ask_every_time' } });
   });
+
+  it('offers neither command scope for a command (AD-40), and refuses a prefix choice', async () => {
+    const { server, tab, register } = await setUp();
+    expect((await register({ displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    const { wsId, chatWith, send } = await trustedProject(server, tab);
+    const session = await chatWith('custom-my-agent');
+    await send(session.id, 'permission npm test -- cart');
+    await waitFor(() => stateOf(server, session.id) === 'waiting', 'the card for the command', 15_000);
+    const asked = eventsOf(server, session.id).find((event) => event.type === 'permission.requested');
+    if (asked?.type !== 'permission.requested') throw new Error('no card');
+    expect(asked.payload.alwaysAllowScope).toBeNull();
+    expect(asked.payload.alwaysAllowPrefix).toBeUndefined();
+    const refused = await request(server, tab, 'POST', apiPath(API_ROUTES.sessionPermission, { wsId, sesId: session.id, requestId: asked.payload.requestId }), { decision: 'allow_always', scope: 'prefix' });
+    expect(refused.status).toBe(400);
+    expect(server.core.permissions.listRules(wsId as never)).toEqual([]);
+  });
 });
 
 describe('epic 21 story 21.6: a custom agent chats only, and Build never offers it', () => {

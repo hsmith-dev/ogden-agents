@@ -20,6 +20,14 @@ export const TEST_TIMEOUT_MS = onWindows ? (onCi ? 30_000 : 20_000) : onCi ? 15_
 export const HOOK_TIMEOUT_MS = onCi ? 30_000 : onWindows ? 20_000 : 10_000;
 
 /**
+ * For a test that starts several processes in turn: a server and its agents, a manager and its workers, a session reopened
+ * in a new process. Each start is about a second on a quiet machine and several times that on a loaded one, so the default
+ * tier would measure them. Pass it as the test's last argument, or for a file whose every test does so,
+ * `vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS })` at its top.
+ */
+export const PROCESS_TEST_TIMEOUT_MS = onWindows ? (onCi ? 45_000 : 30_000) : onCi ? 30_000 : 20_000;
+
+/**
  * For one test that does a whole flow: several servers, fixture repos and worktrees, a build, a review and an approve.
  * Pass it as the test's last argument: `it('...', async () => {...}, FULL_FLOW_TEST_TIMEOUT_MS)`.
  */

@@ -120,10 +120,10 @@ export const composer = (page: Page) => page.getByRole('textbox', { name: 'Messa
  * land while this one is still on its way: the session can show `working`
  * before the POST returns, and an Enter while a send is in flight is ignored.
  */
-export async function send(page: Page, text: string): Promise<void> {
+export async function send(page: Page, text: string, options?: { timeout?: number }): Promise<void> {
   await composer(page).fill(text);
   await composer(page).press('Enter');
-  await expect(composer(page)).toHaveValue('');
+  await expect(composer(page)).toHaveValue('', options);
 }
 
 /** The web app's appearance key (`APPEARANCE_STORAGE_KEY` in packages/shared). */

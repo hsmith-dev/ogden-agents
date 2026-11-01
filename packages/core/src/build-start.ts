@@ -5,7 +5,7 @@
  */
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { ATTENDED_SANDBOX, blockedSentence, RUN_NOT_ACTIVE_MESSAGE, RunId, BMAD_FILES_UNCOMMITTED_MESSAGE, BUILD_BRANCH_PREFIX, WORKTREES_FOLDER_NOT_REAL_MESSAGE, DISK_SPACE_LOW_MESSAGE, MIN_FREE_DISK_BYTES, NOT_READY_MESSAGE, PREREQUISITE_UNMET_MESSAGE, RUN_ACTIVE_MESSAGE, RUN_REASON_START_FAILED, VCS_NOT_TOP_LEVEL_MESSAGE, VCS_UNAVAILABLE_MESSAGE, type BuildAgent, type BuildMode, type RemoteMachineId, type Run, type Session, type TicketDetail, type WorkspaceId } from '@ogden-agents/shared';
+import { ATTENDED_SANDBOX, blockedSentence, RUN_NOT_ACTIVE_MESSAGE, RunId, BMAD_FILES_UNCOMMITTED_MESSAGE, BUILD_BRANCH_PREFIX, buildSessionTitle, WORKTREES_FOLDER_NOT_REAL_MESSAGE, DISK_SPACE_LOW_MESSAGE, MIN_FREE_DISK_BYTES, NOT_READY_MESSAGE, PREREQUISITE_UNMET_MESSAGE, RUN_ACTIVE_MESSAGE, RUN_REASON_START_FAILED, VCS_NOT_TOP_LEVEL_MESSAGE, VCS_UNAVAILABLE_MESSAGE, type BuildAgent, type BuildMode, type RemoteMachineId, type Run, type Session, type TicketDetail, type WorkspaceId } from '@ogden-agents/shared';
 import { runShortOf } from './build-run-folder.js';
 import { removeObjectStore } from './build-object-store.js';
 import { ensureWorktreesRoot, freeBytesOf } from './build-worktrees.js';
@@ -105,7 +105,8 @@ export function createStarter(ctx: BuildCtx) {
    * repo or the data folder yet (its worktree comes at dispatch).
    */
   const enqueue = async (workspaceId: WorkspaceId, ref: string, agent: BuildAgent, plan: StartPlan, note?: string): Promise<{ run: Run; session: Session }> => {
-    const session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: agent });
+    // Named by its ticket at creation (26.6), so its first prompt (the skill command) never names it.
+    const session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: agent, autoTitle: buildSessionTitle(ref, plan.ticket.title) });
     const run = entities.createRun({ sessionId: session.id, ticketRef: ref, sandbox: plan.sandboxKind, agent, machineId: plan.machineId, queuePosition: 1 });
     if (note !== undefined) pendingNotes.set(run.id, { note, resume: false });
     return { run, session };
@@ -163,7 +164,7 @@ export function createStarter(ctx: BuildCtx) {
       for (const folder of PRECREATED_FOLDERS) mkdirSync(join(real, folder), { recursive: true });
       const deadline = deadlineFromNow();
       if (queued === undefined) {
-        session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: agent });
+        session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: agent, autoTitle: buildSessionTitle(ref, ticket.title) });
         run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: sandboxKind, branch, baseRevision: head.revision, baseBranch: head.branch, agent, machineId, deadline });
       } else {
         session = entities.getSession(queued.sessionId);

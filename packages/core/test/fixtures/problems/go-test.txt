@@ -1,0 +1,5 @@
+--- FAIL: TestWrap (0.00s)
+    wrap_test.go:12: got "a b", want "a  b"
+FAIL
+FAIL	example.com/wrap	0.004s
+FAIL

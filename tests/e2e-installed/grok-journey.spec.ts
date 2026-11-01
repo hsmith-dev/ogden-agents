@@ -89,12 +89,17 @@ test('Grok beside Claude Code in a trusted Simple project: own token only, a car
     const trusted = page.getByTestId('agent-option').filter({ hasText: 'Grok' });
     await expect(trusted).not.toHaveAttribute('aria-disabled', 'true');
     await trusted.click();
+    // New chat opens the draft with the pick (epic 26); its first message starts the chat with it.
     await page.getByTestId('new-chat').click();
-    await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
+    await expect(page).toHaveURL(/\/w\/[^/]+\/new\?agent=grok$/);
+    await composerOf(page, 'Grok').fill('whoami');
+    await composerOf(page, 'Grok').press('Enter');
+    await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/, AGENT);
     grokUrl = page.url();
     await expect(page.getByTestId('session-agent')).toHaveText('Grok');
-    await say(page, 'Grok', 'whoami');
-    await expect(replies(page).last()).toContainText('agent=grok');
+    await expect(page.getByTestId('message-user').last()).toHaveText('whoami', AGENT);
+    await expect(replies(page).last()).toContainText('agent=grok', AGENT);
+    await expect(state(page)).toHaveAttribute('data-state', 'idle', AGENT);
   });
 
   await test.step("Grok's process gets its own token and home only, and no other agent gets the token (AD-16)", async () => {

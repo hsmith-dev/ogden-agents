@@ -1,5 +1,6 @@
 import {
   BMAD_DOWNLOAD_INTEGRITY_MESSAGE,
+  COMMAND_CHANGED_MESSAGE,
   BMAD_DOWNLOAD_OFFLINE_MESSAGE,
   BMAD_NOT_DOWNLOADED_MESSAGE,
   BMAD_ALREADY_SET_UP_MESSAGE,
@@ -599,10 +600,13 @@ export class SecretsUnavailableError extends CoreError {
   }
 }
 
+/** A schema failure's issues as a {@link ValidationError} lists them: each one's path and message. */
+export const issuesOf = (error: { issues: ReadonlyArray<{ path: PropertyKey[]; message: string }> }): ValidationIssue[] => error.issues.map((issue) => ({ path: issue.path, message: issue.message }));
+
 /** Throws a schema's refusal as a {@link ValidationError}: its first issue's words (else `fallback`), every issue kept. */
 export function refuseInvalid(error: { issues: Array<{ path: PropertyKey[]; message: string }> }, fallback: string): never {
   const issue = error.issues[0];
-  throw new ValidationError(issue?.message ?? fallback, error.issues.map((each) => ({ path: each.path, message: each.message })));
+  throw new ValidationError(issue?.message ?? fallback, issuesOf(error));
 }
 
 /** A keychain failure as callers see it: a {@link SecretsUnavailableError} as it is, anything else as one with cause `unexpected`. */
@@ -745,5 +749,57 @@ export class BuildSessionReadOnlyError extends CoreError {
   override readonly name = 'BuildSessionReadOnlyError';
   constructor() {
     super('build_session_read_only', BUILD_SESSION_READ_ONLY_MESSAGE);
+  }
+}
+
+/**
+ * Workbench Files (AD-36): the path is `.git`, a credential folder, or its
+ * real path leaves the project or lands in a fenced folder. The server
+ * answers 403 `path_protected`; nothing was read, not even the size.
+ */
+export class PathProtectedError extends CoreError {
+  override readonly name = 'PathProtectedError';
+  constructor(message: string) {
+    super('path_protected', message);
+  }
+}
+
+/**
+ * Workbench Changes (AD-37): a stage, unstage, revert or commit was refused
+ * because a chat in the same folder (the project, or that worktree) is
+ * working or waiting. The server answers 409 `agent_mid_turn`; nothing changed.
+ */
+export class AgentMidTurnError extends CoreError {
+  override readonly name = 'AgentMidTurnError';
+  constructor(message: string) {
+    super('agent_mid_turn', message);
+  }
+}
+
+/** Workbench Changes (AD-37): the hunk changed since it was shown. 409 `hunk_outdated`; nothing changed. */
+export class HunkOutdatedError extends CoreError {
+  override readonly name = 'HunkOutdatedError';
+  constructor(message: string) {
+    super('hunk_outdated', message);
+  }
+}
+
+/** Open in editor (AD-39): no editor found, the one named isn't found, or it didn't start. 409 `editor_unavailable`. */
+export class EditorUnavailableError extends CoreError {
+  override readonly name = 'EditorUnavailableError';
+  constructor(message: string) {
+    super('editor_unavailable', message);
+  }
+}
+
+/**
+ * Problems (AD-38; 8.9): a detected script's text in `package.json` is not
+ * the one the user confirmed, or a saved command no longer matches what
+ * would run. 409 `command_changed`; nothing ran and nothing was stored.
+ */
+export class CommandChangedError extends CoreError {
+  override readonly name = 'CommandChangedError';
+  constructor() {
+    super('command_changed', COMMAND_CHANGED_MESSAGE);
   }
 }

@@ -13,6 +13,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { markNeedsYouOpened } from '../src/shell/needs-you-target';
 import { TooltipProvider } from '../src/ui/tooltip';
 
 const WS = 'ws_1';
@@ -41,12 +42,18 @@ const fake = vi.hoisted(() => ({
   claudeListed: true,
   /** What `sendMessage` does after recording the text. */
   sendResult: (() => Promise.resolve({ messageId: 'msg_x', queued: false })) as () => Promise<unknown>,
+  /** The location's hash, without `#` (a Needs you row names its card there, epic 26). */
+  hash: '',
+  /** The location's path: another page's while the router is on its way there (story 26.10). */
+  pathname: '/w/ws_1/s/ses_1',
 }));
 
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ wsId: 'ws_1', sesId: 'ses_1' }),
   useSearch: () => fake.search,
   useNavigate: () => fake.navigate,
+  useRouterState: ({ select }: { select: (state: { location: { pathname: string; hash: string; href: string; state: Record<string, string> } }) => unknown }) =>
+    select({ location: { pathname: fake.pathname, hash: fake.hash, href: `${fake.pathname}#${fake.hash}`, state: { __TSR_key: 'key_1' } } }),
   Link: ({ children }: { children: ReactNode }) => <a href="/">{children}</a>,
 }));
 vi.mock('@/shell/workspace-header', () => ({ WorkspaceHeader: ({ children }: { children?: ReactNode }) => <header>{children}</header> }));
@@ -186,6 +193,8 @@ beforeEach(() => {
   seq = 0;
   fake.events = [created()];
   fake.search = {};
+  fake.hash = '';
+  fake.pathname = '/w/ws_1/s/ses_1';
   fake.navigations = [];
   fake.fetches = 0;
   fake.driver = 'ui';
@@ -293,6 +302,68 @@ describe('the session page’s driver wiring (story 3.9; 3.6 review F7)', () => 
     fake.driver = 'terminal';
     await push(driverChanged('terminal'));
     expect(screen.queryByTestId('waiting-bar')).toBeNull();
+  });
+});
+
+describe('a Needs you row opens its chat on its card (epic 26, story 26.1)', () => {
+  const asked = () => [
+    created(),
+    event('permission.requested', {
+      sessionId: SES,
+      requestId: 'perm_1',
+      toolCall: { toolCallId: 'call_1', title: 'Run ls', kind: 'execute', command: 'ls' },
+      alwaysAllowScope: null,
+      cautionLevel: 'ask_for_commands',
+    }),
+    event('session.state_changed', { sessionId: SES, state: 'waiting' }),
+  ];
+
+  it('the hash naming a pending card scrolls to and focuses it', async () => {
+    fake.events = asked();
+    fake.hash = 'permission-perm_1';
+    await mount();
+    expect(document.activeElement).toBe(document.getElementById('permission-perm_1'));
+  });
+
+  it('opening the same row again, on the URL already shown, focuses the card again', async () => {
+    fake.events = asked();
+    fake.hash = 'permission-perm_1';
+    await mount();
+    const card = document.getElementById('permission-perm_1')!;
+    expect(document.activeElement).toBe(card);
+    card.blur();
+    expect(document.activeElement).not.toBe(card);
+    // No new history entry (the same location): only the open counts.
+    act(() => markNeedsYouOpened('perm_1'));
+    expect(document.activeElement).toBe(card);
+  });
+
+  it('a hash naming no pending card opens the chat plainly', async () => {
+    fake.events = asked();
+    fake.hash = 'permission-perm_gone';
+    await mount();
+    expect(document.activeElement?.closest('[data-testid="permission-card"]') ?? null).toBeNull();
+  });
+
+  it('not while the terminal drives', async () => {
+    fake.events = asked();
+    fake.hash = 'permission-perm_1';
+    fake.driver = 'terminal';
+    fake.events.push(driverChanged('terminal'));
+    await mount();
+    expect(document.activeElement?.closest('[data-testid="permission-card"]') ?? null).toBeNull();
+  });
+});
+
+describe('a page on its way to another one (story 26.10)', () => {
+  it('disables the composer while the location is no longer this chat, so nothing typed reaches it', async () => {
+    fake.pathname = '/w/ws_1/new';
+    await mount();
+    expect(composerInput()?.readOnly).toBe(true);
+    cleanup();
+    fake.pathname = '/w/ws_1/s/ses_1/';
+    await mount();
+    expect(composerInput()?.readOnly).toBe(false);
   });
 });
 

@@ -477,6 +477,93 @@ export const API_ROUTES = {
    */
   workspaceDocument: `${API_BASE}/workspaces/:wsId/documents`,
   /**
+   * `GET ?path=<workspace-relative folder>` → `WorkspaceFolderResponse`
+   * (Workbench Files, AD-36): one folder of the project, folders first; no
+   * `path` lists the root. 400 `invalid_request` for a malformed path, 403
+   * `path_protected` for `.git`, a credential folder or anything whose real
+   * path leaves the project, 404 `not_found` for a missing folder, a file or
+   * an unknown project. Behind the gate only (AD-15); read-only. `session=`
+   * (epic 8 entry 2) roots it at that chat's worktree; a foreign or unknown
+   * session is 404.
+   */
+  workspaceFiles: `${API_BASE}/workspaces/:wsId/files`,
+  /**
+   * `GET ?path=<workspace-relative file>` → `WorkspaceFileResponse`
+   * (Workbench Files): one file, read-only, `text` (an environment file's
+   * values masked), `binary` or `too_large` (over `MAX_WORKSPACE_FILE_BYTES`,
+   * no content). The same refusals as {@link API_ROUTES.workspaceFiles}; a
+   * folder answers 404. The content is only ever in this response.
+   */
+  workspaceFileContent: `${API_BASE}/workspaces/:wsId/files/content`,
+  /**
+   * `POST WorkspaceFileLinksRequest` → `WorkspaceFileLinksResponse` (8.7):
+   * which of at most `MAX_WORKSPACE_FILE_LINKS` candidate paths (from an
+   * agent's reply or a markdown file's links) are files the viewer would
+   * open, each checked as a read is (refused, missing, a folder or a hard
+   * link outside `node_modules`: absent). Nothing else is answered: no real
+   * path, size or content; `no-store`; the paths are never logged. 400
+   * `invalid_request` for a malformed path or too many, 404 for an unknown
+   * project or a foreign session.
+   */
+  workspaceFileLinks: `${API_BASE}/workspaces/:wsId/files/links`,
+  // The Workbench's other lanes (epic 8 entry 2's contract): each is behind the gate only (AD-15), on no
+  // paired-device allowlist (AD-34, epic 24), and answers 501 `not_implemented` until its lane wires it.
+  // Every path is a `WorkspaceRelativePath` in the query or body; `session` roots it at that chat's worktree.
+  /**
+   * `GET ?q=&mode=&matchCase=&session=` → `WorkspaceSearchResponse` (AD-36;
+   * 8.8): text or file names, at most `WORKSPACE_SEARCH_MAX_MATCHES`,
+   * `truncated` past any cap. 400 for a bad query, 404 for an unknown
+   * project or a foreign session, 501 until the files port can search.
+   */
+  workspaceFileSearch: `${API_BASE}/workspaces/:wsId/files/search`,
+  /**
+   * `POST OpenInEditorRequest` → `OpenInEditorResponse` (AD-39; 8.10): the
+   * file handed to an editor at its line, checked as the files routes check
+   * it first (400, 403 `path_protected`, 404). 409 `editor_unavailable`.
+   */
+  workspaceFileOpenInEditor: `${API_BASE}/workspaces/:wsId/files/open-in-editor`,
+  /** `GET ?view=&session=&turn=` → `ChangesResponse` (AD-37; 8.3 to 8.5): one view's changed files. */
+  workspaceChanges: `${API_BASE}/workspaces/:wsId/changes`,
+  /** `GET ?view=&path=&session=&turn=` → `FileDiffResponse`: one file's hunks. No content in any event. */
+  workspaceChangesFile: `${API_BASE}/workspaces/:wsId/changes/file`,
+  /**
+   * `POST HunkActionRequest` → `HunkActionResponse`: stage, unstage or
+   * revert one hunk or a whole file. 409 `agent_mid_turn` while a chat in
+   * the same folder is working or waiting, 409 `hunk_outdated`.
+   */
+  workspaceChangesHunks: `${API_BASE}/workspaces/:wsId/changes/hunks`,
+  /**
+   * `POST UndoHunkRequest` → `HunkActionResponse` (8.5): puts back what a
+   * revert took, while the server still keeps it. 404 when it is gone, 409
+   * `hunk_outdated` when the file was edited since, `agent_mid_turn`.
+   */
+  workspaceChangesHunksUndo: `${API_BASE}/workspaces/:wsId/changes/hunks/undo`,
+  /** `GET` → `TurnsResponse`: the chat's recorded turns (from `session.turn_changes_recorded`), newest first. */
+  sessionTurns: `${API_BASE}/workspaces/:wsId/sessions/:sesId/turns`,
+  /**
+   * `POST CommitWorktreeRequest` → `CommitWorktreeResponse` (AD-17 CAP-33
+   * note; epic 27): commits the worktree chat's changes on its own branch,
+   * never pushed, appending `session.worktree_committed`. 409
+   * `invalid_operation` for a chat without a worktree, `agent_mid_turn`.
+   */
+  sessionWorktreeCommit: `${API_BASE}/workspaces/:wsId/sessions/:sesId/worktree/commit`,
+  /**
+   * `GET` → `ProjectCommandsResponse`; `PUT SetProjectCommandsRequest` → the
+   * same (AD-38; 8.9). Every Problems route answers 409 `scripts_not_trusted`
+   * in a project not trusted yet; `PUT` 400 `invalid_request` with the plain
+   * reason for a command that needs a shell, 409 `command_changed` for a
+   * script whose text isn't the one confirmed.
+   */
+  workspaceProjectCommands: `${API_BASE}/workspaces/:wsId/project-commands`,
+  /** `POST` → 202 `ProjectCommandRunResponse`: runs a confirmed command in a trusted project. 409 `command_changed` (nothing ran), 409 `invalid_operation` while it already runs, 404 an unknown command. */
+  workspaceProjectCommandRuns: `${API_BASE}/workspaces/:wsId/project-commands/:commandId/runs`,
+  /** `GET` → `ProjectCommandRunDetail`: a run, its masked output and parsed failures (`no-store`). */
+  workspaceProjectCommandRun: `${API_BASE}/workspaces/:wsId/project-command-runs/:runId`,
+  /** `POST` → `ProjectCommandRunResponse`: stops a running command. */
+  workspaceProjectCommandRunStop: `${API_BASE}/workspaces/:wsId/project-command-runs/:runId/stop`,
+  /** `GET` → `EditorsResponse` (AD-39; 8.10): the editors found on this computer. `PUT SetEditorRequest` → `EditorsResponse`: the editor files open in (409 `editor_unavailable` when not found). */
+  editors: `${API_BASE}/editors`,
+  /**
    * `POST StartBuildRequest` → 201 `BuildResponse` (story 5.2): builds one
    * ticket unattended in its own worktree and `build` session; `{ all: true }`
    * → 202 `AllReadyBuildsResponse` (5.8; 501 until then). Serves the

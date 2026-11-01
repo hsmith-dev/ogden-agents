@@ -1,6 +1,7 @@
 // Headless smoke of a built desktop app (story 13.2): it starts, the bundled Node runs the packed
 // server, the window loads the server's page and the tab exchange happens (`launch code used; tab
-// token minted` in the server log), and quitting leaves no `ogden-node` process behind.
+// token minted` in the server log), File > New Chat (Cmd/Ctrl+N) runs the page's new-chat event (epic
+// 26; the page's side is Playwright's), and quitting leaves no `ogden-node` process behind.
 //
 //   node packages/desktop/scripts/smoke.mjs --app <Ogden Agents.app | ogden-agents.exe>
 //   node packages/desktop/scripts/smoke.mjs --installer <setup.exe>      (Windows: installs silently first)
@@ -10,7 +11,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { appExecutable, installNsis, killSidecars, launchApp, listSidecars, newWorkspace, readReport, serverLog, sleep, waitFor, writeQuit } from './app-harness.mjs';
+import { appExecutable, chooseMenu, installNsis, killSidecars, launchApp, listSidecars, newWorkspace, readReport, serverLog, sleep, waitFor, writeQuit } from './app-harness.mjs';
 
 const { values } = parseArgs({ options: { app: { type: 'string' }, installer: { type: 'string' } }, strict: true });
 if (!values.app && !values.installer) {
@@ -44,6 +45,12 @@ try {
   const running = listSidecars(before);
   if (running.length === 0) throw new Error('no ogden-node process while the app runs');
   console.log(`ok: page ${page}, tab token minted, sidecar pids ${running.map((p) => p.pid).join(',')}`);
+
+  // File > New Chat, through the menu's own handler: the shell shows the window and evaluates the page's event.
+  chooseMenu(ws, 'new_chat');
+  await waitFor('menu_new_chat', () => has('menu_new_chat'), 30_000);
+  if (has('menu_new_chat').data?.ok !== true) throw new Error(`File > New Chat did not reach the page: ${JSON.stringify(has('menu_new_chat').data)}`);
+  console.log('ok: File > New Chat evaluated the new-chat event in the page');
 
   writeQuit(ws);
   const exit = await Promise.race([child.exited, sleep(30_000).then(() => 'timeout')]);

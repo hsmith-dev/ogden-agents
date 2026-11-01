@@ -87,7 +87,7 @@ describe('Needs you from pane events', () => {
 
 describe('the Needs you row of a pane', () => {
   it('opens the project\'s Terminals, not a chat', async () => {
-    const root = createRootRoute({ component: () => <TooltipProvider><SidebarProvider><NeedsYouGroup items={[{ id: 'p', wsId: WS, sesId: '', paneId: PANE, workspaceName: 'My project', chatName: 'Terminal 1', text: 'Terminal 1 may need you' }]} /></SidebarProvider></TooltipProvider> });
+    const root = createRootRoute({ component: () => <TooltipProvider><SidebarProvider><NeedsYouGroup items={[{ id: 'p', kind: 'pane', wsId: WS, sesId: '', paneId: PANE, workspaceName: 'My project', chatName: 'Terminal 1', text: 'Terminal 1 may need you' }]} /></SidebarProvider></TooltipProvider> });
     const terminals = createRoute({ getParentRoute: () => root, path: '/w/$wsId/terminals' });
     const session = createRoute({ getParentRoute: () => root, path: '/w/$wsId/s/$sesId' });
     const router = createRouter({ routeTree: root.addChildren([terminals, session]), history: createMemoryHistory({ initialEntries: ['/'] }) });
@@ -95,5 +95,8 @@ describe('the Needs you row of a pane', () => {
     const html = renderToStaticMarkup(<RouterProvider router={router} />);
     expect(html).toContain(`href="/w/${WS}/terminals"`);
     expect(html).toContain('Terminal 1 may need you');
+    // Its glyph is a question's, and its name reads both lines.
+    expect(html).toContain('data-glyph="question"');
+    expect(html).toContain('aria-label="Terminal 1 may need you, in My project, Terminal 1"');
   });
 });

@@ -34,7 +34,7 @@ import { zip } from '../../packages/adapters/test/archives.ts';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { API_ROUTES, requestQuit } from '../support.js';
 import { startChat } from '../e2e/chat-server.js';
-import { expectConnected, landConnected, storedToken } from '../e2e/tab.js';
+import { expectConnected, landConnected, rowsWithAgent, storedToken } from '../e2e/tab.js';
 import { bmadServer, uvReady, waitForExit, type BmadServer, type Launched } from './installed.js';
 
 const servers: BmadServer[] = [];
@@ -164,12 +164,17 @@ test('two agents at once in a Simple project: picker, own keys only, Antigravity
     await expect(page.getByTestId('agent-trust-project')).toContainText('Trust this project for Fake Agent');
     await options.nth(1).click();
     await expect(picker).toHaveAttribute('data-agent', 'antigravity');
+    // New chat opens the draft with the pick (epic 26); its first message starts the chat with it.
     await page.getByTestId('new-chat').click();
-    await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
+    await expect(page).toHaveURL(/\/w\/[^/]+\/new\?agent=antigravity$/);
+    await composerOf(page, 'Antigravity').fill('whoami');
+    await composerOf(page, 'Antigravity').press('Enter');
+    await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/, AGENT);
     agyUrl = page.url();
     await expect(page.getByTestId('session-agent')).toHaveText('Antigravity');
-    await say(page, 'Antigravity', 'whoami');
-    await expect(replies(page).last()).toContainText('agent=antigravity');
+    await expect(page.getByTestId('message-user').last()).toHaveText('whoami', AGENT);
+    await expect(replies(page).last()).toContainText('agent=antigravity', AGENT);
+    await expect(state(page)).toHaveAttribute('data-state', 'idle', AGENT);
   });
 
   await test.step('both at once: Antigravity holds a shell command on its card while Claude Code answers', async () => {
@@ -181,8 +186,8 @@ test('two agents at once in a Simple project: picker, own keys only, Antigravity
     await say(page, 'Claude Code', 'whoami');
     await expect(replies(page).last()).toContainText('agent=default');
     const rows = page.getByTestId('status-row');
-    await expect(rows.filter({ hasText: 'Antigravity' })).toHaveCount(1);
-    await expect(rows.filter({ hasText: 'Claude Code' })).toHaveCount(1);
+    await expect(rowsWithAgent(rows, 'Antigravity')).toHaveCount(1);
+    await expect(rowsWithAgent(rows, 'Claude Code')).toHaveCount(1);
     await page.goto(agyUrl);
     await expect(state(page)).toHaveAttribute('data-state', 'waiting');
     await card(page).getByRole('button', { name: 'Allow once' }).click();

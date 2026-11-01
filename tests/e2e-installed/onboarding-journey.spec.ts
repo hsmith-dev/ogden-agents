@@ -14,7 +14,7 @@
  * 4. Welcome's one question, Simple chats or BMad Method?, with Simple chats
  *    picked and BMad Method available (epic 4 ships Planning and Board; it
  *    was Coming soon before 0.4.0); add the project, say Not now to
- *    the shortcut, land in the empty Chats. Settings → Welcome → Continue
+ *    the shortcut, land in the empty Chats. Help → Welcome → Continue
  *    doesn't ask the question again.
  * 5. The first chat: the reply streams in.
  * 6. Sign in again: the login state is removed, so the chat asks to sign in;
@@ -34,7 +34,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { FIRST_PROJECT_QUESTION } from '../../packages/shared/src/bmad.ts';
 import { API_ROUTES, requestQuit } from '../support.js';
 import { send } from '../e2e/chat-server.js';
-import { expectConnected, sidebarOf, storedToken } from '../e2e/tab.js';
+import { expectConnected, openFromHelp, storedToken } from '../e2e/tab.js';
 import { launch, onboardingServer, waitForExit, type Launched, type OnboardingServer } from './installed.js';
 
 /** An offline install of the fixture: slower on Windows runners. */
@@ -191,13 +191,12 @@ test('a first run on the installed package: Welcome, Install, sign in, a project
     await addProjectAndFinish(page, server);
   });
 
-  await test.step('4b. Settings → Welcome → Continue: the question is not asked again', async () => {
+  await test.step('4b. Help → Welcome → Continue: the question is not asked again', async () => {
     const workspace = page.url();
-    await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('menuitem', { name: 'Welcome' }).click();
+    await openFromHelp(page, 'Welcome');
     await expect(page).toHaveURL(`${launched.url}/welcome`);
     await expect(headline(page)).toHaveText('Pick the agent that will do the work.');
-    // Opened from Settings it doesn't move on by itself: Continue, once the agent shows signed in.
+    // Opened from Help it doesn't move on by itself: Continue, once the agent shows signed in.
     await expect(card(page).getByTestId('agent-state')).toContainText('Installed, signed in');
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(headline(page)).toHaveText('Add a project to get started.');

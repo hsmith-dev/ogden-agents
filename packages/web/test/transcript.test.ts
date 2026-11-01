@@ -1,6 +1,6 @@
 import type { CoreEvent } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { diffHunk, groupSummary, toolCallLabel } from '../src/chat/tool-call-row';
+import { groupSummary, toolCallLabel } from '../src/chat/tool-call-row';
 import { sessionView } from '../src/chat/transcript';
 
 const at = '2026-09-30T00:00:00.000Z';
@@ -82,6 +82,36 @@ const resolved = (requestId: string, decision: string, by: string, extra: Record
   event('permission.resolved', { sessionId: 'ses_1', requestId, decision, by, ...extra });
 
 describe('sessionView: permission requests (story 2.6)', () => {
+  it('carries the second scope, the refusal and the chosen scope (AD-40)', () => {
+    const exact = { kind: 'command_exact', value: 'npm test -- cart', label: 'npm test -- cart' };
+    const prefix = { kind: 'command_prefix', value: 'npm test', label: 'npm test' };
+    const card = event('permission.requested', {
+      sessionId: 'ses_1',
+      requestId: 'p1',
+      toolCall: { toolCallId: 't-p1', title: 'Run npm test -- cart', kind: 'execute', command: 'npm test -- cart' },
+      alwaysAllowScope: exact,
+      alwaysAllowPrefix: prefix,
+      cautionLevel: 'ask_every_time',
+    });
+    const pendingView = sessionView([created(), stateChanged('working', 'idle'), card, stateChanged('waiting', 'working')], 'ses_1');
+    expect(pendingView.pendingPermissions[0]).toMatchObject({ scope: exact, prefixScope: prefix });
+    const decided = sessionView([created(), stateChanged('working', 'idle'), card, resolved('p1', 'allow_always', 'user', { ruleId: 'rule_01J9Z3K4M5N6P7Q8R9S0T1V2W3', scope: prefix })], 'ses_1');
+    const item = decided.items.find((entry) => entry.type === 'permission');
+    expect(item?.type === 'permission' && item.permission.resolution?.scope).toEqual(prefix);
+
+    const refused = event('permission.requested', {
+      sessionId: 'ses_1',
+      requestId: 'p2',
+      toolCall: { toolCallId: 't-p2', title: 'Run x', kind: 'execute', command: 'cat /etc/passwd' },
+      alwaysAllowScope: null,
+      alwaysAllowRefusal: 'Because.',
+      cautionLevel: 'ask_every_time',
+    });
+    const refusedView = sessionView([created(), stateChanged('working', 'idle'), refused, stateChanged('waiting', 'working')], 'ses_1');
+    expect(refusedView.pendingPermissions[0]).toMatchObject({ scope: null, refusal: 'Because.' });
+    expect(refusedView.pendingPermissions[0]?.prefixScope).toBeUndefined();
+  });
+
   it('folds a request in order among the messages, pending while the session waits', () => {
     const events = [created(), completed('u1', 'user', 'Run the tests'), stateChanged('working', 'idle'), requested('p1'), stateChanged('waiting', 'working')];
     const view = sessionView(events, 'ses_1');
@@ -311,23 +341,6 @@ describe('tool-call rows', () => {
     expect(groupSummary(kinds('read', 'read', 'read', 'read', 'edit', 'edit'))).toBe('Read 4 files, edited 2');
     expect(groupSummary(kinds('execute', 'read'))).toBe('Ran 1 command, read 1 file');
   });
-
-  it('show an edit as its hunk: the changed lines with a little context', () => {
-    const before = ['one', 'two', 'three', 'four', 'five', 'six'].join('\n');
-    const after = ['one', 'two', 'three', 'FOUR', 'five', 'six'].join('\n');
-    expect(diffHunk(before, after)).toEqual([
-      { mark: ' ', text: 'two' },
-      { mark: ' ', text: 'three' },
-      { mark: '-', text: 'four' },
-      { mark: '+', text: 'FOUR' },
-      { mark: ' ', text: 'five' },
-      { mark: ' ', text: 'six' },
-    ]);
-    expect(diffHunk(null, 'new\nfile\n')).toEqual([
-      { mark: '+', text: 'new' },
-      { mark: '+', text: 'file' },
-    ]);
-  });
 });
 
 describe('sessionView message origin (story 3.6)', () => {
@@ -478,5 +491,37 @@ describe('sessionView: send now or wait', () => {
     // A request cancelled after the message went belongs to a later turn.
     const later = [...begun(), queuedNow('n1', 'urgent'), interrupted, completed('n1', 'user', 'urgent'), requested, cancelled];
     expect(note(later)?.type === 'interrupted' && note(later)?.cancelledRequest).toBeFalsy();
+  });
+});
+
+describe('sessionView: a tool call held by its permission card (epic 26 story 4)', () => {
+  const call = (status: string) => toolCall('t-req_1', 'Run npm test', 'execute', status);
+  const heldOf = (events: CoreEvent[]) => {
+    const tools = sessionView(events, 'ses_1').items.find((item) => item.type === 'tools');
+    return tools?.type === 'tools' ? tools.calls[0]?.held : 'no call';
+  };
+
+  it('waits while the card is open, then runs once allowed', () => {
+    const asking = [created(), stateChanged('working', 'idle'), call('pending'), requested('req_1'), stateChanged('waiting', 'working')];
+    expect(heldOf(asking)).toBe('waiting');
+    const allowed = [...asking, resolved('req_1', 'allow_once', 'user'), stateChanged('working', 'waiting')];
+    expect(heldOf(allowed)).toBeUndefined();
+    expect(heldOf([...allowed, toolCallUpdated('t-req_1', 'Run npm test', 'execute', 'in_progress')])).toBeUndefined();
+  });
+
+  it('is denied once the card was denied, but not when it was cancelled or left unanswered', () => {
+    const asking = [created(), stateChanged('working', 'idle'), call('pending'), requested('req_1'), stateChanged('waiting', 'working')];
+    expect(heldOf([...asking, resolved('req_1', 'deny', 'user'), stateChanged('working', 'waiting'), toolCallUpdated('t-req_1', 'Run npm test', 'execute', 'failed')])).toBe('denied');
+    expect(heldOf([...asking, resolved('req_1', 'deny', 'cancelled'), stateChanged('idle', 'waiting')])).toBeUndefined();
+    // The agent went away with the card unanswered: the row says what its status says.
+    expect(heldOf([...asking, stateChanged('idle', 'waiting')])).toBeUndefined();
+  });
+
+  it('story 8.4: a turn that changed files ends with its Changed row; one that changed nothing adds none', () => {
+    const recorded = (turnId: string, files: number) =>
+      event('session.turn_changes_recorded', { sessionId: 'ses_1', turnId, startTree: 'a'.repeat(40), endTree: 'b'.repeat(40), files, additions: files * 2, deletions: 1 });
+    const view = sessionView([created(), completed('u1', 'user', 'Write it'), completed('a1', 'agent', 'Done.'), recorded('trn_1', 2), completed('u2', 'user', 'Look'), recorded('trn_2', 0)], 'ses_1');
+    expect(view.items.map((item) => item.type)).toEqual(['message', 'message', 'turn_changes', 'message']);
+    expect(view.items[2]).toEqual({ type: 'turn_changes', turnId: 'trn_1', files: 2, additions: 4, deletions: 1, at });
   });
 });

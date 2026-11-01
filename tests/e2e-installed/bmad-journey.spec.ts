@@ -55,7 +55,7 @@ import {
 import { apiPath, TEST_ROUTES } from '../../packages/shared/src/api.ts';
 import { API_ROUTES, launchLink, requestQuit } from '../support.js';
 import { send } from '../e2e/chat-server.js';
-import { expectConnected, landConnected, sidebarOf, storedToken } from '../e2e/tab.js';
+import { expectConnected, landConnected, openFromSettings, storedToken } from '../e2e/tab.js';
 import { bmadServer, waitForExit, type BmadServer, type Launched } from './installed.js';
 
 const servers: BmadServer[] = [];
@@ -142,18 +142,17 @@ async function openChats(page: Page, origin: string, wsId: string): Promise<void
   await expect(page.getByTestId('workspace-name')).toBeVisible();
 }
 
-/** The header's project tabs: exactly Chats, marked as the current page. */
+/** The header's project tabs with nothing BMad: Chats (the current page) and the Workbench (epic 8, every project), never Board, Plan or Runs. */
 async function expectChatsTabOnly(page: Page) {
   const nav = page.getByRole('navigation', { name: 'Project sections' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('link')).toHaveCount(1);
+  await expect(nav.getByRole('link')).toHaveText(['Chats', 'Workbench']);
   await expect(nav.getByRole('link', { name: 'Chats' })).toHaveAttribute('aria-current', 'page');
 }
 
 /** Opens Settings → New projects from the sidebar. */
 async function openNewProjects(page: Page) {
-  await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
-  await page.getByRole('menuitem', { name: NEW_PROJECTS_SETTINGS_LABEL }).click();
+  await openFromSettings(page, 'Projects', NEW_PROJECTS_SETTINGS_LABEL);
   await expect(page).toHaveURL(/\/settings\/new-projects$/);
 }
 
@@ -277,11 +276,13 @@ test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer,
     await page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: 'Chats' }).click();
     await expect(page.getByTestId('chat-list')).toBeVisible();
     await expectChatsTabOnly(page);
+    // New chat opens the draft (epic 26); its first message starts the chat.
     await page.getByTestId('new-chat').click();
-    await expect(page).toHaveURL(new RegExp(`/w/${plainId}/s/ses_`));
-    await expect(state(page)).toHaveAttribute('data-state', 'idle');
+    await expect(page).toHaveURL(new RegExp(`/w/${plainId}/new$`));
     await expectChatsTabOnly(page);
     const second = await sessionStart(page);
+    await expect(page).toHaveURL(new RegExp(`/w/${plainId}/s/ses_`));
+    await expectChatsTabOnly(page);
     expectSimpleStart(second, cwd);
     expect(await piecesOf(page, plainId)).toEqual([]);
   });

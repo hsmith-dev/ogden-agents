@@ -545,58 +545,15 @@ export function SidebarEarlier({ count, className, children, ...props }: Compone
   );
 }
 
-export interface SidebarStatusRowProps extends Omit<SidebarMenuButtonProps, 'asChild' | 'tooltip' | 'tooltipAlways' | 'title' | 'children'> {
-  state: SessionState;
-  title: string;
-  /** Under the title: the agent and the state word ("Claude Code, working"). */
-  caption: string;
-  /** More for the tooltip only, after the state word (the chat's model, story 11). */
-  detail?: string | undefined;
-  /** The relative time shown right-aligned ("5m"), and the moment it stands for. */
-  time?: { label: string; dateTime: string } | undefined;
-  /** The link the row is (a router Link with no children); the row fills it. */
-  children: ReactElement<{ children?: ReactNode }>;
-}
-
-/**
- * A session row (DESIGN.md Status row): glyph, one-line title, caption in
- * muted-foreground, relative time in tabular caption. `waiting` adds the
- * signal rail on the left. In the rail only the glyph shows; the title and
- * state word are the accessible name and the tooltip.
- */
-export function SidebarStatusRow({ state, title, caption, detail, time, className, children, ...props }: SidebarStatusRowProps) {
-  const word = STATE_WORDS[state];
+/** "Show 3 more" under a sidebar list (DESIGN.md needs-you-row): a ghost text button in caption. */
+export function SidebarMoreButton({ className, ...props }: ComponentProps<'button'>) {
   return (
-    <SidebarMenuButton
-      asChild
-      tooltip={detail === undefined ? `${title}: ${word}` : `${title}: ${word}, ${detail}`}
-      // Not `data-state`: the tooltip trigger sets that one.
-      data-session-state={state}
-      aria-label={detail === undefined ? `${title}, ${caption}` : `${title}, ${caption}, ${detail}`}
-      className={cn(
-        'h-auto min-h-(--row-height) py-1',
-        state === 'waiting' && 'border-l-(length:--rail-row) border-l-signal',
-        className,
-      )}
+    <button
+      type="button"
+      data-slot="sidebar-more-button"
+      className={cn('self-start rounded-md px-2 py-1 text-caption text-foreground transition-colors duration-(--motion-fast) ease-standard hover:bg-accent', className)}
       {...props}
-    >
-      {cloneElement(
-        children,
-        undefined,
-        <>
-          <StateGlyph state={state} labelMode="none" />
-          <span className="flex min-w-0 flex-1 flex-col md:max-lg:sr-only">
-            <bdi className="truncate">{title}</bdi>
-            <span className="truncate text-caption text-muted-foreground">{caption}</span>
-          </span>
-          {time === undefined ? null : (
-            <time dateTime={time.dateTime} className="shrink-0 self-start text-caption tabular-nums text-muted-foreground md:max-lg:hidden">
-              {time.label}
-            </time>
-          )}
-        </>,
-      )}
-    </SidebarMenuButton>
+    />
   );
 }
 

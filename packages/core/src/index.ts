@@ -31,6 +31,7 @@ export * from './data-dir.js';
 export { DATABASE_FILE, type OpenDatabaseOptions } from './db/database.js';
 export { BACKUP_DIR, DatabaseNewerError, KEEP_BACKUPS, LAST_VERSION_FILE } from './db/upgrade-guard.js';
 export * from './entities.js';
+export * from './path-shape.js';
 export * from './errors.js';
 export * from './handoff-brief.js';
 // Not `sessionAppender`: the raw session append stays inside core (E2-R7).
@@ -81,6 +82,19 @@ export * from './vcs-port.js';
 export * from './build-verify.js';
 export * from './build-settings.js';
 export * from './dev-tools.js';
+export * from './workspace-files.js';
+export * from './workspace-files-port.js';
+export * from './workspace-root.js';
+export * from './workspace-changes.js';
+export * from './turn-snapshots.js';
+export * from './editor-launcher-port.js';
+export * from './editor-launch.js';
+export * from './editor-choice.js';
+export * from './project-commands.js';
+export * from './project-command-parsers.js';
+export * from './shell-free.js';
+// The home credential fences, for the Files adapter's confinement (AD-36).
+export { CREDENTIAL_FOLDERS, credentialReadFences } from './build-names.js';
 export * from './local-endpoints.js';
 export * from './remote-host-port.js';
 export * from './remote-machines.js';

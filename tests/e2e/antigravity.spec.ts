@@ -12,7 +12,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { API_ROUTES, FAKE_GEMINI_KEY, fakeAntigravity, removeDataDir } from '../support.js';
 import { setDeveloperMode, startChat, withChatServer } from './chat-server.js';
-import { storedToken } from './tab.js';
+import { rowsWithAgent, storedToken } from './tab.js';
 
 /** Starts an Antigravity chat in the project `wsId` through the REST API, as the picker does, and opens it. */
 async function startAntigravityChat(page: Page, wsId: string): Promise<string> {
@@ -79,8 +79,8 @@ test.describe('Antigravity chat (epic 6 entry 5)', () => {
           // The status sidebar names each chat's agent.
           const rows = page.getByTestId('status-row');
           await expect(rows).toHaveCount(2);
-          await expect(rows.filter({ hasText: 'Antigravity' })).toHaveCount(1);
-          await expect(rows.filter({ hasText: 'Claude Code' })).toHaveCount(1);
+          await expect(rowsWithAgent(rows, 'Antigravity')).toHaveCount(1);
+          await expect(rowsWithAgent(rows, 'Claude Code')).toHaveCount(1);
         },
         { extra: { antigravity: { agent: antigravity.agent, setup: antigravity.setup }, extraAgentEnv: { GEMINI_API_KEY: FAKE_GEMINI_KEY } } },
       );

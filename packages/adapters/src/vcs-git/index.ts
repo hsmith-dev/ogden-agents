@@ -35,7 +35,7 @@
  * a branch is deleted only when it is one Ogden made (`ogden/…`).
  */
 import { execFile, spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import {
@@ -55,13 +55,13 @@ import {
   checkPath, checkRelative, SAFE_CONFIG, realOf, isInside, storeIsPlain
 } from './checks.js';
 import { headerPaths, MAX_PATCH_BYTES } from './patch.js';
+import { createGitRunner } from './runner.js';
 
 export { gitVersionAtLeast, parseGitVersion, type GitVcsOptions } from './checks.js';
 export { headerPaths } from './patch.js';
+export { createGitWorkingTree, type GitWorkingTreeOptions } from './working-tree.js';
 
 export function createGitVcs(options: GitVcsOptions): VcsPort {
-  const git = options.git ?? 'git';
-  const timeout = options.timeoutMs ?? 120_000;
 
   /**
    * The run's object store for a branch Ogden made (`ogden/<run8>/…`), when
@@ -90,51 +90,8 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     return store === undefined || repoObjects.includes(delimiter) || !storeIsPlain(store) ? {} : { GIT_OBJECT_DIRECTORY: store, GIT_ALTERNATE_OBJECT_DIRECTORIES: repoObjects };
   };
 
-  /** The empty hooks folder, made sure of before every call. */
-  const hooksDir = (): string => {
-    mkdirSync(options.hooksDir, { recursive: true, mode: 0o700 });
-    if (readdirSync(options.hooksDir).length > 0) throw new VcsError("Ogden Agents' empty hooks folder isn't empty, so git didn't run.", { step: 'hooks' });
-    return options.hooksDir;
-  };
-
-  /** Runs git in `cwd`; resolves with its exit code (a spawn failure rejects). */
-  const run = (cwd: string, args: readonly string[], maxBuffer = 16 * 1024 * 1024, extraEnv: Readonly<Record<string, string>> = {}): Promise<GitResult> =>
-    new Promise((resolvePromise, reject) => {
-      let hooks: string;
-      try {
-        hooks = hooksDir();
-      } catch (error) {
-        reject(error);
-        return;
-      }
-      const fullArgs = ['-c', 'core.longpaths=true', '-c', `core.hooksPath=${hooks}`, '-c', 'core.fsmonitor=false', '-c', 'core.autocrlf=false', ...args];
-      execFile(
-        git,
-        fullArgs,
-        {
-          cwd,
-          env: { ...options.env(), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', LANG: 'C', ...extraEnv },
-          maxBuffer,
-          timeout,
-          windowsHide: true,
-          encoding: 'utf8',
-        },
-        (error, stdout, stderr) => {
-          if (error !== null && typeof (error as { code?: unknown }).code !== 'number') {
-            reject(new VcsError("Ogden Agents couldn't run git.", { step: args[0] ?? 'git', code: String((error as NodeJS.ErrnoException).code ?? 'unknown') }));
-            return;
-          }
-          resolvePromise({ code: error === null ? 0 : ((error as { code: number }).code ?? 1), stdout, stderr });
-        },
-      );
-    });
-
-  /** Runs git and requires success. `details` never hold git's output (it can name the user's files). */
-  const must = async (cwd: string, args: readonly string[], step: string, maxBuffer?: number, extraEnv?: Readonly<Record<string, string>>): Promise<string> => {
-    const result = await run(cwd, args, maxBuffer, extraEnv);
-    if (result.code !== 0) throw new VcsError(`git couldn't ${step}.`, { step, exitCode: result.code });
-    return result.stdout;
-  };
+  const runner = createGitRunner(options);
+  const { git, timeout, run, must, identityFlags } = runner;
 
   /**
    * Runs git with `input` on its stdin and keeps its stdout as bytes (at
@@ -143,16 +100,16 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
    */
   const runBinary = (cwd: string, args: readonly string[], input: string | Buffer, extraEnv: Readonly<Record<string, string>>): Promise<{ code: number; stdout: Buffer } | undefined> =>
     new Promise((resolvePromise) => {
-      let hooks: string;
+      let base: string[];
       try {
-        hooks = hooksDir();
+        base = runner.baseArgs();
       } catch {
         resolvePromise(undefined);
         return;
       }
-      const child = spawn(git, ['-c', 'core.longpaths=true', '-c', `core.hooksPath=${hooks}`, '-c', 'core.fsmonitor=false', '-c', 'core.autocrlf=false', ...args], {
+      const child = spawn(git, [...base, ...args], {
         cwd,
-        env: { ...options.env(), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', LANG: 'C', ...extraEnv },
+        env: runner.env(extraEnv),
         stdio: ['pipe', 'pipe', 'ignore'],
         windowsHide: true,
       });
@@ -215,45 +172,10 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     return paths;
   };
 
-  /**
-   * The identity a merge, its commit or a rebase is made with: the user's own
-   * where git has one (repo or global config), else Ogden Agents' for the part
-   * missing, so a computer with no git identity still merges and commits.
-   */
-  const identityFlags = async (repoPath: string): Promise<string[]> => {
-    const email = await run(repoPath, ['config', '--get', 'user.email']);
-    const name = await run(repoPath, ['config', '--get', 'user.name']);
-    return [
-      ...(name.code === 0 && name.stdout.trim() !== '' ? [] : ['-c', 'user.name=Ogden Agents']),
-      ...(email.code === 0 && email.stdout.trim() !== '' ? [] : ['-c', 'user.email=ogden-agents@localhost']),
-    ];
-  };
-
-  /**
-   * Git's own folders for a run's worktree, checked against the repo before
-   * git runs there (security review, story 5.3): the agent can write the
-   * worktree's admin folder (`<common>/worktrees/<id>`), so its `HEAD` must
-   * still name `branch` and its `commondir` the repo's, and git is then run
-   * with `GIT_DIR`, `GIT_COMMON_DIR` and `GIT_WORK_TREE` set by Ogden, never
-   * read from files the agent wrote.
-   */
+  /** Ogden's folders for a run's worktree, after its check (`runner.ts`), with the run's own object store when it has one. */
   const pinnedWorktree = async (repoPath: string, worktreePath: string, branch: string): Promise<Record<string, string>> => {
-    checkPath(repoPath);
-    checkPath(worktreePath);
-    checkBranch(branch);
-    const common = realOf(resolve(repoPath, (await must(repoPath, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'read the repository')).trim()));
-    const gitDir = join(common, 'worktrees', basename(worktreePath));
-    try {
-      const head = readFileSync(join(gitDir, 'HEAD'), 'utf8');
-      const commondir = readFileSync(join(gitDir, 'commondir'), 'utf8').trim();
-      const link = readFileSync(join(worktreePath, '.git'), 'utf8').trim();
-      if (head.trim() !== `ref: refs/heads/${branch}`) throw new Error('head');
-      if (realOf(resolve(gitDir, commondir)) !== common) throw new Error('commondir');
-      if (!link.startsWith('gitdir: ') || realOf(resolve(worktreePath, link.slice('gitdir: '.length))) !== realOf(gitDir)) throw new Error('gitdir');
-    } catch {
-      throw new VcsError("The run's worktree isn't as Ogden Agents made it, so git didn't run there.", { step: 'worktree' });
-    }
-    return { GIT_DIR: gitDir, GIT_COMMON_DIR: common, GIT_WORK_TREE: worktreePath, ...writeEnv(branch, common) };
+    const pinned = await runner.pinnedWorktree(repoPath, worktreePath, branch);
+    return { ...pinned.env, ...writeEnv(branch, pinned.common) };
   };
 
   /** Whether git's own file `name` (`MERGE_HEAD`, `rebase-merge`, …) exists in the checkout's git folder. */

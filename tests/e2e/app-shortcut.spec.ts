@@ -1,12 +1,13 @@
 /**
  * The app shortcut in a real browser (story 2.4): the first-run offer, Add
- * from it, then Remove in Settings. The server here has no launcher entry,
+ * from it, then Remove in Settings; seeing the offer answers it, so a
+ * reload ends it (epic 26, 26.5). The server here has no launcher entry,
  * so it runs the in-memory `shortcut-memory` stub: nothing is written on
  * this computer. Its own server, so the shared one's offer is left as is.
  */
 import { expect, test } from '@playwright/test';
-import { makeDataDir, removeDataDir, startServer, type RunningServer } from '../support.js';
-import { landConnected, launchLink } from './tab.js';
+import { API_ROUTES, makeDataDir, removeDataDir, startServer, type RunningServer } from '../support.js';
+import { landConnected, launchLink, openFromHelp, storedToken } from './tab.js';
 
 let server: RunningServer;
 let dataDir: string;
@@ -53,6 +54,29 @@ test('Not now hides the offer', async ({ page }) => {
     await page.reload();
     await expect(page.locator('aside[data-slot="sidebar"]')).toBeVisible();
     await expect(page.getByTestId('app-shortcut-offer')).toHaveCount(0);
+  } finally {
+    await other.close();
+    removeDataDir(otherDir);
+  }
+});
+
+test('seeing the offer answers it: a reload has no banner, and Help can show it again', async ({ page }) => {
+  const otherDir = makeDataDir();
+  const other = await startServer(otherDir);
+  try {
+    await landConnected(page, other.launchUrl);
+    await expect(page.getByTestId('app-shortcut-offer')).toBeVisible();
+    // Not answered here: it is the reload that ends it.
+    const status = async () => {
+      const response = await fetch(`${other.url}${API_ROUTES.appShortcut}`, { headers: { authorization: `Bearer ${await storedToken(page)}`, origin: other.url } });
+      return ((await response.json()) as { offerPending: boolean }).offerPending;
+    };
+    await expect.poll(status).toBe(false);
+    await page.reload();
+    await expect(page.locator('aside[data-slot="sidebar"]')).toBeVisible();
+    await expect(page.getByTestId('app-shortcut-offer')).toHaveCount(0);
+    await openFromHelp(page, 'Add the app shortcut');
+    await expect(page.getByTestId('app-shortcut-offer')).toBeVisible();
   } finally {
     await other.close();
     removeDataDir(otherDir);

@@ -39,24 +39,33 @@ describe('workspace settings page (story 2.8)', () => {
     expect(renderToStaticMarkup(<CautionLevelView value={undefined} onChange={() => {}} saving={false} status={undefined} />)).not.toContain('role="radio"');
   });
 
-  it('lists the rules oldest first with the project and Remove, or says there are none', () => {
+  it('lists the rules oldest first in their words (AD-40) with the project and Remove, or says there are none', () => {
     const rules = [
       rule('A1', { kind: 'command_prefix', value: 'npm test', label: 'npm test' }),
-      rule('B2', { kind: 'tool', value: 'edit', label: 'Editing files' }),
+      rule('B2', { kind: 'command_exact', value: 'npm run lint -- src', label: 'npm run lint -- src' }),
+      rule('C3', { kind: 'tool', value: 'edit', label: 'Editing files' }),
     ];
     const html = renderToStaticMarkup(<AlwaysAllowRulesView rules={rules} name="clay-and-kiln" onRemove={() => {}} removing={undefined} error={undefined} />);
-    expect(html.indexOf('npm test')).toBeLessThan(html.indexOf('Editing files'));
-    expect(html).toMatch(/<code[^>]*>npm test<\/code> in clay-and-kiln/);
+    expect(html.indexOf('npm test')).toBeLessThan(html.indexOf('npm run lint'));
+    expect(html.indexOf('npm run lint')).toBeLessThan(html.indexOf('Editing files'));
+    expect(html).toMatch(/Commands starting with <code[^>]*>npm test<\/code> in clay-and-kiln/);
+    expect(html).toMatch(/Exactly <code[^>]*>npm run lint -- src<\/code> in clay-and-kiln/);
     expect(html).toContain('Editing files in clay-and-kiln');
-    expect(html.match(/>Remove</g)).toHaveLength(2);
-    expect(html).toContain('aria-label="Remove npm test in clay-and-kiln"');
+    expect(html.match(/>Remove</g)).toHaveLength(3);
+    expect(html).toContain('aria-label="Remove Commands starting with npm test in clay-and-kiln"');
+    expect(html).not.toContain('rules-removed');
+    // When each was added (EXPERIENCE.md Always allow rules).
+    expect(html).toMatch(/data-testid="rule-added"[^>]*>Added <time dateTime="2026-09-30T12:00:00.000Z">30 Sept? 2026<\/time>/);
 
     const removing = renderToStaticMarkup(<AlwaysAllowRulesView rules={rules} name="clay-and-kiln" onRemove={() => {}} removing={rules[0]!.id} error="That rule was already removed." />);
     expect(removing).toContain('Removing...');
     expect(removing).toContain('That rule was already removed.');
 
+    const removed = renderToStaticMarkup(<AlwaysAllowRulesView rules={rules.slice(1)} name="clay-and-kiln" onRemove={() => {}} removing={undefined} removed error={undefined} />);
+    expect(removed).toMatch(/role="status"[^>]*>Removed\. Ogden will ask next time\.</);
+
     const empty = renderToStaticMarkup(<AlwaysAllowRulesView rules={[]} name="clay-and-kiln" onRemove={() => {}} removing={undefined} error={undefined} />);
-    expect(empty).toContain('No rules yet.');
+    expect(empty).toContain('No Always allow rules. Ogden asks before each action.');
     expect(empty).not.toContain('>Remove<');
   });
 

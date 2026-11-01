@@ -91,6 +91,14 @@ test('Terminals is a Developer mode surface: hidden without it, and a pane opens
       await expect(terminal.locator('.xterm-rows')).toContainText('echo:echo e2e-pane');
       // Starting is over: no status line.
       await expect(page.getByTestId('pane')).toHaveAttribute('data-state', 'running');
+      // Every header button is an icon with an accessible name (26.6), never an empty box.
+      const buttons = page.getByTestId('pane').locator('button:not([data-testid="pane-title"])');
+      await expect(buttons.first()).toBeVisible();
+      for (const button of await buttons.all()) {
+        await expect(button).toHaveAccessibleName(/\S/);
+        await expect(button.locator('svg')).toHaveCount(1);
+      }
+      await expect(page.getByTestId('pane-close')).toHaveAccessibleName('Close pane');
 
       // A reload comes back to the same pane with its screen replayed from the server's mirror.
       await page.reload();

@@ -69,6 +69,10 @@ export const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
  * check is a stub unless `extra` says otherwise, so no test touches the real keychain or reaches
  * Anthropic (story 9.2).
  *
+ * Open in editor finds no editor unless the test names a folder of fake
+ * editors (`OGDEN_AGENTS_TEST_EDITOR_PATH` with `NODE_ENV=test`) or passes
+ * its own `editorLauncher`, so no test opens a real editor.
+ *
  * Welcome (story 9.5) is marked done in `dataDir` first, so a tab lands on
  * Projects, unless `firstRun` is set (the Welcome tests).
  *
@@ -108,6 +112,9 @@ export async function startServer(
     // The "newer version" check (story 13.7) never reaches npm from a test: a test that wants it passes a fake registry.
     updates: false,
     extraAgentEnv: { FAKE_LOGIN_STATE: loginState, ...extraAgentEnv },
+    // Open in editor (story 8.10) never finds a real editor: none at all, unless a test names a folder of fakes
+    // (`OGDEN_AGENTS_TEST_EDITOR_PATH`, read by the server only in a test run) or its own launcher.
+    ...(process.env.OGDEN_AGENTS_TEST_EDITOR_PATH === undefined ? { editorLauncher: { list: async () => [], open: async () => 'unavailable' as const } } : {}),
     ...extra,
     bmadCatalog,
     launch: true,

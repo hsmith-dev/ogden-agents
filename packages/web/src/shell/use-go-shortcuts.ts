@@ -1,6 +1,6 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
-import { isInsideOverlay } from './keyboard-guard';
+import { focusInsideOverlay } from './keyboard-guard';
 
 /**
  * The project's go-to shortcuts (EXPERIENCE.md Keyboard; story 4.6): `g`,
@@ -32,18 +32,24 @@ export function isShortcutKey(event: Pick<KeyboardEvent, 'key' | 'altKey' | 'ctr
   if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
   if (event.repeat || event.defaultPrevented || event.isComposing) return false;
   const active = typeof document === 'undefined' ? null : document.activeElement;
-  return !isTypingTarget(event.target) && !isTypingTarget(active) && !isInsideOverlay(event.target) && !isInsideOverlay(active);
+  return !isTypingTarget(event.target) && !isTypingTarget(active) && !focusInsideOverlay(event);
+}
+
+/** One `g` sequence: its second key and what it does. */
+export interface GoKeyBinding {
+  key: string;
+  run: () => void;
 }
 
 /**
  * Listens on `window` (bubble phase, so the composer's and the terminal's own
- * handlers, and anything that prevented the default, go first) and opens a
- * tab of `tabs` for `g` then its key.
+ * handlers, and anything that prevented the default, go first) and runs the
+ * binding of `bindings` for `g` then its key. Each caller keeps its own
+ * pending `g`, so two listeners (a project's tabs, `g y`) never block each other.
  */
-export function useGoShortcuts(wsId: string, tabs: readonly GoShortcutTab[]) {
-  const navigate = useNavigate();
-  const latest = useRef({ wsId, tabs, navigate });
-  latest.current = { wsId, tabs, navigate };
+export function useGoKeys(bindings: readonly GoKeyBinding[]) {
+  const latest = useRef(bindings);
+  latest.current = bindings;
 
   useEffect(() => {
     let pendingUntil = 0;
@@ -55,14 +61,14 @@ export function useGoShortcuts(wsId: string, tabs: readonly GoShortcutTab[]) {
       const key = event.key.toLowerCase();
       const now = Date.now();
       if (pendingUntil > now) {
-        const tab = latest.current.tabs.find((each) => each.key === key);
-        if (tab === undefined) {
+        const binding = latest.current.find((each) => each.key === key);
+        if (binding === undefined) {
           pendingUntil = key === 'g' ? now + GO_SHORTCUT_WINDOW_MS : 0;
           return;
         }
         pendingUntil = 0;
         event.preventDefault();
-        void latest.current.navigate({ to: tab.to as '/w/$wsId', params: { wsId: latest.current.wsId } });
+        binding.run();
         return;
       }
       pendingUntil = key === 'g' ? now + GO_SHORTCUT_WINDOW_MS : 0;
@@ -70,4 +76,10 @@ export function useGoShortcuts(wsId: string, tabs: readonly GoShortcutTab[]) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+}
+
+/** Opens a tab of `tabs` for `g` then its key. */
+export function useGoShortcuts(wsId: string, tabs: readonly GoShortcutTab[]) {
+  const navigate = useNavigate();
+  useGoKeys(tabs.map((tab) => ({ key: tab.key, run: () => void navigate({ to: tab.to as '/w/$wsId', params: { wsId } }) })));
 }

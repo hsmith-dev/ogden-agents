@@ -13,7 +13,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { API_ROUTES, fakeAgentSetup, fakeSecondAgent, makeDataDir, removeDataDir, SECOND_AGENT, startServer } from '../support.js';
 import { startChat, withChatServer } from './chat-server.js';
-import { launchLink, openConnected, storedToken } from './tab.js';
+import { launchLink, openConnected, rowsWithAgent, storedToken } from './tab.js';
 
 const THIRD = { agentId: 'third-agent', displayName: 'Third Agent' } as const;
 
@@ -78,13 +78,14 @@ test("a new chat preselects the project's default, set in one tab and followed b
       await page.keyboard.press('Escape');
       await expect(picker).toHaveAttribute('data-agent', SECOND_AGENT.agentId);
 
-      // New chat starts with the project's default.
+      // New chat opens the draft on the project's default; its first message starts the chat with it.
       await page.getByTestId('new-chat').click();
-      await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
-      await expect(page.getByTestId('session-agent')).toHaveText(SECOND_AGENT.displayName);
+      await expect(page).toHaveURL(/\/w\/[^/]+\/new$/);
       const composer = page.getByRole('textbox', { name: `Message ${SECOND_AGENT.displayName}` });
       await composer.fill('whoami');
       await composer.press('Enter');
+      await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
+      await expect(page.getByTestId('session-agent')).toHaveText(SECOND_AGENT.displayName);
       await expect(page.getByTestId('message-agent').last()).toContainText(`agent=${SECOND_AGENT.agentId}`);
 
       // The mode picker offers only this agent's modes: Auto is there, unavailable, with the reason.
@@ -97,8 +98,8 @@ test("a new chat preselects the project's default, set in one tab and followed b
       // Every sidebar row names its agent.
       const rows = page.getByTestId('status-row');
       await expect(rows).toHaveCount(2);
-      await expect(rows.filter({ hasText: SECOND_AGENT.displayName })).toHaveCount(1);
-      await expect(rows.filter({ hasText: 'Claude Code' })).toHaveCount(1);
+      await expect(rowsWithAgent(rows, SECOND_AGENT.displayName)).toHaveCount(1);
+      await expect(rowsWithAgent(rows, 'Claude Code')).toHaveCount(1);
     },
     { extra: { extraAgents: [second, third] } },
   );

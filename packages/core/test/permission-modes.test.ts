@@ -513,7 +513,7 @@ describe('a Skip-all chat never writes rules (criterion 7)', () => {
     await until(() => core.entities.getSession(session.id)?.state === 'waiting', 'the first card');
     const first = streamOf(core, session.id).findLast((event) => event.type === 'permission.requested');
     if (first?.type !== 'permission.requested') throw new Error('no card');
-    expect(first.payload).toMatchObject({ permissionMode: 'ask', alwaysAllowScope: { kind: 'command_prefix' } });
+    expect(first.payload).toMatchObject({ permissionMode: 'ask', alwaysAllowScope: { kind: 'command_exact' } });
     core.permissions.decide(workspace.id, session.id, first.payload.requestId, { decision: 'allow_always' });
     await chat.settled();
     expect(core.permissions.listRules(workspace.id)).toHaveLength(1);

@@ -6,10 +6,12 @@
  * from resolving paths on the filesystem.
  */
 import { realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
-import { alwaysAllowRefusal, type AlwaysAllowScope, type CautionLevel, type ToolKind, type Workspace } from '@ogden-agents/shared';
+import { isAbsolute, parse, resolve, sep } from 'node:path';
+import { alwaysAllowRefusal, programName, type AlwaysAllowScope, type CautionLevel, type ToolKind, type Workspace } from '@ogden-agents/shared';
 import type { ProtectedPaths } from './agent-port.js';
+import { prefixRefusedFor, scriptNameIndex } from './command-prefix-allowlists.js';
 import { canonicalWorkspacePath, isCaseInsensitivePath } from './entities.js';
+import { isDrivePath, isRemotePathShape, resolveLocalSegments } from './path-shape.js';
 
 /**
  * Shell control syntax: `;`, `&`, `|`, a backtick, `$(`, `${`, `>`, `<`, a
@@ -67,30 +69,40 @@ const TOOL_SCOPE_LABELS: Record<Exclude<ToolKind, 'execute' | 'other'>, string> 
 export const PATH_KINDS: ReadonlySet<ToolKind> = new Set<ToolKind>(['read', 'edit', 'delete', 'move', 'search']);
 
 /**
- * `path` as it would be reached: absolute (relative to `base` otherwise),
- * with the symlinks of its nearest existing parent resolved, case-folded
- * where that filesystem ignores case. `undefined` when it can't be told: a
- * `~` path, a masked one, control characters, or a read error.
+ * `path` as it would be reached: absolute (relative to `base`, a real path,
+ * otherwise), resolved one segment at a time, so each symlink is followed
+ * before the `..` after it (`hk/../hooks` with `hk` a link to `.git/hooks` is
+ * `.git/hooks`, as the kernel reads it; independent review 2026-10-31), and
+ * case-folded where that filesystem ignores case. Segments past the first
+ * that doesn't exist are joined as written. `undefined` when it can't be
+ * told: a `~` path, a masked one, control characters, or a read error.
  */
 function reachedPath(base: string, path: string): string | undefined {
   if (path === '' || path.startsWith('~') || path.includes(MASKED) || /[\u0000-\u001f\u007f]/.test(path)) return undefined;
-  let current = isAbsolute(path) ? resolve(path) : resolve(base, path);
-  const rest: string[] = [];
-  for (;;) {
-    try {
-      const real = realpathSync.native(current);
-      const reached = rest.length === 0 ? real : join(real, ...rest.reverse());
-      return isCaseInsensitivePath(real) ? reached.toLowerCase() : reached;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') return undefined;
-      const parent = dirname(current);
-      if (parent === current) return undefined;
-      rest.push(basename(current));
-      current = parent;
-    }
+  // Another computer, a device or a URL is told by its spelling, before any file-system call (on Windows a stat of one is a network lookup).
+  if (isRemotePathShape(path)) return undefined;
+  const absolute = isAbsolute(path);
+  const start = absolute ? parse(resolve(path)).root : base;
+  let reached: ReturnType<typeof resolveLocalSegments>;
+  try {
+    reached = resolveLocalSegments(start, (absolute ? path.slice(parse(path).root.length) : path).split(/[\\/]+/));
+  } catch {
+    return undefined;
   }
+  // The last existing folder decides the case rule; `reached.real` is canonical up to it.
+  return isCaseInsensitivePath(reached.existing) ? reached.real.toLowerCase() : reached.real;
 }
+
+/**
+ * Whether one path part names another machine or a URL (independent review
+ * 2026-10-31; Windows CI 2026-11-01), by its spelling alone: `host:path`,
+ * `user@host:path` (scp, rsync, git remotes), `scheme://...`, or a
+ * {@link isRemotePathShape} path (`\\host\share`, `//host/share`, `\\?\`,
+ * `\\.\`). Such a part is never inside the project. On Windows a single
+ * letter and a separator (`C:/x`) is a drive, a local path checked as any.
+ */
+export const isRemotePart = (part: string, platform: NodeJS.Platform = process.platform): boolean =>
+  isRemotePathShape(part) || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(part) || (/^[^/\\:]+:/.test(part) && !(platform === 'win32' && isDrivePath(part)));
 
 /**
  * Whether the tool call names at least one path and every one of them lies
@@ -115,28 +127,164 @@ export function pathsInsideWorkspace(workspace: Pick<Workspace, 'path' | 'realPa
 }
 
 /**
- * What "Always allow" would cover for a request: for `execute`, its command
- * prefix; for another named kind, the kind; for `other`, an unknown kind,
- * an `execute` without a command, or a command led by an interpreter, a
- * wrapper or a variable assignment, nothing (`null`: Always allow is not offered).
+ * Why no Always allow rule, exact or by prefix, can cover `command`, from its
+ * text alone (AD-40, epic 26 story 8, security review), in plain words for
+ * the card; `undefined` when the text is rulable. A command is rulable only
+ * when it is printable ASCII (plus tabs), holds none of
+ * `; & | \ < > $ ( ) { } [ ] * ? %` or a backtick, no word starting with `=`
+ * (zsh's `=cmd` expansion), no masked secret, and is not led by an
+ * interpreter, a wrapper, a two-word wrapper or a variable assignment
+ * ({@link alwaysAllowRefusal}). Paths are checked apart, on the filesystem
+ * ({@link commandPathsReach}).
+ */
+export function commandRuleRefusal(command: string): string | undefined {
+  if (command.includes(MASKED)) return COMMAND_REFUSALS.masked;
+  if (/[;&|\n\r]/.test(command)) return COMMAND_REFUSALS.chained;
+  if (/[<>]/.test(command)) return COMMAND_REFUSALS.redirected;
+  if (/[`$(){}[\]*?%]/.test(command) || words(command).some((word) => word.replace(/["']/g, '').startsWith('='))) return COMMAND_REFUSALS.expanded;
+  if (command.includes('\\') || !/^[\x20-\x7e\t]*$/.test(command)) return COMMAND_REFUSALS.unchecked;
+  if (words(command).length === 0) return COMMAND_REFUSALS.unchecked;
+  // A quoted first word (`"bash" -c x`, `b'a'sh`) is not the program name a rule or the wrapper check sees.
+  if (/["']/.test(words(command)[0]!)) return COMMAND_REFUSALS.unchecked;
+  return alwaysAllowRefusal(command);
+}
+
+/** The reasons a command can't be ruled (AD-40), as the card writes them. No em or en dashes. */
+export const COMMAND_REFUSALS = {
+  masked: "Always allow isn't offered for this command, because it holds a hidden secret.",
+  chained: "Always allow isn't offered for this command, because it runs more than one thing.",
+  redirected: "Always allow isn't offered for this command, because it redirects input or output.",
+  expanded: "Always allow isn't offered for this command, because the shell would expand part of it first.",
+  unchecked: "Always allow isn't offered for this command, because it has characters Ogden Agents can't check.",
+  outside: "Always allow isn't offered for this command, because it names a path outside this project.",
+  protected: "Always allow isn't offered for this command, because it names a file that controls how the agent or git runs.",
+} as const;
+
+/**
+ * The strings in one command word that could be a path (AD-40): the word
+ * with its quotes removed, each part after an `=`, `:`, `,` or `@`
+ * (`--out=../x`, `-d@../x`, `-Wl,-rpath,/x`), and in a flag word each part
+ * from a `/`, `.` or `~` (`-I../x`, `-I/etc`). Empty parts are no path.
+ */
+function commandPathParts(word: string): string[] {
+  const bare = word.replace(/["']/g, '');
+  const parts = [bare];
+  const flag = bare.startsWith('-');
+  for (let index = 0; index < bare.length; index += 1) {
+    const char = bare[index]!;
+    if ('=:,@'.includes(char)) parts.push(bare.slice(index + 1));
+    if (flag && '/.~'.includes(char)) parts.push(bare.slice(index));
+  }
+  return parts.filter((part) => part !== '');
+}
+
+/**
+ * Where a command's words reach (AD-40): `inside` when every path-like part
+ * of every word ({@link commandPathParts}) resolves inside the workspace,
+ * symlinks followed, and none touches a protected segment; `protected` when
+ * any touches one (a link to `.git` counts); else `outside` (a `~` path, a
+ * parent, an absolute path elsewhere, a link out, or an unreadable root).
+ */
+export function commandPathsReach(
+  workspace: Pick<Workspace, 'path' | 'realPath'>,
+  command: string,
+  extraFolders: readonly string[] = [],
+): 'inside' | 'outside' | 'protected' {
+  let root: string;
+  let base: string;
+  try {
+    base = realpathSync.native(workspace.realPath ?? workspace.path);
+    root = canonicalWorkspacePath(base);
+  } catch {
+    return 'outside';
+  }
+  const prefix = root.endsWith(sep) ? root : root + sep;
+  let outside = false;
+  let touchesProtected = commandNamesProtectedPath(command, extraFolders);
+  const given = words(command);
+  const script = scriptNameIndex(
+    given.map((word) => word.replace(/["']/g, '')),
+    programName(given[0]?.replace(/["']/g, '') ?? ''),
+  );
+  for (const [index, word] of given.entries()) {
+    for (const part of commandPathParts(word)) {
+      if (index !== script && isRemotePart(part)) {
+        outside = true;
+        continue;
+      }
+      const reached = reachedPath(base, part);
+      if (reached === undefined || (reached !== root && !reached.startsWith(prefix))) {
+        outside = true;
+        continue;
+      }
+      if (reached !== root && reached.slice(prefix.length).split(/[\\/]/).some((segment) => isProtectedSegment(segment, extraFolders))) touchesProtected = true;
+    }
+  }
+  return touchesProtected ? 'protected' : outside ? 'outside' : 'inside';
+}
+
+/**
+ * Why a prefix rule must not cover `command` even though an exact rule may
+ * (AD-40 security review, and the independent review of 2026-10-31): a
+ * program no prefix covers (`ssh`, `docker`, `rsync`, `sed`), one whose
+ * words leave its allowlist (git, tar, npm, pnpm, yarn, go: see
+ * `command-prefix-allowlists.ts`), or an option that runs another command
+ * (`find -exec`). `undefined` when a prefix may cover it.
+ */
+export function prefixRuleRefusal(command: string): string | undefined {
+  const raw = words(command);
+  const given = raw.map((word) => word.replace(/["']/g, ''));
+  const name = programName(given[0] ?? '');
+  const refusal = `Commands starting with ${name} aren't offered, because its options can run another command.`;
+  return prefixRefusedFor(name, given.slice(1), raw.slice(1)) ? refusal : undefined;
+}
+
+/**
+ * What "Always allow" would cover for a request, its first (default) scope:
+ * for `execute`, the exact command (`command_exact`, AD-40); for another
+ * named kind, the kind; for `other`, an unknown kind, an `execute` without a
+ * command, or a command whose text can't be ruled ({@link commandRuleRefusal}),
+ * nothing (`null`: Always allow is not offered). Core also refuses a command
+ * whose paths can't be ruled ({@link commandPathsReach}).
  */
 export function alwaysAllowScope(kind: ToolKind, command: string | undefined): AlwaysAllowScope | null {
   if (kind === 'execute') {
-    if (command !== undefined && alwaysAllowRefusal(command) !== undefined) return null;
-    const prefix = command === undefined ? undefined : commandPrefix(command);
-    return prefix === undefined ? null : { kind: 'command_prefix', value: prefix, label: prefix };
+    if (command === undefined || commandRuleRefusal(command) !== undefined) return null;
+    const exact = command.trim();
+    return { kind: 'command_exact', value: exact, label: exact };
   }
   if (kind === 'other') return null;
   return { kind: 'tool', value: kind, label: TOOL_SCOPE_LABELS[kind] };
 }
 
 /**
- * Whether a stored rule answers a request of `kind` with `command`. A
- * command prefix matches whole words only (`npm install` never matches
- * `npm installer`), and nothing matches a command with shell syntax, a
- * masked command, or one led by an interpreter or wrapper. A rule for a
- * file kind matches only when `pathsInside` (every path the call names is
- * inside the workspace; {@link pathsInsideWorkspace}).
+ * The second scope a command offers (AD-40): every command starting with
+ * Ogden's prefix of it ({@link commandPrefix}), never client text. `null`
+ * when the command can't be ruled or a prefix must not cover it
+ * ({@link prefixRuleRefusal}).
+ */
+export function alwaysAllowPrefixScope(command: string): AlwaysAllowScope | null {
+  if (commandRuleRefusal(command) !== undefined || prefixRuleRefusal(command) !== undefined) return null;
+  // A quote in the first two words (`npm "test"`, `ls "-la"`) would put it in the prefix: no prefix at all,
+  // never the wider one-word one.
+  if (words(command).slice(0, 2).some((word) => /["']/.test(word))) return null;
+  const prefix = commandPrefix(command);
+  return prefix === undefined ? null : { kind: 'command_prefix', value: prefix, label: prefix };
+}
+
+/**
+ * Whether a stored rule answers a request of `kind` with `command`.
+ * `pathsInside` is, for a file kind, whether every path the call names is
+ * inside the workspace ({@link pathsInsideWorkspace}), and for `execute`,
+ * whether the command's paths are rulable (`inside` from {@link commandPathsReach}); it
+ * defaults to `false`, so a caller that forgets it never allows.
+ *
+ * A command rule matches only a rulable command ({@link commandRuleRefusal})
+ * and only token-equal words: an exact rule the same command (spaces at the
+ * ends aside), a prefix rule a command whose first words are the prefix's
+ * (`npm test` never `npm testx`, `npm-test` or `npm "test"`) and that no
+ * prefix may cover ({@link prefixRuleRefusal}). Nothing matches a masked
+ * command, or one with shell syntax.
  */
 export function ruleMatches(
   rule: Pick<AlwaysAllowScope, 'kind' | 'value'>,
@@ -144,9 +292,11 @@ export function ruleMatches(
   command: string | undefined,
   pathsInside = false,
 ): boolean {
-  if (command !== undefined && (hasShellSyntax(command) || command.includes(MASKED) || alwaysAllowRefusal(command) !== undefined)) return false;
+  if (command !== undefined && (hasShellSyntax(command) || commandRuleRefusal(command) !== undefined)) return false;
   if (rule.kind === 'tool') return kind !== 'execute' && kind !== 'other' && rule.value === kind && (!PATH_KINDS.has(kind) || pathsInside);
-  if (rule.kind !== 'command_prefix' || kind !== 'execute' || command === undefined) return false;
+  if (kind !== 'execute' || command === undefined || pathsInside !== true) return false;
+  if (rule.kind === 'command_exact') return rule.value.trim() !== '' && command.trim() === rule.value.trim();
+  if (rule.kind !== 'command_prefix' || prefixRuleRefusal(command) !== undefined) return false;
   const prefix = words(rule.value);
   const given = words(command);
   return prefix.length > 0 && prefix.length <= given.length && prefix.every((word, index) => given[index] === word);

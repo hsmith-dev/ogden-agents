@@ -54,6 +54,12 @@ export interface TranscriptToolCall {
   kind: ToolKind;
   status: ToolCallStatus;
   diffs: ToolCallDiff[] | undefined;
+  /**
+   * The call's permission card (epic 26 story 4): `waiting` while it is still
+   * open, `denied` once it was denied. Absent otherwise (no card, allowed, or
+   * a card left unanswered).
+   */
+  held?: 'waiting' | 'denied';
 }
 
 /** The latest `session.check_in` (story 2.10), until any later event of the session. */
@@ -72,8 +78,12 @@ export interface TranscriptCheckIn {
 export interface TranscriptPermission {
   requestId: string;
   toolCall: { toolCallId: string; title: string; kind: ToolKind; command?: string | undefined; protectedPath?: true | undefined };
-  /** What Always allow would cover; `null` when it is not offered. */
+  /** What Always allow would cover, its first (default) scope; `null` when it is not offered. */
   scope: AlwaysAllowScope | null;
+  /** The second scope a command offers: commands starting with Ogden's prefix (AD-40). */
+  prefixScope?: AlwaysAllowScope | undefined;
+  /** Why Always allow isn't offered, as the server said (AD-40); absent on older events. */
+  refusal?: string | undefined;
   cautionLevel: CautionLevel;
   /** The chat's permission mode when it asked (absent before permission modes: Ask). */
   permissionMode?: PermissionMode | undefined;
@@ -85,6 +95,8 @@ export interface TranscriptPermission {
         by: PermissionResolvedEvent['payload']['by'];
         reason: string | undefined;
         ruleId: string | undefined;
+        /** On an Always allow, the scope the rule covers (AD-40); absent on older events. */
+        scope?: AlwaysAllowScope | undefined;
         /** The rule was undone since (`workspace.permission_rule_removed`). */
         ruleRemoved: boolean;
         at: string;
@@ -110,6 +122,8 @@ export type TranscriptItem =
   | { type: 'document'; path: string; next: CatalogNext | null; toolCallId: string | null; at: string }
   /** The user continued the chat with another agent here (handoff, `session.agent_changed`): the "Continued with" divider. */
   | { type: 'agent_changed'; agentId: string; previous: string; at: string }
+  /** A turn that changed files ended (`session.turn_changes_recorded`, story 8.4): its counts, and Review changes on it. */
+  | { type: 'turn_changes'; turnId: string; files: number; additions: number; deletions: number; at: string }
   /** The agent's current step was stopped so a message sent right away goes at once (`session.turn_interrupted`). */
   | {
       type: 'interrupted';
@@ -322,6 +336,12 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
       case 'session.check_in':
         view.checkIn = { waitingOn: event.payload.waitingOn, at: event.at };
         break;
+      case 'session.turn_changes_recorded': {
+        // Only a turn that changed files says so; one that changed nothing adds no row.
+        const { turnId, files, additions, deletions } = event.payload;
+        if (files > 0) view.items.push({ type: 'turn_changes', turnId, files, additions, deletions, at: event.at });
+        break;
+      }
       case 'session.resumed': {
         // The chat reopens on the user's next message: the break goes just before it.
         const reopenedBy = view.items.findLastIndex((item) => item.type === 'message' && item.message.role === 'user' && item.message.status === undefined);
@@ -331,12 +351,14 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
         break;
       }
       case 'permission.requested': {
-        const { requestId, toolCall: call, alwaysAllowScope, cautionLevel, permissionMode } = event.payload;
+        const { requestId, toolCall: call, alwaysAllowScope, alwaysAllowPrefix, alwaysAllowRefusal, cautionLevel, permissionMode } = event.payload;
         if (permissions.has(requestId)) break;
         const permission: TranscriptPermission = {
           requestId,
           toolCall: call,
           scope: alwaysAllowScope,
+          ...(alwaysAllowPrefix === undefined ? {} : { prefixScope: alwaysAllowPrefix }),
+          ...(alwaysAllowRefusal === undefined ? {} : { refusal: alwaysAllowRefusal }),
           cautionLevel,
           ...(permissionMode === undefined ? {} : { permissionMode }),
           requestedAt: event.at,
@@ -358,6 +380,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
           by: event.payload.by,
           reason: event.payload.reason,
           ruleId: event.payload.ruleId,
+          ...(event.payload.scope === undefined ? {} : { scope: event.payload.scope }),
           ruleRemoved: false,
           at: event.at,
         };
@@ -379,6 +402,12 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
     // Only a waiting session is holding a request for its answer; any other has let it go.
     if (permission.status === 'pending' && view.state !== 'waiting') permission.status = 'unanswered';
     if (permission.status === 'pending') view.pendingPermissions.push(permission);
+    // The tool call the card holds says so; the latest request for a call decides (tool calls are fresh per fold).
+    const held = toolCalls.get(permission.toolCall.toolCallId);
+    if (held === undefined) continue;
+    if (permission.status === 'pending') held.held = 'waiting';
+    else if (permission.resolution?.decision === 'deny' && permission.resolution.by !== 'cancelled') held.held = 'denied';
+    else delete held.held;
   }
   return view;
 }

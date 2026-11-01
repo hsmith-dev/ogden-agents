@@ -7,7 +7,7 @@
  */
 import { TicketEpic, TicketRow, TicketsResponse } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { cardStatusLine, groupBoard, humanEpicTitle, isFinishedTicket, indexTickets, prerequisitesOf, unmetPrerequisites } from '../src/planning/board-model';
+import { cardStatusLine, epicHeading, groupBoard, humanEpicTitle, isFinishedTicket, indexTickets, prerequisitesOf, unmetPrerequisites } from '../src/planning/board-model';
 
 const row = (fields: Record<string, unknown>) =>
   TicketRow.parse({ id: null, epic: 'epic-first', title: 'A ticket', type: 'story', status: '', state: 'planned', blocked_reason: '', ...fields });
@@ -98,6 +98,17 @@ describe('humanEpicTitle', () => {
     expect(humanEpicTitle('epic-planning-and-board')).toBe('Planning and board');
     expect(humanEpicTitle('backlog')).toBe('Backlog');
     expect(humanEpicTitle('')).toBe('Not in an epic');
+    expect(humanEpicTitle('epic-1')).toBe('1');
+  });
+});
+
+describe('epicHeading (26.6)', () => {
+  it('names the epic by its id and name, a bare number as Epic N, and no epic plainly', () => {
+    expect(epicHeading({ slug: 'epic-everyday-polish', id: 26, title: humanEpicTitle('epic-everyday-polish') })).toBe('Epic 26: Everyday polish');
+    expect(epicHeading({ slug: 'epic-1', id: null, title: humanEpicTitle('epic-1') })).toBe('Epic 1');
+    expect(epicHeading({ slug: 'epic-1', id: 1, title: humanEpicTitle('epic-1') })).toBe('Epic 1');
+    expect(epicHeading({ slug: '', id: null, title: humanEpicTitle('') })).toBe('Not in an epic');
+    expect(epicHeading({ slug: 'backlog', id: null, title: humanEpicTitle('backlog') })).toBe('Backlog');
   });
 });
 

@@ -150,7 +150,7 @@ test('from a finished epic to a lesson the next build carries, on the installed 
   await test.step('a Simple project shows nothing of retrospectives: the look-back is refused and nothing is written', async () => {
     const simpleId = await addProject(page, simple.path);
     await page.goto(`${url}/w/${simpleId}`);
-    await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats']);
+    await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Workbench']);
     // The guard comes first (AD-22).
     const refused = await api(page, 'POST', lookBackPath(simpleId));
     expect(refused.status).toBe(409);

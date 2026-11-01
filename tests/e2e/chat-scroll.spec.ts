@@ -59,7 +59,7 @@ test('around a permission card, with its tool running, scrolling past the end ne
     await page.setViewportSize({ width: 1440, height: 700 });
     await fillChat(page, 6);
 
-    // Waiting: the tool call shows "In progress" above the card.
+    // Waiting: the tool call reads "Waiting for you" above the card.
     await send(page, 'permission');
     await expect(page.getByTestId('permission-card')).toBeVisible();
     await expectEndsAtLastItem(page);

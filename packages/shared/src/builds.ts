@@ -4,6 +4,7 @@ import { BuildAgent, BuildMode, RunQueueEntry } from './build-runs.js';
 import { VerificationResult } from './build-verification.js';
 import { Run, RunOutcome, Session } from './entities.js';
 import { RemoteMachineId } from './ids.js';
+import { autoChatName, CHAT_NAME_MAX } from './chat-name.js';
 import { TICKET_REF_PATTERN } from './planning-board.js';
 
 /**
@@ -333,6 +334,21 @@ export const BUILD_ALL_NOTHING_STARTED_TEXT = 'Nothing was started. Each ready s
 export const BUILD_ALL_FOLLOW_LABEL = 'Follow them in Runs';
 export const BUILD_FAILED = "The build couldn't start. Try again.";
 export const REVIEW_PAGE_TITLE = 'Review';
+/**
+ * A build session's name (26.6, E26-R6): "Build 1.2: <ticket title>", or
+ * "Build 1.2" when the ticket has no title. Core stores it as the session's
+ * `autoTitle` when it creates the session, so every surface reading
+ * `chatName` shows it; a long title is cut at a word, as stored names are.
+ */
+export const buildSessionTitle = (ref: string, title?: string | null): string => {
+  const plain = `${BUILD_LABEL} ${ref}`;
+  const named = title === undefined || title === null ? null : autoChatName(`${plain}: ${title}`, CHAT_NAME_MAX);
+  return named === null || named === `${plain}:` ? plain : named;
+};
+/** A Runs row's link name (26.6): the whole row opens the run, "Open the build 1.2 Deposit checkout". */
+export const runRowLinkLabel = (ref: string, title?: string | null): string => (title === undefined || title === null || title.trim() === '' ? `Open the build ${ref}` : `Open the build ${ref} ${title}`);
+/** The review page's own workspace tab (26.6): "Review 1.2". */
+export const reviewTabLabel = (ref: string): string => `${REVIEW_PAGE_TITLE} ${ref}`;
 export const REVIEW_LOAD_FAILED = "The review couldn't be loaded. Try again.";
 export const APPROVE_LABEL = 'Approve and merge';
 export const REJECT_LABEL = 'Reject';

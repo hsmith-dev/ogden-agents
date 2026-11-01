@@ -26,6 +26,8 @@ The v1 release is being finalized. Implementation and release evidence are track
 - Run a chat or an attended build on another computer you own over SSH (Settings > Remote machines), with a key Ogden makes for each machine and its host key confirmed once.
 - Choose Ogden, Forest or Ember appearance presets, or build a custom theme with paired light/dark colors, contrast validation and JSON import/export.
 - Use native terminal tabs and splits in Developer mode, or the optional desktop shell.
+- Move fast from the keyboard: Needs you rows say what each waiting item needs and where, and `g y` opens the next one; `g n` (or New chat in the chat header) starts a new chat; Cmd/Ctrl+K opens a palette of projects, chats and actions; Settings is grouped in a left navigation; and Always allow can cover commands starting with the same one or two words (never a chained command or a protected path).
+- Look into a project without leaving Ogden in its Workbench: read its files (Markdown rendered, read-only), search it, review what an agent changed (This turn, Unstaged, Staged, Branch) and stage or revert a hunk, send line comments to the chat's agent as one message, run the project's declared test or lint command in Problems (trusted projects only) and jump from a failure to its line, and open any file at a line in VS Code, Cursor, Zed or a JetBrains IDE. Cmd/Ctrl+K finds files by name too.
 
 The code for these features is present; [v1 readiness](docs/v1-readiness.md) distinguishes automated checks from remaining real-provider and operating-system evidence.
 

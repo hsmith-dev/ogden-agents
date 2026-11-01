@@ -274,6 +274,20 @@
       "when": 1793469025467,
       "tag": "0038_odd_raider",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1793514188924,
+      "tag": "0039_fuzzy_callisto",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1793545279395,
+      "tag": "0040_romantic_fenris",
+      "breakpoints": true
     }
   ]
 }

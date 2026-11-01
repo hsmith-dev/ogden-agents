@@ -6,6 +6,7 @@ description: Local browser control room for your own coding agents. shadcn/ui co
 sources:
   - ../spec-ogden-agents/spec-ogden-agents.md
   - ../architecture-ogden-agents/architecture-ogden-agents.md
+  - ../change-desktop-ux-uplift/change-desktop-ux-uplift.md
 colors:
   # Token names follow shadcn/ui's CSS-variable names so the owned components
   # read them unchanged. `accent` keeps shadcn's meaning (quiet hover fill).
@@ -49,6 +50,14 @@ colors:
   diff-remove-strong: '#F1C3BD'
   terminal: '#101311'
   terminal-foreground: '#DCE2DC'
+  # Syntax (2026-10-31): each is an sRGB mix of an existing token with
+  # foreground, so no new hue enters the palette (see Colors).
+  syntax-keyword: '#2841A7'
+  syntax-string: '#1C613E'
+  syntax-number: '#962E26'
+  syntax-type: '#225579'
+  syntax-comment: '#4E554F'
+  diff-gutter-foreground: '#4E554F'
   # Dark set
   background-dark: '#0F1210'
   foreground-dark: '#E6EAE6'
@@ -87,6 +96,12 @@ colors:
   diff-remove-strong-dark: '#5A2620'
   terminal-dark: '#0A0C0B'
   terminal-foreground-dark: '#DCE2DC'
+  syntax-keyword-dark: '#9FB1F8'
+  syntax-string-dark: '#69CA95'
+  syntax-number-dark: '#ED9A90'
+  syntax-type-dark: '#86BBCC'
+  syntax-comment-dark: '#B1B9B2'
+  diff-gutter-foreground-dark: '#B1B9B2'
 typography:
   display:
     fontFamily: 'Geist'
@@ -324,6 +339,95 @@ components:
     rail: '3px solid {colors.signal}'
     radius: '{rounded.lg}'
     padding: '{spacing.panel-padding}'
+  needs-you-row:
+    background: 'transparent'
+    backgroundHover: '{colors.accent}'
+    radius: '{rounded.md}'
+    whatTypography: '{typography.label}'
+    whereTypography: '{typography.caption}'
+    whereForeground: '{colors.muted-foreground}'
+  command-palette:
+    background: '{colors.popover}'
+    border: '1px solid {colors.border}'
+    radius: '{rounded.lg}'
+    width: 640px
+    inputTypography: '{typography.body}'
+    rowHeight: '{spacing.row-height}'
+    rowSelected: '{colors.accent}'
+    groupTypography: '{typography.caption}'
+  setup-chip:
+    background: 'transparent'
+    backgroundHover: '{colors.accent}'
+    foreground: '{colors.muted-foreground}'
+    radius: '{rounded.md}'
+    height: 28px
+    typography: '{typography.caption}'
+  machine-badge:
+    background: '{colors.muted}'
+    radius: '{rounded.sm}'
+    typography: '{typography.mono-compact}'
+  scope-choice:
+    typography: '{typography.caption}'
+    commandTypography: '{typography.mono-compact}'
+  workbench-nav:
+    width: 200px
+    itemHeight: '{spacing.row-height}'
+    itemSelected: '{colors.card}'
+    typography: '{typography.label}'
+  file-tree-row:
+    height: 28px
+    heightCompact: 24px
+    backgroundHover: '{colors.accent}'
+    backgroundSelected: '{colors.card}'
+    typography: '{typography.mono-compact}'
+  code-view:
+    background: '{colors.card}'
+    border: '1px solid {colors.border}'
+    radius: '{rounded.lg}'
+    typography: '{typography.mono}'
+    lineNumber: '{colors.diff-gutter-foreground}'
+    lineHighlight: '{colors.accent}'
+  diff-file-header:
+    background: '{colors.muted}'
+    border: '1px solid {colors.border}'
+    typography: '{typography.mono}'
+    countAdd: '{colors.syntax-string}'
+    countRemove: '{colors.syntax-number}'
+  diff-hunk-header:
+    background: '{colors.background}'
+    foreground: '{colors.muted-foreground}'
+    typography: '{typography.mono-compact}'
+  line-comment:
+    background: '{colors.card}'
+    border: '1px solid {colors.border}'
+    rail: '2px solid {colors.primary}'
+    radius: '{rounded.md}'
+    typography: '{typography.body-compact}'
+  comments-bar:
+    background: '{colors.card}'
+    border: '1px solid {colors.border}'
+    radius: '{rounded.lg}'
+  path-link:
+    foreground: '{colors.foreground}'
+    underline: '1px dotted {colors.muted-foreground}'
+    typography: '{typography.mono}'
+  problem-row:
+    height: '{spacing.row-height}'
+    heightCompact: '{spacing.row-height-compact}'
+    radius: '{rounded.md}'
+    pathTypography: '{typography.mono-compact}'
+    messageTypography: '{typography.label}'
+  settings-nav:
+    width: 220px
+    itemHeight: '{spacing.row-height}'
+    itemSelected: '{colors.card}'
+    groupTypography: '{typography.label}'
+  try-column:
+    background: '{colors.card}'
+    border: '1px solid {colors.border}'
+    borderKept: '2px solid {colors.primary}'
+    radius: '{rounded.lg}'
+    padding: '{spacing.panel-padding}'
 ---
 
 ## Brand & Style
@@ -353,6 +457,18 @@ The palette is a green-tinted graphite neutral plus one attention color and five
   - `error` `{colors.state-error}` brick red `#C2352C` / `#F0776B`. Shared with `destructive`.
 - **Diff colors** (`diff-add`, `diff-remove` and their `-strong` gutters). Tinted from the working and error hues so the review surface speaks the same language.
 - **Terminal** (`{colors.terminal}`). The terminal panel is dark in both themes, matching what developers expect from their own terminal and making the "you are now driving the real CLI" mode change unmistakable.
+- **Syntax colors** (2026-10-31, CAP-34; the file viewer and diff viewer). Derived, not new: each is an sRGB mix of an existing token with `{colors.foreground}` (dark: `{colors.foreground-dark}`), pulled toward ink so code reads calm and never shows the your-turn cobalt itself.
+
+  | Token | Light | Dark | Derived from | Used for |
+  |---|---|---|---|---|
+  | `{colors.syntax-keyword}` | `#2841A7` (signal 75%) | `#9FB1F8` (signal 70%) | `signal` | keywords and word operators (`return`, `in`) |
+  | `{colors.syntax-string}` | `#1C613E` (state-working 75%) | `#69CA95` (90%) | `state-working` | strings, the "+N" count |
+  | `{colors.syntax-number}` | `#962E26` (destructive 75%) | `#ED9A90` (70%) | `destructive` | numbers, constants, the "-M" count |
+  | `{colors.syntax-type}` | `#225579` (signal and working 50/50, then 80%) | `#86BBCC` (80%) | `signal`, `state-working` | types, tags, attributes |
+  | `{colors.syntax-comment}` | `#4E554F` (muted-foreground 80%) | `#B1B9B2` (65%) | `muted-foreground` | comments, in italic |
+  | `{colors.diff-gutter-foreground}` | `#4E554F` | `#B1B9B2` | same as comment | line numbers on any gutter |
+
+  Identifiers, functions and punctuation stay `{colors.foreground}`. Checked at 4.5:1 or better on every surface code sits on, in both themes: `background`, `card`, `popover`, `muted`, `accent`, `diff-add`, `diff-remove`, `diff-add-strong`, `diff-remove-strong` (lowest: light string on `diff-remove-strong` 4.69, dark number on `diff-add-strong` 4.64). Colour never carries meaning alone in code: added and removed lines also carry a `+` or `-` in the gutter.
 
 Contrast: every text pairing is WCAG AA or better. Text on state-colored backgrounds is avoided; state labels use `foreground` or `muted-foreground`, and the state color sits on the glyph beside them. Glyphs meet 3:1 non-text contrast in both sets.
 
@@ -415,21 +531,33 @@ Crisp enough to read as a tool, soft enough that a non-developer does not feel t
 
 Visual specs. Behavior lives in EXPERIENCE.md Component Patterns. Every shadcn component in `packages/web/ui` takes the palette, radii and type above; none ships in default state. Icons are **Phosphor** (regular weight, 1.5 stroke, 16px default, 14px compact), one family across the app.
 
-- **Status glyph.** 10px, one shape per state so it survives color blindness and grayscale: `working` filled circle (breathing), `waiting` filled circle with a 2px ring in `{colors.signal}`, `idle` hollow circle, `done` check mark, `error` filled diamond. Always paired with the state word in `label` (the word may be visually hidden only in the collapsed rail, where it becomes the accessible name and a tooltip).
-- **Status row** (sidebar). Glyph, session title (truncate at one line), agent name in `caption` `muted-foreground`, relative time right-aligned in tabular `caption`. Hover `{colors.accent}`; selected `{colors.card}` with a 1px `{colors.border}`. `waiting` rows add a 2px left rail in `{colors.signal}`.
+- **Status glyph.** 10px, one shape per state so it survives color blindness and grayscale: `working` filled circle (breathing), `waiting` filled circle with a 2px ring in `{colors.signal}`, `idle` hollow circle, `done` check mark, `error` filled diamond. Always paired with the state word in `label` (the word may be visually hidden only in the collapsed rail and in one-line sidebar rows, where it becomes the accessible name and a tooltip; note 2026-10-31).
+- **Status row** (sidebar; one line from epic 26, 2026-10-31). One line at `{spacing.row-height}` (30px compact): glyph, chat name in `label` truncated at one line, and the agent's monochrome mark at 14px at the end in `muted-foreground`. No second line, no repeated agent name, no time on the row; state word, agent and time live in the tooltip and accessible name. Hover `{colors.accent}`; selected `{colors.card}` with a 1px `{colors.border}`. `waiting` rows add a 2px left rail in `{colors.signal}`.
 - **Needs you group.** Pinned top of the sidebar. `{colors.signal-subtle}` panel, `{rounded.lg}`, heading "Needs you" with its count in `{colors.signal}`. Rows: permission requests, questions, tickets ready for review, blocked runs. Hidden entirely when empty; no "All caught up" filler.
+- **Needs you row** (`needs-you-row`, epic 26). Two lines inside the group's panel, 8px vertical padding: a 14px kind glyph (Phosphor shield for permission, chat-question for question, check-square for review, warning-diamond for blocked) in `foreground`, then line one, the what, in `label` `foreground`, truncated only at its end; line two, the where ("Letterpress, Fix the login bug"), in `caption` `muted-foreground`. Hover `{colors.accent}`, `{rounded.md}`; the row last opened by `g y` keeps a 2px `{colors.signal}` left rail. **Show 3 more** is a ghost text button in `caption`.
 - **Workspace group** (sidebar). A disclosure chevron, the workspace name in `label` 600 as the link that opens it (the Status row's selected fill while the user is inside it), and a muted gear icon to its settings; then its session rows (note 2026-10-04: there is no workspace switcher drop-down). Collapsed groups show a compact state summary: one glyph plus count per non-zero state (for example, working 2, waiting 1).
 - **Message, user.** `{colors.muted}` block, `{rounded.lg}`, right-aligned within the chat column at 85% max width.
 - **Message, agent.** No container; body text on the page, agent name and time above in `caption`. Markdown rendered with `mono` code blocks on `{colors.muted}`.
-- **Tool-call row.** One line: Phosphor glyph for the action (read, edit, run, search), a plain-language verb ("Edited", "Read", "Ran"), and the target in `mono-compact`. Bordered, `{rounded.md}`. Expands in place to show detail (diff hunk, command output). In Comfortable density consecutive tool calls collapse into one row ("Read 4 files, edited 2"); in Compact they list individually.
-- **Permission card.** `{colors.card}`, 1px border, 3px left rail in `{colors.signal}`, `{rounded.lg}`, `{spacing.panel-padding}`. Anatomy: headline in `heading` ("Claude Code wants to run a command"), one plain sentence of why if the agent gave one, the exact command or file path in a `{colors.muted}` `mono` block, the project and caution level in `caption`, then three buttons in one row: **Allow once** (primary ink), **Always allow** (outline, with the scope written under it in `caption`: "npm install in clay-and-kiln"), **Deny** (destructive outline). After a decision it collapses to a single `caption` line with a glyph: "Allowed once: npm install stripe" and the time.
-- **Composer.** `{colors.card}`, 1px `{colors.input}`, `{rounded.lg}`, min 2 lines, grows to 12. Send is an ink icon button. Agent picker (a new chat) or the chat's model chip (story 11; ghost button, model icon, truncates and shrinks before Stop and Send) and attach sit in the composer footer (no agent picker on an empty project's Chats page, where Use another agent is the one agent chooser). Disabled state: `{colors.muted}` fill, text "The terminal is driving this session".
+- **Tool-call row.** One line: Phosphor glyph for the action (read, edit, run, search), a plain-language verb ("Edited", "Read", "Ran"), and the target in `mono-compact`. Bordered, `{rounded.md}`. Expands in place to show detail (the file's diff in the diff viewer, command output). Grouping follows the chat's detail level, Normal or Verbose, not density (note 2026-10-31). **Waiting for you**: the row carries the `waiting` status glyph and the words "Waiting for you" in `label` `foreground` before the target; it never shows the working glyph or "Running" until allowed. The turn's changes row ("Changed 3 files +12 -3") is a tool-call row with a Phosphor files glyph, counts in `{colors.syntax-string}` and `{colors.syntax-number}` with their signs, and **Review changes** as a ghost text button at its end.
+- **Permission card.** `{colors.card}`, 1px border, 3px left rail in `{colors.signal}`, `{rounded.lg}`, `{spacing.panel-padding}`. Anatomy: headline in `heading` ("Claude Code wants to run a command"), one plain sentence of why if the agent gave one, the exact command or file path in a `{colors.muted}` `mono` block, the project and caution level in `caption`, then three buttons in one row: **Allow once** (primary ink), **Always allow** (outline, with the scope written under it in `caption`: "npm install in clay-and-kiln"), **Deny** (destructive outline). After a decision it collapses to a single `caption` line with a glyph: "Allowed once: npm install stripe" and the time. **Scope choice** (`scope-choice`, AD-40): when a prefix is offered, the scope line under Always allow becomes two standard radio rows in `caption`, the command or prefix in `mono-compact` on `{colors.muted}` with `{rounded.sm}`; the card grows by one 24px row and no button moves. When it is not offered for a chained command, one `caption` `muted-foreground` line takes its place.
+- **Composer.** `{colors.card}`, 1px `{colors.input}`, `{rounded.lg}`, min 2 lines, grows to 12. Send is an ink icon button. Under the field, inside the composer, sits the **setup row** (epic 27, 2026-10-31; it replaces the footer's agent picker and model chip): `setup-chip`s for Agent, Model, Mode and Location, 28px tall, ghost, `caption` `muted-foreground` with a Phosphor glyph each (robot, cpu, shield, folder or git-branch or desktop-tower) and a caret; 4px apart; they truncate their value and shrink before Stop and Send; the plan meter chip and attach follow (no agent chip on an empty project's Chats page, where Use another agent is the one agent chooser). The Mode chip in Skip all keeps ghost styling with its word in `{colors.destructive}`; the red banner carries the warning. Disabled state: `{colors.muted}` fill, text "The terminal is driving this session".
 - **Driver toggle.** Two-segment control "Chat | Terminal" in the session header. Track `{colors.muted}`, active segment `{colors.card}` with 1px border. Terminal segment uses a Phosphor terminal glyph. Disabled segment at 50% opacity with a tooltip naming the reason.
 - **Terminal panel.** `{colors.terminal}` in both themes, `{rounded.lg}`, xterm with Geist Mono 13px, 12px inner padding. A 1px `{colors.signal}` top edge while the terminal is the driver.
 - **Read-only banner.** Above the transcript when the terminal drives: `{colors.muted}`, `label`, with a "Switch to Chat" text button.
 - **Ticket card** (board). `{colors.card}`, 1px border, `{rounded.lg}`. Ref in `mono-compact` `muted-foreground`, title in `label` 600, then a single status line. Prerequisite not met: a lock glyph and "Waits for 1.2". Ready for review: a 2px signal left rail. Blocked: brick glyph and a one-line reason.
 - **Verification checks** (review and run). Three rows, always in this order: "Plan marked built", "Tests pass when re-run", "Code changed". Each row: check (working green), cross (error red) or hollow circle (pending grey), then the label, then a detail link.
-- **Diff viewer.** Unified by default, split at `xl` in Compact. File header in `mono` with added/removed counts. Line backgrounds `diff-add` / `diff-remove`, gutters in the `-strong` tones.
+- **Diff viewer** (one component for chat, Changes and Review; 2026-10-31, CAP-34). Inline by default, Side by side by the user's choice from `lg` (it was "split at `xl` in Compact"). A toolbar above the first file: a two-segment Inline | Side by side control styled like the driver toggle, then "Wrap lines" as a checkbox, all in `label`. Per file a sticky `diff-file-header`: `{colors.muted}`, 1px bottom border, path in `mono` (folder part in `muted-foreground`, file name in `foreground`), the change word in `caption`, "+N" in `{colors.syntax-string}` and "-M" in `{colors.syntax-number}` in tabular `mono-compact`, then ghost icon buttons (Open in editor, Copy path, more) and the collapse chevron. Hunks start with a `diff-hunk-header` row (`{colors.background}`, `mono-compact` `muted-foreground`, "Lines 40 to 52") with its actions at the end as small outline buttons in `label` (**Stage**, **Unstage**, **Revert** in destructive outline). Lines: `mono` with syntax colour, backgrounds `diff-add` / `diff-remove`, gutters in the `-strong` tones with line numbers in `{colors.diff-gutter-foreground}` and a `+` or `-` sign; word-level changes inside a line use the `-strong` tone as a 2px-radius fill. Folded context is a full-width ghost row "Show 24 more lines" in `caption`. Side by side splits at 50% with one shared vertical scroll and a 1px `{colors.border}` between. No horizontal scroll: lines wrap with a hanging indent and a muted return glyph. The focused line gets a 2px `{colors.ring}` inset outline.
+- **Line comment** (`line-comment`). A Comment button, 20px square, ink plus glyph on `{colors.card}` with 1px border, sits in the gutter of the hovered or focused line. A draft or saved comment is a block under its line(s), indented to the code: `{colors.card}`, 1px border, 2px left rail in `{colors.primary}` (ink, not signal: it is the user's own note, not the agent asking), `{rounded.md}`, `body-compact` text, the range in `caption` ("Lines 71 to 74"), Edit and Delete as ghost text buttons; "Outdated" as a `caption` badge on `{colors.muted}`. A selected range tints its gutter with `{colors.accent}`.
+- **Comments bar** (`comments-bar`). Sticky at the bottom of the diff surface like the approve bar: `{colors.card}`, border top, `{rounded.lg}` when floating, "Comments to send (3)" in `label` with the count in tabular figures, the Send to picker as a setup chip, and **Send to Claude Code** as the primary ink button.
+- **Path link** (`path-link`). `mono` in `{colors.foreground}` with a 1px dotted underline in `{colors.muted-foreground}`, solid on hover and focus; a `:42` line suffix in `muted-foreground`. Never `{colors.signal}`, never a link-blue.
+- **Code view** (`code-view`, the read-only file viewer). `{colors.card}`, 1px border, `{rounded.lg}`. Header row: path in `mono`, then Copy path and **Open in editor** as outline buttons. Body: `mono` with syntax colour, line numbers right-aligned in `{colors.diff-gutter-foreground}` at tabular width; the target line fills with `{colors.accent}` and a 2px `{colors.ring}` left edge. Rendered markdown uses the agent message styles in the reading column (`{spacing.chat-column}`), with **Show source** as a two-segment control in the header. Binary, too large and protected states are a centred `notice-reduced-mode` style panel inside the view with one sentence and the button; protected uses a lock glyph.
+- **Workbench** (`workbench-nav`). A 200px sub-nav column on `{colors.background}` with items as status-row-like rows (Phosphor folder, magnifying-glass, git-diff, warning-circle), counts right-aligned in tabular `caption`; selected `{colors.card}` with 1px border. The panel uses full width to `{spacing.content-max}`. Files splits into a 280px tree (`file-tree-row`: `mono-compact`, 16px indent per level, chevrons for folders, a lock glyph for protected paths, ignored files in `muted-foreground`) and the code view. Changes lists files in a 280px column with the change word in `caption` and counts, beside the diff viewer; the view switch is a four-segment control (This turn, Unstaged, Staged, Branch) like the driver toggle, with "Compared with main" in `caption` after it.
+- **Problem row** (`problem-row`). A command row: name in `label` 600, the command in `mono-compact` `muted-foreground`, the last result with a status glyph (check working, cross error, working glyph while running) and its word, then **Run** (outline) or **Stop** (destructive outline). Failure rows indent under their file heading (path link in `mono-compact`, count): a cross glyph in `{colors.state-error}`, `file:line` as a path link, the message's first line in `label` truncated at one line, and **Ask the agent to fix this** as a ghost text button at the end. Raw output is a `mono-compact` block on `{colors.terminal}` with `{colors.terminal-foreground}`, `{rounded.md}`, max 320px tall with its own scroll.
+- **Command palette** (`command-palette`). The standard floating layer: 640px wide, 20% from the top, `{colors.popover}`, 1px border, `{rounded.lg}`, the floating shadow. The field in `body` with a magnifying-glass glyph, 48px tall, a 1px bottom border. Results: group headings in sentence-case `caption` `muted-foreground` (never uppercase), rows at `{spacing.row-height}` with a leading glyph (chat rows use their state glyph; files a file glyph; actions their own), the name in `label`, its context ("Letterpress") in `caption` `muted-foreground`, and in Developer mode its kbd hint at the end. The selected row fills `{colors.accent}`; matched letters are `label` 600, not coloured. Max 60vh with its own scroll.
+- **Machine badge** (`machine-badge`, CAP-35). The branch badge's style with a Phosphor desktop-tower glyph ("on build-box"); the same place in the session header.
+- **Settings nav** (`settings-nav`). A 220px column on `{colors.background}` left of the settings page, its group items as status-row-like rows in `label` with a 16px Phosphor glyph each (robot, folders, palette, bell, terminal-window, desktop-tower, sliders), selected `{colors.card}` with 1px border; the page body sits in a 720px column. Below `md` it becomes a select at the top.
+- **Try page** (`try-column`). Columns of equal width, 16px apart, each a card with the agent's mark and name in `heading`, its status glyph and word, the latest activity line in `caption`, counts as in the diff header, then **Open chat** and **Review changes** (outline) and **Keep this one** (primary ink). The kept column gets a 2px ink border; "Not kept" columns drop to `muted-foreground` text with their buttons replaced by **Restore**.
+- **New chat button.** An outline icon button (Phosphor note-pencil) with the visible label "New chat" in the chat header at `lg` and wider, icon only with a tooltip below `lg`.
 - **Approve bar.** Sticky at the bottom of the review surface: `{colors.card}`, border top, `{rounded.lg}` when floating. **Approve and merge** (primary ink, disabled until all verification checks pass) and **Reject and retry** (outline).
 - **Reduced-mode notice.** Inline panel, `{colors.muted}`, 1px border, info glyph, one sentence ("This project uses the standard BMad Method install, so ticket editing from the board is unavailable.") and an outline button "Upgrade this project". Never a toast, never red.
 - **Blocked notice.** `{colors.state-error-subtle}` panel with the plain-language reason and **Retry** (primary). Error red is on the glyph only.
@@ -463,3 +591,6 @@ Visual specs. Behavior lives in EXPERIENCE.md Component Patterns. Every shadcn c
 | Tonal steps and 1px borders for hierarchy | Shadows on cards, glass, glows, gradients |
 | Animate only real state changes; honor reduced motion | Perpetual motion on anything but a working glyph |
 | Plain hyphens and commas in UI copy | Em dashes or en dashes anywhere in visible text |
+| Derive syntax colours from palette tokens and check them at 4.5:1 on every code surface | Ship a stock syntax theme (One Dark, GitHub) or add a hue for code |
+| Style path links as underlined ink `mono` | Colour links cobalt or link-blue |
+| Keep one diff viewer for chat, Changes and Review | A second diff style per surface, or a raw `git diff` dump |

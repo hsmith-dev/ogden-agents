@@ -26,8 +26,12 @@ import {
   WorkspaceResponse,
   type OrchestrationRunView,
 } from '@ogden-agents/shared';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PROCESS_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import { signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
+
+// Each test starts a server and its agents' processes (test-timeouts.ts): a hang limit, not a measurement.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repos: string[] = [];
 const servers: TestServer[] = [];

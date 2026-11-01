@@ -9,3 +9,14 @@ export const OVERLAY_SELECTOR = '[role="dialog"], [role="alertdialog"], [role="m
 export function isInsideOverlay(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(OVERLAY_SELECTOR) !== null;
 }
+
+/**
+ * Whether a key press (or a page event) comes from inside an open overlay:
+ * its target or the focused element is in one. `except` names an overlay
+ * that does not count (the palette's own, for the key that closes it). The
+ * one check behind every page-wide shortcut.
+ */
+export function focusInsideOverlay(event: Pick<Event, 'target'>, except?: string): boolean {
+  const active = typeof document === 'undefined' ? null : document.activeElement;
+  return [event.target, active].some((target) => isInsideOverlay(target) && !(except !== undefined && target instanceof Element && target.closest(except) !== null));
+}

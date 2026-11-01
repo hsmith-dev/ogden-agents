@@ -52,7 +52,7 @@ import { createLatestGate, fetchWorkspaceSettings, useBmadPieces } from '@/works
  * server still offers it, the app shortcut. Finishing marks Welcome done and
  * opens the new project's Chats (its Plan when it was added with Planning
  * on, story 4.6). The steps are this page's state, not
- * routes. **Skip for now** on every step marks it done too; Settings →
+ * routes. **Skip for now** on every step marks it done too; Help →
  * Welcome brings it back.
  *
  * The project step asks "Simple chats or BMad Method?" once (10.4): only

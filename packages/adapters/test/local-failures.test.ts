@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentError, type AgentEvent, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
+import { PROCESS_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import { startFakeServer, type FakeServer } from '../../../tests/fixtures/fake-openai-server.mjs';
 import { createLocalAgent, FAILURE_WORDS, localFailureWords, opencodeChatEnv, opencodeConfig, writeOpenCodeConfig } from '../src/index.js';
 
@@ -112,16 +113,20 @@ describe('a turn that fails, in plain words (each against a fake server mode)', 
     expect(Date.now() - started).toBeLessThan(8_000);
   });
 
-  it('a slow first token (a model still loading) is never cut off while the server answers', async () => {
-    const { session, events } = await start({ serverOptions: { slowMs: 1_500 } });
+  it('a slow first token (a model still loading) is never cut off while the server answers', { timeout: PROCESS_TEST_TIMEOUT_MS }, async () => {
+    // The answer is held until the watch has looked 4 more times (no fixed delay): a watch that never looks hangs this test.
+    const { fake, session, events } = await start({ serverOptions: { slowUntilLooks: 4 } });
     expect((await session.prompt('SLOW please')).stopReason).toBe('end_turn');
+    const asked = fake.log.findIndex((entry) => entry.method === 'POST' && entry.userText?.includes('SLOW') === true);
+    expect(asked).toBeGreaterThanOrEqual(0);
+    expect(fake.log.slice(asked).filter((entry) => entry.method === 'GET' && entry.path === '/v1/models').length).toBeGreaterThanOrEqual(4);
     expect(events.filter((event) => event.type === 'message_chunk').length).toBeGreaterThan(0);
     expect(errorOf(events)).toEqual([]);
   });
 
-  it('never cuts off a server that is busy and slow to answer the look, while it still answers the chat', { timeout: 20_000 }, async () => {
-    const { session, events } = await start({ serverOptions: { slowMs: 2_500, modelsDelayMs: 600 } });
-    // Each look takes 600 ms and the first token 2.5 s: slow, but running.
+  it('never cuts off a server that is busy and slow to answer the look, while it still answers the chat', { timeout: PROCESS_TEST_TIMEOUT_MS }, async () => {
+    const { session, events } = await start({ serverOptions: { slowUntilLooks: 4, modelsDelayMs: 600 } });
+    // Each look takes 600 ms and the first token waits for 4 of them: slow, but running.
     expect((await session.prompt('SLOW please')).stopReason).toBe('end_turn');
     expect(errorOf(events)).toEqual([]);
   });

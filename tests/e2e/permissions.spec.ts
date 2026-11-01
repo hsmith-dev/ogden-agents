@@ -25,7 +25,7 @@ test('nothing runs until Allow once; the card collapses to its record and focus 
     await expect(card(page)).toBeVisible();
     await expect(card(page)).toContainText('Claude Code wants to run a command');
     await expect(card(page).getByTestId('permission-command')).toHaveText('npm test');
-    await expect(card(page).getByTestId('permission-scope')).toContainText('npm test in ogden-agents-e2e-repo-');
+    await expect(card(page).getByTestId('permission-scope')).toContainText('Exactly npm test in ogden-agents-e2e-repo-');
     await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'waiting');
     await expect(page.getByTestId('permission-announcement')).toHaveText('Claude Code is waiting for you: run npm test');
     // The card never takes focus, and no button is focused by default.
@@ -79,35 +79,41 @@ test('Deny records its reason on the record line, and the agent reports Denied',
 
 test('Always allow lets the same prefix run without a card, until it is undone from the record line', async ({ page }) => {
   await withChat(page, async () => {
-    await send(page, 'permission npm install stripe');
+    await send(page, 'permission npm test -- cart');
     await expect(card(page)).toBeVisible();
-    await expect(card(page).getByTestId('permission-scope')).toContainText('npm install in ');
+    // `npm install` is never offered a prefix (it runs packages' scripts; 26.8): `npm test` is.
+    // The prefix is the second choice (AD-40); the exact command is selected by default, and the scope line names it.
+    await expect(card(page).getByTestId('permission-scope')).toContainText('Exactly npm test -- cart in ');
+    await card(page).getByRole('radio', { name: /^Commands starting with npm test in / }).click();
     await card(page).getByRole('button', { name: 'Always allow' }).click();
-    await expect(replies(page)).toContainText('Ran npm install stripe.');
+    await expect(replies(page)).toContainText('Ran npm test -- cart.');
     await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
 
-    await send(page, 'permission npm install lodash');
-    await expect(replies(page).nth(1)).toContainText('Ran npm install lodash.');
+    await send(page, 'permission npm test -- --watch');
+    await expect(replies(page).nth(1)).toContainText('Ran npm test -- --watch.');
     await expect(card(page)).toHaveCount(0);
     const records = page.getByTestId('permission-record');
-    await expect(records.nth(1)).toContainText('Allowed by your Always allow rule: npm install lodash');
+    await expect(records.first()).toContainText('Always allowed: commands starting with npm test');
+    await expect(records.nth(1)).toContainText('Allowed by your Always allow rule: npm test -- --watch');
 
-    // A compound command is never covered by the rule.
-    await send(page, 'permission npm install x && rm -rf build');
+    // A compound command is never covered by the rule, and offers no Always allow, saying why.
+    await send(page, 'permission npm test && rm -rf build');
     await expect(card(page)).toBeVisible();
+    await expect(card(page).getByRole('button', { name: 'Always allow' })).toHaveCount(0);
+    await expect(card(page).getByTestId('permission-scope')).toHaveText("Always allow isn't offered for this command, because it runs more than one thing.");
     await card(page).getByRole('button', { name: 'Deny' }).click();
-    await expect(replies(page).nth(2)).toContainText('Denied npm install x && rm -rf build.');
+    await expect(replies(page).nth(2)).toContainText('Denied npm test && rm -rf build.');
 
     // Undo from the first record line.
     await records.first().getByTestId('permission-record-text').click();
     await page.getByTestId('permission-undo').getByRole('button', { name: 'Undo Always allow' }).click();
     await expect(records.first().getByTestId('permission-rule-undone')).toBeVisible();
 
-    await send(page, 'permission npm install lodash');
+    await send(page, 'permission npm test -- --watch');
     await expect(card(page)).toBeVisible();
     await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'waiting');
     await card(page).getByRole('button', { name: 'Allow once' }).click();
-    await expect(replies(page).nth(3)).toContainText('Ran npm install lodash.');
+    await expect(replies(page).nth(3)).toContainText('Ran npm test -- --watch.');
   });
 });
 

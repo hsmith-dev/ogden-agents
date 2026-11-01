@@ -8,15 +8,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { makeDataDir, removeDataDir, startServer } from '../support.js';
-import { DARK_BG, LIGHT_BG, openConnected, sharedUrl as url, sidebarOf as sidebarColumn } from './tab.js';
-
-async function expectNoHorizontalOverflow(page: Page) {
-  const { scrollWidth, clientWidth } = await page.evaluate(() => ({
-    scrollWidth: document.documentElement.scrollWidth,
-    clientWidth: document.documentElement.clientWidth,
-  }));
-  expect(scrollWidth, 'page scrolls horizontally').toBeLessThanOrEqual(clientWidth);
-}
+import { DARK_BG, expectNoHorizontalOverflow, LIGHT_BG, openConnected, settingsLinkOf, settingsNavOf, sharedUrl as url, sidebarOf as sidebarColumn } from './tab.js';
 
 const background = (page: Page) => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 
@@ -44,7 +36,7 @@ for (const path of ['/', '/settings/appearance']) {
       await expect(sidebar.getByText('No projects yet')).toBeHidden();
       // Labels stay as accessible names in the rail.
       await expect(sidebar.getByRole('button', { name: 'Add project' })).toBeVisible();
-      await expect(sidebar.getByRole('button', { name: 'Settings' })).toBeVisible();
+      await expect(sidebar.getByRole('link', { name: 'Settings', exact: true })).toBeVisible();
       const addBox = (await sidebar.getByRole('button', { name: 'Add project' }).boundingBox())!;
       expect(addBox.x + addBox.width).toBeLessThanOrEqual(56);
       await expect(page.getByTestId('sidebar-trigger')).toBeHidden();
@@ -138,13 +130,16 @@ test('first load: the empty sidebar and the empty workspace area, in plain langu
   expect(await page.evaluate(() => document.fonts.check('15px "Geist Variable"'))).toBe(true);
 });
 
-test('Settings in the sidebar footer opens Appearance', async ({ page }) => {
+test('Settings in the sidebar footer opens Appearance with the settings nav, and is marked current', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openConnected(page);
-  await sidebarColumn(page).getByRole('button', { name: 'Settings' }).click();
-  await page.getByRole('menuitem', { name: 'Appearance' }).click();
+  await expect(settingsLinkOf(page)).not.toHaveAttribute('aria-current', 'page');
+  await settingsLinkOf(page).click();
   await expect(page).toHaveURL(/\/settings\/appearance$/);
   await expect(page.getByRole('heading', { name: 'Appearance', level: 1 })).toBeVisible();
+  await expect(settingsNavOf(page).getByRole('link', { name: 'Appearance', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(settingsLinkOf(page)).toHaveAttribute('aria-current', 'page');
+  await expect(settingsLinkOf(page)).toHaveAttribute('data-active', 'true');
 });
 
 test('first load carries only the shell and home; a settings page loads its own chunk on navigation', async ({ page }) => {
@@ -159,8 +154,7 @@ test('first load carries only the shell and home; a settings page loads its own 
   expect(scripts.some((path) => path.startsWith('/assets/'))).toBe(true);
   expect(scripts.filter((path) => lazyPage.test(path))).toEqual([]);
 
-  await sidebarColumn(page).getByRole('button', { name: 'Settings' }).click();
-  await page.getByRole('menuitem', { name: 'Appearance' }).click();
+  await settingsLinkOf(page).click();
   await expect(page.getByRole('heading', { name: 'Appearance', level: 1 })).toBeVisible();
   expect(scripts.some((path) => /\/assets\/appearance-page-[^/]+\.js$/.test(path))).toBe(true);
 });
@@ -194,7 +188,7 @@ test('density: Developer mode sets compact tokens; rows and body type shrink; th
   await page.setViewportSize({ width: 1440, height: 900 });
   await openConnected(page, '/settings/appearance');
   const sidebar = sidebarColumn(page);
-  const settingsRow = sidebar.getByRole('button', { name: 'Settings' });
+  const settingsRow = settingsLinkOf(page);
   const bodySize = () => page.evaluate(() => getComputedStyle(document.documentElement).fontSize);
 
   expect((await settingsRow.boundingBox())!.height).toBe(40);

@@ -10,7 +10,7 @@
  * revision and path passed is core's own (validated before use), never
  * request input.
  */
-import type { DiffStats } from '@ogden-agents/shared';
+import type { ChangedFile, ChangesView, DiffHunk, DiffStats, HunkAction } from '@ogden-agents/shared';
 import { CoreError } from './errors.js';
 
 /** The main checkout's current branch and its commit. */
@@ -173,6 +173,82 @@ export interface VcsPort {
    * the branch nor the worktree.
    */
   importBundle(repoPath: string, worktreePath: string, branch: string, base: string, bundle: Buffer): Promise<'imported' | 'nothing' | 'refused'>;
+}
+
+/**
+ * Which view of a folder's changes (AD-37): This turn names the turn's two
+ * snapshot trees (from `session.turn_changes_recorded`); the others are
+ * the working tree against the index (Unstaged), the index against `HEAD`
+ * (Staged), and the branch against its base (Branch).
+ */
+export type VcsChangesTarget = { view: 'turn'; startTree: string; endTree: string } | { view: Exclude<ChangesView, 'turn'> };
+
+/** A view's changed files (paths folder-relative, `/`-separated), at most `MAX_CHANGED_FILES`. */
+export interface VcsChangedFiles {
+  /** The branch Branch compares with (`main`), for that view. */
+  base?: string | undefined;
+  files: ChangedFile[];
+  truncated: boolean;
+}
+
+/**
+ * What a hunk action (or an undo) did (8.5): `applied`, with a revert's
+ * undo id; `outdated` when the hunk (or the file's hunks, or the file an
+ * undo puts back) changed since it was shown, and nothing was written;
+ * `not_found` when the folder is in no repository (an undo: gone, used, or
+ * of another folder or path); `unsupported` for a binary, too large, link
+ * or submodule file, or a path under a linked folder.
+ */
+export type VcsHunkResult = { outcome: 'applied'; undo?: string | undefined } | { outcome: 'outdated' | 'not_found' | 'unsupported' };
+
+/**
+ * The folder a working-tree call runs in (AD-37; story 8.4): the project's
+ * real path, or a chat's worktree, which git is run in only with folders
+ * Ogden pins (`GIT_DIR`, `GIT_COMMON_DIR`, `GIT_WORK_TREE`) after checking
+ * the worktree's own files still name `repoPath` and `branch` (5.3's check).
+ */
+export interface VcsFolder {
+  /** The folder itself (absolute): every path in an answer is relative to it. */
+  path: string;
+  /** A chat's worktree: the project's real path and the chat's branch (`ogden/chat/<ses_…>`). */
+  worktree?: { repoPath: string; branch: string } | undefined;
+}
+
+/**
+ * The working-tree half of the VCS port (AD-37; epic 8 entry 2's contract,
+ * 8.4 builds it on git, 8.5 adds hunk actions): kept apart from
+ * {@link VcsPort} so the builds' adapters and fakes are untouched. The
+ * folder is always the one core resolved, and core keeps only the paths
+ * `WorkspaceRelativePath` accepts and no refused name. Snapshots are tree
+ * objects kept in Ogden's data directory, never a commit or a ref, never
+ * the repo's own object store or index. Every call keeps AD-17's
+ * protections (no hook; core serializes snapshots and the commit with the
+ * repo's other git work). A folder that is in no repository answers no
+ * changes and no snapshot.
+ */
+export interface VcsWorkingTreePort {
+  /** The view's changed files. */
+  changedFiles(folder: VcsFolder, target: VcsChangesTarget): Promise<VcsChangedFiles>;
+  /** One file's diff in the view (no hunks when it is binary or over `MAX_DIFF_FILE_BYTES`), or `undefined` when it has no change there. */
+  fileDiff(folder: VcsFolder, target: VcsChangesTarget, path: string): Promise<{ file: ChangedFile; hunks: DiffHunk[] } | undefined>;
+  /**
+   * Stages, unstages or reverts one hunk (`hunkId`) or the whole file
+   * (`hunkIds`: every id the file has now, else `outdated`), all or nothing,
+   * from the view's own diff (8.5; absent: 501). A revert writes the folder
+   * only, never the index, and answers an undo id.
+   */
+  applyHunk?(folder: VcsFolder, input: { target: VcsChangesTarget; action: HunkAction; path: string; hunkId?: string | undefined; hunkIds?: readonly string[] | undefined }): Promise<VcsHunkResult>;
+  /** Puts back what the revert `undo` took from `path` in `folder` (the same folder, path and view only, onto the file as the revert left it), all or nothing, then forgets it (8.5). */
+  undoRevert?(folder: VcsFolder, input: { undo: string; path: string; view?: ChangesView | undefined }): Promise<VcsHunkResult>;
+  /** Snapshots the folder's working tree (tracked and untracked, not ignored) as a tree object; its id, or `undefined` when the folder is in no repository. */
+  snapshot(folder: VcsFolder): Promise<string | undefined>;
+  /**
+   * Commits everything in the worktree (`folder.worktree` is required) on
+   * its checked-out branch with `message` (no hook, never pushed); the
+   * commit and how many files it holds, or `nothing` when there is nothing
+   * to commit.
+   */
+  commitAll(folder: VcsFolder, message: string): Promise<{ revision: string; files: number } | 'nothing'>;
 }
 
 /** A git operation failed; `message` is plain words, `details` are for the log and hold no secret. */

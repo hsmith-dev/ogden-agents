@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { NEW_PROJECTS_SETTINGS_LABEL, type BmadPiece } from '../../packages/shared/src/bmad.ts';
 import { expect, test, type Page } from '@playwright/test';
 import { makeDataDir, removeDataDir, startServer, type RunningServer } from '../support.js';
-import { openConnected, sidebarOf } from './tab.js';
+import { openConnected, openFromSettings, sidebarOf } from './tab.js';
 
 const WORKSPACE_URL = /\/w\/(ws_[0-9A-Z]{26})$/;
 const AVAILABLE: readonly BmadPiece[] = ['planning', 'board'];
@@ -66,8 +66,7 @@ test('a project added from the dialog starts Simple; with BMad Method and Planni
     expect(readdirSync(join(home, 'Documents', 'alpha-repo'))).toEqual([]);
     expect(existsSync(join(dataDir, 'preferences.json'))).toBe(false);
 
-    await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('menuitem', { name: NEW_PROJECTS_SETTINGS_LABEL }).click();
+    await openFromSettings(page, 'Projects', NEW_PROJECTS_SETTINGS_LABEL);
     await expect(page).toHaveURL(/\/settings\/new-projects$/);
     const section = page.getByTestId('new-projects-section');
     await expect(section.getByRole('radio', { name: 'Simple chats' })).toHaveAttribute('aria-checked', 'true');

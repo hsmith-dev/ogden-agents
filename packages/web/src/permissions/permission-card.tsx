@@ -1,5 +1,5 @@
 import { Check, ClockCounterClockwise, Prohibit, ShieldCheck } from '@phosphor-icons/react';
-import type { CautionLevel, PermissionDecision, ToolKind } from '@ogden-agents/shared';
+import type { AlwaysAllowChoice, CautionLevel, PermissionDecision, ToolKind } from '@ogden-agents/shared';
 import { alwaysAllowRefusal, MAX_DENY_REASON_LENGTH, PERMISSION_MODE_LABELS, SKIP_ALL_REFUSAL } from '@ogden-agents/shared';
 import { useId, useState, type KeyboardEvent } from 'react';
 import { ChatApiError, decidePermission, removePermissionRule, UNKNOWN_AGENT_NAME } from '@/chat/chat-api';
@@ -9,7 +9,9 @@ import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
+import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
 import { Text } from '@/ui/typography';
+import { ScopeText, scopeWords, scopeWordsInSentence } from './scope-words';
 
 /** What the agent wants to do, by tool kind, for the card's headline. */
 const WANTS: Record<ToolKind, string> = {
@@ -56,7 +58,10 @@ export interface PermissionCardProps {
  * EXPERIENCE.md Permission card). While pending: the headline, the exact
  * command in mono, the project and caution level, then Allow once, Always
  * allow (its scope written under it, or why it is not offered) and Deny with
- * an optional reason. No button is focused by default, and `1`, `2`, `3`
+ * an optional reason. For a command, the scope is a choice of two (AD-40):
+ * the exact command, selected by default so nothing gets wider by habit, and
+ * commands starting with Ogden's prefix; arrow keys move within it and `2`
+ * saves the selected one. No button is focused by default, and `1`, `2`, `3`
  * answer only while focus is inside the card. Once answered (or no longer
  * waited for) it is its one-line record, which opens a popover to undo an
  * Always allow.
@@ -66,23 +71,35 @@ export function PermissionCard({ permission, wsId, sesId, projectName, agentName
   const [reason, setReason] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [choice, setChoice] = useState<AlwaysAllowChoice>('current');
   // While the terminal drives, the card can be read but not answered (story 3.6 review F2).
   const readOnly = useReadOnlyConversation();
 
   if (permission.status !== 'pending') return <PermissionRecordLine permission={permission} wsId={wsId} projectName={projectName} agentName={agentName} />;
 
   const { scope } = permission;
+  // The second scope only beside a first one (AD-40); the server checks the choice against what it offered.
+  const prefixScope = scope === null ? undefined : permission.prefixScope;
   const target = permissionTarget(permission);
-  // A chat in Skip all never writes rules (permission modes); an interpreter, a wrapper or a variable
-  // assignment can run anything: only Allow once and Deny, with the reason.
+  // A chat in Skip all never writes rules (permission modes); a command that can't be ruled (chained,
+  // redirected, outside the project, led by a wrapper, ...): only Allow once and Deny, with the reason.
+  // The server's reason first; older events had none, so it is worked out from the command.
   const skipAll = permission.permissionMode === 'skip_all';
-  const refusal = skipAll ? SKIP_ALL_REFUSAL : scope === null && permission.toolCall.command !== undefined ? alwaysAllowRefusal(permission.toolCall.command) : undefined;
+  const refusal =
+    permission.refusal ??
+    (skipAll ? SKIP_ALL_REFUSAL : scope === null && permission.toolCall.command !== undefined ? alwaysAllowRefusal(permission.toolCall.command) : undefined);
   const decide = (decision: PermissionDecision) => {
     if (readOnly || sending || (decision === 'allow_always' && scope === null)) return;
     setSending(true);
     setError(undefined);
     const trimmed = reason.trim();
-    decidePermission(wsId, sesId, permission.requestId, decision === 'deny' && trimmed !== '' ? { decision, reason: trimmed } : { decision }).then(
+    const body =
+      decision === 'deny' && trimmed !== ''
+        ? { decision, reason: trimmed }
+        : decision === 'allow_always' && prefixScope !== undefined
+          ? { decision, scope: choice }
+          : { decision };
+    decidePermission(wsId, sesId, permission.requestId, body).then(
       () => onDecided?.(),
       (failure: unknown) => {
         setSending(false);
@@ -135,9 +152,10 @@ export function PermissionCard({ permission, wsId, sesId, projectName, agentName
           Allow once
         </Button>
         {refusal !== undefined ? null : (
-          <div className="flex max-w-64 flex-col gap-1">
+          <div className={prefixScope === undefined ? 'flex max-w-64 flex-col gap-1' : 'flex min-w-0 max-w-96 flex-col gap-1'}>
             <Button
               variant="outline"
+              className="self-start"
               aria-keyshortcuts={readOnly ? undefined : '2'}
               aria-disabled={sending || scope === null || readOnly}
               aria-describedby={`${id}-scope`}
@@ -145,9 +163,42 @@ export function PermissionCard({ permission, wsId, sesId, projectName, agentName
             >
               Always allow
             </Button>
-            <Text variant="caption" id={`${id}-scope`} data-testid="permission-scope">
-              {scope === null ? 'Not offered for this kind of request' : `${scope.label} in ${projectName}`}
-            </Text>
+            {scope !== null && prefixScope !== undefined ? (
+              <RadioGroup
+                id={`${id}-scope`}
+                data-testid="permission-scope"
+                aria-label="What Always allow covers"
+                value={choice}
+                onValueChange={(value) => setChoice(value === 'prefix' ? 'prefix' : 'current')}
+                disabled={readOnly}
+                className="gap-0"
+              >
+                <RadioGroupOption
+                  id={`${id}-scope-current`}
+                  value="current"
+                  data-testid="permission-scope-current"
+                  label={
+                    <>
+                      <ScopeText scope={scope} /> in {projectName}
+                    </>
+                  }
+                />
+                <RadioGroupOption
+                  id={`${id}-scope-prefix`}
+                  value="prefix"
+                  data-testid="permission-scope-prefix"
+                  label={
+                    <>
+                      <ScopeText scope={prefixScope} /> in {projectName}
+                    </>
+                  }
+                />
+              </RadioGroup>
+            ) : (
+              <Text variant="caption" id={`${id}-scope`} data-testid="permission-scope">
+                {scope === null ? 'Not offered for this kind of request' : `${scopeWords(scope)} in ${projectName}`}
+              </Text>
+            )}
           </div>
         )}
         <Button
@@ -216,7 +267,7 @@ function PermissionRecordLine({ permission, wsId, projectName, agentName }: { pe
     if (resolution.by === 'rule') text = `Allowed by your Always allow rule: ${target}`;
     else if (resolution.by === 'caution') text = `${allowed ? 'Allowed' : 'Denied'} by the caution level: ${target}`;
     else if (resolution.decision === 'allow_once') text = `Allowed once: ${target}`;
-    else if (resolution.decision === 'allow_always') text = `Always allowed: ${target}`;
+    else if (resolution.decision === 'allow_always') text = `Always allowed: ${resolution.scope?.kind === 'command_prefix' ? scopeWordsInSentence(resolution.scope) : target}`;
     else text = `Denied: ${target}`;
   }
   const undone = ruleId !== undefined && (resolution?.ruleRemoved === true || goneHere);
@@ -257,7 +308,7 @@ function PermissionRecordLine({ permission, wsId, projectName, agentName }: { pe
             <Text variant="label">
               {resolution?.by === 'rule'
                 ? `This ran without asking because of an Always allow rule in ${projectName}.`
-                : `${agentName} can do this in ${projectName} without asking: ${permission.scope?.label ?? target}.`}
+                : `${agentName} can do this in ${projectName} without asking: ${resolution?.scope !== undefined ? scopeWordsInSentence(resolution.scope) : permission.scope === null ? target : scopeWordsInSentence(permission.scope)}.`}
             </Text>
             <Button variant="outline" onClick={undo}>
               Undo Always allow

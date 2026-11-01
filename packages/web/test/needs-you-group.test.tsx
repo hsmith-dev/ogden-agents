@@ -2,8 +2,9 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Link, 
 import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { NeedsYouGroup, type NeedsYouItem } from '../src/shell/needs-you-group';
-import { SidebarProvider, SidebarStatusRow, SidebarWorkspaceGroup } from '../src/ui/sidebar';
+import { NeedsYouGroup, needsYouGlyph, type NeedsYouItem } from '../src/shell/needs-you-group';
+import { SidebarProvider, SidebarWorkspaceGroup } from '../src/ui/sidebar';
+import { SidebarStatusRow } from '../src/ui/sidebar-rows';
 import { TooltipProvider } from '../src/ui/tooltip';
 
 /** Renders `node` inside a router that knows the session route, so its links get their hrefs. */
@@ -16,16 +17,21 @@ async function renderInRouter(node: ReactNode, at = '/'): Promise<string> {
     ),
   });
   const session = createRoute({ getParentRoute: () => root, path: '/w/$wsId/s/$sesId' });
+  const review = createRoute({ getParentRoute: () => root, path: '/w/$wsId/review/$ref' });
   const chats = createRoute({ getParentRoute: () => root, path: '/w/$wsId' });
   const settings = createRoute({ getParentRoute: () => root, path: '/w/$wsId/settings' });
-  const router = createRouter({ routeTree: root.addChildren([session, chats, settings]), history: createMemoryHistory({ initialEntries: [at] }) });
+  const router = createRouter({ routeTree: root.addChildren([session, review, chats, settings]), history: createMemoryHistory({ initialEntries: [at] }) });
   await router.load();
   return renderToStaticMarkup(<RouterProvider router={router} />);
 }
 
 const render = (items: readonly NeedsYouItem[]) => renderInRouter(<NeedsYouGroup items={items} />);
 
-describe('Needs you group (DESIGN.md needs-you-group; EXPERIENCE.md Responsive & Platform)', () => {
+const permission: NeedsYouItem = { id: 'req_x', kind: 'permission', wsId: 'ws_a', sesId: 'ses_a', workspaceName: 'Clay and kiln', chatName: 'Fix the login bug', text: 'Claude Code wants to run npm test' };
+const rowOf = (html: string, n = 0) => [...html.matchAll(/<a[^>]*data-testid="needs-you-item"[^>]*>([\s\S]*?)<\/a>/g)][n]!;
+const many = (n: number): NeedsYouItem[] => Array.from({ length: n }, (_, i) => ({ id: `req_${i}`, kind: 'waiting', wsId: 'ws_a', sesId: `ses_${i}`, workspaceName: 'Letterpress', chatName: `Chat ${i}`, text: 'Claude Code is waiting for you' }));
+
+describe('Needs you group (DESIGN.md needs-you-group and needs-you-row; EXPERIENCE.md Needs you group, Responsive & Platform)', () => {
   it('renders nothing while nothing needs the user, in any form', async () => {
     const html = await render([]);
     expect(html).not.toContain('needs-you');
@@ -48,19 +54,62 @@ describe('Needs you group (DESIGN.md needs-you-group; EXPERIENCE.md Responsive &
 
     const panel = /<section[^>]*data-testid="needs-you"[^>]*>/.exec(html)![0];
     expect(panel).toMatch(/\bmd:max-lg:hidden\b/);
-    expect(html).toContain('Clay and kiln: Claude Code wants to run npm test');
-    expect(html).toContain('Letterpress: Claude Code is waiting for you');
   });
 
-  it('each item is a link to the session it waits in, naming its workspace, with the state in words', async () => {
-    const html = await render([{ id: 'req_1', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'B', text: 'Claude Code wants to run npm test' }]);
-    const link = /<a[^>]*data-testid="needs-you-item"[^>]*>([\s\S]*?)<\/a>/.exec(html);
-    expect(link).not.toBeNull();
-    expect(link![0]).toContain('href="/w/ws_b/s/ses_b"');
-    // Not color alone: the waiting glyph carries its word for screen readers.
-    expect(link![1]).toContain('data-state="waiting"');
-    expect(link![1]).toMatch(/class="[^"]*sr-only[^"]*">Waiting for you</);
-    expect(link![1]).toContain('B: Claude Code wants to run npm test');
+  it('a row is two lines: what, in full words and clamped only at its end, then the project and chat on one line', async () => {
+    const [row, inner] = rowOf(await render([permission]));
+    const what = /<span data-testid="needs-you-what" class="([^"]*)">([^<]*)<\/span>/.exec(inner!)!;
+    expect(what[2]).toBe('Claude Code wants to run npm test');
+    expect(what[1]).toMatch(/\bline-clamp-2\b/);
+    expect(what[1]).not.toMatch(/\btruncate\b/);
+    expect(what[1]).toMatch(/\btext-label\b/);
+    const where = /<span data-testid="needs-you-where" class="([^"]*)">([\s\S]*?)<\/span>/.exec(inner!)!;
+    expect(where[1]).toMatch(/\btruncate\b.*\btext-caption\b.*\btext-muted-foreground\b/);
+    expect(where[2]).toBe('<bdi>Clay and kiln</bdi>, <bdi>Fix the login bug</bdi>');
+    // Its height grows with its lines.
+    expect(row).toMatch(/\bh-auto\b/);
+  });
+
+  it('its accessible name reads both lines', async () => {
+    const [row] = rowOf(await render([permission, { ...permission, id: 'b', kind: 'pane', chatName: undefined, text: 'Terminal 1 may need you' }]));
+    expect(row).toContain('aria-label="Claude Code wants to run npm test, in Clay and kiln, Fix the login bug"');
+    const [pane] = rowOf(await render([{ ...permission, id: 'b', kind: 'pane', paneId: 'pane_1', sesId: '', chatName: undefined, text: 'Terminal 1 may need you' }]));
+    expect(pane).toContain('aria-label="Terminal 1 may need you, in Clay and kiln"');
+  });
+
+  it('a kind glyph tells permission, question, review and blocked rows apart', async () => {
+    const kinds = [
+      ['permission', 'permission'],
+      ['waiting', 'question'],
+      ['check_in', 'question'],
+      ['sign_in', 'question'],
+      ['pane', 'question'],
+      ['run_review', 'review'],
+      ['run_blocked', 'blocked'],
+    ] as const;
+    for (const [kind, glyph] of kinds) {
+      const [, inner] = rowOf(await render([{ ...permission, kind, ...(kind === 'run_review' ? { reviewRef: '1.2' } : {}) }]));
+      expect(inner, kind).toMatch(new RegExp(`data-slot="needs-you-glyph" data-glyph="${glyph}" aria-hidden="true"`));
+    }
+    expect(needsYouGlyph({ reviewRef: '1.2' })).toBe('review');
+    expect(needsYouGlyph({})).toBe('question');
+  });
+
+  it('a permission row links to its card in the chat; any other chat need to the chat; a review to its review page', async () => {
+    expect(rowOf(await render([permission]))[0]).toContain('href="/w/ws_a/s/ses_a#permission-req_x"');
+    expect(rowOf(await render([{ ...permission, kind: 'waiting', id: 'waiting:ses_a:1' }]))[0]).toContain('href="/w/ws_a/s/ses_a"');
+    expect(rowOf(await render([{ ...permission, kind: 'run_review', id: 'run_review:run_1', reviewRef: '1.2' }]))[0]).toContain('href="/w/ws_a/review/1.2"');
+  });
+
+  it('five rows show, then "Show N more"', async () => {
+    const html = await render(many(8));
+    expect([...html.matchAll(/data-testid="needs-you-item"/g)]).toHaveLength(5);
+    expect(html).toMatch(/<button[^>]*data-testid="needs-you-more"[^>]*aria-expanded="false"[^>]*>Show 3 more<\/button>/);
+    // The count is the whole list's.
+    expect(html).toMatch(/Needs you<span[^>]*>8<\/span>/);
+    const five = await render(many(5));
+    expect([...five.matchAll(/data-testid="needs-you-item"/g)]).toHaveLength(5);
+    expect(five).not.toContain('needs-you-more');
   });
 });
 
@@ -76,7 +125,7 @@ describe('workspace groups and status rows (DESIGN.md Workspace group and Status
         link={<Link to="/w/$wsId" params={{ wsId: 'ws_b' }} activeOptions={{ exact: true }} />}
         settingsLink={<Link to="/w/$wsId/settings" params={{ wsId: 'ws_b' }} />}
       >
-        <SidebarStatusRow state="waiting" title="Chat" caption="Claude Code, waiting for you" time={{ label: '5m', dateTime: '2026-09-30T11:55:00.000Z' }}>
+        <SidebarStatusRow state="waiting" title="Chat" agent="Claude Code" activity="5 min ago">
           <Link to="/w/$wsId/s/$sesId" params={{ wsId: 'ws_b', sesId: 'ses_b' }} />
         </SidebarStatusRow>
       </SidebarWorkspaceGroup>,
@@ -129,16 +178,33 @@ describe('workspace groups and status rows (DESIGN.md Workspace group and Status
     expect(inChat).toContain('data-current="true"');
   });
 
-  it('a row links to its session, with title and state as its accessible name, a tooltip in the rail, and the signal rail when waiting', async () => {
+  it('a row is one line linking to its session: glyph, name and agent mark; state, agent and activity are its name and tooltip; the signal rail when waiting', async () => {
     const html = await group(false);
     const row = /<a[^>]*data-slot="sidebar-menu-button"[^>]*>([\s\S]*?)<\/a>/.exec(html)!;
     expect(row[0]).toContain('href="/w/ws_b/s/ses_b"');
-    expect(row[0]).toContain('aria-label="Chat, Claude Code, waiting for you"');
+    expect(row[0]).toContain('aria-label="Chat, Waiting for you, Claude Code, 5 min ago"');
     expect(row[0]).toContain('data-session-state="waiting"');
     expect(row[0]).toMatch(/border-l-signal/);
-    // The glyph alone in the rail: the text column is visually hidden there.
+    // One line at row height: no auto height, no caption, no time.
+    expect(row[0]).toMatch(/class="[^"]*\bh-\(--row-height\)/);
+    expect(row[0]).not.toMatch(/\bh-auto\b/);
+    expect(row[1]).not.toContain('<time');
+    expect(row[1]).not.toContain('text-caption text-muted-foreground">Claude Code');
+    // The glyph alone in the rail: the name is visually hidden there, the mark hidden.
     expect(row[1]).toMatch(/data-slot="state-glyph" data-state="waiting" aria-hidden="true"/);
-    expect(row[1]).toMatch(/md:max-lg:sr-only[^>]*><bdi class="truncate">Chat<\/bdi>/);
-    expect(row[1]).toMatch(/<time datetime="2026-09-30T11:55:00.000Z"[^>]*tabular-nums[^>]*>5m<\/time>/i);
+    expect(row[1]).toMatch(/md:max-lg:sr-only[^>]*><bdi>Chat<\/bdi><\/span>/);
+    expect(row[1]).toMatch(/<span data-slot="agent-mark" data-letter="CC" aria-hidden="true" class="[^"]*md:max-lg:hidden[^"]*"><\/span>$/);
+  });
+});
+
+describe('a status row names the agent (epic 26, 26.5)', () => {
+  it('says the agent on its model in place of the agent; an agent not known shows its plain name\'s mark', async () => {
+    const html = await renderInRouter(
+      <SidebarStatusRow state="working" title="Fix it" agent="The agent" activity="3 hr ago" detail="Claude Code on Opus">
+        <Link to="/w/$wsId/s/$sesId" params={{ wsId: 'ws_b', sesId: 'ses_b' }} />
+      </SidebarStatusRow>,
+    );
+    expect(html).toContain('aria-label="Fix it, Working, Claude Code on Opus, 3 hr ago"');
+    expect(html).toMatch(/data-slot="agent-mark" data-letter="TA" aria-hidden="true"/);
   });
 });

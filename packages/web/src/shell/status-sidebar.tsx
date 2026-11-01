@@ -1,10 +1,7 @@
-import { useDeveloperModeOn } from '@/appearance/appearance-provider';
-import { Bell, Desktop, FolderSimplePlus, GearSix, HandWaving, Hammer, Info, Package, PaintBrush, Plus, Robot, TerminalWindow, Wrench } from '@phosphor-icons/react';
-import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { GearSix, Plus } from '@phosphor-icons/react';
+import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useChatRename } from '@/chat/chat-name';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
 import {
   Sidebar,
   SidebarContent,
@@ -18,22 +15,22 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarStatusRow,
   SidebarText,
   SidebarWorkspaceGroup,
-  useSidebar,
 } from '@/ui/sidebar';
+import { SidebarStatusRow } from '@/ui/sidebar-rows';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
-import { STATE_WORDS } from '@/ui/state-glyph';
 import { AddProjectDialog } from '@/workspaces/add-project-dialog';
+import { HelpMenu } from './help-menu';
 import { NeedsYouGroup } from './needs-you-group';
+import { markNeedsYouOpened, needsYouTarget } from './needs-you-target';
 import { NewTabButton } from './new-tab-button';
 import { QuitButton } from './quit-button';
 import { ServerStatus } from './server-status';
 import { useSidebarData } from './sidebar-data';
 import { SidebarStartChat } from './sidebar-start-chat';
-import { holdOrder, relativeTime, type SidebarModel, type SidebarRow } from './sidebar-model';
+import { activityWords, holdOrder, type SidebarModel, type SidebarRow } from './sidebar-model';
 import { Wordmark } from './wordmark';
 import { filterProjects, showsProjectFilter } from './project-filter';
 
@@ -42,7 +39,7 @@ import { filterProjects, showsProjectFilter } from './project-filter';
  * to see, open, add and manage projects (backlog story 13). Needs you on top,
  * then each workspace (its name opens it, a gear its settings) with its
  * session rows (story 2.11), a filter when there are many, and Add project,
- * then the footer with Settings, New tab, Quit Ogden Agents and the server status.
+ * then the footer with Settings, Help, New tab, Quit Ogden Agents and the server status.
  */
 export function StatusSidebar() {
   return (
@@ -181,12 +178,10 @@ function StatusSidebarBody() {
           onOpenFirst={
             first === undefined
               ? undefined
-              : () =>
-                  void (first.paneId !== undefined
-                    ? navigate({ to: '/w/$wsId/terminals' as never, params: { wsId: first.wsId } as never })
-                    : first.reviewRef === undefined
-                      ? navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: first.wsId, sesId: first.sesId } })
-                      : navigate({ to: '/w/$wsId/review/$ref', params: { wsId: first.wsId, ref: first.reviewRef } }))
+              : () => {
+                  markNeedsYouOpened(first.id);
+                  void navigate(needsYouTarget(first));
+                }
           }
         />
         <SidebarGroup aria-labelledby={projectsId}>
@@ -244,7 +239,8 @@ function StatusSidebarBody() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        <SettingsMenu />
+        <SettingsLink />
+        <HelpMenu />
         <NewTabButton />
         <QuitButton />
         <ServerStatus />
@@ -270,10 +266,9 @@ function SessionRows({ rows, now }: { rows: readonly SidebarRow[]; now: number }
           state={row.state}
           title={row.title}
           userTitle={row.userTitle}
-          updatedAt={row.updatedAt}
           agentName={row.agentName}
           model={row.model}
-          time={relativeTime(row.updatedAt, now)}
+          activity={activityWords(row.updatedAt, now)}
           active={params.sesId === row.sesId}
         />
       ))}
@@ -288,12 +283,11 @@ const SessionRow = memo(function SessionRow({
   state,
   title,
   userTitle,
-  updatedAt,
   agentName,
   model,
-  time,
+  activity,
   active,
-}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'userTitle' | 'updatedAt' | 'agentName' | 'model'> & { time: string; active: boolean }) {
+}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'userTitle' | 'agentName' | 'model'> & { activity: string; active: boolean }) {
   // Rename in place (backlog story 12): double click the row or press F2 on it.
   const rename = useChatRename({ wsId, sesId, name: title, title: userTitle });
   const item = useRef<HTMLLIElement>(null);
@@ -314,9 +308,9 @@ const SessionRow = memo(function SessionRow({
           data-testid="status-row"
           state={state}
           title={title}
-          caption={`${agentName}, ${STATE_WORDS[state].toLowerCase()}`}
+          agent={agentName}
+          activity={activity}
           detail={model === undefined ? undefined : `${agentName} on ${model}`}
-          time={{ label: time, dateTime: updatedAt }}
           isActive={active}
           aria-keyshortcuts="F2"
           onDoubleClick={startRename}
@@ -334,96 +328,15 @@ const SessionRow = memo(function SessionRow({
   );
 });
 
-/** Settings sections: Agents (9.1), Appearance, New projects (10.4), Notifications (backlog story 8; webhooks join it with builds) and Tools, and Welcome again (9.5). */
-function SettingsMenu() {
-  const { setSheetOpen } = useSidebar();
-  // Terminals settings are Developer mode's (epic 16): a simple user never sees the entry (AD-21).
-  const developerMode = useDeveloperModeOn();
+/** Settings: one link to the grouped settings pages (epic 26, E26-R7), current on any of them. */
+function SettingsLink() {
+  const onSettings = useRouterState({ select: (state) => state.location.pathname === '/settings' || state.location.pathname.startsWith('/settings/') });
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <SidebarMenuButton data-testid="settings-menu" tooltip="Settings" onClick={(event) => event.preventDefault()}>
-          <GearSix aria-hidden />
-          <SidebarLabel>Settings</SidebarLabel>
-        </SidebarMenuButton>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start">
-        <DropdownMenuLabel>Settings</DropdownMenuLabel>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/agents">
-            <Robot aria-hidden />
-            Agents
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/appearance">
-            <PaintBrush aria-hidden />
-            Appearance
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to={'/settings/dev-tools' as '/settings/tools'} data-testid="settings-dev-tools">
-            <Package aria-hidden />
-            Developer tools
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to={'/settings/remote-machines' as '/settings/tools'} data-testid="settings-remote-machines">
-            <Desktop aria-hidden />
-            Remote machines
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/new-projects">
-            <FolderSimplePlus aria-hidden />
-            {NEW_PROJECTS_SETTINGS_LABEL}
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/builds">
-            <Hammer aria-hidden />
-            Builds
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/notifications">
-            <Bell aria-hidden />
-            Notifications
-          </Link>
-        </DropdownMenuItem>
-        {developerMode ? (
-          <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-            <Link to={'/settings/terminals' as '/settings/tools'} data-testid="settings-terminals">
-              <TerminalWindow aria-hidden />
-              Terminals
-            </Link>
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to={'/settings/mcp' as '/settings/tools'}>
-            <Wrench aria-hidden />
-            MCP Servers
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/tools">
-            <Wrench aria-hidden />
-            Tools
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/settings/about">
-            <Info aria-hidden />
-            About
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
-          <Link to="/welcome">
-            <HandWaving aria-hidden />
-            Welcome
-          </Link>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <SidebarMenuButton asChild isActive={onSettings} tooltip="Settings">
+      <Link to="/settings" data-testid="settings-link">
+        <GearSix aria-hidden />
+        <SidebarLabel>Settings</SidebarLabel>
+      </Link>
+    </SidebarMenuButton>
   );
 }

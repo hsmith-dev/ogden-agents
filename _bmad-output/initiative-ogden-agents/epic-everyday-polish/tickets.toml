@@ -1,0 +1,123 @@
+# Epic 26 breakdown (v1.3, everyday polish). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-31 from change-desktop-ux-uplift section 4.4 (approved by the user 2026-10-31). References to other epics use "<epic id>.<entry id>".
+# CI never uses a real agent, model, phone or network: fakes on loopback only. Live checks with real CLIs, agents and devices are hitl.
+# Order after the set check (2026-10-31): 7 and 8 come right after the tracer bullet, since 8 is the least certain slice; ids keep the change proposal's numbering.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: Needs you rows show the request, and g y jumps to the next one"
+description = "Makes each Needs you row two lines per EXPERIENCE.md (what it needs in full words, then project and chat, a kind glyph for permission, question, review and blocked run, five rows then Show N more), adds `g y` (open the next row's target after the one last opened, wrapping) and `]` and `[` inside the group to the existing keyboard handler, and reads today's browser-side Needs you list; when done, a person sees two waiting chats' requests in full in the sidebar and reaches each with `g y`; the row's fields (kind, what, where) are the shape 20.9's core model keeps, and entries 2 and 3 extend the same keyboard handler."
+verify = "Playwright with two fake waiting chats in two projects reads both requests in full at the sidebar's width, opens the first then the second card with `g y` and wraps, and moves between rows with `]` and `[`; each row's accessible name reads both lines."
+covers = ["E26-R1"]
+after = ["2.11", "11.4"]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns", "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#interaction-primitives", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/ogden-current.md#cross-cutting", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/screens/04a-chat-permission-card.png"]
+
+[[entry]]
+id = 7
+type = "story"
+title = "Settings with grouped navigation"
+description = "Replaces the 12-item Settings menu with a left navigation in seven groups (Agents, Projects, Appearance, Notifications, Terminals, Remote machines, Advanced) shown on every settings page and as a drawer at phone width, keeping every existing route; entry 8 adds its rule list inside this layout, and entry 3's palette opens the groups by their routes."
+verify = "Playwright moves from Agents to Appearance in one click, every old settings route still opens its page, and the navigation works at 390px."
+covers = ["E26-R7"]
+after = []
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#information-architecture", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/ogden-current.md#settings", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/screens/15b-sidebar-settings-menu.png"]
+
+[[entry]]
+id = 8
+type = "story"
+title = "Always allow scoped to a command prefix (AD-40), with a security review"
+description = "Brings the existing `command_prefix` scope in `permission-matching.ts` to AD-40: the card keeps today's scope first and offers \"Commands starting with `<prefix>`\" (the one-word or two-word prefix of the parsed command) second, as EXPERIENCE.md Flow 6 shows; the server refuses a match on any shell control character, redirection or protected path; the rule is saved with a `rule_` id and listed with Remove in entry 7's Settings; nothing is offered for custom agents, attended builds or a device, and Skip all writes no rule; a security review of the matcher and routes is run and its findings fixed or recorded."
+verify = "Core tests allow `npm test -- --watch` under an `npm test` rule and refuse chained, piped, redirected, substituted and protected-path commands, and Skip all writes no rule; Playwright saves and removes a prefix rule; the security review's report is in the plan and the user has read it."
+covers = ["E26-R8"]
+after = [7, "2.6", "21.5"]
+hitl = true
+risk = "high"
+unknown = "What today's first scope covers exactly (`alwaysAllowScope` already returns a prefix), so whether it becomes the exact command; the build starts from a gap list against AD-40 and settles the card's two labels with it."
+references = ["_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-40--always-allow-can-be-scoped-to-a-command-pattern-adopted", "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#flow-6-reviewing-a-turn-and-sending-comments-lena-fischer-freelance-web-developer-monday-morning-on-a-clients-shop-frontend", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/ogden-current.md#chat-mid-turn-with-a-permission-card"]
+
+[[entry]]
+id = 2
+type = "story"
+title = "New chat in one step: g n, Cmd/Ctrl+N and header buttons"
+description = "Adds `g n` inside a project to entry 1's keyboard handler, Cmd/Ctrl+N as the desktop app's menu accelerator (a browser tab keeps Cmd/Ctrl+N, and Help says so), and a New chat button in the chat header and the Chats list header, each opening the new-chat draft at `/w/:wsId/new` with the composer focused, which becomes a chat only on its first message; entry 3 lists New chat as an action through the same function and owns `g n` outside a project."
+verify = "Playwright starts a new-chat draft from inside an existing chat with `g n` and both buttons, leaves it unsent and finds no new chat created; a desktop smoke test opens the draft with the menu's Cmd/Ctrl+N accelerator."
+covers = ["E26-R2"]
+after = [1]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/ogden-current.md#project-and-chat-list"]
+
+[[entry]]
+id = 4
+type = "story"
+title = "Tool rows wait in words; Normal and Verbose detail per chat"
+description = "Makes a tool row whose permission card is open read \"Waiting for you: <command>\" with the waiting glyph, then Running and Ran as it proceeds, and adds the per-chat detail level from EXPERIENCE.md (remembered in this browser, Normal by default and Verbose by default in Developer mode, switched from the session header menu keeping the scroll position), replacing the rule that density decided grouping; Normal's \"Changed 3 files\" row and its Review changes link are 8.4's and are not built here."
+verify = "Unit and Playwright tests hold a fake agent's command at the card and read \"Waiting for you: npm test\", then \"Running npm test\" after Allow once; switching to Verbose shows each edit's hunk without a click, and the choice survives a reload."
+covers = ["E26-R4"]
+after = ["2.6", "2.10"]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/ogden-current.md#chat-mid-turn-with-a-permission-card", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/ogden-current.md#finished-turn-and-diff"]
+
+[[entry]]
+id = 3
+type = "story"
+title = "Command palette (Cmd/Ctrl+K): projects, chats, tickets and actions"
+description = "Builds the palette from EXPERIENCE.md: Cmd/Ctrl+K opens it anywhere, the empty query shows Recent chats, Actions and Projects, typing matches chats, projects, tickets when the Board is on, and the actions (New chat from entry 2, Go to Needs you, Show every step from entry 4, the Settings groups from entry 7, Theme), `g n` outside a project opens it on \"New chat in...\", and it runs the chosen item; its sources are a list 8.11 adds files and the Workbench, Search the project and Run tests actions to without changing the palette."
+verify = "Playwright opens the palette with Cmd/Ctrl+K, finds a chat in another project by a word of its title and a ticket by its ref, opens them, and runs New chat and Show every step from it; an axe check passes."
+covers = ["E26-R3"]
+after = [2, 4, "4.9"]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/screens/18-cmd-k-pressed.png"]
+
+[[entry]]
+id = 5
+type = "story"
+title = "One-line sidebar rows; the shortcut banner shows once"
+description = "Makes sidebar chat rows one line (title, status dot, agent icon, with the agent named for screen readers), and shows the app-shortcut banner once, after which it lives in Help; it works on the sidebar after entry 1's Needs you rows."
+verify = "Playwright with 20 fixture chats sees at least 16 rows at 1440x900, the banner does not return after a reload once seen and opens from Help; an axe check passes."
+covers = ["E26-R5"]
+after = [1]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/ogden-current.md#project-and-chat-list", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/ogden-current.md#first-run-and-home"]
+
+[[entry]]
+id = 6
+type = "story"
+title = "Plain titles and no dead ends: build titles, Runs rows, the Board's epic name, Review's tab, terminal header icons"
+description = "Titles build sessions \"Build <ref>: <ticket title>\" where the build session is created, makes a whole Runs row open its run (its buttons still work on their own), shows the epic's name on the Board's epic heading, highlights Review's own tab on the review page, and gives terminal pane header buttons their icons and accessible names."
+verify = "Tests read a fake build session's sidebar title as \"Build 1.2: <title>\", open a run by clicking its row, read the epic's name on the Board, see Review's tab selected, and find a name on every pane header button."
+covers = ["E26-R6"]
+after = ["4.9", "5.4", "5.9", "11.1", "16.4"]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/ogden-current.md#board-plan-and-build-dialog", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/ogden-current.md#runs-run-view-and-review", "_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/ogden-current.md#terminals-developer-mode"]
+
+[[entry]]
+id = 9
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up duplication, dead code and boundary leaks across entries 1 to 8, scoped at start from their build records and deferred review findings."
+verify = "Typecheck, the full suite and the architecture test pass, and the sweep's list of changes is recorded in its plan."
+covers = []
+after = [1, 2, 3, 4, 5, 6, 7, 8]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 10
+type = "story"
+title = "End-to-end suite and v1.3 release part; the user's check in the app and at phone width"
+description = "Adds the epic's end-to-end journey on all three OSes with fakes only (a waiting chat found and answered from Needs you, a new chat from the keyboard, the palette, a prefix rule), re-runs the audit's screens for the top ten list, updates docs, and lists the user's check in the installed desktop app and at 390px."
+verify = "The end-to-end suite passes in CI on macOS, Windows and Linux, and the user's check results are recorded in the plan."
+covers = ["E26-R9"]
+after = [9]
+hitl = true
+risk = "medium"

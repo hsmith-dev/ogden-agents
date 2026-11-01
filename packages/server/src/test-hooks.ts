@@ -27,6 +27,10 @@
  * - {@link PANE_PATH_ENV}: a folder inside the temp folder that terminal pane
  *   detection treats as its whole PATH (epic 16), holding fake programs. In a
  *   test run with none named, detection finds nothing.
+ * - {@link EDITOR_PATH_ENV}: a folder inside the temp folder that the editor
+ *   launcher (8.10) treats as its whole PATH and home, holding fake editors
+ *   (a `code` script). In a test run with none named, the launcher finds
+ *   nothing, so no suite ever opens a real editor.
  * - {@link BMAD_PROBE_ENV} = `1`: registers the test-only route that serves
  *   the `planning` BMad piece behind core's guard (story 10.1), so a test can
  *   see `feature_off` while the piece is off.
@@ -121,6 +125,14 @@ export const PANE_SHELL_ENV = 'OGDEN_AGENTS_TEST_PANE_SHELL';
  * finds or runs a real CLI.
  */
 export const PANE_PATH_ENV = 'OGDEN_AGENTS_TEST_PANE_PATH';
+
+/**
+ * Absolute path to a folder inside the temp folder that holds fake editors
+ * (a `code` that records its argv): the editor launcher looks only there, as
+ * its whole PATH and home (story 8.10; tests only), so no suite ever finds or
+ * starts a real editor.
+ */
+export const EDITOR_PATH_ENV = 'OGDEN_AGENTS_TEST_EDITOR_PATH';
 
 /** `1`: register `TEST_ROUTES.bmadProbe`, a route guarded by the `planning` piece (tests only; story 10.1). */
 export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
@@ -356,22 +368,34 @@ export function testPaneShell(env: Env, dataDir: string, tmp: string = tmpdir())
   return testNodeScript(PANE_SHELL_ENV, env, dataDir, tmp);
 }
 
+/** The folder {@link EDITOR_PATH_ENV} names, checked as {@link testPanePath}'s is: its real path; `''` (finds nothing) in a test run that names none; `undefined` when hooks are not allowed; throws when allowed but unusable. */
+export function testEditorPath(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  const folder = env[EDITOR_PATH_ENV];
+  if (!testHooksAllowed(env, dataDir, tmp)) return undefined;
+  return testFolder(EDITOR_PATH_ENV, folder, tmp);
+}
+
 /** The folder {@link PANE_PATH_ENV} names, by its real path; `''` (finds nothing) in a test run that names none; `undefined` when hooks are not allowed or the folder is outside the temp folder: not inside the temp folder, or not an absolute folder (allowed but unusable throws). */
 export function testPanePath(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
   const folder = env[PANE_PATH_ENV];
   if (!testHooksAllowed(env, dataDir, tmp)) return undefined;
-  // A test run with no folder named finds nothing at all: detection never looks at the real computer, so no suite ever runs a real CLI.
+  return testFolder(PANE_PATH_ENV, folder, tmp);
+}
+
+/** A hook's folder of fakes, once hooks are allowed: `''` with none named, else its real path inside the temp folder (throws otherwise). */
+function testFolder(name: string, folder: string | undefined, tmp: string): string {
+  // A test run with no folder named finds nothing at all: the lookup never looks at the real computer, so no suite ever runs a real program.
   if (folder === undefined || folder === '') return '';
-  if (!isAbsolute(folder)) throw new Error(`${PANE_PATH_ENV}: must be an absolute path`);
+  if (!isAbsolute(folder)) throw new Error(`${name}: must be an absolute path`);
   let real: string;
   try {
     real = realpathSync(folder);
     if (!statSync(real).isDirectory()) throw new Error('not a folder');
   } catch {
-    throw new Error(`${PANE_PATH_ENV}: must be an existing folder`);
+    throw new Error(`${name}: must be an existing folder`);
   }
   // Allowed but unusable throws, so a test never falls back to looking at the real computer.
-  if (!insideTemp(real, tmp)) throw new Error(`${PANE_PATH_ENV}: must be a folder inside the temp folder`);
+  if (!insideTemp(real, tmp)) throw new Error(`${name}: must be a folder inside the temp folder`);
   return real;
 }
 
@@ -606,7 +630,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox' | 'notifier' | 'manager'> & {
+export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'editorLauncher' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox' | 'notifier' | 'manager'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -619,6 +643,7 @@ export interface TestHooks {
   claudeCli: string | undefined;
   paneShell: string | undefined;
   panePath: string | undefined;
+  editorPath: string | undefined;
   antigravityServer: string | undefined;
   antigravityInstall: TestAntigravityInstall | undefined;
   codexServer: string | undefined;
@@ -655,6 +680,8 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     // A shell a test passes decides it: the hook is not read.
     paneShell: options.paneShell === undefined ? testPaneShell(env, dataDir, tmp) : undefined,
     panePath: options.paneLaunchers === undefined ? testPanePath(env, dataDir, tmp) : undefined,
+    // An editor launcher a test passes decides it: the hook is not read.
+    editorPath: options.editorLauncher === undefined ? testEditorPath(env, dataDir, tmp) : undefined,
     // Antigravity's ports given (or left out) by a test decide it: the hook is not read.
     antigravityServer: options.antigravity === undefined ? testAntigravityServer(env, dataDir, tmp) : undefined,
     antigravityInstall: options.antigravity === undefined ? testAntigravityInstall(env, dataDir, tmp) : undefined,
@@ -694,6 +721,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.claudeCli !== undefined ||
     hooks.paneShell !== undefined ||
     (hooks.panePath !== undefined && hooks.panePath !== '') ||
+    (hooks.editorPath !== undefined && hooks.editorPath !== '') ||
     hooks.antigravityServer !== undefined ||
     hooks.antigravityInstall !== undefined ||
     hooks.codexServer !== undefined ||
@@ -717,6 +745,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     claudeCli: hooks.claudeCli !== undefined,
     paneShell: hooks.paneShell !== undefined,
     panePath: hooks.panePath !== undefined && hooks.panePath !== '',
+    editorPath: hooks.editorPath !== undefined && hooks.editorPath !== '',
     antigravityServer: hooks.antigravityServer !== undefined,
     antigravityInstall: hooks.antigravityInstall !== undefined,
     codexServer: hooks.codexServer !== undefined,

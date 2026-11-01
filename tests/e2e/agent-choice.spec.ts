@@ -10,6 +10,7 @@
 import { expect, test } from '@playwright/test';
 import { fakeSecondAgent, SECOND_AGENT } from '../support.js';
 import { startChat, withChatServer } from './chat-server.js';
+import { rowsWithAgent } from './tab.js';
 
 test('a Claude Code chat and a second agent chat side by side in one project, each named by its agent', async ({ page }) => {
   const second = await fakeSecondAgent();
@@ -33,16 +34,19 @@ test('a Claude Code chat and a second agent chat side by side in one project, ea
       await expect(options.first()).toHaveAttribute('aria-checked', 'true');
       await options.nth(1).click();
       await expect(picker).toHaveAttribute('data-agent', SECOND_AGENT.agentId);
+      // New chat opens the draft with that pick (epic 26); its first message starts the chat with it.
       await page.getByTestId('new-chat').click();
+      await expect(page).toHaveURL(new RegExp(`/w/${claude.wsId}/new\\?agent=${SECOND_AGENT.agentId}$`));
+      await expect(page.getByTestId('agent-picker')).toHaveAttribute('data-agent', SECOND_AGENT.agentId);
+      const composer = page.getByRole('textbox', { name: `Message ${SECOND_AGENT.displayName}` });
+      await expect(composer).toBeFocused();
+      await composer.fill('whoami');
+      await composer.press('Enter');
       await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
       const fakeUrl = page.url();
       expect(fakeUrl).not.toBe(claude.url);
 
       // The session view names its agent, and the chat reaches it.
-      const composer = page.getByRole('textbox', { name: `Message ${SECOND_AGENT.displayName}` });
-      await expect(composer).toBeVisible();
-      await composer.fill('whoami');
-      await composer.press('Enter');
       await expect(page.getByTestId('message-agent').last()).toContainText(`agent=${SECOND_AGENT.agentId}`);
       await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
 
@@ -56,8 +60,8 @@ test('a Claude Code chat and a second agent chat side by side in one project, ea
       // The status sidebar names each chat's agent.
       const rows = page.getByTestId('status-row');
       await expect(rows).toHaveCount(2);
-      await expect(rows.filter({ hasText: SECOND_AGENT.displayName })).toHaveCount(1);
-      await expect(rows.filter({ hasText: 'Claude Code' })).toHaveCount(1);
+      await expect(rowsWithAgent(rows, SECOND_AGENT.displayName)).toHaveCount(1);
+      await expect(rowsWithAgent(rows, 'Claude Code')).toHaveCount(1);
 
       // The Claude Code chat still reaches Claude Code (the fake agent standing in, with no name of its own).
       await page.goto(claude.url);

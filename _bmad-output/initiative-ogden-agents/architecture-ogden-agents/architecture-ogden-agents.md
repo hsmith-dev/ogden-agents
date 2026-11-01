@@ -8,7 +8,7 @@ scope: 'Ogden Agents as a whole: launcher, local server, browser UI, agent/tool 
 status: final
 created: '2026-09-29'
 updated: '2026-10-31'
-binds: [CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAP-16, CAP-17, CAP-18, CAP-19, CAP-20, CAP-24, CAP-26, CAP-27, CAP-28, CAP-29, CAP-30, CAP-31, CAP-32, CAP-33]
+binds: [CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAP-16, CAP-17, CAP-18, CAP-19, CAP-20, CAP-24, CAP-26, CAP-27, CAP-28, CAP-29, CAP-30, CAP-31, CAP-32, CAP-33, CAP-34, CAP-35]
 sources: ['../spec-ogden-agents/spec-ogden-agents.md']
 companions: []
 ---
@@ -22,7 +22,7 @@ The architecture is hexagonal. `packages/core` holds the domain: workspaces, ses
 | Layer | Package | Holds |
 |---|---|---|
 | Domain | `packages/core` | Entities, ports, event log, session and run state machines, verification rules |
-| Adapters | `packages/adapters` | `acp-*`, `buildrunner-acp`, `tickets-v7`, `bmad-catalog`, `sandbox-*`, `vcs-git`, `terminal-pty`, `secrets-keyring`, `notify-*`; for AD-31 to AD-35: `screen-prompt-*`, `discovery-*`, `device-access-*`, `plan-limit-*` |
+| Adapters | `packages/adapters` | `acp-*`, `buildrunner-acp`, `tickets-v7`, `bmad-catalog`, `sandbox-*`, `vcs-git`, `terminal-pty`, `secrets-keyring`, `notify-*`; for AD-31 to AD-35: `screen-prompt-*`, `discovery-*`, `device-access-*`, `plan-limit-*`; for AD-36 and AD-39: `workspace-files-*`, `editor-launcher-*` |
 | Delivery | `packages/server` | HTTP and WebSocket, the security gate, wiring, the launcher handshake |
 | UI | `packages/web` | React app; `packages/web/ui` is the design system |
 | Contract | `packages/shared` | Zod schemas and TypeScript types for every event, API shape and ID |
@@ -57,6 +57,7 @@ graph LR
   - Note (epic 12, user-approved 2026-10-04): Codex (`acp-codex`, `setup-codex`) and Grok (`acp-grok`, `setup-grok`) are v1.1 chat agents, each a descriptor plus quirks on `acp-base`. The quirks gain, agent-neutrally: `authenticate` at start, Deny chosen by option id when several are `reject_once`, a permission mode fixed at chat start and given in `_meta`, and a launch that receives the chat's mode and protected paths. An agent's own config folders come from its descriptor, so core still names no agent. No rule changes.
   - Note (CAP-24, architecture pass 2026-10-07, proposed alongside AD-24/25/26): a new core port, `RemoteHostPort`, joins the list — an install-level registry of configured remote machines (add/remove, connect, confirm-and-pin a host key, spawn a process with piped stdio, push/pull a worktree per AD-24), implemented by an adapter such as `remote-host-ssh`; core names no SSH library or client. Install-level because a machine is the user's own physical box, usable from any workspace (AD-2), not scoped to one project. Proposed alongside AD-24/25/26 and carries their status: the port shape is settled enough to adopt, but it is not wired to a real credential/host-key adapter until AD-26 (or whatever the user confirms in its place) is itself adopted.
   - Note (CAP-27 to CAP-33, architecture pass 2026-10-31, adopted with AD-30 to AD-35): four core ports join the list: `ScreenPromptPort` (AD-31, adapters `screen-prompt-<cli>`), `SessionDiscoveryPort` (AD-32, `discovery-<agent>`), `DeviceAccessPort` (AD-34, `device-access-<variant>`: certificate issuance and interface enumeration) and `PlanLimitPort` (AD-35, `plan-limit-<agent>`). A custom ACP agent (CAP-27) needs no port: it is a user-defined `AgentDescriptor` on `acp-base` with `agentId` `custom-<slug>`, kept as a core-owned install-level row (AD-11) and added to the registry live. Its command is resolved like epic 12's linked command (absolute, runnable, never through a shell). Its optional key is `agent-api-key/custom-<slug>` (AD-16), passed in a variable whose name matches `^[A-Z][A-Z0-9_]*_API_KEY$` and is neither on the child-env allowlist nor a loader variable (`NODE_OPTIONS`, `LD_*`, `DYLD_*`, `PATH`). It offers Ask only, needs project trust, is `interactiveOnly` so orchestration refuses it as a worker, and its `AgentPort` never declares `unattendedBuild`. A removed custom agent's chats open read-only with a plain reason. Core still names no agent.
+  - Note (CAP-34 and CAP-35, desktop UX uplift, adopted 2026-10-31 with AD-36 to AD-39): two core ports join the list: `WorkspaceFilesPort` (AD-36, adapters `workspace-files-<variant>`) and `EditorLauncherPort` (AD-39, `editor-launcher-<variant>`). Working-tree diffs, hunks and snapshots stay on `VcsPort` (AD-37); project commands (AD-38) need no new port. No rule changes.
 
 ### AD-2 — Workspace is the top-level scope
 
@@ -538,6 +539,74 @@ graph LR
   - Enforcement: tests that no route returns a meter for an API-key agent, that no stored field holds a cost, and that no use case refuses on a reading.
 - **Alternatives weighed:** a Claude Code statusLine helper through `--settings` (shares the flag with Auto's protected-path guard and replaces the user's status line; dropped).
 
+### AD-36 — Workspace files are read through one contained port [ADOPTED]
+
+- **Binds:** CAP-34, AD-2, AD-15, AD-16
+- **Status:** Adopted by the user (2026-10-31) with the desktop UX uplift change proposal (P-A1).
+- **Prevents:** a second, looser file-reading path appearing per feature (viewer, search, diff, Problems, editor hand-off).
+- **Rule:**
+  - `WorkspaceFilesPort` is the only way the UI lists, reads or searches a project's files. Every surface that shows file content (viewer, markdown, search, AD-38's Problems, AD-39's targets) goes through it.
+  - Routes take a workspace id (and, for a worktree chat, its session id) and a relative path, never an absolute path from the client.
+  - The root is the workspace's top folder (AD-2), or, for a chat with a `worktreePath` (AD-8 CAP-33 note), that worktree; never anything else under the data directory. Every path is resolved (realpath) and must stay inside the root after links are resolved, otherwise it is refused.
+  - Refused: the credential folders unattended builds already fence from reads, and `.git` internals. The write-protected list (AD-17, AD-22's 4.13 note, Auto's ask rules) guards agent writes, not the user's reads: `AGENTS.md`, `CLAUDE.md`, `.claude`, `_bmad` and the like stay readable, since they are what a user most wants to look at.
+  - Secret-bearing files (`.env`, `.env.*` and the names AD-16's masker knows) are shown with every value masked, never raw.
+  - Reads are capped (default 1 MB); a binary file is shown as "binary file". Search respects `.gitignore` and caps its results.
+  - File content and search results are served by GET only and never enter the event log or the database (AD-5, AD-16).
+  - The routes sit behind AD-15's gate and are not on AD-34's device allowlist.
+  - Ogden is not an IDE: the viewer is read-only; editing hands off through AD-39.
+  - Hard links (user decision 2026-10-31, story 8.1): a regular file with more than one link outside a `node_modules` folder is refused with a plain reason (Ogden doesn't open hard-linked files; open it in your editor), since no path check can tell where its other name lives. It is listed, marked protected. Files under `node_modules` stay readable (pnpm hard-links them).
+  - Bare repositories (user decision 2026-10-31, story 8.1): any folder whose name ends in `.git`, compared after the same unicode normalization and case fold as the credential folders, counts as `.git` internals anywhere in the project: not listed into, not read.
+
+### AD-37 — Working-tree changes go through `VcsPort`, never a shell [ADOPTED]
+
+- **Binds:** CAP-34, CAP-35, AD-17
+- **Status:** Adopted by the user (2026-10-31) with the desktop UX uplift change proposal (P-A2).
+- **Prevents:** UI code running git directly; a revert racing the agent's own write; a snapshot becoming a fourth commit kind or writing into the user's repo.
+- **Rule:**
+  - The diff views (This turn, Unstaged, Staged, Branch) and stage, unstage and revert of a hunk are `VcsPort` operations. No route, use case or UI code runs git itself.
+  - **This turn** is the diff between snapshots Ogden records at a turn's start and end: a tree object, no commit, no ref. AD-17's three commit kinds (approve's merge, Save the lessons, a chat worktree's commit) are unchanged.
+  - Snapshot objects are kept in the data directory, not in the repo's own object store (Config and data convention).
+  - A stage or revert is refused while an agent is mid-turn in the same folder (the main checkout or the chat's worktree).
+  - Every call keeps AD-17's git protections (repo hooks off, pinned worktree checks, Windows `core.longpaths`) and is serialized with the repo's other git work.
+  - A project whose `.git` is a file (a gitdir pointer) is followed only for the two standard layouts, compared by real path: a linked worktree (it points at `<repo>/.git/worktrees/<name>`, or `<name>.git/worktrees/<name>` of a bare repository with its own HEAD, objects and refs, whose `gitdir` file points back at this project's `.git` file) or a submodule (it points inside `<super>/.git/modules/`, whose `core.worktree`, if set, resolves to this project). Anything else and the diff views, snapshots and a chat worktree's commit refuse with a plain reason, so a pointer never makes Ogden read or write another repository (user decision 2026-11-01, story 8.4 review #12).
+  - **Retention and Restore:** a worktree removed by retention first has its uncommitted changes snapshotted into the data directory, so Restore can bring it back. Retention never removes a worktree mid-turn. The AD-17 CAP-33 note (a chat worktree is removed with the chat after confirmation) still holds.
+
+### AD-38 — Project commands are declared, trusted and contained [ADOPTED]
+
+- **Binds:** CAP-34 (Problems), CAP-35 (setup scripts), AD-3, AD-16, AD-22
+- **Status:** Adopted by the user (2026-10-31) with the desktop UX uplift change proposal (P-A3).
+- **Prevents:** arbitrary command execution from a page; parser sprawl.
+- **Rule:**
+  - A project's commands (test, lint, setup) are named in workspace settings (core-owned, AD-11). Commands detected from `package.json` scripts are offered and never run until the user confirms.
+  - They run only in a trusted project: AD-22's per-project trust (notes 4.2, 4.13 and epic 12). As that trust is bound to the trusted files' contents, a confirmed command is bound to its text, and a detected script whose text changed since is asked again.
+  - Each runs with AD-16's allowlisted child environment, never `process.env` and never a key. The server owns the process (AD-3): it is killed on Stop or server stop.
+  - Output is masked with AD-16's patterns and stays out of the event log (as AD-6 keeps terminal bytes out). Events carry ids, state, exit code and item counts; output and items are fetched.
+  - Failures are parsed into `file:line` items by a small set of known formats (TypeScript, ESLint, Vitest/Jest, pytest, Go, Rust), each with fixtures; other output is shown raw. Items open through AD-36 and AD-39.
+  - The routes sit behind AD-15's gate and are not on AD-34's device allowlist.
+
+### AD-39 — Opening an editor is a fixed launcher [ADOPTED]
+
+- **Binds:** CAP-34, AD-16, AD-36
+- **Status:** Adopted by the user (2026-10-31) with the desktop UX uplift change proposal (P-A4).
+- **Prevents:** a URL scheme or a shell string built from user input.
+- **Rule:**
+  - `EditorLauncherPort` knows a short, fixed list of editors (VS Code `code -g`, Cursor, Zed, JetBrains launchers). Each is found on `PATH` the way linked commands and epic 16's pane launchers are: absolute, runnable, non-absolute `PATH` entries ignored.
+  - It starts one with `file:line` as arguments, no shell, with AD-16's allowlisted environment, and only for a path AD-36 allows.
+  - A Windows `.cmd` shim goes through `cmd.exe`, as pane launchers do, because Node refuses it otherwise. For a shim, a path holding a `cmd.exe` metacharacter is refused.
+  - No URL scheme is opened and no editor name or argument comes from free text.
+
+### AD-40 — Always allow can be scoped to a command pattern [ADOPTED]
+
+- **Binds:** epic 26 story 8, CAP-4, AD-9
+- **Status:** Adopted by the user (2026-10-31) with epic 26 (P-A6).
+- **Prevents:** a pattern that silently allows a chained or redirected command.
+- **Rule:**
+  - For a command (execute-kind) request, Always allow offers, beside the current scope, "Always allow commands starting with `<prefix>`". The prefix is the first one or two words of the parsed command, never a free-typed pattern.
+  - A prefix rule never matches a command containing a shell control character (`;`, `&&`, `||`, `|`, `` ` ``, `$(`, redirection) or naming a protected path. As today, nothing is offered or matched for a command led by an interpreter, a wrapper or a variable assignment.
+  - It is saved as a rule like any other (`rule_` id, AD-9), shown and removable in Settings.
+  - Custom agents (21.5) and attended builds still offer no Always allow. A chat in Skip all writes no rule. A device answers `allow_once` or `deny` only (AD-34).
+  - Note: this ratifies the `command_prefix` scope already in `packages/core/src/permission-matching.ts`.
+
 ## Consistency Conventions
 
 | Concern | Convention |
@@ -549,7 +618,7 @@ graph LR
 | Errors | `{ "error": { "code": "snake_case", "message": "…", "details"?: {} } }`; codes live in `packages/shared` |
 | Adapter naming | `<port>-<variant>`: `acp-claude-code`, `sandbox-seatbelt`, `notify-webhook` |
 | Files | kebab-case; one exported React component per file, except shadcn-style compound components in `packages/web/src/ui` (for example `sidebar.tsx` exporting `Sidebar`, `SidebarGroup`, …), which keep their parts together |
-| Config and data | The OS per-user data directory `ogden-agents/` holds the SQLite database, logs and the encrypted-secrets fallback. Nothing is written to user repos except BMAD's own files (only in projects that turned a BMad piece on, AD-22; note epic 10, 2026-10-01), and for builds only run branches and git's worktree metadata; the worktrees themselves live in the data directory (AD-17; note epic 5, 2026-10-01). For CAP-27 to CAP-33: chat worktrees and attachments in the data directory, the device CA's key in the keychain, found sessions and plan readings as install-level tables |
+| Config and data | The OS per-user data directory `ogden-agents/` holds the SQLite database, logs and the encrypted-secrets fallback. Nothing is written to user repos except BMAD's own files (only in projects that turned a BMad piece on, AD-22; note epic 10, 2026-10-01), and for builds only run branches and git's worktree metadata; the worktrees themselves live in the data directory (AD-17; note epic 5, 2026-10-01). For CAP-27 to CAP-33: chat worktrees and attachments in the data directory, the device CA's key in the keychain, found sessions and plan readings as install-level tables. For CAP-34 and CAP-35: turn and retention snapshots in the data directory (AD-37), never in the repo |
 | Logging | Structured JSON lines to the data directory; secrets redacted (AD-16) |
 | Tests | Every ticket ships its tests; UI layout is checked in a real browser with Playwright, since jsdom doesn't evaluate media queries |
 
@@ -652,6 +721,9 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 | CAP-31 answer from your phone | `DeviceAccessPort`, device listener in `server` | AD-15, AD-16, AD-30, AD-34 |
 | CAP-32 plan-limit meters | `PlanLimitPort`/`plan-limit-*` | AD-8, AD-35 |
 | CAP-33 desktop conveniences | `packages/desktop` (tray, global shortcut), `VcsPort` chat worktrees, ACP prompt attachments | AD-3, AD-8, AD-17 (notes) |
+| CAP-34 investigate and review in Ogden (epic 8) | `WorkspaceFilesPort`/`workspace-files-*`, `VcsPort` diffs and hunks, project commands and parsers, `EditorLauncherPort`/`editor-launcher-*` | AD-36, AD-37, AD-38, AD-39 |
+| CAP-35 start and route work (epic 27) | composer setup row, `VcsPort` chat worktrees, retention and Restore, setup commands | AD-17 (CAP-33 note), AD-37, AD-38 |
+| Epic 26 story 8 command-pattern Always allow | core permission rules (`permission-matching.ts`) | AD-40 |
 
 ## Deferred
 
@@ -671,4 +743,6 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 - **Attachment limits (CAP-33):** the exact per-file cap and allowed media types, decided in the epic within the AD-8 note.
 - **A plan meter for terminal panes:** none in v1.3 (AD-35 alternatives); revisit if a source exists that neither touches the user's config nor shares Auto's `--settings`.
 - **Screen prompts in the AD-6 chat terminal:** none in v1.3 (AD-30 scope); only after it gains a screen mirror, with `waiting` then recomputed by one core function over cards and prompts.
+- **CAP-35's side-by-side trials and per-worktree ports:** how several agents' worktrees are compared and one kept, and how a parallel worktree's port is allocated, are decided in epic 27 within the AD-17 CAP-33 note and AD-37.
+- **Exact caps for AD-36 and AD-38:** search result and output caps beyond the 1 MB read default, decided in epic 8.
 - **Agents that start other agents on their own** (an agent shelling out to another CLI): not linked in lineage; a later event kind under AD-33 if wanted.

@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { withTimeout } from '../../scripts/installed-package.mjs';
 import { API_ROUTES, isAlive } from '../support.js';
-import { DARK_BG, expectConnected as connected, landConnected, sidebarOf, storedToken } from '../e2e/tab.js';
+import { DARK_BG, expectConnected as connected, landConnected, openFromSettings, sidebarOf, storedToken } from '../e2e/tab.js';
 import { installed, LAUNCHER_ARGS } from './installed.js';
 
 test('the epic 1 journey on the installed package', async ({ page, context }) => {
@@ -67,8 +67,7 @@ test('the epic 1 journey on the installed package', async ({ page, context }) =>
   });
 
   await test.step('4. change theme and density', async () => {
-    await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('menuitem', { name: 'Appearance' }).click();
+    await openFromSettings(page);
     await expect(page).toHaveURL(/\/settings\/appearance$/);
     await expect(page.getByRole('heading', { name: 'Appearance', level: 1 })).toBeVisible();
 
@@ -87,9 +86,7 @@ test('the epic 1 journey on the installed package', async ({ page, context }) =>
   });
 
   await test.step('5. open Settings > Tools: the status is shown, nothing is downloaded', async () => {
-    await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
-    // Exact: "Developer tools" (CAP-25) is a separate menu item whose name also contains "tools".
-    await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
+    await openFromSettings(page, 'Advanced', 'Tools');
     await expect(page).toHaveURL(/\/settings\/tools$/);
     await expect(page.getByRole('heading', { name: 'Tools', level: 1 })).toBeVisible();
     const status = page.getByTestId('uv-status');

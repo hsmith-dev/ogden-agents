@@ -9,8 +9,9 @@ Each phase is usable on its own.
 | 3 | BMAD integration and v7 board (bmad-method-ui as reference) | CAP-2, CAP-6, CAP-7, CAP-18 | Guided planning and a live board over the ticket tree |
 | 4 | Unattended builds as Ogden-managed ACP build sessions (one named ticket each; epics 5 and 11; bmad-loop not used in v1, 2026-10-02), with the sandbox rules from `agent-matrix.md` | CAP-8, CAP-9, CAP-10, CAP-12, CAP-14 | Autonomous building with verification, run-time limits, and approval |
 | 5 | Antigravity beside Claude Code for chat, if possible (epic 6), and retrospectives | CAP-15, CAP-13 | A second chat agent where it proves possible; the learning loop |
-| v2 | Markdown viewing, code-change review, a VS Code extension, and more agents (Codex, Gemini CLI, Copilot; builds beyond Claude Code) (epic 8) | beyond v1 | A developer reads plans and reviews agent changes in the app or in VS Code, with the agent of their choice |
+| v2 | A VS Code extension and more agents (Gemini CLI, Copilot) (a new envelope split from epic 8, 2026-10-31) | beyond v1 | A developer reviews agent changes in VS Code, with the agent of their choice |
 | v1.3 | Any agent and the desktop home (epics 20, 21, 22, 24, 25; after v1.0.0 publishes) | CAP-27, CAP-28, CAP-29, CAP-30, CAP-32, CAP-33 | Bring your own ACP agent, answer any CLI's prompts as cards, take over outside sessions, rotate long chats, see plan limits, and desktop conveniences |
+| v1.3 (first) | Everyday polish, the Workbench, and where work runs (epics 26, 8 and 27, built before epics 20 to 25) | CAP-34, CAP-35 | Start work in the right place, then look into the project and review changes without leaving Ogden |
 | v2 (phone) | Answer from your phone (epic 23; after AD-34 is adopted) | CAP-31 | Answer what needs you away from the desk |
 
 No open question blocks phase 1. In phase 2, confirm which ACP adapters map to a resumable CLI session. Fork BMAD-METHOD and bmad-loop before phase 3.

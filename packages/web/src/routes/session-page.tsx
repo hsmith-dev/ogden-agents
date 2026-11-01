@@ -1,8 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ArrowsLeftRight, ChatCircle, House, Stop } from '@phosphor-icons/react';
 import type { PermissionMode } from '@ogden-agents/shared';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
 import { agentNameOf, cancelSession, CHAT_AGENTS_QUERY_KEY, ChatApiError, UNKNOWN_AGENT_NAME, fetchSession, sendMessage, setPermissionMode, setSessionModel, switchDriver } from '@/chat/chat-api';
@@ -12,12 +12,14 @@ import { useChatAgents } from '@/chat/use-chat-agents';
 import { Composer } from '@/chat/composer';
 import { chatDraftKey } from '@/chat/drafts';
 import { HandoffDialog } from '@/chat/handoff-dialog';
+import { onBeforeChatDetailChange, setChatDetail, useChatDetail } from '@/chat/detail-level';
+import { NewChatButton } from '@/chat/new-chat-button';
 import { CONTINUE_WITH_ANOTHER_AGENT, SessionMenu } from '@/chat/session-menu';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
 import { sessionView, type TranscriptCheckIn, type TranscriptItem } from '@/chat/transcript';
-import { AgentChangedMarker, EarlierHistory, InterruptedNote, Message, ResumedMarker } from '@/chat/transcript-parts';
+import { AgentChangedMarker, EarlierHistory, InterruptedNote, Message, ResumedMarker, TurnChangesRow } from '@/chat/transcript-parts';
 import { QueuedMessages } from '@/chat/queued-messages';
 import { otherWayShortcutLabel, useWhileWorking } from '@/chat/send-mode';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
@@ -34,6 +36,7 @@ import { ReadOnlyBanner } from '@/terminal/read-only-banner';
 import { TerminalPanel } from '@/terminal/terminal-panel';
 import { conversationProps, TerminalPane } from '@/terminal/terminal-pane';
 import { focusComposer, useSessionDriver } from '@/terminal/use-session-driver';
+import { needsYouOpenCount, subscribeNeedsYouOpened } from '@/shell/needs-you-target';
 import { Banner } from '@/ui/banner';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
@@ -42,6 +45,7 @@ import { Skeleton } from '@/ui/skeleton';
 import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
 import { fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
+import { chatRoots, sessionKey } from '@/workbench/chat-folder';
 
 /** How close to the bottom (px) still counts as at the bottom, for auto-scroll. */
 const AT_BOTTOM_PX = 48;
@@ -60,6 +64,8 @@ const itemKey = (item: TranscriptItem, index: number): string =>
             ? `agent-${item.at}-${index}`
           : item.type === 'interrupted'
             ? `interrupted-${item.messageId}`
+          : item.type === 'turn_changes'
+            ? `turn-changes-${item.turnId}`
             : item.permission.requestId;
 
 /** What the composer says while the terminal drives (DESIGN.md Composer). */
@@ -117,7 +123,7 @@ export function SessionPage() {
     [workspaceEvents],
   );
   const view = useMemo(() => sessionView(events, sesId, rulesRemoved), [events, sesId, rulesRemoved]);
-  const session = useQuery({ queryKey: ['session', wsId, sesId], queryFn: () => fetchSession(wsId, sesId), retry: false });
+  const session = useQuery({ queryKey: sessionKey(wsId, sesId), queryFn: () => fetchSession(wsId, sesId), retry: false });
   // The chat's own agent, by its product name (epic 6, E6-R1).
   const chatAgents = useChatAgents();
   // Until the session has loaded its agent isn't known: no agent's name is guessed (review: a second agent's chat named Claude Code).
@@ -135,6 +141,8 @@ export function SessionPage() {
   const setups = useAgents();
   const signsInHere = agentId !== undefined && setups.data?.some((setup) => setup.agentId === agentId) === true;
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
+  // The chat's folder, for Open in editor on an agent's absolute edit paths (8.10): its worktree, else the project.
+  const roots = chatRoots(session.data?.session, workspace.data);
   const end = useRef<HTMLDivElement>(null);
   const lastText = view.messages.at(-1)?.text.length ?? 0;
   const projectName = workspace.data === undefined ? 'this project' : workspaceName(workspace.data);
@@ -224,6 +232,54 @@ export function SessionPage() {
   useLayoutEffect(() => {
     if (!history.loading) anchor.current = undefined;
   }, [history.loading]);
+
+  // The chat's detail level (epic 26 story 4): switching keeps the item in view where it was.
+  // A switch changes only what a tools item holds, never how many items there are, so the
+  // transcript's child index finds the same item after it.
+  const detail = useChatDetail(sesId, appearance.developerMode);
+  const transcriptRef = useRef<HTMLElement>(null);
+  const detailAnchor = useRef<{ index: number; offset: number } | undefined>(undefined);
+  const detailNow = useRef(detail);
+  detailNow.current = detail;
+  useEffect(
+    () =>
+      onBeforeChatDetailChange((changed, next) => {
+        detailAnchor.current = undefined;
+        const container = scroller();
+        const section = transcriptRef.current;
+        // The same level again changes nothing, so no layout effect would clear an anchor kept now.
+        if (changed !== sesId || next === detailNow.current || container === null || section === null) return;
+        const box = container.getBoundingClientRect();
+        const children = [...section.children];
+        const startsInView = (child: Element) => {
+          const { top } = child.getBoundingClientRect();
+          return top >= box.top && top < box.bottom;
+        };
+        // The item that starts in view nearest its middle and is not tool calls (those change size, and
+        // tool calls between the top and the item would push it), else the first that starts in view, else
+        // the one the view starts inside.
+        const middle = box.top + box.height / 2;
+        let index = -1;
+        children.forEach((child, at) => {
+          if (!startsInView(child) || child.getAttribute('data-testid') === 'tool-calls') return;
+          const distance = Math.abs(child.getBoundingClientRect().top - middle);
+          if (index === -1 || distance < Math.abs(children[index]!.getBoundingClientRect().top - middle)) index = at;
+        });
+        if (index === -1) index = children.findIndex(startsInView);
+        if (index === -1) index = children.findIndex((child) => child.getBoundingClientRect().bottom > box.top);
+        if (index === -1) return;
+        detailAnchor.current = { index, offset: children[index]!.getBoundingClientRect().top - box.top };
+      }),
+    [sesId, scroller],
+  );
+  useLayoutEffect(() => {
+    const kept = detailAnchor.current;
+    detailAnchor.current = undefined;
+    const container = scroller();
+    const child = transcriptRef.current?.children[kept?.index ?? -1];
+    if (kept === undefined || container === null || child === undefined) return;
+    container.scrollTop += child.getBoundingClientRect().top - container.getBoundingClientRect().top - kept.offset;
+  }, [detail, scroller]);
 
   // A new card announces once, assertively, and never takes focus.
   useEffect(() => {
@@ -365,6 +421,29 @@ export function SessionPage() {
     card?.focus({ preventScroll: true });
   }, [waitingFor, terminalDrives]);
 
+  // A Needs you row (epic 26) names its permission card in the hash: scroll to and focus it once per
+  // navigation, as soon as that card is pending. A card already answered leaves a plain session open;
+  // not while the terminal drives (nothing in the read-only conversation takes focus).
+  // Story 26.10: while the router is on its way to another page (the new-chat draft's code still loading),
+  // this chat stays on screen with its own params; its composer takes nothing, so text typed or sent then
+  // waits for the next page's composer instead of reaching this chat.
+  const leaving = useRouterState({ select: (router) => router.location.pathname.replace(/\/+$/, '') !== `/w/${wsId}/s/${sesId}` });
+  const linked = useRouterState({ select: (router) => ({ hash: router.location.hash, key: router.location.state.__TSR_key ?? router.location.state.key ?? router.location.href }), structuralSharing: true });
+  // Each open counts, the same row again too: the router pushes no new entry for the URL already shown.
+  const opens = useSyncExternalStore(subscribeNeedsYouOpened, needsYouOpenCount, needsYouOpenCount);
+  const focusedLink = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const openKey = `${linked.key}|${opens}`;
+    if (terminalDrives || !linked.hash.startsWith('permission-') || focusedLink.current === openKey) return;
+    const requestId = linked.hash.slice('permission-'.length);
+    if (!view.pendingPermissions.some((permission) => permission.requestId === requestId)) return;
+    const card = document.getElementById(linked.hash);
+    if (card === null) return;
+    focusedLink.current = openKey;
+    card.scrollIntoView?.({ block: 'center' });
+    card.focus({ preventScroll: true });
+  }, [linked, opens, view.pendingPermissions, terminalDrives]);
+
   if (session.error instanceof ChatApiError && session.error.status === 404) {
     return (
       <>
@@ -442,7 +521,8 @@ export function SessionPage() {
   return (
     <>
       <WorkspaceHeader
-        title={isBuild ? 'Build' : chatTitle}
+        // A build session shows its name too (26.6): "Build 1.2: <ticket title>", or "Build" before it loads.
+        title={isBuild && shownName === '' ? 'Build' : chatTitle}
         wsId={wsId}
         compactOnPhone={appearance.developerMode}
         titleHidden={!isBuild && rename.editing}
@@ -484,7 +564,16 @@ export function SessionPage() {
             onSwitch={switchTo}
           />
         ) : null}
-        {severalAgents && session.data !== undefined ? <SessionMenu blockedReason={handoffBlocked} onContinue={() => setHandoffOpen(true)} /> : null}
+        {/* New chat in one step (epic 26, E26-R2): the project's new-chat draft. */}
+        <NewChatButton wsId={wsId} />
+        {session.data !== undefined ? (
+          <SessionMenu
+            detail={detail}
+            onDetail={(next) => setChatDetail(sesId, next)}
+            blockedReason={handoffBlocked}
+            onContinue={severalAgents ? () => setHandoffOpen(true) : undefined}
+          />
+        ) : null}
       </WorkspaceHeader>
       <HandoffDialog
         open={handoffOpen}
@@ -527,7 +616,7 @@ export function SessionPage() {
           {/* While the terminal drives: readable, nothing in it sends (3.6 review F2). */}
           {/* And while the chat's agent is removed (story 21.4). */}
           <ReadOnlyConversation.Provider value={terminalDrives || agentRemoved}>
-            <section aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
+            <section ref={transcriptRef} aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
               {!loading && (history.hasEarlier || history.error !== undefined) ? (
                 <EarlierHistory loading={history.loading} error={history.error} onShow={showEarlier} />
               ) : null}
@@ -544,15 +633,17 @@ export function SessionPage() {
               ) : (
                 view.items.map((item, index) =>
                   item.type === 'message' ? (
-                    <Message key={item.message.messageId} message={item.message} agentName={nameOf(item.message.agentId)} />
+                    <Message key={item.message.messageId} message={item.message} agentName={nameOf(item.message.agentId)} wsId={wsId} sesId={sesId} />
                   ) : item.type === 'tools' ? (
-                    <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} density={appearance.density} />
+                    <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} detail={detail} chat={{ wsId, sesId, roots }} />
                   ) : item.type === 'resumed' ? (
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
                   ) : item.type === 'agent_changed' ? (
                     <AgentChangedMarker key={`agent-${item.at}-${index}`} agentName={nameOf(item.agentId)} />
                   ) : item.type === 'interrupted' ? (
                     <InterruptedNote key={`interrupted-${item.messageId}`} cancelledRequest={item.cancelledRequest} />
+                  ) : item.type === 'turn_changes' ? (
+                    <TurnChangesRow key={`turn-changes-${item.turnId}`} wsId={wsId} sesId={sesId} turnId={item.turnId} files={item.files} additions={item.additions} deletions={item.deletions} />
                   ) : item.type === 'document' ? (
                     <DocumentCard
                       key={`document-${item.path}`}
@@ -711,6 +802,7 @@ export function SessionPage() {
             working={state === 'working'}
             restore={restore}
             draftKey={chatDraftKey(wsId, sesId)}
+            disabled={leaving}
             footer={
               <ModelPicker
                 agentName={agentName}

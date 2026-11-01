@@ -64,3 +64,4 @@ Reading and answering CLI prompts in epic 16 panes. Not here: screen prompts in 
 - Decision (2026-10-31, autonomous): tracer bullet is entry 2 (a fake CLI's prompt answered from a card through the gate); entry 1 is the spike that captures real prompts, the part least certain.
 - Unknown: which prompt kinds each real CLI draws in a parseable frame on each OS, and whether any marks selection only with color; entry 1 answers, and entries 7 and 8 wait on it.
 - Waits on epic 16 because: panes, launchers, the status tracker and Developer-mode gating (16.3 to 16.6, 16.9). Waits on epic 11 because: Needs you (11.4).
+- Decision (2026-10-31, autonomous, following the user's approved order in change-desktop-ux-uplift): epic 26 builds before this epic, so entry 9 keeps 26.1's two-line Needs you rows (kind, what, where) and `g y`, and names 26.1 in its `after`. Waits on epic 26 because: the Needs you row shape (26.1).

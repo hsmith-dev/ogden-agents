@@ -9,7 +9,7 @@
  */
 import { ReviewResponse } from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -40,7 +40,7 @@ const verification = (results: Array<'pass' | 'fail' | 'not_run'>, extra: Record
 const review = (fields: Record<string, unknown>) =>
   ReviewResponse.parse({ run: RUN, outcome: 'verified', reason: null, diff: 'diff --git a/x b/x\n', truncated: false, files: ['src/x.ts', 'README.md'], merged: false, headRevision: 'b'.repeat(40), summary: 'Ticket 1.1 changed 2 files.', verification: verification(['pass', 'pass', 'pass']), findings: [], diffStats: { files: 2, insertions: 3, deletions: 1 }, ...fields });
 
-const state = vi.hoisted(() => ({ review: undefined as unknown, calls: [] as string[], bodies: [] as unknown[] }));
+const state = vi.hoisted(() => ({ review: undefined as unknown, calls: [] as string[], bodies: [] as unknown[], rejectFails: false }));
 vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [], caughtUp: true }), useSessionEvents: () => [] }));
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to, params, ...props }: { children: ReactNode; to: string; params: { wsId: string; ref?: string; sesId?: string } }) => (
@@ -55,6 +55,7 @@ vi.mock('@/auth/tab-token', () => ({
       const method = init.method ?? 'GET';
       state.calls.push(`${method} ${path}`);
       if (init.body !== undefined) state.bodies.push(JSON.parse(String(init.body)));
+      if (state.rejectFails && path.endsWith('/reject')) return new Response(JSON.stringify({ error: { code: 'internal', message: 'Nope.' } }), { status: 500 });
       return new Response(JSON.stringify(method === 'POST' && path.endsWith('/retry') ? { run: RUN } : state.review), { status: 200 });
     },
   },
@@ -72,6 +73,8 @@ const settle = () =>
 beforeEach(() => {
   state.calls.length = 0;
   state.bodies.length = 0;
+  state.rejectFails = false;
+  localStorage.clear();
 });
 afterEach(() => cleanup());
 
@@ -139,5 +142,147 @@ describe('the review page (story 5.9)', () => {
     expect(screen.getByTestId('review-merged')).toBeTruthy();
     expect(screen.queryByTestId('review-approve')).toBeNull();
     expect(screen.queryByTestId('review-reject')).toBeNull();
+  });
+});
+
+describe('the review diff in the diff viewer (story 8.3)', () => {
+  const DIFF = [
+    'diff --git a/src/x.ts b/src/x.ts',
+    'index 1..2 100644',
+    '--- a/src/x.ts',
+    '+++ b/src/x.ts',
+    '@@ -1,2 +1,2 @@',
+    ' const keep = 0;',
+    '-export const x = 1;',
+    '+export const x = 2;',
+    'diff --git a/README.md b/README.md',
+    'new file mode 100644',
+    '--- /dev/null',
+    '+++ b/README.md',
+    '@@ -0,0 +1 @@',
+    '+# Hello',
+    '',
+  ].join('\n');
+
+  it('shows each file as its own section, without hunk actions; the file list buttons jump to their section', async () => {
+    state.review = review({ diff: DIFF });
+    mount(<BuildReview wsId={WS} ticketRef="1.1" />);
+    await settle();
+    const sections = screen.getAllByTestId('diff-file');
+    expect(sections.map((section) => [section.getAttribute('data-diff-file'), section.getAttribute('data-change')])).toEqual([
+      ['src/x.ts', 'changed'],
+      ['README.md', 'added'],
+    ]);
+    expect(screen.getByRole('table', { name: 'Changes in README.md' }).textContent).toContain('Added line 1: # Hello');
+    expect(sections[0]!.querySelectorAll('[data-diff-nav="hunk"] button')).toHaveLength(0);
+    const list = screen.getByTestId('review-files');
+    expect(list.textContent).toContain('Added');
+    const scrolled = vi.fn();
+    const real = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrolled;
+    try {
+      await act(async () => fireEvent.click(within(list).getByRole('button', { name: /README\.md/ })));
+    } finally {
+      Element.prototype.scrollIntoView = real;
+    }
+    expect(scrolled).toHaveBeenCalled();
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('README.md');
+  });
+
+  it('a cut diff shows the lines read so far and one note that only the start is shown', async () => {
+    state.review = review({ diff: DIFF.slice(0, DIFF.indexOf('-export')), truncated: true });
+    mount(<BuildReview wsId={WS} ticketRef="1.1" />);
+    await settle();
+    expect(screen.getAllByTestId('diff-file')).toHaveLength(1);
+    expect(screen.getByTestId('review-diff-cut').textContent).toBe('Only the start of these changes is shown.');
+    // README.md isn't in the cut text: listed, not a button.
+    expect(within(screen.getByTestId('review-files')).queryByRole('button', { name: /README\.md/ })).toBeNull();
+  });
+
+  it('text that is not a diff shows as it was, in a wrapped block', async () => {
+    state.review = review({ diff: 'no header here\n' });
+    mount(<BuildReview wsId={WS} ticketRef="1.1" />);
+    await settle();
+    const block = screen.getByTestId('review-diff');
+    expect(block.tagName).toBe('PRE');
+    expect(block.textContent).toContain('no header here');
+    expect(block.className).toContain('whitespace-pre-wrap');
+    expect(screen.queryByTestId('diff-viewer')).toBeNull();
+  });
+});
+
+describe('line comments in Review (story 8.6)', () => {
+  const DIFF = ['diff --git a/src/x.ts b/src/x.ts', '--- a/src/x.ts', '+++ b/src/x.ts', '@@ -1,2 +1,2 @@', ' const keep = 0;', '-export const x = 1;', '+export const x = 2;', ''].join('\n');
+
+  it('collects comments with no send; Reject and retry carries them in its note, editable, and clears them once it succeeded', async () => {
+    state.review = review({ diff: DIFF });
+    mount(<BuildReview wsId={WS} ticketRef="1.1" />);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on line 2' }));
+    fireEvent.change(screen.getByTestId('diff-comment-input'), { target: { value: 'Keep it at 1.' } });
+    fireEvent.click(screen.getByTestId('diff-comment-save'));
+    expect(screen.getByTestId('comments-bar-title').textContent).toBe('Comments to send (1)');
+    expect(screen.getByTestId('review-comments-go-with').textContent).toBe('Your comment goes with it.');
+    expect(screen.queryByTestId('comments-send')).toBeNull();
+    expect(screen.queryByTestId('comments-send-to')).toBeNull();
+
+    // A failed reject keeps them.
+    state.rejectFails = true;
+    fireEvent.click(screen.getByTestId('review-reject'));
+    const note = screen.getByTestId('review-note') as HTMLTextAreaElement;
+    expect(note.value).toBe('Please address these review comments:\n\nsrc/x.ts:2\n> + export const x = 2;\nKeep it at 1.');
+    expect(screen.getByTestId('review-note-comments').textContent).toBe('Your comment goes with it.');
+    fireEvent.change(note, { target: { value: `${note.value}\nAnd add a test.` } });
+    fireEvent.click(screen.getByTestId('review-reject-confirm'));
+    await settle();
+    expect(screen.getByTestId('review-action-error')).toBeTruthy();
+    expect(screen.getByTestId('comments-bar-title').textContent).toBe('Comments to send (1)');
+
+    state.rejectFails = false;
+    fireEvent.click(screen.getByTestId('review-reject-confirm'));
+    await settle();
+    const sent = state.bodies.filter((body) => (body as { retry?: boolean }).retry === true).at(-1) as { note: string };
+    expect(sent.note).toContain('src/x.ts:2');
+    expect(sent.note).toContain('Keep it at 1.');
+    expect(sent.note).toContain('And add a test.');
+    expect(screen.queryByTestId('comments-bar')).toBeNull();
+  });
+
+  const add = (name: string, text: string) => {
+    fireEvent.click(screen.getByRole('button', { name }));
+    fireEvent.change(screen.getByTestId('diff-comment-input'), { target: { value: text } });
+    fireEvent.click(screen.getByTestId('diff-comment-save'));
+  };
+
+  it('reopened after Cancel with another comment, the note holds the new set once; only what went with it is cleared', async () => {
+    state.review = review({ diff: DIFF });
+    mount(<BuildReview wsId={WS} ticketRef="1.1" />);
+    await settle();
+    add('Comment on line 2', 'First.');
+    fireEvent.click(screen.getByTestId('review-reject'));
+    fireEvent.click(screen.getByTestId('review-reject-cancel'));
+    add('Comment on line 1', 'Second.');
+    fireEvent.click(screen.getByTestId('review-reject'));
+    const note = (screen.getByTestId('review-note') as HTMLTextAreaElement).value;
+    expect(note.match(/Please address/g)).toHaveLength(1);
+    expect(note).toContain('First.');
+    expect(note).toContain('Second.');
+    expect(screen.getByTestId('review-note-comments').textContent).toBe('Your 2 comments go with it.');
+  });
+
+  it('a note with no room left takes no comments, says nothing about them, and keeps them after the reject', async () => {
+    state.review = review({ diff: DIFF });
+    mount(<BuildReview wsId={WS} ticketRef="1.1" />);
+    await settle();
+    fireEvent.click(screen.getByTestId('review-reject'));
+    fireEvent.change(screen.getByTestId('review-note'), { target: { value: 'n'.repeat(3995) } });
+    fireEvent.click(screen.getByTestId('review-reject-cancel'));
+    add('Comment on line 2', 'First.');
+    fireEvent.click(screen.getByTestId('review-reject'));
+    expect((screen.getByTestId('review-note') as HTMLTextAreaElement).value).toBe('n'.repeat(3995));
+    expect(screen.queryByTestId('review-note-comments')).toBeNull();
+    fireEvent.click(screen.getByTestId('review-reject-confirm'));
+    await settle();
+    expect(screen.getByTestId('comments-bar-title').textContent).toBe('Comments to send (1)');
   });
 });

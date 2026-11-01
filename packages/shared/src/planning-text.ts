@@ -119,6 +119,8 @@ export const BOARD_EPICS_LABEL = 'Epics';
 export const BOARD_DROPPED_LABEL = 'Dropped';
 /** The heading of tickets that sit in no epic. */
 export const BOARD_NO_EPIC_TITLE = 'Not in an epic';
+/** An epic's heading word on the Board (26.6): "Epic 26: Everyday polish". */
+export const BOARD_EPIC_LABEL = 'Epic';
 /** The one-line notice when `tickets.py` couldn't read some files ("Some ticket files could not be read (2)"). */
 export function boardProblemsLine(count: number): string {
   return `${BOARD_PROBLEMS_TITLE} (${count})`;

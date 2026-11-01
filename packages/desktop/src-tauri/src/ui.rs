@@ -96,13 +96,30 @@ pub fn show_main(app: &AppHandle) {
     }
 }
 
-/// About, Check for updates and Quit (and Edit, so copy and paste work in the page on macOS).
+/// The one script the shell ever runs in the page (epic 26, E26-R2): File > New Chat fires the page's
+/// own event, `NEW_CHAT_EVENT` in packages/web/src/chat/new-chat.ts, and the page opens the project's
+/// new-chat draft. AD-15 still holds: one way, a constant, no capability, no data; any page script could
+/// fire it too, and it only opens a draft. A unit test ties this string to `NEW_CHAT_EVENT`.
+const NEW_CHAT_SCRIPT: &str = "window.dispatchEvent(new Event('ogden-agents:new-chat'))";
+
+/// File > New Chat (Cmd/Ctrl+N): shows the window, then asks the page for a new chat. Inside a project the
+/// draft opens; elsewhere the page does nothing. The accelerator is the menu's, so the webview never sees
+/// the key (WebView2 would open a window for it).
+pub fn new_chat(app: &AppHandle) {
+    show_main(app);
+    let ok = app.get_webview_window("main").map(|window| window.eval(NEW_CHAT_SCRIPT).is_ok()).unwrap_or(false);
+    report("menu_new_chat", json!({ "ok": ok }));
+}
+
+/// About, Check for updates and Quit, File > New Chat (and Edit, so copy and paste work in the page on macOS).
 pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let about = MenuItem::with_id(app, "about", "About Ogden Agents", true, None::<&str>)?;
     let check = MenuItem::with_id(app, "check_updates", "Check for Updates", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Ogden Agents", true, Some("CmdOrCtrl+Q"))?;
     let separator = PredefinedMenuItem::separator(app)?;
     let app_menu = Submenu::with_items(app, "Ogden Agents", true, &[&about, &check, &separator, &quit])?;
+    let new_chat_item = MenuItem::with_id(app, "new_chat", "New Chat", true, Some("CmdOrCtrl+N"))?;
+    let file = Submenu::with_items(app, "File", true, &[&new_chat_item])?;
     let edit = Submenu::with_items(
         app,
         "Edit",
@@ -117,12 +134,13 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &PredefinedMenuItem::select_all(app, None)?,
         ],
     )?;
-    Menu::with_items(app, &[&app_menu, &edit])
+    Menu::with_items(app, &[&app_menu, &file, &edit])
 }
 
 pub fn on_menu(app: &AppHandle, id: &str) {
     match id {
         "quit" => request_quit(app, "menu"),
+        "new_chat" => new_chat(app),
         "about" => {
             let app = app.clone();
             std::thread::spawn(move || {

@@ -1,0 +1,4 @@
+src/a.ts:12:5: Unexpected any. Specify a different type. [Error/@typescript-eslint/no-explicit-any]
+src/a.ts:14:1: Unexpected console statement. [Warning/no-console]
+
+2 problems

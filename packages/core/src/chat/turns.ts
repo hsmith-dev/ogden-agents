@@ -14,6 +14,7 @@ import {
   SessionNotBusyError,
   SessionNotIdleError,
 } from '../errors.js';
+import { withinTimeout, type TurnSnapshotHandle } from '../turn-snapshots.js';
 import type { Agents } from './agents.js';
 import type { CheckIn } from './check-in.js';
 import { AGENT_SESSION_REF, DELTA_INTERVAL_MS, HANDOFF_PENDING_REF, MAX_QUEUED_MESSAGES } from './constants.js';
@@ -217,6 +218,22 @@ export function createTurns(
       }
       if (!entry.restartPending || attempt >= 2) break;
     }
+    // The folder as it is just before the prompt goes out (story 8.4): never more than 10 s, never a failure of the turn.
+    const snapshots = options.turnSnapshots;
+    const snapshot: TurnSnapshotHandle | undefined = snapshots === undefined ? undefined : await withinTimeout(snapshots.start(session.id));
+    // Stopped (or dropped) while it was taken: nothing is sent.
+    if (snapshots !== undefined && (turn.stopping || live.get(session.id) !== entry)) return;
+    try {
+      await runPrompt(session, entry, started, turn, messageId, text);
+    } finally {
+      // Once the prompt settled, however it ended: the turn's changes are recorded, without holding the turn
+      // (`serializedByRepo` orders this snapshot before the next turn's start snapshot).
+      if (snapshot !== undefined && snapshots !== undefined && !ctx.closing) void withinTimeout(snapshots.end(snapshot));
+    }
+  };
+
+  /** The prompt of {@link runTurn}, once its agent is ready. */
+  const runPrompt = async (session: Session, entry: Live, started: AgentSession, turn: Turn, messageId: string, text: string): Promise<void> => {
     try {
       const { prompt, primed, handoff } = promptFor(session.id, entry, messageId, text);
       const prompting = started.prompt(prompt);

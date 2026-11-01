@@ -3,7 +3,7 @@
  * A 0.2.0 user upgrades, in a real browser (story 10.7; E10-R7, CAP-19,
  * AD-5): this version starts on a data folder as 0.2.0 left it
  * (`fixtures/data-folder-0.2.0.ts`). The launch link lands on Projects, not
- * Welcome, and Settings → Welcome never asks "Simple chats or BMad Method?";
+ * Welcome, and Help → Welcome never asks "Simple chats or BMad Method?";
  * both projects and their chats are there with their transcripts; settings
  * show the caution level, the kept rule and every BMad piece off, with the
  * repo note and the default line; the `_bmad/` project's offer shows exactly
@@ -17,7 +17,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { BMAD_NEW_PROJECTS_LINK, BMAD_OFFER_NOT_NOW, BMAD_OFFER_TEXT, BMAD_PIECES, BMAD_REPO_HAS_BMAD_TEXT } from '../../packages/shared/src/bmad.ts';
 import { createDataFolder020 } from '../fixtures/data-folder-0.2.0.js';
 import { startServer } from '../support.js';
-import { openConnected, sidebarOf } from './tab.js';
+import { openConnected, openFromHelp, sidebarOf } from './tab.js';
 
 /** Opens the project's chats page and waits until its detection has been answered. */
 async function openChats(page: Page, origin: string, wsId: string): Promise<void> {
@@ -115,9 +115,8 @@ test('a 0.2.0 data folder: everything kept, every project Simple, no Welcome que
       // browsing appended nothing but the Not now.
       expect(server.core.events.readAfter(lastSeq).map((event) => event.type)).toEqual(['session.renamed', 'session.renamed', 'server.started', 'workspace.bmad_offer_dismissed']);
 
-      // Settings → Welcome: an existing user with projects is never asked the first-project question.
-      await sidebar.getByRole('button', { name: 'Settings' }).click();
-      await page.getByRole('menuitem', { name: 'Welcome' }).click();
+      // Help → Welcome: an existing user with projects is never asked the first-project question.
+      await openFromHelp(page, 'Welcome');
       await expect(page).toHaveURL(/\/welcome$/);
       // The agent step: an API key (kept in memory, its check a stub) makes the agent ready, and Welcome moves on.
       const card = page.getByTestId('agent-card-claude-code');

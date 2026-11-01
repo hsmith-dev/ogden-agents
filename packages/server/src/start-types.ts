@@ -8,7 +8,7 @@ import type { AntigravityPorts } from './antigravity-wiring.js';
 import type { CodexPorts } from './codex-wiring.js';
 import type { GrokPorts } from './grok-wiring.js';
 import type { LocalPorts } from './local-wiring.js';
-import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, NotifierPort, PaneLaunchers, RemoteHostPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
+import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, EditorLauncherPort, ProjectCommandRunner, WorkspaceFilesPort, NotifierPort, PaneLaunchers, RemoteHostPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort, VcsWorkingTreePort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -49,6 +49,14 @@ export interface StartOptions {
   toolchain?: ToolchainPort;
   /** Override generic developer CLI tools' catalog and OS mechanics (tests; CAP-25). Default: the `dev-tools-catalog` adapter. */
   devToolsPort?: DevToolsPort;
+  /** Override the Workbench's Files reader (tests; AD-36). Default: the `workspace-files-node` adapter on the user's home and `dataDir`. */
+  workspaceFilesPort?: WorkspaceFilesPort;
+  /** Override Open in editor's launcher (tests; AD-39, 8.10). Default: the `editor-launcher-node` adapter (in a test run, confined to `OGDEN_AGENTS_TEST_EDITOR_PATH`'s folder). */
+  editorLauncher?: EditorLauncherPort;
+  /** Override the Workbench's Changes git (tests; AD-37, story 8.4). Default: `vcs-git`'s working tree on the user's `git`, snapshots in `<data>/snapshots`. */
+  vcsWorkingTreePort?: VcsWorkingTreePort;
+  /** Override Problems' command runner (tests; AD-38, 8.9). Default: the `project-commands-node` adapter. The server closes it on stop. */
+  projectCommandRunner?: ProjectCommandRunner;
   /** Override Claude Code's chat agent (tests). Default: the `acp-claude-code` adapter. */
   agent?: AgentPort;
   /**

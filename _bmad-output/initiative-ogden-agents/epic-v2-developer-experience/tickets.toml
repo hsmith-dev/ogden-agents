@@ -1,0 +1,150 @@
+# Epic 8 breakdown (v1.3, the Workbench). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-31 from change-desktop-ux-uplift section 4.4 (approved by the user 2026-10-31, with AD-36 to AD-39 adopted). References to other epics use "<epic id>.<entry id>".
+# CI never uses a real agent, model, phone or network: fakes on loopback only. Live checks with real CLIs, agents, editors and devices are hitl.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: the Files tab lists the project and shows one file read-only through WorkspaceFilesPort"
+description = "Adds the thinnest path: `WorkspaceFilesPort` with list and read, a `workspace-files-node` adapter that resolves each path and refuses anything outside the project's top folder, `.git` internals and credential folders, two GET routes under the AD-15 gate taking a workspace id and a relative path, and a Workbench tab with a Files tree that opens one file in a read-only viewer."
+verify = "On all three OSes a test lists a fixture project and opens one file through the real server, and a `../` path, an absolute path, a link out of the project, `.git` internals and a credential folder are refused."
+covers = ["E8-R1", "E8-R2"]
+after = ["2.5"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 2
+type = "story"
+title = "Epic contracts and stubs: files, search, diff views, hunk actions, project commands, editor launcher; routes and events"
+description = "Adds the shared schemas and memory stubs for the full `WorkspaceFilesPort` (search, caps, binary, masking), the `VcsPort` diff views, turn snapshots and hunk operations, the project-command use-cases and run events (ids, state, exit code, counts only), `EditorLauncherPort`, the chat `worktreePath` and branch fields with their events (moved from 25.2; 27.3 creates worktree chats on them), every route under the AD-15 gate off AD-34's device allowlist and taking a worktree chat's session id to root it at its `worktreePath` (AD-36; 8.4 and 27.3 rely on this), and the palette-derived syntax colour tokens entries 3 and 7 share, with architecture tests that no route takes an absolute path and no UI or use case runs git, so the lanes start at once."
+verify = "Unit and architecture tests pass, including that no event schema carries file content, command output or a diff."
+covers = ["E8-R1", "E8-R4", "E8-R5", "E8-R8", "E8-R9"]
+after = [1]
+hitl = false
+risk = "medium"
+unknown = "The exact search-result and command-output caps beyond the 1 MB read default (architecture open items: decided in epic 8); entry 2 proposes them and records a Decision line, and entries 8 and 9 use them."
+
+[[entry]]
+id = 3
+type = "story"
+title = "The diff viewer component, used by Review first"
+description = "Builds the one diff viewer from DESIGN.md (per-file sections, a file jump, syntax colour from entry 2's palette-derived tokens checked at 4.5:1 in both themes, inline or side by side, no sideways page scroll) with slots for the hunk actions and line comments entries 5 and 6 add, and replaces Review's raw `git diff` text and the chat's per-edit hunks with it."
+verify = "Playwright opens a fixture run's Review and a chat edit row and sees per-file sections in both layouts; a contrast test passes for every syntax token in light and dark."
+covers = ["E8-R3"]
+after = [2, "5.9"]
+hitl = false
+risk = "medium"
+references = ["_bmad-output/initiative-ogden-agents/research-desktop-agent-ux/screens/10b-review-diff-open.png"]
+
+[[entry]]
+id = 4
+type = "story"
+title = "Changes panel: This turn, Unstaged, Staged and Branch; turn snapshots; Commit these changes for a worktree chat"
+description = "Records a tree snapshot at each turn's start and end in the data directory (no commit, no ref), builds the Changes panel on entry 3's viewer with the four views through `VcsPort`, and, for a chat with a `worktreePath` (entry 2's field), the user-clicked local commit to its branch with hooks off, serialized with the repo's git work, never pushed, with the plain line about merging (moved from 25.7); 27.3 relies on this commit for its worktree chats."
+verify = "Tests show only one turn's edits under This turn after two fake-agent turns, and commit a fixture chat worktree's changes to its branch only, with hooks off and the main checkout unchanged."
+covers = ["E8-R4"]
+after = [3, "5.5"]
+hitl = false
+risk = "medium"
+unknown = "How snapshots are written to an object store in the data directory rather than the repo's own (AD-37) on all three OSes; the build settles it first."
+
+[[entry]]
+id = 5
+type = "story"
+title = "Hunk stage, unstage and revert; refused mid-turn"
+description = "Adds stage, unstage and revert of one hunk to entry 3's viewer in Changes through `VcsPort`, with a confirmation on revert, and the server's refusal while an agent is mid-turn in the same folder."
+verify = "Tests stage and revert single hunks on a fixture repo and leave the others intact, and a request while the fake agent is mid-turn is refused with its code."
+covers = ["E8-R5"]
+after = [4]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Line comments sent to the agent as one message"
+description = "Adds line comments to entry 3's viewer per EXPERIENCE.md: a Comments to send bar that sends them to the turn's chat as one message listing each `path:line`, the quoted lines and the comment, by the chat's send rule; from Unstaged, Staged or Branch a Send to picker of the project's chats and New chat; in Review they go with Reject and retry instead; unsent comments kept in this browser for 7 days."
+verify = "Playwright comments on two lines of a fake turn's changes, sends them, and the fake agent receives one message with both files and lines; a Review comment goes with Reject and retry."
+covers = ["E8-R6"]
+after = [5]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 7
+type = "story"
+title = "Files and viewer: markdown rendered, links from chat paths and file:line"
+description = "Completes Files: markdown rendered with the chat's renderer, syntax colour from entry 2's tokens, a binary or over-cap file in plain words, masked secret files, and paths and `file:line` in chat made links that open the viewer at that line (resolved through `WorkspaceFilesPort`, never as absolute paths); entries 8, 9 and 10 open their results through it."
+verify = "Playwright opens a fixture `README.md` rendered, follows a `src/a.ts:12` link from a fake agent's reply to line 12, sees a `.env` value masked, a 2 MB file capped and a binary file named as one."
+covers = ["E8-R1", "E8-R2"]
+after = [2, "2.10"]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Project search"
+description = "Adds Search to the Workbench: text search through `WorkspaceFilesPort` that respects `.gitignore`, caps its results, and opens a result in entry 7's viewer at its line; entry 11 reuses its file-name lookup."
+verify = "Tests find a fixture word in a tracked file and not in an ignored one, the cap holds on a large fixture, and a result opens at its line."
+covers = ["E8-R7"]
+after = [7]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 9
+type = "story"
+title = "Problems: declared commands, trusted only, failures as file:line, Ask the agent to fix this"
+description = "Adds the workspace settings for test and lint commands with the `package.json` offer and its confirmation bound to the command's text, runs them only in a trusted project with the allowlisted environment and Stop, masks and fetches output, parses the six known formats with fixtures into items that open in entry 7's viewer, and offers \"Ask the agent to fix this\", which fills the composer of the project's latest chat (or a new chat) with the failure, its `file:line` and output lines and never sends by itself; it owns the project-command runner 27.7 reuses for setup scripts."
+verify = "Tests refuse a command in an untrusted project and an unconfirmed or changed script, parse each format's fixture into `file:line` items, and kill a running command on Stop; Playwright opens a failure at its line."
+covers = ["E8-R8"]
+after = [7, "4.2"]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 10
+type = "story"
+title = "Open in editor"
+description = "Adds the `editor-launcher` adapter with the fixed editor list found on `PATH` through the linked-command resolver, starts the chosen one with `file:line` as arguments and no shell (a Windows `.cmd` shim through `cmd.exe` with metacharacter paths refused), and puts Open in editor on the viewer, entry 3's diff viewer file headers and entry 9's Problems items, with the default editor in Settings."
+verify = "Tests start a fake editor on `PATH` with the expected arguments on all three OSes and refuse a path outside the project."
+covers = ["E8-R9"]
+after = [6, 9, "12.12"]
+hitl = false
+risk = "medium"
+unknown = "The exact JetBrains launcher names on each OS; the build lists them from each product's docs."
+
+[[entry]]
+id = 11
+type = "story"
+title = "Command palette gains files"
+description = "Adds files by name to 26.3's palette sources through entry 8's file-name lookup, opening the chosen file in the viewer."
+verify = "Playwright opens the palette, types part of a fixture file's name, and opens it in the viewer."
+covers = ["E8-R10"]
+after = [8, "26.3"]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 12
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up duplication, dead code and boundary leaks across entries 1 to 11, scoped at start from their build records and deferred review findings."
+verify = "Typecheck, the full suite and the architecture test pass, and the sweep's list of changes is recorded in its plan."
+covers = []
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 13
+type = "story"
+title = "End-to-end suite and v1.3 release part; live checks with a real agent and VS Code"
+description = "Adds the epic's end-to-end journey on all three OSes with fakes only (This turn, revert, comment, the agent's answer, a Problems failure opened at its line), updates docs, and lists the user's live checks: a real agent answering sent comments, and VS Code opening a failure at its line."
+verify = "The end-to-end suite passes in CI on macOS, Windows and Linux, and the user's live check results are recorded in the plan."
+covers = ["E8-R11"]
+after = [12]
+hitl = true
+risk = "medium"

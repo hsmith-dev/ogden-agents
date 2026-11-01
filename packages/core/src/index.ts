@@ -88,6 +88,7 @@ export * from './workspace-changes.js';
 export * from './turn-snapshots.js';
 export * from './editor-launcher-port.js';
 export * from './editor-launch.js';
+export * from './editor-choice.js';
 export * from './project-commands.js';
 export * from './project-command-parsers.js';
 export * from './shell-free.js';

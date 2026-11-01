@@ -134,11 +134,11 @@ export function ViewerHeader({ path, actions }: { path: string; actions?: ReactN
   );
 }
 
-/** The viewer framing a one-sentence state instead of text, with an optional detail under it (a file's size). */
-export function ViewerState({ path, children, testId, detail }: { path: string | undefined; children: ReactNode; testId: string; detail?: ReactNode }) {
+/** The viewer framing a one-sentence state instead of text, with an optional detail under it (a file's size) and header `actions` (Open in editor). */
+export function ViewerState({ path, children, testId, detail, actions }: { path: string | undefined; children: ReactNode; testId: string; detail?: ReactNode; actions?: ReactNode }) {
   return (
     <section aria-label={path ?? 'File'} className="flex min-w-0 flex-col rounded-md border border-border bg-card">
-      {path === undefined ? null : <ViewerHeader path={path} />}
+      {path === undefined ? null : <ViewerHeader path={path} actions={actions} />}
       <div className="flex flex-col gap-1 p-3">
         <Text variant="body" tone="muted" data-testid={testId} role="status">
           {children}

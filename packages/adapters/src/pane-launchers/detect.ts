@@ -89,8 +89,12 @@ function probeEnvironment(system: DetectSystem): Record<string, string> {
 
 const platformKey = (platform: NodeJS.Platform): 'darwin' | 'linux' | 'win32' => (platform === 'win32' ? 'win32' : platform === 'darwin' ? 'darwin' : 'linux');
 
-/** An executable entry as the places to try: a bare name on each PATH folder (Windows: each PATHEXT), or one expanded absolute path. */
-function candidatesFor(entry: string, system: DetectSystem): string[] {
+/**
+ * An executable entry as the places to try: a bare name on each PATH folder
+ * (Windows: each PATHEXT), or one expanded absolute path (`~` home,
+ * `%VAR%`; an unset variable gives none). Shared with the editor launcher (8.10).
+ */
+export function candidatesFor(entry: string, system: Pick<DetectSystem, 'platform' | 'env'>): string[] {
   const win = system.platform === 'win32';
   const path = win ? win32 : posix;
   const env = system.env;

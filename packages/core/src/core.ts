@@ -26,6 +26,7 @@ import { createTurnSnapshots, type TurnSnapshots } from './turn-snapshots.js';
 import type { VcsWorkingTreePort } from './vcs-port.js';
 import { createEditorLaunch, type EditorLaunch } from './editor-launch.js';
 import type { EditorLauncherPort } from './editor-launcher-port.js';
+import { createEditorChoice } from './editor-choice.js';
 import { createProjectCommands, type ProjectCommandRunner, type ProjectCommands } from './project-commands.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
@@ -209,6 +210,8 @@ export type OpenCoreOptions = OpenDatabaseOptions &
     onTurnSnapshotError?: (sessionId: SessionId, error: unknown) => void;
     /** The editor launcher (AD-39; 8.10). Absent: no Open in editor use-case. */
     editorLauncherPort?: EditorLauncherPort;
+    /** The kept editor choice (`<dataDir>/editor.json`) exists but can't be read: its code only (8.10). */
+    onEditorChoiceError?: (code: string) => void;
     /** Runs a project's declared commands (AD-38; 8.9: `project-commands-node`). Absent: no Problems use-case. The server closes it on stop. */
     projectCommandRunner?: ProjectCommandRunner;
     /**
@@ -295,7 +298,10 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     workspaceFiles,
     workspaceChanges: options.vcsWorkingTreePort === undefined ? undefined : createWorkspaceChanges({ entities, sessionEvents, port: options.vcsWorkingTreePort }),
     turnSnapshots: options.vcsWorkingTreePort === undefined ? undefined : createTurnSnapshots({ entities, sessionEvents, port: options.vcsWorkingTreePort, ...(options.onTurnSnapshotError === undefined ? {} : { onError: options.onTurnSnapshotError }) }),
-    editorLaunch: options.editorLauncherPort === undefined || workspaceFiles?.locate === undefined ? undefined : createEditorLaunch({ entities, files: { locate: workspaceFiles.locate }, launcher: options.editorLauncherPort }),
+    editorLaunch:
+      options.editorLauncherPort === undefined || workspaceFiles?.locate === undefined
+        ? undefined
+        : createEditorLaunch({ entities, files: { locate: workspaceFiles.locate }, launcher: options.editorLauncherPort, choice: createEditorChoice({ dataDir, ...(options.onEditorChoiceError === undefined ? {} : { onError: options.onEditorChoiceError }) }) }),
     projectCommands:
       options.projectCommandRunner === undefined || options.workspaceFilesPort === undefined
         ? undefined

@@ -21,6 +21,7 @@ import { Link } from '@tanstack/react-router';
 import { useMemo, useRef, useState } from 'react';
 import { lineCommentsKey, useLineComments, type LineCommentsState } from '@/workbench/line-comments';
 import { CommentsBar, useLineCommentSlots } from '@/workbench/line-comments-ui';
+import { withOpenInEditor } from '@/workbench/open-in-editor';
 import { appendDraft } from '@/workbench/problems-api';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
@@ -57,7 +58,7 @@ export const REVIEW_DIFF_CUT_TEXT = 'Only the start of these changes is shown.';
  * Story 8.6: line comments, collected in a bar with no send: they go with
  * Reject and retry, as its note.
  */
-function ReviewChanges({ files, diff, truncated, comments }: Pick<ReviewResponse, 'files' | 'diff' | 'truncated'> & { comments: LineCommentsState }) {
+function ReviewChanges({ wsId, files, diff, truncated, comments }: Pick<ReviewResponse, 'files' | 'diff' | 'truncated'> & { wsId: string; comments: LineCommentsState }) {
   const parsed = useMemo(() => parseUnifiedDiff(diff, truncated), [diff, truncated]);
   const viewer = useRef<DiffViewerHandle>(null);
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -81,7 +82,8 @@ function ReviewChanges({ files, diff, truncated, comments }: Pick<ReviewResponse
       ) : (
         <div data-testid="review-diff" className="flex min-w-0 flex-col gap-2">
           <div className="flex min-w-0 flex-col" onFocus={commentSlots.onFocus} onKeyDownCapture={commentSlots.onKeyDownCapture}>
-            <DiffViewer ref={viewer} files={parsed.files} label="The build's changes" {...commentSlots.slots} />
+            {/* Open in editor opens the project's copy of a file (a build's worktree is not a Workbench root). */}
+            <DiffViewer ref={viewer} files={parsed.files} label="The build's changes" fileActions={withOpenInEditor(wsId, undefined, parsed.files)} {...commentSlots.slots} />
           </div>
           {parsed.cut ? (
             <Text variant="caption" data-testid="review-diff-cut">
@@ -228,7 +230,7 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
       </section>
       <details className="flex min-w-0 flex-col gap-2" data-testid="review-changes">
         <summary className="cursor-pointer text-label">{REVIEW_SHOW_CHANGES_LABEL(files.length)}</summary>
-        <ReviewChanges files={files} diff={diff} truncated={truncated} comments={comments} />
+        <ReviewChanges wsId={wsId} files={files} diff={diff} truncated={truncated} comments={comments} />
       </details>
       {asking ? (
         <div className="flex flex-col gap-2" data-testid="review-reject-form">

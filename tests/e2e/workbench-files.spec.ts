@@ -15,7 +15,15 @@
  * 8.8: `g s` opens Search; typing a fixture word lists the tracked file and
  * not the ignored one, and its result opens the viewer at that line; axe
  * finds nothing on the panel and a 390px page has no sideways scroll.
+ *
+ * 8.10: Open in editor hands `src/a.ts` at line 12 to a fake `code` (its
+ * argv checked), `Cmd`/`Ctrl`+click on a reply's link does too, Settings,
+ * Projects, Editor chooses Cursor; with none found the button is disabled
+ * with its reason; axe finds nothing and a 390px page has no sideways scroll.
  */
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { API_ROUTES } from '../support.js';
@@ -232,5 +240,100 @@ test('g s opens Search; a word is found in the tracked file and not the ignored 
       await expect(page.getByTestId('search-file-path')).toHaveText('src/a.ts');
     },
     { files: { '.gitignore': 'dist/\n', 'src/a.ts': 'const a = 1;\n\nexport const zebraword = a;\n', 'dist/a.js': 'export const zebraword = 1;\n', '.git/config': '[core]\n' } },
+  );
+});
+
+/** A folder inside the temp folder holding fake `code` and `cursor`, each recording its argv (one per line) in `<folder>/<name>.argv`. */
+function fakeEditors(): string {
+  const folder = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-editors-'));
+  for (const name of ['code', 'cursor']) {
+    if (process.platform === 'win32') {
+      writeFileSync(join(folder, `${name}.cmd`), `@echo off\r\n(for %%a in (%*) do @echo %%~a) > "%~dp0${name}.argv"\r\n`);
+    } else {
+      writeFileSync(join(folder, name), `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done > "${join(folder, `${name}.argv`)}"\n`);
+      chmodSync(join(folder, name), 0o755);
+    }
+  }
+  return folder;
+}
+
+/** What a fake editor last recorded, or `undefined`. */
+const recorded = (folder: string, name: string): string | undefined => {
+  const file = join(folder, `${name}.argv`);
+  return existsSync(file) ? readFileSync(file, 'utf8').replaceAll('\r\n', '\n') : undefined;
+};
+
+test('Open in editor hands src/a.ts at line 12 to a fake code; Cmd/Ctrl+click on a reply link opens it too; Settings chooses Cursor; axe clean at 390px', async ({ page }) => {
+  // The launcher looks only in a folder of fakes (a test hook that needs a test run and a temp data folder).
+  const folder = fakeEditors();
+  const before = { path: process.env.OGDEN_AGENTS_TEST_EDITOR_PATH, env: process.env.NODE_ENV };
+  process.env.OGDEN_AGENTS_TEST_EDITOR_PATH = folder;
+  process.env.NODE_ENV = 'test';
+  try {
+    await withChatServer(
+      page,
+      async ({ server, repo }) => {
+        const real = join(realpathSync(repo), 'src', 'a.ts');
+        const { wsId } = await startChat(page, repo);
+
+        // A reply link: Cmd/Ctrl+click opens the file at its line and stays in the chat.
+        await send(page, 'reply-with Look at `src/a.ts:12` for the bug.');
+        const link = page.getByTestId('message-agent').last().getByRole('link', { name: 'src/a.ts:12' });
+        await expect(link).toBeVisible();
+        const chatUrl = page.url();
+        await link.click({ modifiers: ['ControlOrMeta'] });
+        await expect.poll(() => recorded(folder, 'code')).toBe(`-g\n${real}:12:1\n`);
+        expect(page.url()).toBe(chatUrl);
+
+        // The viewer's Open in editor.
+        rmSync(join(folder, 'code.argv'), { force: true });
+        await page.goto(`${server.url}/w/${wsId}/workbench?path=src%2Fa.ts&line=12`);
+        const button = page.getByTestId('open-in-editor');
+        await expect(button).toHaveText('Open in editor: src/a.ts');
+        await button.click();
+        await expect(button).toHaveText('Opened in VS Code: src/a.ts');
+        await expect(page.getByTestId('open-in-editor-status')).toHaveText('Opened in VS Code');
+        await expect.poll(() => recorded(folder, 'code')).toBe(`-g\n${real}:12:1\n`);
+
+        // Settings, Projects, Editor: Open files in Cursor, kept by the server.
+        await page.goto(`${server.url}/settings/editor`);
+        await expect(page.getByRole('radiogroup', { name: 'Open files in' })).toBeVisible();
+        await page.getByTestId('editor-option-cursor').click();
+        await expect(page.getByTestId('editor-settings-status')).toHaveText('Saved: files open in Cursor.');
+        await page.setViewportSize({ width: 390, height: 844 });
+        const settingsAxe = await new AxeBuilder({ page }).include('[data-testid="editor-settings-page"]').analyze();
+        expect(settingsAxe.violations.map((v) => `${v.id}: ${v.nodes.map((node) => node.target.join(' ')).join(', ')}`)).toEqual([]);
+        await expectNoSidewaysScroll(page);
+
+        await page.goto(`${server.url}/w/${wsId}/workbench?path=src%2Fa.ts&line=12`);
+        await page.getByTestId('open-in-editor').click();
+        await expect(page.getByTestId('open-in-editor')).toHaveText('Opened in Cursor: src/a.ts');
+        await expect.poll(() => recorded(folder, 'cursor')).toBe(`-g\n${real}:12:1\n`);
+        const axe = await new AxeBuilder({ page }).include('[data-testid="workbench-files"]').analyze();
+        expect(axe.violations.map((v) => `${v.id}: ${v.nodes.map((node) => node.target.join(' ')).join(', ')}`)).toEqual([]);
+        await expectNoSidewaysScroll(page);
+      },
+      { files: { 'src/a.ts': LONG } },
+    );
+  } finally {
+    if (before.path === undefined) delete process.env.OGDEN_AGENTS_TEST_EDITOR_PATH;
+    else process.env.OGDEN_AGENTS_TEST_EDITOR_PATH = before.path;
+    if (before.env === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = before.env;
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('with no editor found, Open in editor is disabled with the reason', async ({ page }) => {
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const wsId = await addProject(page, repo);
+      await page.goto(`${server.url}/w/${wsId}/workbench?path=src%2Fa.ts`);
+      const button = page.getByTestId('open-in-editor');
+      await expect(button).toHaveAttribute('aria-disabled', 'true');
+      await expect(button).toHaveAccessibleDescription('No editor found on this computer. Ogden looks for VS Code, Cursor, Zed and JetBrains.');
+    },
+    { files: { 'src/a.ts': SOURCE } },
   );
 });

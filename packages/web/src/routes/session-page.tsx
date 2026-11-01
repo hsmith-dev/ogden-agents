@@ -140,6 +140,9 @@ export function SessionPage() {
   const setups = useAgents();
   const signsInHere = agentId !== undefined && setups.data?.some((setup) => setup.agentId === agentId) === true;
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
+  // The chat's folder, for Open in editor on an agent's absolute edit paths (8.10): its worktree, else the project.
+  const worktree = session.data?.session.worktreePath ?? null;
+  const chatRoots = worktree !== null ? [worktree] : workspace.data === undefined ? [] : [workspace.data.path, ...(workspace.data.realPath === undefined ? [] : [workspace.data.realPath])];
   const end = useRef<HTMLDivElement>(null);
   const lastText = view.messages.at(-1)?.text.length ?? 0;
   const projectName = workspace.data === undefined ? 'this project' : workspaceName(workspace.data);
@@ -632,7 +635,7 @@ export function SessionPage() {
                   item.type === 'message' ? (
                     <Message key={item.message.messageId} message={item.message} agentName={nameOf(item.message.agentId)} wsId={wsId} sesId={sesId} />
                   ) : item.type === 'tools' ? (
-                    <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} detail={detail} />
+                    <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} detail={detail} chat={{ wsId, sesId, roots: chatRoots }} />
                   ) : item.type === 'resumed' ? (
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
                   ) : item.type === 'agent_changed' ? (

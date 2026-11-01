@@ -19,7 +19,11 @@ import { defineConfig, devices } from '@playwright/test';
  * allow rule on a server of its own. Epic 8's Workbench journey (story 8.13)
  * runs This turn, a hunk reverted and undone, a line comment the agent
  * receives, search, Problems, Open in editor (a fake `code`, through a test
- * hook) and Cmd/Ctrl+K on a server of its own.
+ * hook) and Cmd/Ctrl+K on a server of its own. Epic 27's where work runs
+ * journey (story 27.10) runs a Worktree chat with its port, a commit, Move to
+ * this folder and back, Delete chat, retention and Restore, Try with several
+ * agents (Claude Code and Codex, both the fake) and a remote machine on the
+ * in-memory remote host (a test hook) on a server of its own.
  * Every server a spec starts is stopped with its whole process tree.
  *
  *   pnpm run pack && pnpm e2e:installed
@@ -53,7 +57,8 @@ export default defineConfig({
   // planning journey and the permission modes journey (story 4.13), and the
   // 0.2.0 upgrade (story 10.7), epic 6's agents journey (entry 10), epic 12's
   // Codex and Grok journeys, epic 11's and 17's builds journeys, epic 26's
-  // everyday polish journey (story 26.10) and epic 8's Workbench journey (story 8.13), each on a server of its own from the
+  // everyday polish journey (story 26.10), epic 8's Workbench journey (story 8.13) and epic 27's where work runs
+  // journey (story 27.10), each on a server of its own from the
   // same install; then epic 1's journey on the first server, last since it quits it.
   projects: [
     { name: 'gate', testMatch: /(^|[\\/])(gate|bypass)\.spec\.ts$/ },
@@ -80,6 +85,8 @@ export default defineConfig({
     { name: 'polish', testMatch: /(^|[\\/])everyday-polish-journey\.spec\.ts$/, dependencies: ['builds-agents'] },
     // Epic 8's Workbench (story 8.13): This turn, Revert and Undo, a line comment to the agent, search, Problems, Open in editor, Cmd/Ctrl+K.
     { name: 'workbench', testMatch: /(^|[\\/])workbench-journey\.spec\.ts$/, dependencies: ['polish'] },
-    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['workbench'] },
+    // Epic 27's where work runs (story 27.10): a Worktree chat and its port, a commit, hand-off, Delete chat, retention, Try with several agents, a remote machine.
+    { name: 'where-work-runs', testMatch: /(^|[\\/])where-work-runs-journey\.spec\.ts$/, dependencies: ['workbench'] },
+    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['where-work-runs'] },
   ],
 });

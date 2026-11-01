@@ -27,6 +27,7 @@ import {
   createOpenAiLocalModel,
   DETECT_PROBE_TIMEOUT_MS,
   createMemorySecretStore,
+  createMemoryRemoteHostPort,
   createSshRemoteHostPort,
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
@@ -168,10 +169,11 @@ export function wireAgents({ options, dataDir, log, hooks, core, customKeyEnv = 
         })
       : undefined;
   const secrets = options.secrets ?? (hooks.secretStore === 'memory' ? createMemorySecretStore() : createKeyringSecretStore());
-  // CAP-24, epic 19 story 19.3: the remote-machine registry, over the real SSH port or a test's fake. Returned
+  // CAP-24, epic 19 story 19.3: the remote-machine registry, over the real SSH port, a test's fake, or the
+  // in-memory host under the remote host hook (story 27.10). Returned
   // too (story 19.7) so `start.ts` builds one shared `remote` capability for chats and builds alike, over this
   // exact `RemoteHostPort`, never a second, differently-faked instance.
-  const remoteHosts = options.remoteHost ?? createSshRemoteHostPort();
+  const remoteHosts = options.remoteHost ?? (hooks.remoteHost === 'memory' ? createMemoryRemoteHostPort() : createSshRemoteHostPort());
   const remoteMachines = core.remoteMachines(secrets, remoteHosts);
   // Claude Code's setup (or the ports given in its place), then each extra agent's own (6.3).
   const setupPorts = [...(options.agentSetup ?? (claudeSetup === undefined ? [] : [claudeSetup])), ...extraAgents.flatMap((wiring) => (wiring.setup === undefined ? [] : [wiring.setup]))];

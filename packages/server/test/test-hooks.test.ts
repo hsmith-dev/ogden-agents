@@ -9,7 +9,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createFixedSandbox } from '@ogden-agents/adapters';
+import { createFixedSandbox, createMemoryRemoteHostPort } from '@ogden-agents/adapters';
 import { BMAD_DOWNLOAD_INTEGRITY_MESSAGE } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -35,6 +35,9 @@ import {
   SANDBOX_ENV,
   testSandbox,
   testManager,
+  testRemoteHost,
+  testHooksLogFields,
+  REMOTE_HOST_ENV,
   MANAGER_ENV,
   testNotifier,
   NOTIFIER_ENV,
@@ -141,6 +144,24 @@ describe('testManager (epic 15, story 15.3)', () => {
     expect(testManager({ NODE_ENV: 'test', [MANAGER_ENV]: 'memory' }, OUTSIDE)).toBeUndefined();
     expect(testManager({ NODE_ENV: 'test' }, dir)).toBeUndefined();
     expect(testManager({ NODE_ENV: 'test', [MANAGER_ENV]: 'real' }, dir)).toBeUndefined();
+  });
+});
+
+describe('testRemoteHost (story 27.10)', () => {
+  it('is the in-memory remote host only for a test run on a temp data folder with its variable set to memory', () => {
+    const dir = tempDataDir();
+    expect(testRemoteHost({ NODE_ENV: 'test', [REMOTE_HOST_ENV]: 'memory' }, dir)).toBe('memory');
+    // Unset, outside a test run, outside the temp folder, or any other value: the real SSH host.
+    expect(testRemoteHost({ [REMOTE_HOST_ENV]: 'memory' }, dir)).toBeUndefined();
+    expect(testRemoteHost({ NODE_ENV: 'production', VITEST: '', [REMOTE_HOST_ENV]: 'memory' }, dir)).toBeUndefined();
+    expect(testRemoteHost({ NODE_ENV: 'test', [REMOTE_HOST_ENV]: 'memory' }, OUTSIDE)).toBeUndefined();
+    expect(testRemoteHost({ NODE_ENV: 'test' }, dir)).toBeUndefined();
+    expect(testRemoteHost({ NODE_ENV: 'test', [REMOTE_HOST_ENV]: 'ssh' }, dir)).toBeUndefined();
+    expect(resolveTestHooks({ NODE_ENV: 'test', [REMOTE_HOST_ENV]: 'memory' }, dir, { ownsCore: true }).remoteHost).toBe('memory');
+    expect(resolveTestHooks({ [REMOTE_HOST_ENV]: 'memory' }, dir, { ownsCore: true }).remoteHost).toBeUndefined();
+    // A remote host given to start() decides it: the hook is not read.
+    expect(resolveTestHooks({ NODE_ENV: 'test', [REMOTE_HOST_ENV]: 'memory' }, dir, { ownsCore: true, remoteHost: createMemoryRemoteHostPort() }).remoteHost).toBeUndefined();
+    expect(testHooksLogFields(resolveTestHooks({ NODE_ENV: 'test', [REMOTE_HOST_ENV]: 'memory' }, dir, { ownsCore: true }))).toMatchObject({ remoteHost: true });
   });
 });
 

@@ -27,7 +27,7 @@ import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { apiError, notImplemented } from './errors.js';
 import type { Logger } from './log.js';
-import { NO_STORE, workbenchRefusal } from './workspace-files-routes.js';
+import { NO_STORE, workbenchRefusal } from './workbench-refusal.js';
 
 /** The largest body any of these routes takes (`SetProjectCommandsRequest`: 20 commands of 2000 characters, twice). */
 const MAX_BODY_BYTES = 256 * 1024;

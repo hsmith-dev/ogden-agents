@@ -64,6 +64,7 @@ import {
   MAX_DIFF_FILE_BYTES,
   MAX_UNDOS_KEPT,
   UNDO_KEPT_MS,
+  UNIFIED_HUNK_HEADER,
   type ChangedFile,
   type DiffHunk,
   type DiffLine,
@@ -104,7 +105,6 @@ interface ViewSpec {
 }
 
 const EMPTY_ID = /^0+$/;
-const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
 /** A raw record's header: `:<old mode> <new mode> <old id> <new id> <status>`. */
 const RAW_HEADER = /^:(\d{6}) (\d{6}) ([0-9a-f]+) ([0-9a-f]+) ([A-Z])\d*$/;
@@ -214,7 +214,7 @@ export function parseHunks(patch: string): DiffHunk[] {
     current = undefined;
   };
   for (const line of patch.split('\n')) {
-    const header = HUNK_HEADER.exec(line);
+    const header = UNIFIED_HUNK_HEADER.exec(line);
     if (header !== null) {
       finish();
       const oldStart = Number(header[1]);

@@ -58,12 +58,12 @@ import {
 } from '@ogden-agents/shared';
 import type { z } from 'zod';
 import type { Entities } from './entities.js';
-import { AgentMidTurnError, HunkOutdatedError, InvalidOperationError, NotFoundError, NotImplementedError, ValidationError } from './errors.js';
+import { AgentMidTurnError, HunkOutdatedError, InvalidOperationError, NotFoundError, NotImplementedError, issuesOf, ValidationError } from './errors.js';
 import { serializedByRepo } from './repo-serialization.js';
 import type { SessionEvents } from './session-events.js';
 import type { VcsChangesTarget, VcsHunkResult, VcsWorkingTreePort } from './vcs-port.js';
 import { checkedWorkspacePath, isRefusedWorkspacePath } from './workspace-files.js';
-import { resolveWorkspaceRoot, sessionFolder, vcsFolderOf, workspaceFolder } from './workspace-root.js';
+import { namedSession, resolveWorkspaceRoot, sessionFolder, vcsFolderOf, workspaceFolder } from './workspace-root.js';
 
 export interface WorkspaceChanges {
   /** `ChangesQuery` → the view's changed files. {@link ValidationError}, {@link NotFoundError} (a foreign chat or turn). */
@@ -89,7 +89,7 @@ export interface WorkspaceChangesOptions {
 /** The parsed value, or {@link ValidationError} with the schema's issues. */
 function parsed<S extends z.ZodType>(schema: S, value: unknown, message: string): z.infer<S> {
   const result = schema.safeParse(value);
-  if (!result.success) throw new ValidationError(message, result.error.issues.map((issue) => ({ path: issue.path, message: issue.message })));
+  if (!result.success) throw new ValidationError(message, issuesOf(result.error));
   return result.data;
 }
 
@@ -140,7 +140,7 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
 
   return {
     async changes(workspaceId, query) {
-      const { workspace, session } = resolveWorkspaceRoot(entities, workspaceId, (query as { session?: unknown } | null | undefined)?.session);
+      const { workspace, session } = resolveWorkspaceRoot(entities, workspaceId, namedSession(query));
       const { view, turn } = parsed(ChangesQuery, query, 'That is not a view of the changes.');
       const target = targetOf(view, session, turn);
       if (target === undefined) return { view, files: [], truncated: false };
@@ -156,7 +156,7 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
     },
 
     async fileDiff(workspaceId, query) {
-      const { workspace, session } = resolveWorkspaceRoot(entities, workspaceId, (query as { session?: unknown } | null | undefined)?.session);
+      const { workspace, session } = resolveWorkspaceRoot(entities, workspaceId, namedSession(query));
       const path = checkedWorkspacePath((query as { path?: unknown } | null | undefined)?.path, { rootAllowed: false });
       const { view, turn } = parsed(FileDiffQuery, query, 'That is not a file of the changes.');
       const target = targetOf(view, session, turn);
@@ -170,7 +170,7 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
       const applyHunk = port.applyHunk;
       // Without the port's hunk actions nothing is checked or asked.
       if (applyHunk === undefined) throw new NotImplementedError(HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE);
-      const { workspace, root, session } = resolveWorkspaceRoot(entities, workspaceId, (body as { session?: unknown } | null | undefined)?.session);
+      const { workspace, root, session } = resolveWorkspaceRoot(entities, workspaceId, namedSession(body));
       const path = checkedWorkspacePath((body as { path?: unknown } | null | undefined)?.path, { rootAllowed: false });
       const request = parsed(HunkActionRequest, body, 'That is not a change Ogden can make.');
       const target = targetOf(request.view, session, request.turn);
@@ -190,7 +190,7 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
     async undo(workspaceId, body) {
       const undoRevert = port.undoRevert;
       if (undoRevert === undefined) throw new NotImplementedError(HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE);
-      const { workspace, root, session } = resolveWorkspaceRoot(entities, workspaceId, (body as { session?: unknown } | null | undefined)?.session);
+      const { workspace, root, session } = resolveWorkspaceRoot(entities, workspaceId, namedSession(body));
       const path = checkedWorkspacePath((body as { path?: unknown } | null | undefined)?.path, { rootAllowed: false });
       const request = parsed(UndoHunkRequest, body, 'That is not a revert Ogden can undo.');
       const folder = vcsFolderOf(workspace, session);

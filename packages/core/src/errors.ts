@@ -600,10 +600,13 @@ export class SecretsUnavailableError extends CoreError {
   }
 }
 
+/** A schema failure's issues as a {@link ValidationError} lists them: each one's path and message. */
+export const issuesOf = (error: { issues: ReadonlyArray<{ path: PropertyKey[]; message: string }> }): ValidationIssue[] => error.issues.map((issue) => ({ path: issue.path, message: issue.message }));
+
 /** Throws a schema's refusal as a {@link ValidationError}: its first issue's words (else `fallback`), every issue kept. */
 export function refuseInvalid(error: { issues: Array<{ path: PropertyKey[]; message: string }> }, fallback: string): never {
   const issue = error.issues[0];
-  throw new ValidationError(issue?.message ?? fallback, error.issues.map((each) => ({ path: each.path, message: each.message })));
+  throw new ValidationError(issue?.message ?? fallback, issuesOf(error));
 }
 
 /** A keychain failure as callers see it: a {@link SecretsUnavailableError} as it is, anything else as one with cause `unexpected`. */

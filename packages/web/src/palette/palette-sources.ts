@@ -14,6 +14,7 @@ import { markNeedsYouOpened, needsYouTarget, nextNeedsYou, lastNeedsYouOpened } 
 import { useSidebarData } from '@/shell/sidebar-data';
 import { UNTITLED, type SidebarWorkspace } from '@/shell/sidebar-model';
 import { visibleWorkspaceTabs } from '@/shell/workspace-tabs';
+import { useWorktreeChat } from '@/workbench/chat-folder';
 import { parentOf, usePaletteFileSearch } from '@/workbench/workbench-api';
 import { SEARCH_DEBOUNCE_MS } from '@/workbench/workbench-search';
 import { fetchBmadPieces, fetchWorkspaceSettings } from '@/workspaces/workspace-settings-api';
@@ -232,17 +233,19 @@ function useDebouncedValue(value: string, delay: number): string {
 /**
  * The current project's files (8.11): only while the palette is open on
  * everything, in a project, with something typed, after a pause in typing.
- * Closing, leaving the project or a newer query cancels the request in
- * flight; any failure leaves the group out. Results are never kept.
+ * On a chat with a worktree of its own, that worktree's files, opened in it
+ * (8.12). Closing, leaving the project or a newer query cancels the request
+ * in flight; any failure leaves the group out. Results are never kept.
  */
 function useFileItems(ctx: PaletteContext): PaletteItem[] {
   const navigate = useNavigate();
   const active = ctx.open && ctx.mode === 'all' && ctx.wsId !== undefined;
+  const session = useWorktreeChat(ctx.wsId, ctx.sesId, active);
   const typed = active ? ctx.query.trim() : '';
   const settled = useDebouncedValue(typed, SEARCH_DEBOUNCE_MS);
-  const search = usePaletteFileSearch(ctx.wsId, settled, active);
+  const search = usePaletteFileSearch(ctx.wsId, settled, active, session);
   const paths = active && settled !== '' && !search.isError ? search.data?.files.map((file) => file.path) : undefined;
-  return fileItems(ctx.wsId, paths, ctx.query, (wsId, path) => void navigate({ to: '/w/$wsId/workbench', params: { wsId }, search: { path } }));
+  return fileItems(ctx.wsId, paths, ctx.query, (wsId, path) => void navigate({ to: '/w/$wsId/workbench', params: { wsId }, search: session === undefined ? { path } : { path, session } }));
 }
 
 // ---- Actions ----

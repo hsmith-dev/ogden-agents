@@ -18,15 +18,11 @@ import {
   SEND_TO_LABEL,
   sendCommentsLabel,
   changesMoreFilesText,
-  COMMIT_MESSAGE_LABEL,
-  COMMIT_WORKTREE_LABEL,
-  committedText,
   fileActionName,
   HUNK_ACTION_LABELS,
   HUNK_REVERTED_LABEL,
   HUNK_ACTIONS_BY_VIEW,
   hunkActionName,
-  MAX_COMMIT_MESSAGE_CHARS,
   PUT_BACK_TEXT,
   REVERT_CONFIRM_DESCRIPTION,
   REVERT_CONFIRM_TITLE,
@@ -34,7 +30,6 @@ import {
   turnPickerText,
   UNDO_GONE_TEXT,
   UNDO_LABEL,
-  WORKTREE_NEVER_PUSHED_TEXT,
   type ChangedFile,
   type ChangesView,
   type DiffHunk,
@@ -42,11 +37,10 @@ import {
   type TurnSummary,
 } from '@ogden-agents/shared';
 import { CaretDown } from '@phosphor-icons/react';
-import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { isApiError } from '@/api/http';
-import { agentNameOf, fetchSession } from '@/chat/chat-api';
+import { agentNameOf } from '@/chat/chat-api';
 import { chatDraftKey, newChatDraftKey, readDraft, writeDraft } from '@/chat/drafts';
 import { useChatAgents } from '@/chat/use-chat-agents';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent } from '@/ui/alert-dialog';
@@ -54,18 +48,18 @@ import { Button } from '@/ui/button';
 import { hunkRangeText } from '@/ui/diff/diff-file';
 import { DiffFileList, DiffViewer, type DiffFileData, type DiffSlots, type DiffViewerHandle } from '@/ui/diff-viewer';
 import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
-import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
 import { Skeleton } from '@/ui/skeleton';
-import { Textarea } from '@/ui/textarea';
 import { withOpenInEditor } from './open-in-editor';
 import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
 import { Text } from '@/ui/typography';
 import { isBusy, useSessions } from '@/workspaces/workspace-api';
-import { useChanges, useCommitWorktree, useFileDiffs, useHunkAction, useTurns, useUndoRevert, type ChangesTarget, type HunkActionBody } from './changes-api';
+import { useChanges, useFileDiffs, useHunkAction, useTurns, useUndoRevert, type ChangesTarget, type HunkActionBody } from './changes-api';
 import { lineCommentsKey, useLineComments, type LineCommentsState } from './line-comments';
+import { chatWorktree } from './chat-folder';
 import { CommentsBar, useLineCommentSlots } from './line-comments-ui';
 import { appendDraft } from './problems-api';
+import { WorktreeCommit } from './worktree-commit';
 
 /** Where the panel goes next: a view, and for This turn the turn picked. */
 export interface ChangesNavigation {
@@ -141,7 +135,7 @@ export function WorkbenchChanges({ wsId, view, session, turn, onNavigate }: Work
         </ToggleGroup>
         {shown === 'turn' && session !== undefined ? <TurnPicker wsId={wsId} session={session} turn={turn} onPick={(picked) => onNavigate({ view: 'turn', turn: picked })} /> : null}
       </div>
-      {session === undefined ? null : <WorktreeCommit wsId={wsId} sesId={session} />}
+      {session === undefined ? null : <WorktreeCommit wsId={wsId} session={session} />}
       {actions.panel}
       <ChangesList key={`${shown}\0${session ?? ''}\0${target.turn ?? ''}`} wsId={wsId} target={target} slotsFor={actions.slotsFor} comments={comments} />
     </div>
@@ -160,8 +154,8 @@ function useBusyAgent(wsId: string, session: string | undefined): string | undef
   const { sessions } = useSessions(wsId);
   const agents = useChatAgents(wsId);
   if (sessions === undefined) return undefined;
-  const folder = session === undefined ? null : (sessions.find((one) => one.id === session)?.worktreePath ?? null);
-  const busy = sessions.find((one) => one.kind !== 'build' && one.machineId === null && isBusy(one) && (one.worktreePath ?? null) === folder);
+  const folder = chatWorktree(sessions.find((one) => one.id === session));
+  const busy = sessions.find((one) => one.kind !== 'build' && one.machineId === null && isBusy(one) && chatWorktree(one) === folder);
   return busy === undefined ? undefined : agentNameOf(agents.data, busy.agentId ?? undefined);
 }
 
@@ -571,63 +565,4 @@ function ChangesList({
       </div>
     );
   }
-}
-
-/** Commit these changes, for a chat working in its own worktree: on its own branch, never pushed. */
-function WorktreeCommit({ wsId, sesId }: { wsId: string; sesId: string }) {
-  const session = useQuery({
-    queryKey: ['session', wsId, sesId],
-    queryFn: () => fetchSession(wsId, sesId),
-    retry: false,
-    // While its agent works, the state is read again so Commit comes back once it is done.
-    refetchInterval: (query) => (query.state.data?.session.state === 'working' || query.state.data?.session.state === 'waiting' ? 2000 : false),
-  });
-  const commit = useCommitWorktree(wsId, sesId);
-  const [message, setMessage] = useState('');
-  const found = session.data?.session;
-  if (found === undefined || found.worktreePath === null) return null;
-  const busy = found.state === 'working' || found.state === 'waiting';
-  const empty = message.trim() === '';
-  return (
-    <form
-      className="flex min-w-0 flex-col gap-2"
-      data-testid="worktree-commit"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (busy || empty || commit.isPending) return;
-        commit.mutate(message.trim(), { onSuccess: () => setMessage('') });
-      }}
-    >
-      <Field id="worktree-commit-message" label={COMMIT_MESSAGE_LABEL} description={WORKTREE_NEVER_PUSHED_TEXT}>
-        <Textarea
-          id="worktree-commit-message"
-          aria-describedby="worktree-commit-message-description"
-          value={message}
-          maxLength={MAX_COMMIT_MESSAGE_CHARS}
-          onChange={(event) => setMessage(event.target.value)}
-          data-testid="worktree-commit-message"
-        />
-      </Field>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" aria-disabled={busy || empty || commit.isPending || undefined} data-testid="worktree-commit-button">
-          {COMMIT_WORKTREE_LABEL}
-        </Button>
-        {busy ? (
-          <Text variant="caption" data-testid="worktree-commit-busy">
-            {agentMidTurnText('The agent')}
-          </Text>
-        ) : null}
-        {commit.isSuccess ? (
-          <Text variant="caption" role="status" data-testid="worktree-committed">
-            {committedText(commit.data.files)}
-          </Text>
-        ) : null}
-      </div>
-      {commit.isError ? (
-        <Notice variant="blocked" data-testid="worktree-commit-error">
-          {commit.error.message}
-        </Notice>
-      ) : null}
-    </form>
-  );
 }

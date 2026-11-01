@@ -19,6 +19,9 @@
 import { posix, win32 } from 'node:path';
 import { helperEnvironment } from './child-env.js';
 
+/** The OS a per-OS list of programs is keyed by (every other POSIX OS reads Linux's). */
+export const platformKey = (platform: NodeJS.Platform): 'darwin' | 'linux' | 'win32' => (platform === 'win32' ? 'win32' : platform === 'darwin' ? 'darwin' : 'linux');
+
 /** Whether `dir` is an absolute folder: POSIX `/…`; Windows a drive letter (`C:\…`). */
 export const isAbsoluteFolder = (dir: string, platform: NodeJS.Platform): boolean => (platform === 'win32' ? /^[A-Za-z]:[\\/]/.test(dir) : posix.isAbsolute(dir));
 

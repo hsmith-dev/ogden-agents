@@ -46,7 +46,7 @@ import type { BmadScriptTrust } from './bmad-script-trust.js';
 import type { Orm } from './db/database.js';
 import { workspaces } from './db/schema.js';
 import type { Entities } from './entities.js';
-import { CommandChangedError, InvalidOperationError, NotFoundError, ScriptsNotTrustedError, ValidationError } from './errors.js';
+import { CommandChangedError, InvalidOperationError, NotFoundError, ScriptsNotTrustedError, issuesOf, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import { newId } from './ids.js';
 import { parseProblems } from './project-command-parsers.js';
@@ -376,7 +376,7 @@ export function createProjectCommands({ orm, events, entities, trust, files, run
       const parsed = SetProjectCommandsRequest.safeParse(body);
       if (!parsed.success) {
         const message = parsed.error.issues[0]?.message ?? 'Those are not commands Ogden can save.';
-        throw new ValidationError(message, parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })));
+        throw new ValidationError(message, issuesOf(parsed.error));
       }
       const current = await view(id, root);
       const before = new Map(current.stored.map((command) => [command.id, command]));

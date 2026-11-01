@@ -22,7 +22,7 @@ import { posix, win32 } from 'node:path';
 import type { EditorLauncherPort } from '@ogden-agents/core';
 import type { EditorId, EditorInfo } from '@ogden-agents/shared';
 import { DESKTOP_SESSION } from '../child-env.js';
-import { launchEnvironment, safeWorkingFolder, windowsCmd } from '../program-launch.js';
+import { launchEnvironment, platformKey, safeWorkingFolder, windowsCmd } from '../program-launch.js';
 import { candidatesFor, nodeDetectSystem, type DetectSystem } from '../pane-launchers/detect.js';
 
 /** How an editor takes a line: `goto` = `-g path:l:c`, `colon` = `path:l:c`, `jetbrains` = `--line l --column c path`. */
@@ -113,8 +113,6 @@ const WINDOWS_STARTABLE = /\.(?:exe|com)$/i;
 const WINDOWS_SHIM = /\.(?:cmd|bat)$/i;
 /** A character cmd.exe reads as its own (or a control character): never passed through a shim. */
 const CMD_UNSAFE = /["%^!&|<>()\u0000-\u001f\u007f]/;
-
-const platformKey = (platform: NodeJS.Platform): 'darwin' | 'linux' | 'win32' => (platform === 'win32' ? 'win32' : platform === 'darwin' ? 'darwin' : 'linux');
 
 const positive = (value: number | undefined): value is number => value !== undefined && Number.isSafeInteger(value) && value >= 1;
 

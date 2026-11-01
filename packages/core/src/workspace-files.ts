@@ -33,9 +33,9 @@ import {
 } from '@ogden-agents/shared';
 import { CREDENTIAL_FOLDERS } from './build-names.js';
 import type { Entities } from './entities.js';
-import { NotFoundError, PathProtectedError, ValidationError } from './errors.js';
+import { NotFoundError, PathProtectedError, issuesOf, ValidationError } from './errors.js';
 import { isWorkspacePathRefusal, type WorkspaceFilesPort, type WorkspacePathRefusal, type WorkspaceRoot } from './workspace-files-port.js';
-import { resolveWorkspaceRoot } from './workspace-root.js';
+import { namedSession, resolveWorkspaceRoot } from './workspace-root.js';
 
 /** The project's agent folder stays readable (its instructions and skills): the one credential folder name not refused inside a project. */
 const READABLE_IN_PROJECT = '.claude';
@@ -185,10 +185,10 @@ export function createWorkspaceFiles({ entities, port }: WorkspaceFilesOptions):
     files.search = async (workspaceId, query, signal) => {
       const parsed = WorkspaceSearchQuery.safeParse(query);
       // The workspace and the chat are checked first: an unknown one is 404 whatever the query.
-      const root = rootOf(workspaceId, (query as { session?: unknown } | null | undefined)?.session);
+      const root = rootOf(workspaceId, namedSession(query));
       if (!parsed.success) {
         const message = 'That search is not one Ogden can run.';
-        throw new ValidationError(message, parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })));
+        throw new ValidationError(message, issuesOf(parsed.error));
       }
       const { q, mode, matchCase, regex } = parsed.data;
       if (regex && !compiles(q, matchCase)) throw new ValidationError(WORKSPACE_SEARCH_INVALID_REGEX_TEXT, [{ path: ['q'], message: WORKSPACE_SEARCH_INVALID_REGEX_TEXT }]);

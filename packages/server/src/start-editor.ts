@@ -8,15 +8,9 @@
 import { createEditorLauncherNode, nodeEditorSystem } from '@ogden-agents/adapters';
 import type { EditorLauncherPort } from '@ogden-agents/core';
 import { realpathSync } from 'node:fs';
-import { isAbsolute, relative } from 'node:path';
 import type { StartOptions } from './start-types.js';
+import { confinedEnvironment, inside } from './test-confined.js';
 import type { TestHooks } from './test-hooks.js';
-
-/** Whether `path` is inside `folder` (a folder of the same prefix is not). */
-const inside = (folder: string, path: string): boolean => {
-  const from = relative(folder, path);
-  return from !== '' && !from.startsWith('..') && !isAbsolute(from);
-};
 
 /** Whether `path`, by its real path (links followed), is inside `folder` (already a real path): a link out of the folder is not. */
 const reallyInside = (folder: string, path: string): boolean => {
@@ -37,11 +31,7 @@ export function createServerEditorLauncher(options: Pick<StartOptions, 'editorLa
       ...nodeEditorSystem,
       // Only a file inside the test's folder, by its real path, is ever looked at or started (`''`: nothing is).
       runnable: (path: string) => folder !== '' && reallyInside(folder, path) && nodeEditorSystem.runnable(path),
-      env: {
-        PATH: folder,
-        HOME: folder,
-        ...(process.platform === 'win32' ? { PATHEXT: '.EXE;.CMD', SystemRoot: nodeEditorSystem.env.SystemRoot ?? 'C:\\Windows', ComSpec: nodeEditorSystem.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe' } : {}),
-      },
+      env: confinedEnvironment(folder),
     },
   });
 }

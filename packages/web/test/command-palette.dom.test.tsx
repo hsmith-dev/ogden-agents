@@ -31,6 +31,8 @@ const state = vi.hoisted(() => ({
   boardOn: true,
   ticketReads: 0,
   ticketsFail: false,
+  /** The chat on screen's worktree (8.12), `null` for a chat in the project's folder. */
+  worktree: null as string | null,
 }));
 
 /** The file-name search's stand-in: each request's query and signal; `answer` (or held open while `hold`). */
@@ -92,6 +94,10 @@ vi.mock('../src/workspaces/workspace-settings-api', async (importOriginal) => ({
   fetchWorkspaceSettings: async () => ({ bmadPieces: state.boardOn ? ['board'] : [] }),
   fetchBmadPieces: async () => [{ piece: 'board', available: true }],
 }));
+vi.mock('../src/chat/chat-api', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  fetchSession: async () => ({ session: { worktreePath: state.worktree } }),
+}));
 vi.mock('../src/planning/planning-api', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   fetchTickets: async () => {
@@ -146,6 +152,7 @@ beforeEach(() => {
   state.params = {};
   state.navigations = [];
   state.needsYou = [];
+  state.worktree = null;
   state.boardOn = true;
   state.ticketReads = 0;
   state.ticketsFail = false;
@@ -497,6 +504,31 @@ describe('files (8.11)', () => {
     fireEvent.keyDown(field(), { key: 'Enter' });
     await waitFor(() => expect(palette()).toBeNull());
     expect(state.navigations).toEqual([{ to: '/w/$wsId/workbench', params: { wsId: 'ws_a' }, search: { path: 'src/ui/palette.ts' } }]);
+  });
+
+  it("on a chat with a worktree of its own, searches that worktree and opens the file in it; a chat in the project's folder searches the project (8.12)", async () => {
+    state.params = { wsId: 'ws_a', sesId: 'ses_1' };
+    state.pathname = '/w/ws_a/s/ses_1';
+    state.worktree = '/data/chat-worktrees/ses_1';
+    search.answer = () => files('src/a.ts');
+    mount();
+    act(() => openCommandPalette());
+    type('a.ts');
+    await screen.findByRole('group', { name: 'Files' });
+    expect(new URLSearchParams(search.calls.at(-1)!.url.split('?')[1]).get('session')).toBe('ses_1');
+    const file = options().find((option) => option.getAttribute('data-id') === 'file:src/a.ts')!;
+    fireEvent.click(file);
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(state.navigations).toEqual([{ to: '/w/$wsId/workbench', params: { wsId: 'ws_a' }, search: { path: 'src/a.ts', session: 'ses_1' } }]);
+    cleanup();
+    search.calls = [];
+    state.navigations = [];
+    state.worktree = null;
+    mount();
+    act(() => openCommandPalette());
+    type('a.ts');
+    await screen.findByRole('group', { name: 'Files' });
+    expect(search.calls.at(-1)!.url).not.toMatch(/session/);
   });
 
   it('files arriving after a row is highlighted leave it highlighted: Enter still runs it', async () => {

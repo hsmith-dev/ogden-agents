@@ -102,16 +102,17 @@ export function useWorkspaceSearch(wsId: string, params: WorkspaceSearchParams) 
 
 /**
  * The command palette's file-name search (8.11): the project root's names
- * matching `q`, only while `enabled` and `q` is not empty. A new `q` (or
+ * (a worktree chat's, for `session`, 8.12) matching `q`, only while
+ * `enabled` and `q` is not empty. A new `q` (or
  * `enabled` going false) cancels the request in flight, since the query left
  * behind is removed at once (`gcTime: 0`) and its signal was handed to
  * fetch. Never retried, and never kept: while the next answer loads there
  * are no files.
  */
-export function usePaletteFileSearch(wsId: string | undefined, q: string, enabled: boolean) {
+export function usePaletteFileSearch(wsId: string | undefined, q: string, enabled: boolean, session?: string) {
   return useQuery({
-    queryKey: ['palette-files', wsId ?? '', q],
-    queryFn: ({ signal }) => fetchWorkspaceSearch(wsId!, { q, mode: 'names', matchCase: false, regex: false }, signal),
+    queryKey: ['palette-files', wsId ?? '', session ?? '', q],
+    queryFn: ({ signal }) => fetchWorkspaceSearch(wsId!, { q, mode: 'names', matchCase: false, regex: false, ...(session === undefined ? {} : { session }) }, signal),
     enabled: enabled && wsId !== undefined && q !== '',
     retry: false,
     staleTime: 0,

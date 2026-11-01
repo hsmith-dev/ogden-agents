@@ -19,7 +19,7 @@ import { posix, win32 } from 'node:path';
 import type { LauncherRefusal, PaneLaunchers } from '@ogden-agents/core';
 import type { PaneDetection, PaneLauncher, PaneLauncherStatus } from '@ogden-agents/shared';
 import { WINDOWS_FOLDERS } from '../child-env.js';
-import { absolutePathFolders, envValue, launchEnvironment, safeWorkingFolder, windowsCmd } from '../program-launch.js';
+import { absolutePathFolders, envValue, launchEnvironment, platformKey, safeWorkingFolder, windowsCmd } from '../program-launch.js';
 
 /** What detection needs of the computer; replaced in tests. */
 export interface DetectSystem {
@@ -87,8 +87,6 @@ export const nodeDetectSystem: DetectSystem = {
 function probeEnvironment(system: DetectSystem): Record<string, string> {
   return launchEnvironment(system.platform === 'win32' ? WINDOWS_FOLDERS : [], system.env, system.platform);
 }
-
-const platformKey = (platform: NodeJS.Platform): 'darwin' | 'linux' | 'win32' => (platform === 'win32' ? 'win32' : platform === 'darwin' ? 'darwin' : 'linux');
 
 /**
  * An executable entry as the places to try: a bare name on each PATH folder

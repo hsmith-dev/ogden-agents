@@ -7,6 +7,7 @@ import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { cn } from '@/ui/utils';
+import { sessionKey } from '@/workbench/chat-folder';
 
 /**
  * Chat names (backlog story 12): every chat shows its name (the user's, else
@@ -118,7 +119,7 @@ export function useChatRename({ wsId, sesId, name, title, className }: { wsId: s
         (session) => {
           setMessage(renamedAnnouncement(session.title, chatName(session)));
           void queryClient.invalidateQueries({
-            queryKey: ['session', wsId, sesId],
+            queryKey: sessionKey(wsId, sesId),
           });
           void queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
         },

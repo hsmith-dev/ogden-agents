@@ -11,9 +11,9 @@
 import { EDITOR_NONE_FOUND_TEXT, EDITOR_UNAVAILABLE_MESSAGE, OpenInEditorRequest, SessionId, SetEditorRequest, type EditorId, type EditorInfo, type EditorsResponse, type OpenInEditorResponse } from '@ogden-agents/shared';
 import type { EditorLauncherPort } from './editor-launcher-port.js';
 import type { Entities } from './entities.js';
-import { EditorUnavailableError, ValidationError } from './errors.js';
+import { EditorUnavailableError, issuesOf, ValidationError } from './errors.js';
 import { checkedWorkspacePath, type WorkspaceFiles } from './workspace-files.js';
-import { resolveWorkspaceRoot } from './workspace-root.js';
+import { namedSession, resolveWorkspaceRoot } from './workspace-root.js';
 
 export interface EditorLaunch {
   /** The editors found, the default and the kept choice. */
@@ -44,7 +44,7 @@ export function createEditorLaunch({ entities, files, launcher, choice }: Editor
     },
     async setChoice(body) {
       const parsed = SetEditorRequest.safeParse(body);
-      if (!parsed.success) throw new ValidationError('That is not an editor Ogden can open files in.', parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })));
+      if (!parsed.success) throw new ValidationError('That is not an editor Ogden can open files in.', issuesOf(parsed.error));
       const editors = await launcher.list();
       const { editorId } = parsed.data;
       if (editorId !== null && !editors.some((editor) => editor.id === editorId)) throw new EditorUnavailableError(editors.length === 0 ? EDITOR_NONE_FOUND_TEXT : EDITOR_UNAVAILABLE_MESSAGE);
@@ -55,7 +55,7 @@ export function createEditorLaunch({ entities, files, launcher, choice }: Editor
     async open(workspaceId, body) {
       // As the Files use-case: the project and the chat first (404), then the path (400 malformed, 403 a refused name), then the rest of the body.
       // The project first (404), then a malformed chat id is 400 as the files routes answer it, then an unknown or foreign chat 404.
-      const named = (body as { session?: unknown } | null | undefined)?.session;
+      const named = namedSession(body);
       resolveWorkspaceRoot(entities, workspaceId);
       if (named !== undefined && !SessionId.safeParse(named).success) throw new ValidationError('That is not a chat of this project.', [{ path: ['session'], message: 'A chat id.' }]);
       resolveWorkspaceRoot(entities, workspaceId, named);
@@ -63,7 +63,7 @@ export function createEditorLaunch({ entities, files, launcher, choice }: Editor
       const parsed = OpenInEditorRequest.safeParse(body);
       if (!parsed.success) {
         const message = 'That is not a file Ogden can open in an editor.';
-        throw new ValidationError(message, parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })));
+        throw new ValidationError(message, issuesOf(parsed.error));
       }
       const { path, line, column, editorId, session } = parsed.data;
       const absolutePath = await files.locate(workspaceId, path, session);

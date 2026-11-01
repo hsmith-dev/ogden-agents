@@ -403,19 +403,21 @@ export function AlwaysAllowRulesSection({ wsId, name, title, explained }: { wsId
   const rules = usePermissionRules(wsId);
   const queryClient = useQueryClient();
   const [removing, setRemoving] = useState<string | undefined>(undefined);
-  // The rules' load the "Removed" status belongs to: it goes once the list changes again.
-  const [removedAt, setRemovedAt] = useState<number | undefined>(undefined);
+  // The removed rule and the rules left just after: the "Removed" status stays while that rule is gone and no new rule has
+  // appeared, so a refetch with the same rules (the removal's own event) never hides it; it goes once the list changes again.
+  const [removed, setRemoved] = useState<{ id: string; left: ReadonlySet<string> } | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
 
   const onRemove = (rule: PermissionRule) => {
     setRemoving(rule.id);
-    setRemovedAt(undefined);
+    setRemoved(undefined);
     setError(undefined);
     removePermissionRule(wsId, rule.id).then(
       () => {
         setRemoving(undefined);
         void queryClient.invalidateQueries({ queryKey: ['permission-rules', wsId] }).then(() => {
-          setRemovedAt(queryClient.getQueryState(['permission-rules', wsId])?.dataUpdatedAt);
+          const left = queryClient.getQueryData<PermissionRule[]>(['permission-rules', wsId]) ?? [];
+          setRemoved({ id: rule.id, left: new Set(left.map((each) => each.id)) });
         });
       },
       (failure: unknown) => {
@@ -428,7 +430,7 @@ export function AlwaysAllowRulesSection({ wsId, name, title, explained }: { wsId
   };
 
   const loadError = rules.error instanceof Error ? rules.error.message : undefined;
-  return <AlwaysAllowRulesView rules={rules.data} name={name} onRemove={onRemove} removing={removing} removed={removedAt !== undefined && removedAt === rules.dataUpdatedAt} error={error ?? loadError} title={title} explained={explained} />;
+  return <AlwaysAllowRulesView rules={rules.data} name={name} onRemove={onRemove} removing={removing} removed={removed !== undefined && rules.data !== undefined && rules.data.every((each) => each.id !== removed.id && removed.left.has(each.id))} error={error ?? loadError} title={title} explained={explained} />;
 }
 
 /**

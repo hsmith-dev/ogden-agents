@@ -7,7 +7,7 @@ import { useAppearance } from '@/appearance/appearance-provider';
 import { AgentPicker } from '@/chat/agent-picker';
 import { agentNameOf, ChatApiError, createChatSession, sendMessage, setPermissionMode } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
-import { newChatDraftKey } from '@/chat/drafts';
+import { clearDraftIfUnchanged, newChatDraftKey, readDraft } from '@/chat/drafts';
 import { agentDefaultLabel, ModelMenu, modelLabel } from '@/chat/model-picker';
 import type { NewChatSearch } from '@/chat/new-chat';
 import { AGENT_UNAVAILABLE_ID, NewChatAgentStatus, useNewChatAgent } from '@/chat/new-chat-agent';
@@ -18,6 +18,7 @@ import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { EmptyState, PageBody, PageFooter } from '@/ui/page';
 import { Text } from '@/ui/typography';
+import { TryDialog } from '@/trials/try-dialog';
 import { fetchWorkspace } from '@/workspaces/workspace-api';
 
 /**
@@ -69,6 +70,8 @@ function NewChatDraft({ wsId, search }: { wsId: string; search: NewChatSearch })
   const [picks, setPicks] = useState<{ agentId: string | undefined; model?: string | null; mode?: { mode: PermissionMode; confirmed: boolean } }>({ agentId });
   const ownPicks = picks.agentId === agentId ? picks : { agentId };
   const [location, setLocation] = useState<ChatLocation>('this_folder');
+  // Try with several agents (27.8): the dialog takes the draft's text as it is when it opens.
+  const [trying, setTrying] = useState<{ text: string } | undefined>(undefined);
   // One place (27.5): This folder, Worktree or a machine, never Worktree and a machine together.
   // A machine it opened with that isn't a confirmed one (a stale link) is This folder, once the machines are read.
   const machines = useRemoteMachines();
@@ -150,7 +153,13 @@ function NewChatDraft({ wsId, search }: { wsId: string; search: NewChatSearch })
           footer={
             chatAgents.data === undefined || agentId === undefined ? undefined : (
               <>
-                <AgentPicker agents={chatAgents.data.agents} value={agentId} onChange={setPickedAgent} className={SETUP_CHIP_CLASS} />
+                <AgentPicker
+                  agents={chatAgents.data.agents}
+                  value={agentId}
+                  onChange={setPickedAgent}
+                  onTrySeveral={() => setTrying({ text: readDraft(newChatDraftKey(wsId)) })}
+                  className={SETUP_CHIP_CLASS}
+                />
                 <ModelMenu
                   testId="model-picker"
                   title="Model for the new chat"
@@ -191,6 +200,24 @@ function NewChatDraft({ wsId, search }: { wsId: string; search: NewChatSearch })
           onSend={onSend}
         />
       </PageFooter>
+      {chatAgents.data === undefined ? null : (
+        <TryDialog
+          open={trying !== undefined}
+          onOpenChange={(open) => {
+            if (!open) setTrying(undefined);
+          }}
+          wsId={wsId}
+          agents={chatAgents.data.agents}
+          initialText={trying?.text ?? ''}
+          initialAgentId={agentId}
+          onStarted={(trial) => {
+            // Sent to every agent: the draft goes, unless it changed meanwhile.
+            if (trying !== undefined) clearDraftIfUnchanged(newChatDraftKey(wsId), trying.text);
+            setTrying(undefined);
+            if (mounted.current) void navigate({ to: '/w/$wsId/try/$tryId', params: { wsId, tryId: trial.id } });
+          }}
+        />
+      )}
     </>
   );
 }

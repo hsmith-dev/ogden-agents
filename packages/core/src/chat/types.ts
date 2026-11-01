@@ -274,6 +274,14 @@ export interface Chat {
    * never touched, and a removal that fails after is logged, never thrown.
    */
   deleteChat(workspaceId: WorkspaceId, sessionId: SessionId, options?: { discardUncommitted?: boolean | undefined }): Promise<ChatDeletedResponse>;
+  /**
+   * Whether Delete chat would refuse this chat's copy without
+   * `discardUncommitted` (27.8, a trial's Keep with Delete): a local worktree
+   * chat whose copy has uncommitted changes, or saved ones while put away, or
+   * whose state can't be read. `false` for any other chat.
+   * `NotFoundError` for a chat of another project.
+   */
+  copyHasUncommitted(workspaceId: WorkspaceId, sessionId: SessionId): Promise<boolean>;
   /** Where the chat works (27.4): this folder, its own worktree (branch) or its remote machine. `NotFoundError` for a chat of another project. */
   chatLocation(workspaceId: WorkspaceId, sessionId: SessionId): SessionLocation;
   /**

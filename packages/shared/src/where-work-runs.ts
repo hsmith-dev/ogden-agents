@@ -161,12 +161,29 @@ export const CreateTrialRequest = z
   .strict();
 export type CreateTrialRequest = z.infer<typeof CreateTrialRequest>;
 
-/** One trial: its chats, one per agent, and the one kept (`null` until Keep this one). */
+/**
+ * What became of one trial chat: `open` until Keep this one; then `kept`,
+ * or for each other one `put_away` (its copy put away, `not_kept`,
+ * restorable), `removed` (deleted with Delete chat) or `left` (it couldn't
+ * go safely, so it stays as it was).
+ */
+export const TRIAL_CHAT_RESULTS = ['open', 'kept', 'put_away', 'removed', 'left'] as const;
+export const TrialChatResult = z.enum(TRIAL_CHAT_RESULTS);
+export type TrialChatResult = z.infer<typeof TrialChatResult>;
+
+/** One of a trial's chats: its agent and what became of it. */
+export const TrialChat = z.object({ sessionId: SessionId, agentId: AgentId, result: TrialChatResult }).strict();
+export type TrialChat = z.infer<typeof TrialChat>;
+
+/** One trial: the task, its chats in the order the agents were picked, one per agent, and the one kept (`null` until Keep this one). */
 export const Trial = z
   .object({
     id: TrialId,
     workspaceId: WorkspaceId,
+    /** The task each chat was sent (the user's own text: never in an event). */
+    text: z.string().min(1).max(TRIAL_TEXT_MAX),
     sessionIds: TrialSessionIds,
+    chats: z.array(TrialChat).min(TRIAL_AGENTS_MIN).max(TRIAL_AGENTS_MAX),
     keptSessionId: SessionId.nullable(),
     createdAt: IsoUtcTimestamp,
   })
@@ -176,8 +193,33 @@ export type Trial = z.infer<typeof Trial>;
 export const TrialResponse = z.object({ trial: Trial });
 export type TrialResponse = z.infer<typeof TrialResponse>;
 
-/** `POST …/trials/:tryId/keep`: keeps one of the trial's chats; the others' copies are put away (`not_kept`). */
-export const KeepTrialRequest = z.object({ sessionId: SessionId }).strict();
+/** `GET …/trials`: the project's trials, newest first. */
+export const TrialsResponse = z.object({ trials: z.array(Trial) });
+export type TrialsResponse = z.infer<typeof TrialsResponse>;
+
+/** What Keep this one does with the other chats: put their copies away (restorable, the default) or delete them (27.3's Delete chat). */
+export const TRIAL_OTHERS = ['put_away', 'delete'] as const;
+export const TrialOthers = z.enum(TRIAL_OTHERS);
+export type TrialOthers = z.infer<typeof TrialOthers>;
+
+/**
+ * `POST …/trials/:tryId/keep`: keeps one of the trial's chats; the others'
+ * copies are put away (`not_kept`) or, with `others: 'delete'`, deleted.
+ * A delete removes another chat's uncommitted changes only for the chats in
+ * `discard`: the ones the confirmation named. Any other changed copy is
+ * refused (409 `uncommitted_changes`) before anything is removed.
+ */
+export const KeepTrialRequest = z
+  .object({
+    sessionId: SessionId,
+    others: TrialOthers.default('put_away'),
+    discard: z
+      .array(SessionId)
+      .max(TRIAL_AGENTS_MAX - 1)
+      .refine((ids) => new Set(ids).size === ids.length, 'Name each chat once.')
+      .default([]),
+  })
+  .strict();
 export type KeepTrialRequest = z.infer<typeof KeepTrialRequest>;
 
 // The words (EXPERIENCE.md, CAP-35). No em or en dashes.
@@ -384,3 +426,61 @@ export const TRIAL_NOT_KEPT_TEXT = 'Not kept';
 export const TRIAL_WAITING_TEXT = 'Waits for a free slot';
 /** A trial chat's tooltip line in the sidebar. */
 export const trialTooltipText = (task: string, index: number, count: number): string => `Try: ${task}, ${index} of ${count}`;
+/** The Try dialog's title, its agents' label and its count line. */
+export const TRIAL_DIALOG_TITLE = 'Try with several agents';
+export const TRIAL_TASK_LABEL = 'Task';
+export const TRIAL_AGENTS_LABEL = 'Agents';
+export const TRIAL_PICK_TEXT = 'Pick 2 to 4 agents.';
+/** Where the dialog's task comes from when the draft is empty. */
+export const TRIAL_TASK_EMPTY_TEXT = 'Write the task each agent is sent.';
+/**
+ * The dialog's retention line (decision 2026-11-01): each copy counts toward
+ * the install's cap, and none of a trial's copies is put away to save space
+ * until one is kept, so the project may sit above the cap until then.
+ */
+export const trialRetentionText = (keep: number, count: number): string =>
+  `These ${count} copies count toward your limit of ${keep} ${keep === 1 ? 'worktree' : 'worktrees'}. None of them is put away to save space until you keep one, so you may have more than ${keep} for a while.`;
+/** The 409 `invalid_operation` message for an agent that can't start a chat now: nothing was made. */
+export const trialUnreadyText = (agentName: string, reason: string): string => `${agentName} can't start a chat now, so nothing was started. ${reason}`;
+/** The 409 `invalid_operation` message for an agent that isn't on this install. */
+export const trialUnknownAgentText = (agentId: string): string => `There is no agent ${agentId} on this install, so nothing was started.`;
+/** The Try page's title. */
+export const TRIAL_PAGE_TITLE = 'Try';
+/** A trial that isn't there (another project's, or deleted with the history). */
+export const TRIAL_NOT_FOUND_TEXT = 'There is no such try in this project.';
+/** A column's actions. */
+export const TRIAL_OPEN_CHAT_LABEL = 'Open chat';
+export const TRIAL_REVIEW_CHANGES_LABEL = 'Review changes';
+/** A kept column's word. */
+export const TRIAL_KEPT_TEXT = 'Kept';
+/** A not-kept column deleted with Delete chat. */
+export const TRIAL_REMOVED_TEXT = 'Not kept. Deleted.';
+/** A not-kept copy that couldn't go safely: it stays as it was. */
+export const TRIAL_LEFT_TEXT = "Not kept. This copy couldn't go safely, so it was left as it is.";
+/** A column's "+N -M" (8.4's Changes, the branch view). */
+export const trialChangesText = (additions: number, deletions: number): string => `+${additions} -${deletions}`;
+/** The keep dialog's title. */
+export const trialKeepTitle = (agentName: string): string => `Keep ${agentName}'s result?`;
+/** The keep dialog's choice for the other chats, and each choice's line. */
+export const TRIAL_OTHERS_LABEL = 'The other chats';
+export const TRIAL_PUT_AWAY_LABEL = 'Put away';
+export const TRIAL_PUT_AWAY_DESCRIPTION = 'The other copies are put away; you can restore them.';
+export const TRIAL_DELETE_LABEL = 'Delete';
+export const TRIAL_DELETE_DESCRIPTION = 'The other chats and their copies are deleted, keeping branches that have commits.';
+/** The keep dialog's confirmation when copies to delete have uncommitted changes (sends their ids as `discard`). */
+export const trialDeleteUncommittedText = (agentNames: readonly string[]): string =>
+  `${agentNames.join(', ')} ${agentNames.length === 1 ? 'has' : 'have'} changes that aren't committed. Deleting discards them.`;
+/** The keep dialog's line above one copy's ignored files. */
+export const trialIgnoredFilesTitle = (agentName: string): string => `${agentName}'s copy`;
+/** The keep dialog's confirm button. */
+export const TRIAL_KEEP_CONFIRM_LABEL = 'Keep';
+/** The 409 `uncommitted_changes` message for Keep this one with Delete: nothing was removed. */
+export const TRIAL_UNCOMMITTED_MESSAGE = "Another chat's copy has changes that aren't committed, so nothing was deleted.";
+/** The 409 `agent_mid_turn` message for Keep this one: nothing changed. */
+export const TRIAL_MID_TURN_MESSAGE = 'Keep one once the other agents have finished.';
+/** The 409 `invalid_operation` message for a trial already kept. */
+export const TRIAL_ALREADY_KEPT_TEXT = 'This try already has a kept chat.';
+/** The 409 `invalid_operation` message for a chat that isn't one of the trial's. */
+export const TRIAL_NOT_ITS_CHAT_TEXT = "That chat isn't part of this try.";
+/** The session page's link to its try. */
+export const TRIAL_PART_OF_LABEL = 'Part of a try';

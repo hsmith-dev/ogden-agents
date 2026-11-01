@@ -613,16 +613,23 @@ export const API_ROUTES = {
   worktreeRetention: `${API_BASE}/settings/worktree-retention`,
   /**
    * `POST CreateTrialRequest` → 201 `TrialResponse` (27.8): one worktree
-   * chat per agent, appending `workspace.trial_started`. 400 for fewer than
-   * 2, more than 4 or a repeated agent.
+   * chat per agent, each sent the task, appending `workspace.trial_started`.
+   * 400 for fewer than 2, more than 4 or a repeated agent, or a `machineId`
+   * (a trial is local only); 409 `invalid_operation` naming an agent that
+   * can't start a chat now or isn't on this install (nothing made).
+   * `GET` → `TrialsResponse`: the project's trials, newest first (`no-store`).
    */
   workspaceTrials: `${API_BASE}/workspaces/:wsId/trials`,
   /** `GET` → `TrialResponse` (27.8). 404 for an unknown trial. */
   workspaceTrial: `${API_BASE}/workspaces/:wsId/trials/:tryId`,
   /**
    * `POST KeepTrialRequest` → `TrialResponse` (27.8): keeps one chat and
-   * puts the others' copies away (`not_kept`, restorable), appending
-   * `workspace.trial_kept`. 409 `agent_mid_turn` while one of them works.
+   * puts the others' copies away (`not_kept`, restorable) or, with
+   * `others: 'delete'`, deletes them (27.3), appending `workspace.trial_kept`;
+   * one that can't go safely stays (`left`). Nothing is merged. 409
+   * `agent_mid_turn` while another works, waits or is terminal-driven;
+   * `uncommitted_changes` deleting a changed copy not named in `discard`;
+   * `invalid_operation` once kept (nothing changed).
    */
   workspaceTrialKeep: `${API_BASE}/workspaces/:wsId/trials/:tryId/keep`,
   /**

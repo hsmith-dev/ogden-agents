@@ -29,7 +29,7 @@ import {
 } from '@ogden-agents/shared';
 import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, max, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Database } from './db/database.js';
-import { events, orchestrationRuns, orchestrationSteps, runs, sessions, workspaces } from './db/schema.js';
+import { events, orchestrationRuns, orchestrationSteps, runs, sessions, trialChats, trials, workspaces } from './db/schema.js';
 import { EventValidationError, NotFoundError, SessionEventScopeError } from './errors.js';
 import { newId } from './ids.js';
 
@@ -482,6 +482,9 @@ export function createEventLog(db: Database, options: EventLogOptions = {}): Eve
         // Orchestration runs (epic 15) go with the history they point into: their chats and events are gone.
         orm.delete(orchestrationSteps).where(inArray(orchestrationSteps.runId, orm.select({ id: orchestrationRuns.id }).from(orchestrationRuns).where(eq(orchestrationRuns.workspaceId, workspaceId)))).run();
         orm.delete(orchestrationRuns).where(eq(orchestrationRuns.workspaceId, workspaceId)).run();
+        // Trials (27.8) go with the chats they name.
+        orm.delete(trialChats).where(inArray(trialChats.trialId, orm.select({ id: trials.id }).from(trials).where(eq(trials.workspaceId, workspaceId)))).run();
+        orm.delete(trials).where(eq(trials.workspaceId, workspaceId)).run();
         const deletedSessions = orm.delete(sessions).where(eq(sessions.workspaceId, workspaceId)).run().changes;
         const event = append({
           type: 'workspace.history_deleted',

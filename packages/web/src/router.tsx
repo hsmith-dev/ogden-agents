@@ -257,6 +257,13 @@ const workspaceReviewRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-review-page'), 'WorkspaceReviewPage'),
 });
 
+/** One task tried by several agents (27.8), `/w/:wsId/try/:tryId`: a column per agent, keep one. */
+const workspaceTryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/try/$tryId',
+  component: lazyRouteComponent(() => import('./routes/try-page'), 'TryPage'),
+});
+
 /** The session view's search: `?driver=terminal` mirrors who drives the chat (story 3.6); it never switches by itself. */
 export interface SessionSearch {
   driver?: 'terminal';
@@ -284,6 +291,7 @@ const routeTree = rootRoute.addChildren([
   workspaceOrchestrateRoute,
   workspaceTerminalsRoute,
   workspaceWorkbenchRoute,
+  workspaceTryRoute,
   sessionRoute,
   settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, alwaysAllowSettingsRoute, buildsSettingsRoute, worktreesSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);

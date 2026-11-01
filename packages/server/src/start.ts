@@ -480,6 +480,13 @@ async function listenAndAnnounce({
       (error: unknown) => log.warn('the worktree retention sweep failed', { code: error instanceof CoreError ? error.code : 'unexpected' }),
     );
   sweepRef.current = (sessionId) => sweep(sessionId);
+  // Trials (27.8): one task, several agents, each in its own worktree chat; ids and codes only in the log.
+  const trials = core.createTrials({
+    chat,
+    onChatError: (sessionId, step, error) => log.warn('a trial chat step did not finish', { sessionId, step, code: error instanceof CoreError ? error.code : 'unexpected' }),
+    // Kept: its copies count as any other's again, so the cap applies, sparing the chat just kept.
+    onKept: (sessionId) => sweep(sessionId),
+  });
   const snapshotCleanup = core.createSnapshotCleanup(chatWorktree);
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
   const { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
@@ -630,6 +637,7 @@ async function listenAndAnnounce({
     tabs,
     // Retention and Restore (27.6).
     worktreeRetention,
+    trials,
   });
 
   // Saved API keys and, for an agent with one, its subscription state, before the first chat (story 9.2).

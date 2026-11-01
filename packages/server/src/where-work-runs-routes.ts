@@ -4,12 +4,24 @@
  * them, the install's worktree retention setting, and trials. Behind the
  * gate (AD-15) like every `/api/v1/*` route, on no paired-device allowlist
  * (AD-34), and not a BMad piece. Each answers 501 `not_implemented` until
- * its lane wires its use-case (27.4, 27.6, 27.8). A worktree's port has no
+ * its lane wires its use-case (27.4, 27.6, 27.8; all wired since 27.8). A worktree's port has no
  * route: `SessionLocation.port` carries it. `GET`s answer with
  * `Cache-Control: no-store`; nothing here logs a path. No git and no child
  * process here: every git operation is `VcsChatWorktreePort`'s.
  */
-import { HandOffConflictError, NotFoundError, RestoreFailedError, WorktreePutAwayError, type ChatLocations, type Trials, type WorktreeRetention } from '@ogden-agents/core';
+import {
+  AgentMidTurnError,
+  AgentNotReadyError,
+  HandOffConflictError,
+  NotFoundError,
+  RestoreFailedError,
+  UncommittedChangesError,
+  UnknownAgentError,
+  WorktreePutAwayError,
+  type ChatLocations,
+  type Trials,
+  type WorktreeRetention,
+} from '@ogden-agents/core';
 import {
   API_ROUTES,
   chatOfWorktreeBranch,
@@ -24,6 +36,7 @@ import {
   SessionLocationResponse,
   CopyIgnoredFilesResponse,
   TrialResponse,
+  TrialsResponse,
   WorktreeRetentionSetting,
 } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
@@ -59,6 +72,13 @@ export function registerWhereWorkRunsRoutes(app: Hono, { chatLocations, worktree
     if (error instanceof RestoreFailedError) return apiError(c, 409, 'restore_failed', restoreFailedText(error), { reason: error.reason });
     if (error instanceof WorktreePutAwayError) return apiError(c, 409, 'worktree_put_away', error.message);
     return workbench(c, error);
+  };
+  // A trial's own refusals (27.8): core's fixed sentences, which name an agent at most, never a path or the task.
+  const trialRefusal = (c: Context, error: unknown): Response => {
+    if (error instanceof AgentMidTurnError) return apiError(c, 409, 'agent_mid_turn', error.message);
+    if (error instanceof UncommittedChangesError) return apiError(c, 409, 'uncommitted_changes', error.message);
+    if (error instanceof AgentNotReadyError || error instanceof UnknownAgentError) return apiError(c, 409, 'invalid_operation', error.message);
+    return refusal(c, error);
   };
   const limit = bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
   const readJson = async (c: Context): Promise<{ body: unknown } | { response: Response }> => {
@@ -144,6 +164,7 @@ export function registerWhereWorkRunsRoutes(app: Hono, { chatLocations, worktree
   // Trials (27.8).
   if (trials === undefined) {
     app.post(API_ROUTES.workspaceTrials, notImplemented);
+    app.get(API_ROUTES.workspaceTrials, notImplemented);
     app.get(API_ROUTES.workspaceTrial, notImplemented);
     app.post(API_ROUTES.workspaceTrialKeep, notImplemented);
   } else {
@@ -153,14 +174,21 @@ export function registerWhereWorkRunsRoutes(app: Hono, { chatLocations, worktree
       try {
         return c.json(TrialResponse.parse(await trials.start(c.req.param('wsId'), read.body)), 201, NO_STORE);
       } catch (error) {
-        return refusal(c, error);
+        return trialRefusal(c, error);
+      }
+    });
+    app.get(API_ROUTES.workspaceTrials, async (c) => {
+      try {
+        return c.json(TrialsResponse.parse(await trials.list(c.req.param('wsId'))), 200, NO_STORE);
+      } catch (error) {
+        return trialRefusal(c, error);
       }
     });
     app.get(API_ROUTES.workspaceTrial, async (c) => {
       try {
         return c.json(TrialResponse.parse(await trials.get(c.req.param('wsId'), c.req.param('tryId'))), 200, NO_STORE);
       } catch (error) {
-        return refusal(c, error);
+        return trialRefusal(c, error);
       }
     });
     app.post(API_ROUTES.workspaceTrialKeep, limit, async (c) => {
@@ -169,7 +197,7 @@ export function registerWhereWorkRunsRoutes(app: Hono, { chatLocations, worktree
       try {
         return c.json(TrialResponse.parse(await trials.keep(c.req.param('wsId'), c.req.param('tryId'), read.body)), 200, NO_STORE);
       } catch (error) {
-        return refusal(c, error);
+        return trialRefusal(c, error);
       }
     });
   }

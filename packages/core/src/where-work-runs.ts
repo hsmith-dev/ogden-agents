@@ -30,6 +30,7 @@ import type {
   RestoreWorktreeResponse,
   SessionLocationResponse,
   TrialResponse,
+  TrialsResponse,
   WorktreeRetentionSetting,
 } from '@ogden-agents/shared';
 import type { VcsChatWorktreePort } from './vcs-port.js';
@@ -102,12 +103,27 @@ export interface PortProbePort {
   isFree(port: number): Promise<boolean>;
 }
 
-/** One task tried by several agents (27.8), each in its own worktree chat. */
+/** One task tried by several agents (27.8), each in its own local worktree chat (`trials.ts`). */
 export interface Trials {
-  /** Parses `CreateTrialRequest`; one worktree chat per agent, appending `workspace.trial_started`. */
+  /**
+   * Parses `CreateTrialRequest` (strict: no machine); every agent must be
+   * able to start a local chat now (`InvalidOperationError` naming it,
+   * nothing made); one worktree chat per agent (a failure removes the ones
+   * made, no trial written), then `workspace.trial_started`, then each chat
+   * is sent the task.
+   */
   start(workspaceId: unknown, body: unknown): Promise<TrialResponse>;
+  /** The project's trials, newest first. */
+  list(workspaceId: unknown): Promise<TrialsResponse>;
   get(workspaceId: unknown, trialId: unknown): Promise<TrialResponse>;
-  /** Keeps one chat (`KeepTrialRequest`); the others' copies are put away (`not_kept`), appending `workspace.trial_kept`. Refused mid-turn. */
+  /**
+   * Keeps one chat (`KeepTrialRequest`); the others' copies are put away
+   * (`not_kept`) or deleted (27.3), one that can't go staying (`left`),
+   * appending `workspace.trial_kept`. Refused, changing nothing:
+   * `AgentMidTurnError` while another works or waits; `UncommittedChangesError`
+   * deleting a changed copy not named in `discard`;
+   * `InvalidOperationError` once kept. Nothing is merged.
+   */
   keep(workspaceId: unknown, trialId: unknown, body: unknown): Promise<TrialResponse>;
 }
 

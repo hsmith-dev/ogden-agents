@@ -84,10 +84,25 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   // The Workbench's Files (AD-36): not a BMad piece, read-only, behind the gate only.
   `GET ${API_ROUTES.workspaceFiles}`,
   `GET ${API_ROUTES.workspaceFileContent}`,
+  // The Workbench's other lanes (epic 8 entry 2): not a BMad piece, behind the gate only.
+  `GET ${API_ROUTES.workspaceFileSearch}`,
+  `POST ${API_ROUTES.workspaceFileOpenInEditor}`,
+  `GET ${API_ROUTES.workspaceChanges}`,
+  `GET ${API_ROUTES.workspaceChangesFile}`,
+  `POST ${API_ROUTES.workspaceChangesHunks}`,
+  `GET ${API_ROUTES.sessionTurns}`,
+  `POST ${API_ROUTES.sessionWorktreeCommit}`,
+  `GET ${API_ROUTES.workspaceProjectCommands}`,
+  `PUT ${API_ROUTES.workspaceProjectCommands}`,
+  `POST ${API_ROUTES.workspaceProjectCommandRuns}`,
+  `GET ${API_ROUTES.workspaceProjectCommandRun}`,
+  `POST ${API_ROUTES.workspaceProjectCommandRunStop}`,
 ];
 
 /** The BMad-named routes that serve projects with BMad off (story 10.2) or the whole install (story 4.14): never guarded, by design. */
 const UNGUARDED_BY_DESIGN: readonly string[] = [
+  // A project command's runs (epic 8 entry 2, AD-38): a `runs` segment, but no BMad piece (8.9 checks the project trust).
+  `POST ${API_ROUTES.workspaceProjectCommandRuns}`,
   `GET ${API_ROUTES.bmadPieces}`,
   // The pinned upstream BMad Method's status and download (story 4.14): one for the install, never a workspace's piece.
   `GET ${API_ROUTES.bmadSource}`,

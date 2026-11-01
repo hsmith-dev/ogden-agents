@@ -23,6 +23,10 @@ export const ID_PREFIXES = {
   orchestrationRun: 'orc',
   /** A remote machine added over SSH (CAP-24, epic 19 story 19.1; architecture's id-prefix note). */
   remoteMachine: 'mach',
+  /** One agent turn whose start and end Ogden snapshotted, for the This turn view (AD-37, epic 8 entry 2). */
+  turn: 'trn',
+  /** One run of a project's declared command (AD-38, epic 8 entry 2; 8.9 runs them). */
+  projectCommandRun: 'pcr',
 } as const;
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
 
@@ -71,3 +75,11 @@ export type OrchestrationRunId = z.infer<typeof OrchestrationRunId>;
 /** A remote machine the user added over SSH (CAP-24, epic 19 story 19.1). */
 export const RemoteMachineId = prefixedUlid('mach');
 export type RemoteMachineId = z.infer<typeof RemoteMachineId>;
+
+/** One recorded agent turn (AD-37): its start and end snapshots are in `session.turn_changes_recorded`. */
+export const TurnId = prefixedUlid('trn');
+export type TurnId = z.infer<typeof TurnId>;
+
+/** One run of a project command (AD-38). */
+export const ProjectCommandRunId = prefixedUlid('pcr');
+export type ProjectCommandRunId = z.infer<typeof ProjectCommandRunId>;

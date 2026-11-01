@@ -37,3 +37,6 @@ export * from './build-verification.js';
 export * from './release-source.js';
 export * from './jira.js';
 export * from './workspace-files.js';
+export * from './editors.js';
+export * from './workbench-changes.js';
+export * from './project-commands.js';

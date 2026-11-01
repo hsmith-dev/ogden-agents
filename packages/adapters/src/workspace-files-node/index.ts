@@ -22,12 +22,19 @@
  * makes it `binary`. An environment file (`.env`, `.env.*`, `.envrc`,
  * `*.env`) has every value masked, its names kept. Nothing is written or
  * logged here.
+ *
+ * A `chat_worktree` root (epic 8 entry 2: a worktree chat's own copy, which
+ * lives in the data folder) lifts the data-folder fence for that call alone;
+ * every other check holds, and nothing outside that root is ever shown. Such
+ * a root must lie strictly inside the data folder, else every call is `protected`.
+ * `locate` checks a file exactly as `read` does and answers its real path,
+ * for the editor launcher. Search is 8.8's: this port has none yet.
  */
 import { constants as fsConstants, realpathSync } from 'node:fs';
 import { lstat, opendir, open, readlink, realpath, stat } from 'node:fs/promises';
 import type { BigIntStats } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { credentialReadFences, foldSegment, isRefusedWorkspacePath, type WorkspaceFilesPort, type WorkspacePathRefusal } from '@ogden-agents/core';
+import { credentialReadFences, foldSegment, isRefusedWorkspacePath, type WorkspaceFilesPort, type WorkspacePathRefusal, type WorkspaceRootKind } from '@ogden-agents/core';
 import {
   MAX_WORKSPACE_FILE_BYTES,
   MAX_WORKSPACE_FOLDER_ENTRIES,
@@ -146,26 +153,35 @@ export function maskEnvironmentText(text: string): string {
 }
 
 export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: WorkspaceFilesNodeOptions): WorkspaceFilesPort {
-  /** The fenced folders, worked out at each call (a credential folder may appear later). */
-  const fences = (): string[] => [...credentialReadFences(home, realOrUndefined), realOrUndefined(dataDir) ?? resolve(dataDir)];
+  /**
+   * The fenced folders, worked out at each call (a credential folder may
+   * appear later): the home credential folders, and the data folder unless
+   * the root is a chat's worktree (which lives there).
+   */
+  const fences = (kind: WorkspaceRootKind): string[] => [...credentialReadFences(home, realOrUndefined), ...(kind === 'chat_worktree' ? [] : [realOrUndefined(dataDir) ?? resolve(dataDir)])];
 
   /** Whether `real` (a real path) may be shown: inside the root, no refused segment below it, in no fence. */
   const allowed = (root: string, real: string, fenced: readonly string[]): boolean =>
     within(real, root) && !isRefusedWorkspacePath(segmentsBelow(root, real)) && !fenced.some((fence) => within(real, fence));
 
   /** The checked real path of `path` below the root, or why not. */
-  const resolveChecked = async (rootPath: string, path: string): Promise<{ root: string; real: string; fenced: string[] } | WorkspacePathRefusal> => {
+  const resolveChecked = async (rootPath: string, path: string, kind: WorkspaceRootKind): Promise<{ root: string; real: string; fenced: string[] } | WorkspacePathRefusal> => {
     const segments = path === '' ? [] : path.split('/');
     if (isRefusedWorkspacePath(segments)) return PROTECTED;
     const root = await realRepoRoot(rootPath);
     if (root === undefined) return NOT_FOUND;
+    // A chat worktree lifts the data-folder fence only because it lives strictly inside that folder: never the folder itself or above it.
+    if (kind === 'chat_worktree') {
+      const data = realOrUndefined(dataDir) ?? resolve(dataDir);
+      if (root === data || !within(root, data)) return PROTECTED;
+    }
     let real: string;
     try {
       real = await realpath(join(root, ...segments));
     } catch {
       return NOT_FOUND;
     }
-    const fenced = fences();
+    const fenced = fences(kind);
     return allowed(root, real, fenced) ? { root, real, fenced } : PROTECTED;
   };
 
@@ -216,8 +232,8 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
   };
 
   return {
-    async list(rootPath, path): Promise<WorkspaceFolderResponse | WorkspacePathRefusal> {
-      const checked = await resolveChecked(rootPath, path);
+    async list(rootPath, path, kind = 'project'): Promise<WorkspaceFolderResponse | WorkspacePathRefusal> {
+      const checked = await resolveChecked(rootPath, path, kind);
       if ('refused' in checked) return checked;
       const { root, real, fenced } = checked;
       const segments = path === '' ? [] : path.split('/');
@@ -303,8 +319,8 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
       return { path, entries, truncated };
     },
 
-    async read(rootPath, path): Promise<WorkspaceFileResponse | WorkspacePathRefusal> {
-      const checked = await resolveChecked(rootPath, path);
+    async read(rootPath, path, kind = 'project'): Promise<WorkspaceFileResponse | WorkspacePathRefusal> {
+      const checked = await resolveChecked(rootPath, path, kind);
       if ('refused' in checked) return checked;
       const { root, real } = checked;
       let handle: Awaited<ReturnType<typeof open>> | undefined;
@@ -343,6 +359,23 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck }: Workspac
         return codeOf(error) === 'ELOOP' ? PROTECTED : NOT_FOUND;
       } finally {
         await handle?.close().catch(() => undefined);
+      }
+    },
+
+    async locate(rootPath, path, kind = 'project'): Promise<{ realPath: string } | WorkspacePathRefusal> {
+      const checked = await resolveChecked(rootPath, path, kind);
+      if ('refused' in checked) return checked;
+      const { root, real } = checked;
+      try {
+        const identity = await linkFreeIdentity(root, real);
+        if (identity === undefined) return PROTECTED;
+        if (!identity.isFile()) return NOT_FOUND;
+        if (refusedHardLink(root, real, identity)) return HARD_LINKED;
+        // What the path leads to now must still be that file, at its checked real path under the same root.
+        if (!sameFile(identity, await stat(real, { bigint: true })) || !(await stillSame(root, real, identity))) return PROTECTED;
+        return { realPath: real };
+      } catch {
+        return NOT_FOUND;
       }
     },
   };

@@ -6,7 +6,7 @@
  * only once it is committed.
  */
 import { realpathSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import {
   AdapterRefs as AdapterRefsSchema,
   AgentId as AgentIdSchema,
@@ -16,6 +16,8 @@ import {
   PermissionMode as PermissionModeSchema,
   PermissionModeChangeCause as PermissionModeChangeCauseSchema,
   RemoteMachineId as RemoteMachineIdSchema,
+  SessionId as SessionIdSchema,
+  chatWorktreeBranch,
   SessionDriver as SessionDriverSchema,
   SessionKind as SessionKindSchema,
   SessionState as SessionStateSchema,
@@ -96,6 +98,18 @@ export interface NewSession {
   model?: string | null;
   /** The remote machine this chat runs its agent on (CAP-24, epic 19 story 19.7), set at creation, never changed. Default `null` (a local chat). */
   machineId?: RemoteMachineId | null;
+  /**
+   * The session's id, when the caller needs it before the row exists (a
+   * worktree chat's branch names it, epic 27). A fresh `ses_` id; default a new one.
+   */
+  id?: SessionId;
+  /**
+   * The chat's own worktree (AD-8 CAP-33 note): an absolute path, set at
+   * creation and never changed. Given with {@link branch} or not at all.
+   */
+  worktreePath?: string | null;
+  /** The worktree's branch: exactly `ogden/chat/<id>`. Given with {@link worktreePath} or not at all. */
+  branch?: string | null;
 }
 
 /** What a newly created workspace starts with (story 10.4). Ignored when the workspace already exists. */
@@ -335,6 +349,21 @@ const toWorkspace = (row: WorkspaceRow): Workspace => ({
   createdAt: row.createdAt,
 });
 
+/**
+ * A new chat's worktree and branch (AD-8 CAP-33 note): both or neither, the
+ * path absolute, the branch exactly `ogden/chat/<id>`; else {@link ValidationError}.
+ */
+function checkedWorktree(id: SessionId, worktreePath: string | null, branch: string | null): { worktreePath: string | null; branch: string | null } {
+  if (worktreePath === null && branch === null) return { worktreePath: null, branch: null };
+  const issue = (path: string, message: string): never => {
+    throw new ValidationError('invalid worktree', [{ path: [path], message }]);
+  };
+  if (worktreePath === null || branch === null) return issue(worktreePath === null ? 'worktreePath' : 'branch', 'A worktree and its branch are given together.');
+  if (typeof worktreePath !== 'string' || worktreePath === '' || worktreePath.includes('\0') || !isAbsolute(worktreePath)) return issue('worktreePath', 'A worktree is an absolute path.');
+  if (branch !== chatWorktreeBranch(id)) return issue('branch', `A chat worktree's branch is ${chatWorktreeBranch(id)}.`);
+  return { worktreePath, branch };
+}
+
 const toSession = (row: SessionRow): Session => ({
   id: row.id as SessionId,
   workspaceId: row.workspaceId as WorkspaceId,
@@ -345,6 +374,8 @@ const toSession = (row: SessionRow): Session => ({
   ...(row.agentId === null ? {} : { agentId: row.agentId }),
   ...(row.model === null ? {} : { model: row.model }),
   machineId: row.machineId ?? null,
+  worktreePath: row.worktreePath ?? null,
+  branch: row.branch ?? null,
   title: row.title,
   ...(row.autoTitle === null ? {} : { autoTitle: row.autoTitle }),
   adapterRefs: row.adapterRefs,
@@ -498,8 +529,10 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
       const at = now();
       const autoTitle = input.autoTitle == null ? null : autoChatName(input.autoTitle, CHAT_NAME_MAX);
       const machineId = check(RemoteMachineIdSchema.nullable(), input.machineId ?? null, 'machine id');
+      const id = input.id === undefined ? newId('ses') : check(SessionIdSchema, input.id, 'session id');
+      const { worktreePath, branch } = checkedWorktree(id, input.worktreePath ?? null, input.branch ?? null);
       const session: Session = {
-        id: newId('ses'),
+        id,
         workspaceId: input.workspaceId,
         kind: check(SessionKindSchema, input.kind, 'session kind'),
         state: check(SessionStateSchema, input.state ?? 'idle', 'session state'),
@@ -509,6 +542,8 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         ...(input.agentId === undefined ? {} : { agentId: check(AgentIdSchema, input.agentId, 'agent id') }),
         ...(input.model === undefined || input.model === null ? {} : { model: check(ModelIdSchema, input.model, 'model') }),
         machineId,
+        worktreePath,
+        branch,
         title: input.title ?? null,
         ...(autoTitle === null ? {} : { autoTitle }),
         adapterRefs: check(AdapterRefsSchema, input.adapterRefs ?? {}, 'adapter refs'),
@@ -517,6 +552,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
       };
       return log.transaction(() => {
         if (getWorkspace(input.workspaceId) === undefined) throw new NotFoundError('workspace', input.workspaceId);
+        if (input.id !== undefined && getSession(id) !== undefined) throw new ValidationError('invalid session id', [{ path: ['id'], message: 'That session already exists.' }]);
         orm.insert(sessions).values(session).run();
         sessionEvents.appendSessionEvent(session.id, {
           type: 'session.created',

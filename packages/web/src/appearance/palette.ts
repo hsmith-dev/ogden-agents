@@ -35,10 +35,27 @@ export function parseCustomPalette(value: unknown): CustomPalette | undefined {
 }
 const STATUS_COLORS = ['state-working', 'state-waiting', 'state-idle', 'state-done', 'state-error', 'destructive'];
 const STATUS_SURFACES = ['state-working-subtle', 'state-error-subtle', 'destructive-foreground', 'diff-add', 'diff-add-strong', 'diff-remove', 'diff-remove-strong'];
-const OVERRIDES = [...STATUS_COLORS, ...STATUS_SURFACES, 'background', 'foreground', 'card', 'card-foreground', 'popover', 'popover-foreground', 'sidebar', 'sidebar-foreground', 'muted', 'muted-foreground', 'accent', 'accent-foreground', 'secondary', 'secondary-foreground', 'border', 'input', 'primary', 'primary-foreground', 'signal', 'signal-foreground', 'signal-subtle', 'ring'];
+/** The code and diff text colors (epic 8 entry 2): each kept readable on every custom surface. */
+export const SYNTAX_COLORS = ['syntax-keyword', 'syntax-string', 'syntax-number', 'syntax-type', 'syntax-comment', 'diff-gutter-foreground'] as const;
+const OVERRIDES = [...STATUS_COLORS, ...STATUS_SURFACES, ...SYNTAX_COLORS, 'background', 'foreground', 'card', 'card-foreground', 'popover', 'popover-foreground', 'sidebar', 'sidebar-foreground', 'muted', 'muted-foreground', 'accent', 'accent-foreground', 'secondary', 'secondary-foreground', 'border', 'input', 'primary', 'primary-foreground', 'signal', 'signal-foreground', 'signal-subtle', 'ring'];
 function mix(a: string, b: string, weight: number): string {
   const other = channels(b);
   return '#' + channels(a).map((channel, index) => Math.round(channel * (1 - weight) + other[index]! * weight).toString(16).padStart(2, '0')).join('');
+}
+/**
+ * `color` (a token's default) mixed toward `foreground` in tenths until it
+ * reads at 4.5:1 or more on every one of `surfaces`; `foreground` itself
+ * when no step does (the custom palette already holds it at 4.5:1 on its
+ * surfaces). Not a color: `foreground`.
+ */
+export function readableOn(color: string, foreground: string, surfaces: readonly string[]): string {
+  const start = isColor(color) ? color : foreground;
+  const reads = (candidate: string) => surfaces.every((surface) => contrast(candidate, surface) >= 4.5);
+  for (let step = 0; step <= 10; step++) {
+    const candidate = step === 0 ? start : mix(start, foreground, step / 10);
+    if (reads(candidate)) return candidate;
+  }
+  return foreground;
 }
 export function applyPalette(root: HTMLElement, palette: PalettePreference = 'default', custom?: CustomPalette, dark = false): void {
   for (const token of OVERRIDES) root.style.removeProperty(`--${token}`);
@@ -67,6 +84,9 @@ export function applyPalette(root: HTMLElement, palette: PalettePreference = 'de
     }
     set(STATUS_SURFACES.filter((name) => name !== 'destructive-foreground'), background);
     set(['destructive-foreground'], background);
+    // Code and diff text sit on the page, the muted surface and the diff rows (which are the page here).
+    const codeSurfaces = [background, safeSurface];
+    for (const name of SYNTAX_COLORS) set([name], readableOn(defaults.getPropertyValue(`--${name}`).trim(), foreground, codeSurfaces));
   } else if (palette === 'forest' || palette === 'ember') {
     const base = palette === 'forest' ? 'state-working' : 'state-error';
     root.style.setProperty('--signal', `var(--${base})`);

@@ -10,7 +10,7 @@
  * revision and path passed is core's own (validated before use), never
  * request input.
  */
-import type { DiffStats } from '@ogden-agents/shared';
+import type { ChangedFile, ChangesView, DiffHunk, DiffStats, HunkAction } from '@ogden-agents/shared';
 import { CoreError } from './errors.js';
 
 /** The main checkout's current branch and its commit. */
@@ -173,6 +173,48 @@ export interface VcsPort {
    * the branch nor the worktree.
    */
   importBundle(repoPath: string, worktreePath: string, branch: string, base: string, bundle: Buffer): Promise<'imported' | 'nothing' | 'refused'>;
+}
+
+/**
+ * Which view of a folder's changes (AD-37): This turn names the turn's two
+ * snapshot trees (from `session.turn_changes_recorded`); the others are
+ * the working tree against the index (Unstaged), the index against `HEAD`
+ * (Staged), and the branch against its base (Branch).
+ */
+export type VcsChangesTarget = { view: 'turn'; startTree: string; endTree: string } | { view: Exclude<ChangesView, 'turn'> };
+
+/** A view's changed files (paths folder-relative, `/`-separated), at most `MAX_CHANGED_FILES`. */
+export interface VcsChangedFiles {
+  /** The branch Branch compares with (`main`), for that view. */
+  base?: string | undefined;
+  files: ChangedFile[];
+  truncated: boolean;
+}
+
+/** What a hunk action did: `outdated` when the hunk changed since it was shown, `not_found` when the file or hunk has no change there. */
+export type VcsHunkResult = 'applied' | 'outdated' | 'not_found';
+
+/**
+ * The working-tree half of the VCS port (AD-37; epic 8 entry 2's contract,
+ * 8.4 and 8.5 build it on git): kept apart from {@link VcsPort} so the
+ * builds' adapters and fakes are untouched. `root` is always the folder
+ * core resolved (the workspace's real path or a chat's worktree), and every
+ * path is one core checked (`WorkspaceRelativePath`, no refused name).
+ * Snapshots are tree objects kept in Ogden's data directory, never a commit
+ * or a ref, never the repo's own object store. Every call keeps AD-17's
+ * protections (no hook, serialized with the repo's other git work).
+ */
+export interface VcsWorkingTreePort {
+  /** The view's changed files. */
+  changedFiles(root: string, target: VcsChangesTarget): Promise<VcsChangedFiles>;
+  /** One file's diff in the view (no hunks when it is binary or over `MAX_DIFF_FILE_BYTES`), or `undefined` when it has no change there. */
+  fileDiff(root: string, target: VcsChangesTarget, path: string): Promise<{ file: ChangedFile; hunks: DiffHunk[] } | undefined>;
+  /** Stages, unstages or reverts one hunk (`hunkId`) or the whole file, all or nothing. */
+  applyHunk(root: string, input: { target: VcsChangesTarget; action: HunkAction; path: string; hunkId?: string | undefined }): Promise<VcsHunkResult>;
+  /** Snapshots the folder's working tree (tracked and untracked, not ignored) as a tree object; its id. */
+  snapshot(root: string): Promise<string>;
+  /** Commits everything in the worktree on its checked-out branch with `message` (no hook, never pushed); the commit and how many files it holds. */
+  commitAll(root: string, message: string): Promise<{ revision: string; files: number }>;
 }
 
 /** A git operation failed; `message` is plain words, `details` are for the log and hold no secret. */

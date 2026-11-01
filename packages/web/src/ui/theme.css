@@ -54,6 +54,16 @@
   --color-state-done: var(--state-done);
   --color-state-error: var(--state-error);
   --color-state-error-subtle: var(--state-error-subtle);
+  --color-diff-add: var(--diff-add);
+  --color-diff-add-strong: var(--diff-add-strong);
+  --color-diff-remove: var(--diff-remove);
+  --color-diff-remove-strong: var(--diff-remove-strong);
+  --color-diff-gutter-foreground: var(--diff-gutter-foreground);
+  --color-syntax-keyword: var(--syntax-keyword);
+  --color-syntax-string: var(--syntax-string);
+  --color-syntax-number: var(--syntax-number);
+  --color-syntax-type: var(--syntax-type);
+  --color-syntax-comment: var(--syntax-comment);
   --color-terminal: var(--terminal);
   --color-terminal-foreground: var(--terminal-foreground);
 

@@ -750,3 +750,31 @@ export class PathProtectedError extends CoreError {
     super('path_protected', message);
   }
 }
+
+/**
+ * Workbench Changes (AD-37): a stage, unstage, revert or commit was refused
+ * because a chat in the same folder (the project, or that worktree) is
+ * working or waiting. The server answers 409 `agent_mid_turn`; nothing changed.
+ */
+export class AgentMidTurnError extends CoreError {
+  override readonly name = 'AgentMidTurnError';
+  constructor(message: string) {
+    super('agent_mid_turn', message);
+  }
+}
+
+/** Workbench Changes (AD-37): the hunk changed since it was shown. 409 `hunk_outdated`; nothing changed. */
+export class HunkOutdatedError extends CoreError {
+  override readonly name = 'HunkOutdatedError';
+  constructor(message: string) {
+    super('hunk_outdated', message);
+  }
+}
+
+/** Open in editor (AD-39): no editor found, the one named isn't found, or it didn't start. 409 `editor_unavailable`. */
+export class EditorUnavailableError extends CoreError {
+  override readonly name = 'EditorUnavailableError';
+  constructor(message: string) {
+    super('editor_unavailable', message);
+  }
+}

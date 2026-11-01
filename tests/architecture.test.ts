@@ -1087,3 +1087,118 @@ describe('CAP-24: the remote-machine registry names no SSH library (epic 19 stor
     expect(violations).toEqual([]);
   });
 });
+
+/**
+ * Epic 8 entry 2 (AD-36, AD-37, AD-39): the Workbench's client paths are
+ * `WorkspaceRelativePath` only (never absolute, never a route's `:path`),
+ * and no git or child process is run from core, shared, the web or a
+ * Workbench route file: every git operation is `VcsWorkingTreePort`'s and
+ * every process an adapter's.
+ */
+const WORKBENCH_ROUTE_KEYS = [
+  'workspaceFiles',
+  'workspaceFileContent',
+  'workspaceFileSearch',
+  'workspaceFileOpenInEditor',
+  'workspaceChanges',
+  'workspaceChangesFile',
+  'workspaceChangesHunks',
+  'sessionTurns',
+  'sessionWorktreeCommit',
+  'workspaceProjectCommands',
+  'workspaceProjectCommandRuns',
+  'workspaceProjectCommandRun',
+  'workspaceProjectCommandRunStop',
+  'editors',
+] as const;
+
+/** The Workbench's request schemas, as each route reads its query or body. */
+const WORKBENCH_REQUEST_SCHEMAS = [
+  'WorkspaceFilesQuery',
+  'WorkspaceSearchQuery',
+  'OpenInEditorRequest',
+  'ChangesQuery',
+  'FileDiffQuery',
+  'HunkActionRequest',
+  'CommitWorktreeRequest',
+  'SetProjectCommandsRequest',
+  'ProjectCommandInput',
+] as const;
+
+/** The Workbench's route files in the server. */
+const WORKBENCH_ROUTE_FILE = /(^|[\\/])packages[\\/]server[\\/]src[\\/](?:workspace-files-routes|workbench-routes)\.ts$/;
+/** Where no git and no child process may appear. */
+const NO_GIT_AREA = /(^|[\\/])packages[\\/](?:core|shared|web)[\\/]src[\\/]/;
+/**
+ * The one core module that names git commands, by design: it runs them on a
+ * remote machine over SSH (CAP-24, epic 19 story 19.4), never on this
+ * computer and never for the Workbench.
+ */
+const GIT_COMMAND_EXEMPT = new Set(['packages/core/src/remote-worktree-sync.ts']);
+/** A string or template literal that starts with the `git` command (`'git'`, `` `git -C ${dir} …` ``). */
+const GIT_COMMAND = /(['"`])git(?=\1|\s)/g;
+const CHILD_PROCESS = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)['"](?:node:)?child_process['"]/;
+
+/** One message per child_process load or git command in core, shared, the web and the Workbench route files. */
+export function findWorkbenchProcessViolations(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    const file = path.split('\\').join('/');
+    if (!NO_GIT_AREA.test(file) && !WORKBENCH_ROUTE_FILE.test(file)) continue;
+    const code = withoutComments(source);
+    if (CHILD_PROCESS.test(code)) violations.push(`${file}: loads child_process (AD-37, AD-39: processes run only in adapters)`);
+    if (!GIT_COMMAND_EXEMPT.has(file) && GIT_COMMAND.test(code)) violations.push(`${file}: names a git command (AD-37: git runs only behind VcsPort)`);
+    GIT_COMMAND.lastIndex = 0;
+  }
+  return violations;
+}
+
+describe('epic 8 entry 2: Workbench paths are workspace-relative and no git runs outside VcsPort', () => {
+  it("every Workbench request schema's path field is WorkspaceRelativePath, and no route template has a :path param", async () => {
+    const shared = (await import('../packages/shared/src/index.ts')) as unknown as Record<string, unknown>;
+    const { API_ROUTES, WorkspaceRelativePath } = shared as { API_ROUTES: Record<string, string>; WorkspaceRelativePath: unknown };
+    const pathFields: string[] = [];
+    for (const name of WORKBENCH_REQUEST_SCHEMAS) {
+      const schema = shared[name] as { shape?: Record<string, { unwrap?: () => unknown }> } | undefined;
+      expect(schema?.shape, name).toBeDefined();
+      for (const [field, value] of Object.entries(schema!.shape!)) {
+        if (!/path/i.test(field)) continue;
+        pathFields.push(`${name}.${field}`);
+        const inner = value === WorkspaceRelativePath ? value : value.unwrap?.();
+        expect(inner, `${name}.${field}`).toBe(WorkspaceRelativePath);
+      }
+    }
+    expect(pathFields).toEqual(['WorkspaceFilesQuery.path', 'OpenInEditorRequest.path', 'FileDiffQuery.path', 'HunkActionRequest.path']);
+    for (const key of WORKBENCH_ROUTE_KEYS) {
+      expect(API_ROUTES[key], key).toBeDefined();
+      expect(API_ROUTES[key], key).not.toMatch(/:path\b/);
+    }
+  });
+
+  it('core, shared, the web and the Workbench route files load no child_process and name no git command', () => {
+    const files = loadWorkspaceSources();
+    expect(files.filter((file) => WORKBENCH_ROUTE_FILE.test(file.path))).toHaveLength(2);
+    expect(findWorkbenchProcessViolations(files)).toEqual([]);
+  });
+
+  it('flags a planted child_process load or git command, but not a comment, a `.git` name, another package or the remote sync', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/workspace-changes.ts', source: "import { execFile } from 'node:child_process';" },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/a.ts', source: "await run('git', ['diff']);" },
+      { pkg: '@ogden-agents/shared', path: 'packages/shared/src/b.ts', source: 'const command = `git -C ${dir} apply`;' },
+      { pkg: '@ogden-agents/web', path: 'packages/web/src/c.ts', source: "const cp = await import('child_process');" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/workbench-routes.ts', source: 'spawn("git status");' },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/ok.ts', source: "// run('git', ['diff'])\nconst folder = '.git';\nconst word = 'github';\nconst refused = 'repo.git';" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/vcs-git/index.ts', source: "import { execFile } from 'node:child_process';\nexecFile('git', ['diff']);" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/build-routes.ts', source: "execFile('git', []);" },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/remote-worktree-sync.ts', source: 'const c = `git -C ${dir} fetch`;' },
+    ];
+    expect(findWorkbenchProcessViolations(files)).toEqual([
+      'packages/core/src/workspace-changes.ts: loads child_process (AD-37, AD-39: processes run only in adapters)',
+      'packages/core/src/a.ts: names a git command (AD-37: git runs only behind VcsPort)',
+      'packages/shared/src/b.ts: names a git command (AD-37: git runs only behind VcsPort)',
+      'packages/web/src/c.ts: loads child_process (AD-37, AD-39: processes run only in adapters)',
+      'packages/server/src/workbench-routes.ts: names a git command (AD-37: git runs only behind VcsPort)',
+    ]);
+  });
+});

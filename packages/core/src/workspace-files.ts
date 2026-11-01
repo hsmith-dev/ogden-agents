@@ -6,12 +6,29 @@
  * port is asked anything; the port checks the same names again on the real
  * path, with the home and data-folder fences. Nothing is written, no event
  * is appended, and neither a path nor a file's content is logged.
+ *
+ * Epic 8 entry 2: each call may name a chat (`session`), which roots it at
+ * that chat's worktree when it has one (a foreign or unknown chat is
+ * {@link NotFoundError}); `search` exists only when the port can search,
+ * and `locate` only when it can locate (the editor launcher's).
  */
-import { WorkspaceId, WorkspaceRelativePath, WORKSPACE_PATH_HARD_LINK_MESSAGE, WORKSPACE_PATH_PROTECTED_MESSAGE, type WorkspaceFileResponse, type WorkspaceFolderResponse } from '@ogden-agents/shared';
+import {
+  WorkspaceRelativePath,
+  WorkspaceSearchQuery,
+  WORKSPACE_PATH_HARD_LINK_MESSAGE,
+  WORKSPACE_PATH_PROTECTED_MESSAGE,
+  WORKSPACE_SEARCH_MAX_MATCHES,
+  WORKSPACE_SEARCH_MAX_PREVIEW,
+  type WorkspaceFileResponse,
+  type WorkspaceFolderResponse,
+  type WorkspaceSearchFile,
+  type WorkspaceSearchResponse,
+} from '@ogden-agents/shared';
 import { CREDENTIAL_FOLDERS } from './build-names.js';
 import type { Entities } from './entities.js';
 import { NotFoundError, PathProtectedError, ValidationError } from './errors.js';
-import { isWorkspacePathRefusal, type WorkspaceFilesPort, type WorkspacePathRefusal } from './workspace-files-port.js';
+import { isWorkspacePathRefusal, type WorkspaceFilesPort, type WorkspacePathRefusal, type WorkspaceRoot } from './workspace-files-port.js';
+import { resolveWorkspaceRoot } from './workspace-root.js';
 
 /** The project's agent folder stays readable (its instructions and skills): the one credential folder name not refused inside a project. */
 const READABLE_IN_PROJECT = '.claude';
@@ -49,48 +66,122 @@ export function isRefusedWorkspacePath(segments: readonly string[]): boolean {
 
 export interface WorkspaceFiles {
   /** The folder at `path` (absent or `''`: the root). {@link ValidationError}, {@link PathProtectedError} or {@link NotFoundError} (never naming the path). */
-  list(workspaceId: unknown, path: unknown): Promise<WorkspaceFolderResponse>;
+  list(workspaceId: unknown, path: unknown, session?: unknown): Promise<WorkspaceFolderResponse>;
   /** The file at `path`. The same refusals. */
-  read(workspaceId: unknown, path: unknown): Promise<WorkspaceFileResponse>;
+  read(workspaceId: unknown, path: unknown, session?: unknown): Promise<WorkspaceFileResponse>;
+  /**
+   * Project search (8.8): `query` checked against `WorkspaceSearchQuery`
+   * ({@link ValidationError}), the answer clamped to
+   * `WORKSPACE_SEARCH_MAX_MATCHES` matches (`truncated` past it) and each
+   * preview to `WORKSPACE_SEARCH_MAX_PREVIEW`. Absent when the port can't search.
+   */
+  search?(workspaceId: unknown, query: unknown): Promise<WorkspaceSearchResponse>;
+  /** The absolute real path of an allowed file, for the editor launcher only; the same refusals as {@link read}. Absent when the port can't locate. */
+  locate?(workspaceId: unknown, path: unknown, session?: unknown): Promise<string>;
 }
 
 export interface WorkspaceFilesOptions {
-  entities: Pick<Entities, 'getWorkspace'>;
+  entities: Pick<Entities, 'getWorkspace' | 'getSession'>;
   port: WorkspaceFilesPort;
 }
 
-export function createWorkspaceFiles({ entities, port }: WorkspaceFilesOptions): WorkspaceFiles {
-  /** The workspace's real path, or {@link NotFoundError}. */
-  const rootOf = (workspaceId: unknown): string => {
-    const id = WorkspaceId.safeParse(workspaceId);
-    const workspace = id.success ? entities.getWorkspace(id.data) : undefined;
-    if (workspace === undefined) throw new NotFoundError('workspace', 'requested');
-    return workspace.realPath ?? workspace.path;
-  };
-  /** The checked path, or {@link ValidationError} / {@link PathProtectedError}. */
-  const checked = (path: unknown, { rootAllowed }: { rootAllowed: boolean }): string => {
-    if (rootAllowed && (path === undefined || path === '')) return '';
-    const parsed = WorkspaceRelativePath.safeParse(path);
-    if (!parsed.success) {
-      const message = 'That is not a path inside the project.';
-      throw new ValidationError(message, [{ path: ['path'], message }]);
+/**
+ * The client's path, checked: {@link ValidationError} unless it is a
+ * `WorkspaceRelativePath`, {@link PathProtectedError} for a refused name.
+ * `rootAllowed`: absent or `''` is the root (`''`).
+ */
+export function checkedWorkspacePath(path: unknown, { rootAllowed }: { rootAllowed: boolean }): string {
+  if (rootAllowed && (path === undefined || path === '')) return '';
+  const parsed = WorkspaceRelativePath.safeParse(path);
+  if (!parsed.success) {
+    const message = 'That is not a path inside the project.';
+    throw new ValidationError(message, [{ path: ['path'], message }]);
+  }
+  if (isRefusedWorkspacePath(parsed.data.split('/'))) throw new PathProtectedError(WORKSPACE_PATH_PROTECTED_MESSAGE);
+  return parsed.data;
+}
+
+/** A port's answer, or its refusal as {@link PathProtectedError} / {@link NotFoundError} (never naming the path). */
+export function workspaceAnswer<T extends object>(result: T | WorkspacePathRefusal): T {
+  if (!isWorkspacePathRefusal(result)) return result;
+  if (result.refused === 'protected') throw new PathProtectedError(result.reason === 'hard_link' ? WORKSPACE_PATH_HARD_LINK_MESSAGE : WORKSPACE_PATH_PROTECTED_MESSAGE);
+  throw new NotFoundError('path', 'requested');
+}
+
+/** Context kept before a match in a cut preview. */
+const PREVIEW_LEAD = 80;
+
+/**
+ * A line longer than {@link WORKSPACE_SEARCH_MAX_PREVIEW} cut to a window
+ * around the match at 1-based `column` (some context before it), so the
+ * match stays in the preview; `column` itself still counts in the whole line.
+ */
+export function previewAround(line: string, column: number): string {
+  if (line.length <= WORKSPACE_SEARCH_MAX_PREVIEW) return line;
+  const start = Math.max(0, Math.min(column - 1 - PREVIEW_LEAD, line.length - WORKSPACE_SEARCH_MAX_PREVIEW));
+  return line.slice(start, start + WORKSPACE_SEARCH_MAX_PREVIEW);
+}
+
+/** `files` held to {@link WORKSPACE_SEARCH_MAX_MATCHES} matches (a File names hit counts as one) and previews cut to {@link WORKSPACE_SEARCH_MAX_PREVIEW} around their match. */
+export function clampSearchFiles(files: readonly WorkspaceSearchFile[]): { files: WorkspaceSearchFile[]; truncated: boolean } {
+  const kept: WorkspaceSearchFile[] = [];
+  let left = WORKSPACE_SEARCH_MAX_MATCHES;
+  let truncated = false;
+  for (const file of files) {
+    if (left <= 0) {
+      truncated = true;
+      break;
     }
-    if (isRefusedWorkspacePath(parsed.data.split('/'))) throw new PathProtectedError(WORKSPACE_PATH_PROTECTED_MESSAGE);
-    return parsed.data;
-  };
-  const answer = <T extends object>(result: T | WorkspacePathRefusal): T => {
-    if (!isWorkspacePathRefusal(result)) return result;
-    if (result.refused === 'protected') throw new PathProtectedError(result.reason === 'hard_link' ? WORKSPACE_PATH_HARD_LINK_MESSAGE : WORKSPACE_PATH_PROTECTED_MESSAGE);
-    throw new NotFoundError('path', 'requested');
-  };
-  return {
-    async list(workspaceId, path) {
-      const root = rootOf(workspaceId);
-      return answer(await port.list(root, checked(path, { rootAllowed: true })));
+    if (file.matches.length === 0) {
+      kept.push({ path: file.path, matches: [] });
+      left -= 1;
+      continue;
+    }
+    const matches = file.matches.slice(0, left).map((match) => (match.preview.length > WORKSPACE_SEARCH_MAX_PREVIEW ? { ...match, preview: previewAround(match.preview, match.column) } : match));
+    if (matches.length < file.matches.length) truncated = true;
+    kept.push({ path: file.path, matches });
+    left -= matches.length;
+  }
+  return { files: kept, truncated };
+}
+
+export function createWorkspaceFiles({ entities, port }: WorkspaceFilesOptions): WorkspaceFiles {
+  /** The request's root, or {@link NotFoundError}. */
+  const rootOf = (workspaceId: unknown, session: unknown): WorkspaceRoot => resolveWorkspaceRoot(entities, workspaceId, session).root;
+  const files: WorkspaceFiles = {
+    async list(workspaceId, path, session) {
+      const root = rootOf(workspaceId, session);
+      const checked = checkedWorkspacePath(path, { rootAllowed: true });
+      return workspaceAnswer(root.kind === 'project' ? await port.list(root.path, checked) : await port.list(root.path, checked, root.kind));
     },
-    async read(workspaceId, path) {
-      const root = rootOf(workspaceId);
-      return answer(await port.read(root, checked(path, { rootAllowed: false })));
+    async read(workspaceId, path, session) {
+      const root = rootOf(workspaceId, session);
+      const checked = checkedWorkspacePath(path, { rootAllowed: false });
+      return workspaceAnswer(root.kind === 'project' ? await port.read(root.path, checked) : await port.read(root.path, checked, root.kind));
     },
   };
+  const search = port.search?.bind(port);
+  if (search !== undefined) {
+    files.search = async (workspaceId, query) => {
+      const parsed = WorkspaceSearchQuery.safeParse(query);
+      // The workspace and the chat are checked first: an unknown one is 404 whatever the query.
+      const root = rootOf(workspaceId, (query as { session?: unknown } | null | undefined)?.session);
+      if (!parsed.success) {
+        const message = 'That search is not one Ogden can run.';
+        throw new ValidationError(message, parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })));
+      }
+      const { q, mode, matchCase } = parsed.data;
+      const found = await search(root.path, { q, mode, matchCase }, root.kind);
+      const clamped = clampSearchFiles(found.files);
+      return { files: clamped.files, truncated: found.truncated || clamped.truncated, limit: WORKSPACE_SEARCH_MAX_MATCHES };
+    };
+  }
+  const locate = port.locate?.bind(port);
+  if (locate !== undefined) {
+    files.locate = async (workspaceId, path, session) => {
+      const root = rootOf(workspaceId, session);
+      return workspaceAnswer(await locate(root.path, checkedWorkspacePath(path, { rootAllowed: false }), root.kind)).realPath;
+    };
+  }
+  return files;
 }

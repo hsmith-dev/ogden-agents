@@ -153,6 +153,16 @@ import {
   WorkspaceDevToolUnattendedAllowChangedEvent,
   WorkspaceDevToolUnattendedAllowChangedInput,
 } from './events-dev-tools.js';
+import {
+  SessionTurnChangesRecordedEvent,
+  SessionTurnChangesRecordedInput,
+  SessionWorktreeCommittedEvent,
+  SessionWorktreeCommittedInput,
+  WorkspaceProjectCommandFinishedEvent,
+  WorkspaceProjectCommandFinishedInput,
+  WorkspaceProjectCommandStartedEvent,
+  WorkspaceProjectCommandStartedInput,
+} from './events-workbench.js';
 import { ApiErrorCode } from './errors.js';
 import { PermissionRuleId, RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
@@ -236,6 +246,9 @@ export {
 
 // Generic developer CLI tool events (CAP-25).
 export { DevToolsCatalogChangedEvent, DevToolsCatalogChangeReason, WorkspaceDevToolUnattendedAllowChangedEvent } from './events-dev-tools.js';
+
+// The Workbench's events (epic 8 entry 2): ids, states and counts only.
+export { SessionTurnChangesRecordedEvent, SessionWorktreeCommittedEvent, WorkspaceProjectCommandStartedEvent, WorkspaceProjectCommandFinishedEvent } from './events-workbench.js';
 
 // ---------------------------------------------------------------------------
 // Event types. Each is defined once without the core-assigned fields (what a
@@ -429,6 +442,11 @@ export const CoreEvent = z.discriminatedUnion('type', [
   AgentAuthChangedEvent,
   DevToolsCatalogChangedEvent,
   WorkspaceDevToolUnattendedAllowChangedEvent,
+  // The Workbench (epic 8 entry 2): ids, states and counts only.
+  SessionTurnChangesRecordedEvent,
+  SessionWorktreeCommittedEvent,
+  WorkspaceProjectCommandStartedEvent,
+  WorkspaceProjectCommandFinishedEvent,
   SettingsDeveloperModeChangedEvent,
   SettingsAgentDefaultModelChangedEvent,
   SettingsAgentLinkedCommandChangedEvent,
@@ -505,6 +523,10 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   AgentAuthChangedInput,
   DevToolsCatalogChangedInput,
   WorkspaceDevToolUnattendedAllowChangedInput,
+  SessionTurnChangesRecordedInput,
+  SessionWorktreeCommittedInput,
+  WorkspaceProjectCommandStartedInput,
+  WorkspaceProjectCommandFinishedInput,
   SettingsDeveloperModeChangedInput,
   SettingsAgentDefaultModelChangedInput,
   SettingsAgentLinkedCommandChangedInput,

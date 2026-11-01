@@ -230,6 +230,14 @@ export const API_ERROR_CODES = [
   'custom_agent_test_running',
   /** Workbench Files (AD-36): the path is `.git`, a credential folder, or its real path leaves the project (403). Nothing was read. */
   'path_protected',
+  /** An operation that the entity's current state does not allow (409), such as committing a chat that has no worktree of its own (AD-37). Nothing changed. */
+  'invalid_operation',
+  /** Workbench Changes (AD-37): a stage, unstage, revert or commit was refused because an agent is working or waiting in the same folder (409). Nothing changed. */
+  'agent_mid_turn',
+  /** Workbench Changes (AD-37): the hunk changed since it was shown (a This turn hunk edited again since the turn), so it was not applied (409). Nothing changed. */
+  'hunk_outdated',
+  /** Open in editor (AD-39): the editor asked for, or any editor, is not found on this computer, or it did not start (409). Nothing was started. */
+  'editor_unavailable',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

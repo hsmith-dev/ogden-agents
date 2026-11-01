@@ -4,6 +4,7 @@ Every release of the `ogden-agents` npm package. Since `2026.10.8-1`, each relea
 
 ## Unreleased
 
+- **Safer program lookup.** Finding and starting an agent program, a terminal's `--version` check, your editor and Problems commands now use only absolute folders on your `PATH`, start in your home folder (never the shared temp folder) and get the restricted environment, so a program planted behind an empty or relative `PATH` entry can't stand in for the real one.
 - **Needs you says what and where.** Each Needs you row reads in two lines: what the item needs, in full words ("Claude Code wants to run npm test"), then the project and the chat, with a glyph telling a permission request, a question, a review and a blocked run apart. `g y` opens the next waiting item (after the one you opened last, wrapping), with its permission card focused, and `]` and `[` move between the rows.
 - **A new chat in one step.** `g n` inside a project, a **New chat** button in the chat header and in the Chats list, and, in the desktop app, Cmd/Ctrl+N each open the project's new-chat draft with the cursor in the composer. The draft becomes a chat only when you send its first message. Outside a project, `g n` opens the palette on "New chat in...".
 - **A command palette.** Cmd/Ctrl+K opens it anywhere: Recent chats, Actions and Projects at first, then chats, projects, tickets (when the Board is on) and actions as you type, such as New chat, Go to Needs you, Show every step, the Settings groups and Theme. Enter runs the one chosen.

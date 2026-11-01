@@ -33,14 +33,10 @@ describe('workbench routes on the real server', () => {
     const repo = tempDataDir();
     const created = await fetch(`${server.url}${API_ROUTES.workspaces}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ path: repo }) });
     const wsId = WorkspaceResponse.parse(await created.json()).workspace.id;
-    const sesId = newId('ses');
     const unwired: Array<[string, string]> = [
       ['GET', `${apiPath(API_ROUTES.workspaceFileSearch, { wsId })}?q=x`],
-      ['GET', `${apiPath(API_ROUTES.workspaceChanges, { wsId })}?view=unstaged`],
-      ['GET', `${apiPath(API_ROUTES.workspaceChangesFile, { wsId })}?view=unstaged&path=a.ts`],
+      // Changes are wired on git since 8.4; hunk actions are 8.5's.
       ['POST', apiPath(API_ROUTES.workspaceChangesHunks, { wsId })],
-      ['GET', apiPath(API_ROUTES.sessionTurns, { wsId, sesId })],
-      ['POST', apiPath(API_ROUTES.sessionWorktreeCommit, { wsId, sesId })],
       ['GET', apiPath(API_ROUTES.workspaceProjectCommands, { wsId })],
       ['PUT', apiPath(API_ROUTES.workspaceProjectCommands, { wsId })],
       ['POST', apiPath(API_ROUTES.workspaceProjectCommandRuns, { wsId, commandId: 'test' })],

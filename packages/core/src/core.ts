@@ -1,4 +1,4 @@
-import type { AgentId, RunLimits } from '@ogden-agents/shared';
+import type { AgentId, RunLimits, SessionId } from '@ogden-agents/shared';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
 import { createLookBackOffers, type LookBackOffers } from './look-back-offers.js';
@@ -22,6 +22,7 @@ import { createDevTools, type DevTools, type DevToolsPort } from './dev-tools.js
 import { createWorkspaceFiles, type WorkspaceFiles } from './workspace-files.js';
 import type { WorkspaceFilesPort } from './workspace-files-port.js';
 import { createWorkspaceChanges, type WorkspaceChanges } from './workspace-changes.js';
+import { createTurnSnapshots, type TurnSnapshots } from './turn-snapshots.js';
 import type { VcsWorkingTreePort } from './vcs-port.js';
 import { createEditorLaunch, type EditorLaunch } from './editor-launch.js';
 import type { EditorLauncherPort } from './editor-launcher-port.js';
@@ -104,6 +105,8 @@ export interface Core {
   readonly workspaceFiles: WorkspaceFiles | undefined;
   /** The Workbench's Changes (AD-37; epic 8 entry 2): the views, a file's diff, hunk actions, turns and a worktree chat's commit; `undefined` without a {@link OpenCoreOptions.vcsWorkingTreePort}. */
   readonly workspaceChanges: WorkspaceChanges | undefined;
+  /** A chat turn's start and end snapshots (AD-37; story 8.4), for `createChat`'s `turnSnapshots`; `undefined` without a {@link OpenCoreOptions.vcsWorkingTreePort}. */
+  readonly turnSnapshots: TurnSnapshots | undefined;
   /** Open in editor (AD-39; epic 8 entry 2); `undefined` without an {@link OpenCoreOptions.editorLauncherPort} or a files port that can locate. */
   readonly editorLaunch: EditorLaunch | undefined;
   /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
@@ -199,6 +202,8 @@ export type OpenCoreOptions = OpenDatabaseOptions &
      * git). Absent: no Changes use-case (`core.workspaceChanges` is `undefined`).
      */
     vcsWorkingTreePort?: VcsWorkingTreePort;
+    /** Told of a turn snapshot that failed (story 8.4), for the log; the error may name a path, so log its code only. */
+    onTurnSnapshotError?: (sessionId: SessionId, error: unknown) => void;
     /** The editor launcher (AD-39; 8.10). Absent: no Open in editor use-case. */
     editorLauncherPort?: EditorLauncherPort;
     /**
@@ -284,6 +289,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     devTools: createDevTools({ db, events, entities, port: options.devToolsPort ?? NOOP_DEV_TOOLS_PORT }),
     workspaceFiles,
     workspaceChanges: options.vcsWorkingTreePort === undefined ? undefined : createWorkspaceChanges({ entities, sessionEvents, port: options.vcsWorkingTreePort }),
+    turnSnapshots: options.vcsWorkingTreePort === undefined ? undefined : createTurnSnapshots({ entities, sessionEvents, port: options.vcsWorkingTreePort, ...(options.onTurnSnapshotError === undefined ? {} : { onError: options.onTurnSnapshotError }) }),
     editorLaunch: options.editorLauncherPort === undefined || workspaceFiles?.locate === undefined ? undefined : createEditorLaunch({ entities, files: { locate: workspaceFiles.locate }, launcher: options.editorLauncherPort }),
     paneStore: createPaneStore({ db }),
     terminalsSettings: createTerminalsSettings({ db, events }),

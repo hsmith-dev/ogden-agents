@@ -9,6 +9,7 @@
 import { SessionId, WorkspaceId, type Session, type Workspace } from '@ogden-agents/shared';
 import type { Entities } from './entities.js';
 import { NotFoundError } from './errors.js';
+import type { VcsFolder } from './vcs-port.js';
 import type { WorkspaceRoot } from './workspace-files-port.js';
 
 export interface ResolvedWorkspaceRoot {
@@ -23,6 +24,16 @@ export const workspaceFolder = (workspace: Workspace): string => workspace.realP
 
 /** The folder a session works in: its worktree, else its project's folder. */
 export const sessionFolder = (workspace: Workspace, session: Session): string => session.worktreePath ?? workspaceFolder(workspace);
+
+/**
+ * The folder git runs in for `session` (else the project): a chat's
+ * worktree names the project's real path and the chat's branch, so the
+ * adapter checks the worktree and pins git's folders before it runs there.
+ */
+export function vcsFolderOf(workspace: Workspace, session: Session | undefined): VcsFolder {
+  if (session === undefined || session.worktreePath === null || session.branch === null) return { path: workspaceFolder(workspace) };
+  return { path: session.worktreePath, worktree: { repoPath: workspaceFolder(workspace), branch: session.branch } };
+}
 
 /** The root of a request for `workspaceId` and (optionally) `session`, or {@link NotFoundError}. */
 export function resolveWorkspaceRoot(entities: Pick<Entities, 'getWorkspace' | 'getSession'>, workspaceId: unknown, session?: unknown): ResolvedWorkspaceRoot {

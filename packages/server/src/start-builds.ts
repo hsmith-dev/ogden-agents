@@ -8,9 +8,9 @@
 import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createLocalBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createLocalBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createGitWorkingTree, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
-import { createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsPort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
+import { createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsPort, type VcsWorkingTreePort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import { createPerAgentSandbox } from './build-agent-sandbox.js';
 import type { Logger } from './log.js';
 import { agentEnvironment, withoutAgentKeys } from './start-env.js';
@@ -30,6 +30,24 @@ export function gitHooksDir(dataDir: string): string {
  */
 export function createServerVcs(options: StartOptions, dataDir: string): VcsPort {
   return options.vcs ?? createGitVcs({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), worktreesRoot: worktreesRootOf(dataDir), runsRoot: join(dataDir, RUNS_DIR) });
+}
+
+/** Where the Workbench's turn snapshots are kept (AD-37; story 8.4): a real folder of the data folder, never a link. */
+export function snapshotsRootOf(dataDir: string): string {
+  return join(dataDir, 'snapshots');
+}
+
+/** The longest one Workbench git call may run (story 8.4 review): a snapshot given up on by the turn never holds the repo for long. */
+export const WORKING_TREE_GIT_TIMEOUT_MS = 30_000;
+
+/**
+ * The Workbench's Changes on the user's git (AD-37; story 8.4): the same
+ * environment and empty hooks folder as {@link createServerVcs}, snapshots in
+ * `<data>/snapshots`, each git call at most {@link WORKING_TREE_GIT_TIMEOUT_MS}.
+ * A test's own (`StartOptions.vcsWorkingTreePort`) replaces it.
+ */
+export function createServerWorkingTree(options: StartOptions, dataDir: string): VcsWorkingTreePort {
+  return options.vcsWorkingTreePort ?? createGitWorkingTree({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), snapshotsRoot: snapshotsRootOf(dataDir), timeoutMs: WORKING_TREE_GIT_TIMEOUT_MS });
 }
 
 export function createBuildsWiring({

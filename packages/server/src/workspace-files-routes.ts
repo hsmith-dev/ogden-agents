@@ -23,6 +23,7 @@ import {
   EditorUnavailableError,
   HunkOutdatedError,
   InvalidOperationError,
+  NotImplementedError,
   NotFoundError,
   PathProtectedError,
   ValidationError,
@@ -69,6 +70,8 @@ export function workbenchRefusal(log: Logger, what: string): (c: Context, error:
     if (error instanceof HunkOutdatedError) return apiError(c, 409, 'hunk_outdated', HUNK_OUTDATED_TEXT);
     // Core's own plain message (never a path).
     if (error instanceof InvalidOperationError) return apiError(c, 409, 'invalid_operation', error.message);
+    // A lane not shipped yet (hunk actions before 8.5): core's own plain message.
+    if (error instanceof NotImplementedError) return apiError(c, 501, 'not_implemented', error.message);
     if (error instanceof EditorUnavailableError) return apiError(c, 409, 'editor_unavailable', error.message === EDITOR_NONE_FOUND_TEXT ? EDITOR_NONE_FOUND_TEXT : EDITOR_UNAVAILABLE_MESSAGE);
     // Never the path or the reason's text, which could name it.
     log.error(`a ${what} request failed`, { code: error instanceof CoreError ? error.code : 'unexpected' });

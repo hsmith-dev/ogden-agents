@@ -13,10 +13,19 @@
  * without a worktree, and appends `session.worktree_committed` with counts
  * only. This turn reads the chat's `session.turn_changes_recorded` events.
  * No diff, path or file content is ever appended or logged here.
+ *
+ * Story 8.4: a chat's worktree is given to the port with its repo and
+ * branch (`vcsFolderOf`), so git runs there only after the worktree check;
+ * only paths `WorkspaceRelativePath` accepts and `isRefusedWorkspacePath`
+ * allows are answered; hunk actions are 501 until the port has them (8.5);
+ * the commit runs under `serializedByRepo(<project folder>)`, with the
+ * snapshots, and nothing to commit is {@link InvalidOperationError}.
  */
 import {
   AGENT_MID_TURN_MESSAGE,
   COMMIT_NEEDS_WORKTREE_MESSAGE,
+  COMMIT_NOTHING_MESSAGE,
+  HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE,
   ChangesQuery,
   CommitWorktreeRequest,
   FileDiffQuery,
@@ -24,6 +33,8 @@ import {
   HunkActionRequest,
   MAX_CHANGED_FILES,
   SessionId,
+  WorkspaceRelativePath,
+  type ChangedFile,
   type ChangesResponse,
   type CommitWorktreeResponse,
   type FileDiffResponse,
@@ -36,11 +47,12 @@ import {
 } from '@ogden-agents/shared';
 import type { z } from 'zod';
 import type { Entities } from './entities.js';
-import { AgentMidTurnError, HunkOutdatedError, InvalidOperationError, NotFoundError, ValidationError } from './errors.js';
+import { AgentMidTurnError, HunkOutdatedError, InvalidOperationError, NotFoundError, NotImplementedError, ValidationError } from './errors.js';
+import { serializedByRepo } from './repo-serialization.js';
 import type { SessionEvents } from './session-events.js';
 import type { VcsChangesTarget, VcsWorkingTreePort } from './vcs-port.js';
-import { checkedWorkspacePath } from './workspace-files.js';
-import { resolveWorkspaceRoot, sessionFolder, workspaceFolder } from './workspace-root.js';
+import { checkedWorkspacePath, isRefusedWorkspacePath } from './workspace-files.js';
+import { resolveWorkspaceRoot, sessionFolder, vcsFolderOf, workspaceFolder } from './workspace-root.js';
 
 export interface WorkspaceChanges {
   /** `ChangesQuery` → the view's changed files. {@link ValidationError}, {@link NotFoundError} (a foreign chat or turn). */
@@ -67,6 +79,12 @@ function parsed<S extends z.ZodType>(schema: S, value: unknown, message: string)
   if (!result.success) throw new ValidationError(message, result.error.issues.map((issue) => ({ path: issue.path, message: issue.message })));
   return result.data;
 }
+
+/** Whether a path the port answered is one Ogden shows: a plain workspace-relative path with no refused name. */
+const shownPath = (path: string): boolean => WorkspaceRelativePath.safeParse(path).success && !isRefusedWorkspacePath(path.split('/'));
+
+/** Whether a changed file (and a renamed file's old path) may be shown. */
+export const shownFile = (file: ChangedFile): boolean => shownPath(file.path) && (file.previousPath === undefined || shownPath(file.previousPath));
 
 export function createWorkspaceChanges({ entities, sessionEvents, port }: WorkspaceChangesOptions): WorkspaceChanges {
   const recordedTurns = (session: Session): SessionTurnChangesRecordedEvent[] =>
@@ -102,42 +120,47 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
 
   return {
     async changes(workspaceId, query) {
-      const { root, session } = resolveWorkspaceRoot(entities, workspaceId, (query as { session?: unknown } | null | undefined)?.session);
+      const { workspace, session } = resolveWorkspaceRoot(entities, workspaceId, (query as { session?: unknown } | null | undefined)?.session);
       const { view, turn } = parsed(ChangesQuery, query, 'That is not a view of the changes.');
       const target = targetOf(view, session, turn);
       if (target === undefined) return { view, files: [], truncated: false };
-      const found = await port.changedFiles(root.path, target.target);
+      const found = await port.changedFiles(vcsFolderOf(workspace, session), target.target);
+      const files = found.files.filter(shownFile);
       return {
         view,
         ...(found.base === undefined || view !== 'branch' ? {} : { base: found.base }),
         ...(target.turnId === undefined ? {} : { turn: target.turnId }),
-        files: found.files.slice(0, MAX_CHANGED_FILES),
-        truncated: found.truncated || found.files.length > MAX_CHANGED_FILES,
+        files: files.slice(0, MAX_CHANGED_FILES),
+        truncated: found.truncated || files.length > MAX_CHANGED_FILES,
       };
     },
 
     async fileDiff(workspaceId, query) {
-      const { root, session } = resolveWorkspaceRoot(entities, workspaceId, (query as { session?: unknown } | null | undefined)?.session);
+      const { workspace, session } = resolveWorkspaceRoot(entities, workspaceId, (query as { session?: unknown } | null | undefined)?.session);
       const path = checkedWorkspacePath((query as { path?: unknown } | null | undefined)?.path, { rootAllowed: false });
       const { view, turn } = parsed(FileDiffQuery, query, 'That is not a file of the changes.');
       const target = targetOf(view, session, turn);
       if (target === undefined) throw new NotFoundError('change', 'requested');
-      const found = await port.fileDiff(root.path, target.target, path);
-      if (found === undefined) throw new NotFoundError('change', 'requested');
+      const found = await port.fileDiff(vcsFolderOf(workspace, session), target.target, path);
+      if (found === undefined || !shownFile(found.file)) throw new NotFoundError('change', 'requested');
       return { view, file: found.file, hunks: found.file.binary || found.file.tooLarge ? [] : found.hunks };
     },
 
     async hunk(workspaceId, body) {
+      const applyHunk = port.applyHunk;
+      // Hunk actions are 8.5's: until the port has them, nothing is checked or asked.
+      if (applyHunk === undefined) throw new NotImplementedError(HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE);
       const { workspace, root, session } = resolveWorkspaceRoot(entities, workspaceId, (body as { session?: unknown } | null | undefined)?.session);
       const path = checkedWorkspacePath((body as { path?: unknown } | null | undefined)?.path, { rootAllowed: false });
       const request = parsed(HunkActionRequest, body, 'That is not a change Ogden can make.');
       const target = targetOf(request.view, session, request.turn);
       if (target === undefined) throw new NotFoundError('change', 'requested');
       refuseMidTurn(workspace, root.path);
-      const result = await port.applyHunk(root.path, { target: target.target, action: request.action, path, hunkId: request.hunkId });
+      const folder = vcsFolderOf(workspace, session);
+      const result = await applyHunk.call(port, folder, { target: target.target, action: request.action, path, hunkId: request.hunkId });
       if (result === 'outdated') throw new HunkOutdatedError(HUNK_OUTDATED_TEXT);
       if (result === 'not_found') throw new NotFoundError('change', 'requested');
-      const after = await port.fileDiff(root.path, target.target, path);
+      const after = await port.fileDiff(folder, target.target, path);
       return { file: after?.file ?? null };
     },
 
@@ -155,8 +178,14 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
       if (session.worktreePath === null || session.branch === null) throw new InvalidOperationError(COMMIT_NEEDS_WORKTREE_MESSAGE);
       // The project folder is never the worktree, so only chats in this worktree can block it.
       if (session.worktreePath === workspaceFolder(workspace)) throw new InvalidOperationError(COMMIT_NEEDS_WORKTREE_MESSAGE);
-      refuseMidTurn(workspace, session.worktreePath);
-      const { revision, files } = await port.commitAll(session.worktreePath, message);
+      const worktreePath = session.worktreePath;
+      // With the snapshots and the repo's other git work: one at a time per project.
+      const committed = await serializedByRepo(workspaceFolder(workspace), async () => {
+        refuseMidTurn(workspace, worktreePath);
+        return port.commitAll(vcsFolderOf(workspace, session), message);
+      });
+      if (committed === 'nothing') throw new InvalidOperationError(COMMIT_NOTHING_MESSAGE);
+      const { revision, files } = committed;
       sessionEvents.appendSessionEvent(session.id, { type: 'session.worktree_committed', payload: { sessionId: session.id, branch: session.branch, revision, files } });
       return { revision, files };
     },

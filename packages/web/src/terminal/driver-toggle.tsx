@@ -1,6 +1,7 @@
 import type { SessionDriver } from '@ogden-agents/shared';
 import { ChatCircle, TerminalWindow } from '@phosphor-icons/react';
 import { useId, type ReactNode } from 'react';
+import { modifierShortcutLabel } from '@/shell/keyboard-shortcuts';
 import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { Text } from '@/ui/typography';
@@ -13,8 +14,7 @@ export const notIdleReason = (agentName: string) => `${agentName} is busy. Switc
 export const SWITCHING_WORDS = 'Switching...';
 
 /** The shortcut as this computer writes it: `⌘.` on Apple devices, `Ctrl+.` elsewhere. */
-export const driverShortcutLabel = (platform: string = typeof navigator === 'undefined' ? '' : navigator.userAgent): string =>
-  /Mac|iPhone|iPad/.test(platform) ? '⌘.' : 'Ctrl+.';
+export const driverShortcutLabel = (platform?: string): string => modifierShortcutLabel('.', platform);
 
 /** The shortcut for assistive technology (`aria-keyshortcuts`): both spellings work everywhere. */
 const ARIA_SHORTCUTS = 'Meta+. Control+.';

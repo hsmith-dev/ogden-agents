@@ -5,7 +5,8 @@ import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-route
 import { useId, type KeyboardEvent } from 'react';
 import { currentSettingsPage, settingsGroupFor, visibleSettingsGroups, type SettingsGlyph } from './settings-groups';
 
-const GLYPHS: Record<SettingsGlyph, Icon> = { Robot, Folders, Palette, Bell, TerminalWindow, DesktopTower, Sliders };
+/** Each group's Phosphor glyph (DESIGN.md settings-nav); the command palette's Settings actions use them too. */
+export const SETTINGS_GLYPHS: Record<SettingsGlyph, Icon> = { Robot, Folders, Palette, Bell, TerminalWindow, DesktopTower, Sliders };
 
 /** `↑` and `↓` move focus between the nav's links, stopping at the ends (EXPERIENCE.md Settings navigation). */
 function moveFocus(event: KeyboardEvent<HTMLElement>) {
@@ -39,7 +40,7 @@ export function SettingsLayout() {
     <SettingsFrame>
       <SettingsNavColumn label="Settings" title="Settings" onKeyDown={moveFocus} data-testid="settings-nav">
         {groups.map((group) => {
-          const Glyph = GLYPHS[group.glyph];
+          const Glyph = SETTINGS_GLYPHS[group.glyph];
           const isCurrent = group.id === currentGroup?.id;
           const hasSubPages = group.pages.length > 1;
           return (

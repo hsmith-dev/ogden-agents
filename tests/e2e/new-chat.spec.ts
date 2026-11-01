@@ -7,7 +7,8 @@
  * message makes exactly one chat, which opens and shows it; a failed first
  * send keeps that chat for the retry. The desktop app's File > New Chat
  * (Cmd/Ctrl+N) reaches the page as `NEW_CHAT_EVENT` (the desktop smoke
- * checks the shell evaluates it); here it is dispatched the same way. Each
+ * checks the shell evaluates it); here it is dispatched the same way.
+ * Outside a project both open the command palette on "New chat in..." (26.3). Each
  * test runs its own server with the fake agent.
  */
 import { expect, test, type Page } from '@playwright/test';
@@ -110,7 +111,7 @@ test('a failed first send says why, and the retry goes to the chat it made', asy
   });
 });
 
-test('the desktop New Chat event opens the draft inside a project, and nothing outside one; g n outside a project does nothing', async ({ page }) => {
+test('the desktop New Chat event opens the draft inside a project; outside one, it and g n open the palette on "New chat in..."', async ({ page }) => {
   await withChatServer(page, async ({ repo }) => {
     const chat = await startChat(page, repo);
     // What the shell evaluates for File > New Chat (Cmd/Ctrl+N).
@@ -121,14 +122,18 @@ test('the desktop New Chat event opens the draft inside a project, and nothing o
     const home = new URL('/', chat.url).href;
     await page.goto(home);
     await expect(page.getByTestId('workspace-area')).toBeVisible();
-    // The event outside a project: the page stays.
+    const palette = page.getByTestId('command-palette');
+    // The event outside a project: the page stays, and the palette lists the projects (26.3).
     await page.evaluate((name) => window.dispatchEvent(new Event(name)), NEW_CHAT_EVENT);
-    await page.waitForTimeout(300);
+    await expect(palette).toHaveAttribute('data-mode', 'new-chat-in');
     await expect(page).toHaveURL(home);
-    // g n outside a project: the page stays.
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await expect(palette).toHaveCount(0);
+    // g n outside a project: the same.
     await blur(page);
     await goNew(page);
-    await page.waitForTimeout(300);
+    await expect(palette).toHaveAttribute('data-mode', 'new-chat-in');
     await expect(page).toHaveURL(home);
   });
 });

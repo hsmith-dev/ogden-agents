@@ -1,14 +1,17 @@
-import { PERMISSION_MODE_LABELS, PERMISSION_MODES, type CoreEvent, type PermissionMode, type SessionPermissionModeOption } from '@ogden-agents/shared';
+import { PERMISSION_MODE_LABELS, PERMISSION_MODES, type ChatAgent, type CoreEvent, type PermissionMode, type SessionPermissionModeOption } from '@ogden-agents/shared';
 import { CaretDown, ShieldCheck, ShieldWarning } from '@phosphor-icons/react';
 import { useMemo, useState } from 'react';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent } from '@/ui/alert-dialog';
 import { Banner } from '@/ui/banner';
 import { Button } from '@/ui/button';
+import { SETUP_CHIP_CLASS } from '@/chat/setup-row';
 import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
+import { cn } from '@/ui/utils';
 
 /**
  * A chat's permission mode in the UI (permission modes; EXPERIENCE.md
- * Permission mode): the picker in the session header, Skip all's red
+ * Permission mode): the Mode chip in the composer's setup row (moved from
+ * the session header, epic 27, 27.1), Skip all's red
  * confirmation, and the red banner while a chat skips its permission checks.
  * The server decides every change; the view follows only
  * `session.permission_mode_changed` (else the session as read).
@@ -47,6 +50,25 @@ export function usePermissionMode(events: readonly CoreEvent[], read: Permission
   );
 }
 
+/** Why Skip all can't be picked for a new chat: Developer mode is off. */
+const SKIP_ALL_NEEDS_DEVELOPER_MODE = 'Skip all needs Developer mode.';
+
+/**
+ * The modes a new chat's draft offers (27.1): every mode the agent declares
+ * (Ask always), Skip all only in Developer mode; the rest disabled with why.
+ * The server checks the chosen mode again once the chat exists.
+ */
+export function draftModeOptions(agent: Pick<ChatAgent, 'displayName' | 'permissionModes'> | undefined, developerMode: boolean): SessionPermissionModeOption[] {
+  return PERMISSION_MODES.map((mode) => {
+    if (mode === 'ask') return { mode, available: true };
+    if (agent === undefined || !agent.permissionModes.includes(mode)) {
+      return { mode, available: false, reason: `${agent?.displayName ?? 'This agent'} doesn't offer ${PERMISSION_MODE_LABELS[mode]}.` };
+    }
+    if (mode === 'skip_all' && !developerMode) return { mode, available: false, reason: SKIP_ALL_NEEDS_DEVELOPER_MODE };
+    return { mode, available: true };
+  });
+}
+
 export interface PermissionModePickerProps {
   /** The chat's agent by its product name (epic 6): what the descriptions and reasons name. */
   agentName: string;
@@ -61,16 +83,20 @@ export interface PermissionModePickerProps {
   changing: boolean;
   /** Asks the server for `mode`; for Skip all only after the user confirmed its warning. */
   onChoose(mode: PermissionMode, confirmed: boolean): void;
+  /** The menu's heading ("Permission mode"; the draft's "Permission mode for the new chat"). */
+  title?: string | undefined;
+  /** Skip all's confirmation title (the draft's names the new chat). */
+  confirmTitle?: string | undefined;
 }
 
 /**
- * The permission mode picker in the session header: the current mode, and a
+ * The Mode chip in the composer's setup row: the current mode, and a
  * menu of Ask, Auto and (in Developer mode) Skip all, each with what it does;
  * a mode the agent doesn't offer is disabled with its one-sentence reason.
  * Choosing Skip all opens its red warning first; nothing changes unless the
  * user confirms it.
  */
-export function PermissionModePicker({ agentName, mode, options, developerMode, terminalDrives, changing, onChoose }: PermissionModePickerProps) {
+export function PermissionModePicker({ agentName, mode, options, developerMode, terminalDrives, changing, onChoose, title, confirmTitle }: PermissionModePickerProps) {
   const [confirming, setConfirming] = useState(false);
   const descriptions = permissionModeDescriptions(agentName);
   // The agent takes its mode only when a chat starts, and this chat has started (epic 12, 12.3).
@@ -91,8 +117,9 @@ export function PermissionModePicker({ agentName, mode, options, developerMode, 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
+            className={SETUP_CHIP_CLASS}
             data-testid="permission-mode-picker"
             data-mode={mode}
             data-fixed={fixed ? 'true' : undefined}
@@ -100,13 +127,13 @@ export function PermissionModePicker({ agentName, mode, options, developerMode, 
             aria-busy={changing || undefined}
           >
             {mode === 'skip_all' ? <ShieldWarning aria-hidden /> : <ShieldCheck aria-hidden />}
-            {/* At phone width the shield alone (the red banner names Skip all); the label is still read. */}
-            <span className="max-sm:sr-only">{PERMISSION_MODE_LABELS[mode]}</span>
+            {/* Skip all keeps the ghost chip with its word in red; the red banner carries the warning (DESIGN.md Composer). */}
+            <span className={cn('truncate', mode === 'skip_all' && 'text-destructive')}>{PERMISSION_MODE_LABELS[mode]}</span>
             <CaretDown aria-hidden />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" data-testid="permission-mode-menu">
-          <DropdownMenuLabel>{fixed ? 'Permission mode (fixed for this chat)' : 'Permission mode'}</DropdownMenuLabel>
+        <DropdownMenuContent align="start" data-testid="permission-mode-menu">
+          <DropdownMenuLabel>{fixed ? 'Permission mode (fixed for this chat)' : (title ?? 'Permission mode')}</DropdownMenuLabel>
           {listed.map((each) => {
             const reason = reasonFor(each);
             return (
@@ -124,7 +151,7 @@ export function PermissionModePicker({ agentName, mode, options, developerMode, 
         </DropdownMenuContent>
       </DropdownMenu>
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent data-testid="skip-all-confirm" title="Skip all permission checks in this chat?" description={skipAllWarning(agentName)}>
+        <AlertDialogContent data-testid="skip-all-confirm" title={confirmTitle ?? 'Skip all permission checks in this chat?'} description={skipAllWarning(agentName)}>
           <AlertDialogCancel data-testid="skip-all-cancel">Cancel</AlertDialogCancel>
           <AlertDialogConfirm
             data-testid="skip-all-confirm-button"

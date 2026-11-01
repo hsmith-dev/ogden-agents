@@ -238,6 +238,8 @@ export const API_ERROR_CODES = [
   'hunk_outdated',
   /** Open in editor (AD-39): the editor asked for, or any editor, is not found on this computer, or it did not start (409). Nothing was started. */
   'editor_unavailable',
+  /** A request whose fields don't go together (400), such as a worktree chat on a remote machine (27.1). Nothing was created. */
+  'validation_failed',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

@@ -3,7 +3,7 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { AgentId, ChatAgent, HandoffPreviewResponse, PermissionMode, RemoteMachineId, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, ChatAgent, ChatLocation, HandoffPreviewResponse, PermissionMode, RemoteMachineId, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentModels } from '../agent-models.js';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -15,6 +15,7 @@ import type { Permissions } from '../permissions.js';
 import type { RemoteHostConnection } from '../remote-host-port.js';
 import type { SessionEvents } from '../session-events.js';
 import type { TerminalPort, TerminalProcess } from '../terminal-port.js';
+import type { VcsPort } from '../vcs-port.js';
 
 export interface ChatOptions {
   entities: Entities;
@@ -108,6 +109,12 @@ export interface ChatOptions {
   remote?: {
     connect(machineId: RemoteMachineId): Promise<RemoteHostConnection>;
   };
+  /**
+   * Git, for a chat started in its own worktree (epic 27, 27.1): the
+   * project's top folder and commit, and the worktree made in
+   * `<data>/cw`. Absent: a worktree chat is refused (`InvalidOperationError`).
+   */
+  vcs?: Pick<VcsPort, 'topLevel' | 'head' | 'addWorktree'>;
 }
 
 /** A terminal's size in character cells. */
@@ -198,10 +205,25 @@ export interface Chat {
    * still reachable is `agentFor`'s own connect-time refusal
    * (`agent_unavailable`), the same place a chat already refuses an agent
    * that isn't ready -- never a second place that can disagree with it.
+   *
+   * `location: 'worktree'` (epic 27, 27.1) gives a plain `chat` its own
+   * worktree, `<data>/cw/<8>` on `ogden/chat/<id>` from the project's
+   * checked-out commit, made under the repo's serialized git work and stored
+   * as its `worktreePath` and `branch`; its agent and terminal run there.
+   * Refused, making nothing: `ValidationError` with a `machineId`;
+   * `InvalidOperationError` for another kind, a project that isn't its
+   * repository's top folder with a commit, or git failing.
    */
   createChatSession(
     workspaceId: WorkspaceId,
-    options?: { kind?: SessionKind | undefined; agentId?: AgentId | undefined; autoTitle?: string | undefined; model?: string | null | undefined; machineId?: RemoteMachineId | null | undefined },
+    options?: {
+      kind?: SessionKind | undefined;
+      agentId?: AgentId | undefined;
+      autoTitle?: string | undefined;
+      model?: string | null | undefined;
+      machineId?: RemoteMachineId | null | undefined;
+      location?: ChatLocation | undefined;
+    },
   ): Promise<Session>;
   /**
    * The agents a chat can be started with, in order (epic 6; frozen in 6.3):

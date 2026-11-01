@@ -139,6 +139,8 @@
   /* Component sizes (DESIGN.md Components and Accessibility Floor) */
   --button-height: 36px;
   --button-height-compact: 30px;
+  /* The composer setup row's chips (DESIGN.md setup-chip, epic 27). */
+  --setup-chip-height: 28px;
   --glyph-size: 10px;
   --glyph-ring: 2px;
   --icon-size: 16px;

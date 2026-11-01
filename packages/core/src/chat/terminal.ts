@@ -23,6 +23,7 @@ import { omittedNote, START_MARK, turnsToImport } from '../terminal-import.js';
 import type { TerminalProcess } from '../terminal-port.js';
 import { checkTerminalReady, checkTerminalSupport } from '../terminal-checks.js';
 import { terminalUnavailableReason } from '../terminal-reasons.js';
+import { sessionFolder } from '../workspace-root.js';
 import type { Agents } from './agents.js';
 import {
   TERMINAL_CLOSE_WAIT_MS,
@@ -159,7 +160,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     if (resume?.transcript === undefined) return undefined;
     const workspace = getWorkspace(session.workspaceId);
     // Bounded (review F1): a read that hangs is an unreadable record; the switch goes on.
-    const read = await bounded(resume.transcript({ agentSessionId, cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv(session.id) } }), TERMINAL_STEP_TIMEOUT_MS);
+    const read = await bounded(resume.transcript({ agentSessionId, cwd: sessionFolder(workspace, session), env: { ...agentEnv(session.id) } }), TERMINAL_STEP_TIMEOUT_MS);
     if (read === TIMED_OUT) throw new TerminalHandoffError('terminal_read_timeout');
     return read;
   };
@@ -257,8 +258,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     const opening = terminal.open({
       file: command.file,
       args: command.args,
-      // The real-cased path, as the agent had it: the CLI finds its sessions by folder.
-      cwd: workspace.realPath ?? workspace.path,
+      // The real-cased path, as the agent had it (its worktree for a worktree chat, 27.1): the CLI finds its sessions by folder.
+      cwd: sessionFolder(workspace, session),
       env: { ...command.env, TERM: 'xterm-256color' },
       cols: TERMINAL_COLS,
       rows: TERMINAL_ROWS,

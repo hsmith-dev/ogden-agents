@@ -22,7 +22,7 @@ export interface ComposerProps {
   action?: ReactNode;
   /** The id of an element that says more about the field (the chosen agent can't start a chat now). */
   describedBy?: string | undefined;
-  /** At the start of the footer row: the agent picker for a new chat (epic 6), or the chat's model picker (story 11; DESIGN.md Composer). */
+  /** At the start of the footer row, under the prompt box: the setup row's chips (Agent, Model, Mode, Location; epic 27, DESIGN.md Composer). */
   footer?: ReactNode;
   /**
    * Text to put back in the field (messages that were not sent; story 2.10),
@@ -149,7 +149,12 @@ export function Composer({ label, blockedReason, hint, action, footer, described
           autoFocus
         />
         <div className="flex items-center justify-end gap-2">
-          {footer === undefined ? null : <div className="mr-auto flex min-w-0 items-center overflow-hidden">{footer}</div>}
+          {/* The setup row (epic 27, 27.1): chips truncate before they wrap; below `md` the row scrolls sideways inside itself, never the page. */}
+          {footer === undefined ? null : (
+            <div data-testid="setup-row" className="mr-auto flex min-w-0 items-center gap-1 overflow-hidden max-md:overflow-x-auto max-md:[&>*]:shrink-0">
+              {footer}
+            </div>
+          )}
           {action}
           {twoWays && working ? (
             <>

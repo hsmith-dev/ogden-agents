@@ -7,6 +7,7 @@
 import { projectNotTrustedReason, redactSecrets, type Session, type SessionId, type Workspace } from '@ogden-agents/shared';
 import { AgentError, type AgentEvent, type AgentPermissionRequest, type AgentRestored, type AgentSession } from '../agent-port.js';
 import { PRIME_NEW_MESSAGE, primedPrompt } from '../resume-prime.js';
+import { sessionFolder } from '../workspace-root.js';
 import { AGENT_SESSION_REF, AGENT_STARTING_NOTICE_MS, HANDOFF_PENDING_REF, REMOTE_CHAT_CWD } from './constants.js';
 import type { ChatContext } from './context.js';
 import type { Models } from './model.js';
@@ -100,7 +101,8 @@ export function createAgents(
     // the way a build does (CAP-24's non-goals rule out provisioning anything on the remote), so it runs in
     // `REMOTE_CHAT_CWD` -- the machine's own home directory -- never `workspace.realPath`, which names nothing there.
     const input = {
-      cwd: machineId !== null ? REMOTE_CHAT_CWD : build?.cwd ?? workspace.realPath ?? workspace.path,
+      // A chat started in its own worktree (27.1) works there; every other chat in its project's folder.
+      cwd: machineId !== null ? REMOTE_CHAT_CWD : build?.cwd ?? sessionFolder(workspace, session),
       env: { ...agentEnv(session.id), ...unattended?.env },
       onPermissionRequest,
       permissionMode: startMode,

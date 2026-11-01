@@ -15,6 +15,7 @@ import { HandoffDialog } from '@/chat/handoff-dialog';
 import { onBeforeChatDetailChange, setChatDetail, useChatDetail } from '@/chat/detail-level';
 import { NewChatButton } from '@/chat/new-chat-button';
 import { CONTINUE_WITH_ANOTHER_AGENT, SessionMenu } from '@/chat/session-menu';
+import { LocationChip, SessionAgentChip } from '@/chat/setup-row';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
@@ -101,7 +102,7 @@ const checkInWords = (checkIn: TranscriptCheckIn, agentName: string) =>
  * `session.driver_changed`, and `?driver=terminal` mirrors it. Story 4.7: a
  * planning session's `session.document_written` shows as a document card
  * (one per path) with Open and the next suggested step, which opens the new
- * planning session it starts. Permission modes: the header's picker sets
+ * planning session it starts. Permission modes: the setup row's Mode chip (moved from the header, 27.1) sets
  * the chat's mode (Skip all only in Developer mode, after its red warning),
  * the view follows only `session.permission_mode_changed`, and a chat in
  * Skip all shows the red banner above the conversation or the terminal.
@@ -509,6 +510,9 @@ export function SessionPage() {
     });
   };
 
+  // Chat | Terminal in the header (Developer mode, a chat whose agent is still registered).
+  const driverShown = appearance.developerMode && !isBuild && !agentRemoved;
+
   return (
     <>
       <WorkspaceHeader
@@ -533,21 +537,10 @@ export function SessionPage() {
           </Text>
         ) : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
-        {isBuild || agentRemoved ? null : (
-          <span className={state === undefined ? 'ml-auto' : undefined}>
-            <PermissionModePicker
-              agentName={agentName}
-              mode={permissionMode}
-              options={session.data?.permissionModes}
-              developerMode={appearance.developerMode}
-              terminalDrives={terminalDrives}
-              changing={modeChanging}
-              onChoose={(mode, confirmed) => changeMode(mode, confirmed)}
-            />
-          </span>
-        )}
-        {appearance.developerMode && !isBuild && !agentRemoved ? (
+        {driverShown ? (
           <DriverToggle
+            // Before the state is known, the first of the right-hand controls takes the space.
+            className={state === undefined ? 'ml-auto' : undefined}
             agentName={agentName}
             driver={driver}
             switching={switchingTo}
@@ -556,7 +549,13 @@ export function SessionPage() {
           />
         ) : null}
         {/* New chat in one step (epic 26, E26-R2): the project's new-chat draft. */}
-        <NewChatButton wsId={wsId} />
+        {state === undefined && !driverShown ? (
+          <span className="ml-auto">
+            <NewChatButton wsId={wsId} />
+          </span>
+        ) : (
+          <NewChatButton wsId={wsId} />
+        )}
         {session.data !== undefined ? (
           <SessionMenu
             detail={detail}
@@ -792,17 +791,35 @@ export function SessionPage() {
             restore={restore}
             draftKey={chatDraftKey(wsId, sesId)}
             footer={
-              <ModelPicker
-                agentName={agentName}
-                model={model}
-                models={sessionModels === undefined ? undefined : sessionModels.available}
-                current={sessionModels?.current}
-                terminalDrives={terminalDrives}
-                changing={modelChanging}
-                open={modelMenuOpen}
-                onOpenChange={setModelMenuOpen}
-                onChoose={changeModel}
-              />
+              // The setup row (epic 27, 27.1): the chat's agent, model, mode and place; the place is fixed once it started.
+              <>
+                {/* As the draft's Agent chip and the header's name: only while the install has several agents. */}
+                {severalAgents ? <SessionAgentChip agentId={agentId} agentName={agentName} blockedReason={handoffBlocked} onContinue={() => setHandoffOpen(true)} /> : null}
+                <ModelPicker
+                  agentName={agentName}
+                  model={model}
+                  models={sessionModels === undefined ? undefined : sessionModels.available}
+                  current={sessionModels?.current}
+                  terminalDrives={terminalDrives}
+                  changing={modelChanging}
+                  open={modelMenuOpen}
+                  onOpenChange={setModelMenuOpen}
+                  onChoose={changeModel}
+                />
+                <PermissionModePicker
+                  agentName={agentName}
+                  mode={permissionMode}
+                  options={session.data?.permissionModes}
+                  developerMode={appearance.developerMode}
+                  terminalDrives={terminalDrives}
+                  changing={modeChanging}
+                  onChoose={(mode, confirmed) => changeMode(mode, confirmed)}
+                />
+                {/* A remote chat's place is its machine (27.5 adds it to this chip). */}
+                {session.data === undefined || (session.data.session.machineId ?? null) !== null ? null : (
+                  <LocationChip value={(session.data.session.worktreePath ?? null) === null ? 'this_folder' : 'worktree'} />
+                )}
+              </>
             }
             action={
               busy ? (

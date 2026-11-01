@@ -173,16 +173,20 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
   app.post(API_ROUTES.workspaceSessions, limit, async (c) => {
     const scope = ids(c);
     if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
-    const body = await readBody(c, CreateSessionRequest, { optional: true });
+    // A worktree on a remote machine (27.1, until 27.5) is fields that don't go together: `validation_failed`.
+    const body = await readBody(c, CreateSessionRequest, { optional: true, issueCode: (path) => (path[0] === 'location' ? 'validation_failed' : undefined) });
     if (!body.ok) return body.response;
     try {
       // The agent picked (epic 6), or the default one; an id this install doesn't have is refused by core.
       // Its model (story 11): the one given (an agent handoff's), else the project's or install's default for the agent.
       // Its remote target (CAP-24, epic 19 story 19.7): the machine picked, or `null`/omitted for a local chat.
-      const session = await chat.createChatSession(scope.workspaceId, { agentId: body.value?.agentId, model: body.value?.model, machineId: body.value?.machineId });
+      // Where it works (27.1): This folder (omitted), or its own worktree.
+      const session = await chat.createChatSession(scope.workspaceId, { agentId: body.value?.agentId, model: body.value?.model, machineId: body.value?.machineId, location: body.value?.location });
       log.info('chat session created', { workspaceId: scope.workspaceId, sessionId: session.id, agentId: session.agentId });
       return c.json(SessionResponse.parse({ session }), 201);
     } catch (error) {
+      // A worktree that can't be made here (not a repo, not its top folder, git failed): the project's state refuses it.
+      if (error instanceof InvalidOperationError && body.value?.location === 'worktree') return apiError(c, 409, 'invalid_operation', error.message);
       return refusal(c, error);
     }
   });

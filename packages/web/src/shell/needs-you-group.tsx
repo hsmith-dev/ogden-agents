@@ -1,7 +1,8 @@
 import { CheckSquare, ChatCircleDots, Shield, WarningDiamond, type Icon } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { useState, useSyncExternalStore, type KeyboardEvent } from 'react';
-import { SidebarAttentionButton, SidebarAttentionGroup, SidebarMenu, SidebarMenuItem, SidebarMoreButton, SidebarNeedsRow } from '@/ui/sidebar';
+import { SidebarAttentionButton, SidebarAttentionGroup, SidebarMenu, SidebarMenuItem, SidebarMoreButton } from '@/ui/sidebar';
+import { SidebarNeedsRow } from '@/ui/sidebar-rows';
 import type { NeedKind } from './sidebar-model';
 import { lastNeedsYouOpened, markNeedsYouOpened, needsYouTarget, subscribeNeedsYouOpened } from './needs-you-target';
 

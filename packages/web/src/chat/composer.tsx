@@ -16,6 +16,12 @@ export interface ComposerProps {
   label: string;
   /** Why sending is not possible right now (the agent waits for an answer), shown under the field. */
   blockedReason?: string | undefined;
+  /**
+   * The field takes no text (read-only, keeping focus) and nothing is sent (the page is on its way to
+   * another one, story 26.10): unlike `blockedReason`, typing is refused too,
+   * so nothing lands in this composer's draft. Nothing is shown for it.
+   */
+  disabled?: boolean | undefined;
   /** A note under the field when sending is possible (the message will be queued). */
   hint?: string | undefined;
   /** Beside Send: the Stop button while the agent works (story 2.10). */
@@ -54,7 +60,7 @@ export interface ComposerProps {
  * project's choice; `Cmd/Ctrl+Enter` and the menu beside Send do the other
  * (send now or wait). `Esc` does nothing here: it never stops the agent.
  */
-export function Composer({ label, blockedReason, hint, action, footer, describedBy, restore, draftKey, whileWorking, working, onSend }: ComposerProps) {
+export function Composer({ label, blockedReason, disabled = false, hint, action, footer, describedBy, restore, draftKey, whileWorking, working, onSend }: ComposerProps) {
   const [text, setText] = useState(() => (draftKey === undefined ? '' : readDraft(draftKey)));
   const currentKey = useRef(draftKey);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -88,7 +94,7 @@ export function Composer({ label, blockedReason, hint, action, footer, described
     setText(draftKey === undefined ? '' : readDraft(draftKey));
     setError(undefined);
   }
-  const blocked = sending || blockedReason !== undefined;
+  const blocked = disabled || sending || blockedReason !== undefined;
 
   const twoWays = whileWorking !== undefined;
   const submit = (delivery: WhileWorking | undefined = whileWorking) => {
@@ -145,6 +151,9 @@ export function Composer({ label, blockedReason, hint, action, footer, described
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
+          // Read-only, not disabled: a disabled field drops focus to the page, where typed letters would run `g` shortcuts.
+          readOnly={disabled}
+          aria-disabled={disabled || undefined}
           // Opening a chat puts the cursor here (EXPERIENCE.md Empty chats).
           autoFocus
         />

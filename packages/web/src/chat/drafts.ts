@@ -1,3 +1,5 @@
+import { storageOf } from '@/ui/stored';
+
 /**
  * Composer drafts (backlog story 6): the unsent text of each chat's composer,
  * kept for the short term in this browser's `localStorage` so leaving a chat,
@@ -35,13 +37,7 @@ export interface DraftEnv {
 }
 
 const browserEnv: DraftEnv = {
-  storage: () => {
-    try {
-      return window.localStorage;
-    } catch {
-      return undefined;
-    }
-  },
+  storage: storageOf,
   now: () => Date.now(),
 };
 

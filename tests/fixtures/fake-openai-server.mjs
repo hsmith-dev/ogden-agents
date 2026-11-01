@@ -7,7 +7,9 @@
 // Rules for POST /v1/chat/completions (streaming or not):
 //   response_format json_schema  -> a JSON object built from the schema (or broken JSON
 //                                   when the last user text contains MALFORMED)
-//   user text contains SLOW      -> waits SLOW_MS (default 4000) before the first token
+//   user text contains SLOW      -> waits SLOW_MS (default 4000) before the first token, or with
+//                                   `slowUntilLooks: n` until n more GET /v1/models have been
+//                                   answered after it came (a watch that looks; no fixed delay)
 //   user text contains NOTFOUND  -> 404 model_not_found
 //   tools present, user text contains "run" and no tool result yet
 //                                -> one tool call (the `bash` tool if offered, else the first)
@@ -19,9 +21,21 @@
 //   otherwise                    -> text "Hello from the fake model."
 import http from 'node:http';
 
-export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = null, slowMs = 4000, modelsDelayMs = 0, models = ['fake-small', 'fake-large', 'fake-nojson', 'fake-noformat'], managerCases = {} } = {}) {
+export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = null, slowMs = 4000, slowUntilLooks = 0, modelsDelayMs = 0, models = ['fake-small', 'fake-large', 'fake-nojson', 'fake-noformat'], managerCases = {} } = {}) {
   const log = [];
   const caseCounts = new Map();
+  // `slowUntilLooks`: the model lists answered so far, and the SLOW answers held until a count of them.
+  let looks = 0;
+  const heldForLooks = [];
+  const slowWait = () =>
+    slowUntilLooks > 0 ? new Promise((resolve) => heldForLooks.push({ until: looks + slowUntilLooks, resolve })) : new Promise((resolve) => setTimeout(resolve, slowMs));
+  const looked = () => {
+    looks += 1;
+    for (const held of heldForLooks.splice(0)) {
+      if (looks >= held.until) held.resolve();
+      else heldForLooks.push(held);
+    }
+  };
   const sockets = new Set();
   const lastText = (messages) => {
     const m = [...messages].reverse().find((x) => x.role === 'user');
@@ -89,7 +103,8 @@ export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = nul
       const p = entry.path;
       if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) {
         if (modelsDelayMs > 0) await new Promise((r) => setTimeout(r, modelsDelayMs));
-        return send(200, { object: 'list', data: models.map((id) => ({ id, object: 'model', created: 1, owned_by: 'fake' })) });
+        send(200, { object: 'list', data: models.map((id) => ({ id, object: 'model', created: 1, owned_by: 'fake' })) });
+        return looked();
       }
       if (req.method === 'GET' && p === '/api/tags') return send(200, { models: models.map((name) => ({ name, model: name, size: 4_000_000_000, details: { parameter_size: '7B', family: 'fake' } })) });
       // The two native shapes Ogden reads for sizes, context length and tool support (story 14.5). `fake-small` is small, `fake-large` is big with tools.
@@ -121,7 +136,7 @@ export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = nul
           return send(200, { ...base(model), object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] });
         }
         // A slow structured answer (story 14.8): the slow first token applies to these requests too.
-        if (text.includes('SLOW') && (json.response_format || text.includes('MANAGER_TEST'))) await new Promise((r) => setTimeout(r, slowMs));
+        if (text.includes('SLOW') && (json.response_format || text.includes('MANAGER_TEST'))) await slowWait();
         // Story 14.8: a model that only gets it right when asked again (REPAIRABLE), and one whose answer is huge (HUGE).
         const repairing = text.startsWith('That was not valid') && messages.some((m) => m.role === 'user' && String(m.content).includes('REPAIRABLE'));
         if (repairing) return send(200, { ...base(model), object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: '{"verdict":"fit","reason":"ok"}' }, finish_reason: 'stop' }] });
@@ -135,7 +150,7 @@ export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = nul
           const content = text.includes('MALFORMED') ? '{"answer": "oops",' : JSON.stringify(build(json.response_format.json_schema?.schema) ?? (text.includes('MANAGER_TEST') ? { verdict: 'fit', reason: 'ok' } : { ok: true }));
           return send(200, { ...base(model), object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
         }
-        if (text.includes('SLOW')) await new Promise((r) => setTimeout(r, slowMs));
+        if (text.includes('SLOW')) await slowWait();
         const lastUserIdx = messages.map((m) => m.role).lastIndexOf('user');
         const hasToolResult = messages.slice(lastUserIdx + 1).some((m) => m.role === 'tool');
         const tools = json.tools ?? [];

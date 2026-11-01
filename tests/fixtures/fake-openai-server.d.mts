@@ -7,6 +7,8 @@ export interface FakeServerOptions {
   requireKey?: string | null;
   /** How long a prompt containing `SLOW` waits before its first token. */
   slowMs?: number;
+  /** In place of `slowMs`: a prompt containing `SLOW` waits until this many more `GET /v1/models` have been answered after it came (a watch's looks). */
+  slowUntilLooks?: number;
   models?: string[];
   /** How long `GET /v1/models` waits before answering (a busy server). */
   modelsDelayMs?: number;

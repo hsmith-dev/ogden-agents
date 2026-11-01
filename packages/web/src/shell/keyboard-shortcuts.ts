@@ -1,4 +1,5 @@
-import { driverShortcutLabel } from '@/terminal/driver-toggle';
+import { modifierShortcutLabel } from '@/ui/platform';
+import type { ShortcutTableGroup, ShortcutTableRow } from '@/ui/shortcut-table';
 
 /*
  * The keyboard shortcuts Ogden Agents has (EXPERIENCE.md Keyboard), the one
@@ -6,22 +7,9 @@ import { driverShortcutLabel } from '@/terminal/driver-toggle';
  * a shortcut that exists in the code; add a row here when one is added.
  */
 
-export interface KeyboardShortcut {
-  /**
-   * The keys, as the user presses them: each inner list is one key press
-   * (keys held together), the outer list presses made in turn (`g`, then `c`).
-   */
-  keys: readonly (readonly string[])[];
-  /** What it does, in a few plain words. */
-  action: string;
-  /** Where it works, when not everywhere. */
-  where?: string;
-}
-
-export interface KeyboardShortcutGroup {
-  label: string;
-  shortcuts: readonly KeyboardShortcut[];
-}
+/** A shortcut row and a group of them: the shapes Help's `ShortcutTable` renders. */
+export type KeyboardShortcut = ShortcutTableRow;
+export type KeyboardShortcutGroup = ShortcutTableGroup;
 
 /** The groups and their shortcuts, as this computer writes them (`⌘.` on Apple devices, `Ctrl+.` elsewhere). */
 export function keyboardShortcuts(platform?: string): readonly KeyboardShortcutGroup[] {
@@ -29,6 +17,9 @@ export function keyboardShortcuts(platform?: string): readonly KeyboardShortcutG
     {
       label: 'Go to',
       shortcuts: [
+        { keys: [[modifierShortcutLabel('K', platform)]], action: 'Command palette' },
+        { keys: [['g'], ['n']], action: 'New chat', where: 'In a project; elsewhere opens the palette' },
+        { keys: [[modifierShortcutLabel('N', platform)]], action: 'New chat', where: 'In the desktop app; a browser tab keeps it' },
         { keys: [['g'], ['c']], action: 'Chats', where: 'In a project' },
         { keys: [['g'], ['s']], action: 'Workbench Search', where: 'In a project' },
         { keys: [['g'], ['p']], action: 'Plan', where: 'In a project, with Planning on' },
@@ -54,7 +45,7 @@ export function keyboardShortcuts(platform?: string): readonly KeyboardShortcutG
         { keys: [['1']], action: 'Allow once', where: 'On a permission card' },
         { keys: [['2']], action: 'Always allow', where: 'On a permission card' },
         { keys: [['3']], action: 'Deny', where: 'On a permission card' },
-        { keys: [[driverShortcutLabel(platform)]], action: 'Switch between Chat and Terminal', where: 'In Developer mode' },
+        { keys: [[modifierShortcutLabel('.', platform)]], action: 'Switch between Chat and Terminal', where: 'In Developer mode' },
       ],
     },
   ];

@@ -421,6 +421,10 @@ export function SessionPage() {
   // A Needs you row (epic 26) names its permission card in the hash: scroll to and focus it once per
   // navigation, as soon as that card is pending. A card already answered leaves a plain session open;
   // not while the terminal drives (nothing in the read-only conversation takes focus).
+  // Story 26.10: while the router is on its way to another page (the new-chat draft's code still loading),
+  // this chat stays on screen with its own params; its composer takes nothing, so text typed or sent then
+  // waits for the next page's composer instead of reaching this chat.
+  const leaving = useRouterState({ select: (router) => router.location.pathname.replace(/\/+$/, '') !== `/w/${wsId}/s/${sesId}` });
   const linked = useRouterState({ select: (router) => ({ hash: router.location.hash, key: router.location.state.__TSR_key ?? router.location.state.key ?? router.location.href }), structuralSharing: true });
   // Each open counts, the same row again too: the router pushes no new entry for the URL already shown.
   const opens = useSyncExternalStore(subscribeNeedsYouOpened, needsYouOpenCount, needsYouOpenCount);
@@ -795,6 +799,7 @@ export function SessionPage() {
             working={state === 'working'}
             restore={restore}
             draftKey={chatDraftKey(wsId, sesId)}
+            disabled={leaving}
             footer={
               <ModelPicker
                 agentName={agentName}

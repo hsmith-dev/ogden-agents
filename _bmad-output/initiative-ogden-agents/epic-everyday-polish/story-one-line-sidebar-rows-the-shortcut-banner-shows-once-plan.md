@@ -90,8 +90,8 @@ context:
 
 ### Deferred (for the sweep)
 
-- `g n`, Cmd/Ctrl+N (26.2) and Cmd/Ctrl+K (26.3) rows belong in `src/shell/keyboard-shortcuts.ts` once those land, including the note that a browser tab keeps Cmd/Ctrl+N.
-- `tests/e2e-installed/onboarding-journey.spec.ts` and `agents-journey.spec.ts` were edited (Help opener, `rowsWithAgent`) but not run here (they need the packed tarball).
+- `g n`, Cmd/Ctrl+N (26.2) and Cmd/Ctrl+K (26.3) rows belong in `src/shell/keyboard-shortcuts.ts` once those land, including the note that a browser tab keeps Cmd/Ctrl+N. (26.9: done by 26.3.)
+- `tests/e2e-installed/onboarding-journey.spec.ts` and `agents-journey.spec.ts` were edited (Help opener, `rowsWithAgent`) but not run here (they need the packed tarball). (26.9: logged in `deferred-work.md`, 26.10.)
 
 ## Plan Change Log
 

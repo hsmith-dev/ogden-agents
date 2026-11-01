@@ -5,6 +5,7 @@ import { call, isApiError, type Auth } from '@/api/http';
 import { keepSaved } from '@/api/keep-saved';
 import { tabAuth } from '@/auth/tab-token';
 import { useEventInvalidation } from '@/events/use-event-invalidation';
+import { storageOf } from '@/ui/stored';
 import { useAppearance } from './appearance-provider';
 
 /**
@@ -97,13 +98,7 @@ function markCarried(storage: Pick<Storage, 'setItem'> | undefined): void {
   }
 }
 
-const browserStorage = (): Storage | undefined => {
-  try {
-    return window.localStorage;
-  } catch {
-    return undefined;
-  }
-};
+const browserStorage = storageOf;
 
 /**
  * Keeps the appearance copy of Developer mode in step with the server's

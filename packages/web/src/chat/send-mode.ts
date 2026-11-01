@@ -4,6 +4,7 @@ import { callNoContent } from '@/api/http';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { call, postJson } from '@/chat/chat-api';
 import { useEventInvalidation } from '@/events/use-event-invalidation';
+import { modifierShortcutLabel } from '@/ui/platform';
 import { useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
 /**
@@ -61,8 +62,7 @@ export function useWhileWorking(wsId: string): WhileWorking {
 export const otherWay = (whileWorking: WhileWorking): WhileWorking => (whileWorking === 'now' ? 'wait' : 'now');
 
 /** The shortcut that sends the other way, as this computer writes it. */
-export const otherWayShortcutLabel = (platform: string = typeof navigator === 'undefined' ? '' : navigator.userAgent): string =>
-  /Mac|iPhone|iPad/.test(platform) ? '⌘ Enter' : 'Ctrl+Enter';
+export const otherWayShortcutLabel = (platform?: string): string => modifierShortcutLabel('Enter', platform, ' ');
 
 const queuedPath = (wsId: string, sesId: string, messageId: string) => apiPath(API_ROUTES.sessionQueuedMessage, { wsId, sesId, messageId });
 

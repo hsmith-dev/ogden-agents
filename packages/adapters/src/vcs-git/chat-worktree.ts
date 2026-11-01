@@ -39,12 +39,15 @@
  * and older than the grace; a store no project maps to, only when every
  * project's store was found; `tmp` files older than the grace. Packs are
  * left.
+ *
+ * Moving a chat's changes (`moveChanges`, 27.4) is the working tree's
+ * (`working-tree.ts`), on the same git and store.
  */
 import { existsSync, lstatSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, unlinkSync, utimesSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isRealFolder, RUN_SHORT_ID, VcsError, type VcsChatWorktreePort, type VcsSnapshotPruned, type VcsSnapshotStorePort } from '@ogden-agents/core';
 import { checkBranch, checkPath, realOf, REVISION } from './checks.js';
-import { createWorkingTreeInternals, type GitWorkingTreeOptions, type Located } from './working-tree.js';
+import { createGitWorkingTree, createWorkingTreeInternals, type GitWorkingTreeOptions, type Located } from './working-tree.js';
 
 export interface GitChatWorktreeOptions extends GitWorkingTreeOptions {
   /** `<data>/cw`: only a direct child of it, a real folder, is saved or restored. */
@@ -89,6 +92,8 @@ export function createGitChatWorktree(options: GitChatWorktreeOptions): VcsChatW
   const { runner, present, storeOf, storeFolderOf, tempIndex, storeEnv, locate, snapshotLocated } = internals;
   const { run, must } = runner;
   const now = options.now ?? Date.now;
+  // The hand-off (27.4) moves changes with the working tree's own git and store.
+  const workingTree = createGitWorkingTree(options);
 
   const refuse = (reason: string): never => {
     throw new VcsError("This chat's copy can't be put away as it is, so it was kept.", { step: 'put_away', reason });
@@ -485,9 +490,8 @@ export function createGitChatWorktree(options: GitChatWorktreeOptions): VcsChatW
       return { branch: name, on: tip === undefined ? 'gone' : 'moved' };
     },
 
-    async moveChanges() {
-      // Hand off is 27.4's.
-      throw new VcsError("Moving a chat's changes isn't available yet.", { step: 'move' });
+    moveChanges(repoPath, input) {
+      return workingTree.moveChanges(repoPath, input);
     },
 
     async pruneSnapshots(entries, { olderThanMs, protect = [] }): Promise<VcsSnapshotPruned> {

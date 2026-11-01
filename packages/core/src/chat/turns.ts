@@ -23,6 +23,7 @@ import type { Models } from './model.js';
 import type { PermissionModes } from './permission-mode.js';
 import type { Replies } from './replies.js';
 import { capDiffs, sameDiffs, toolCallPayload, toolKind, toolStatus } from './tool-calls.js';
+import { refuseWhileFolderMoves } from './folder-hold.js';
 import type { Chat, Live, ToolCallState, Turn } from './types.js';
 
 export function createTurns(
@@ -349,6 +350,8 @@ export function createTurns(
       if (ctx.agents.get(ctx.agentIdOf(session)) === undefined) throw new AgentRemovedError();
       const workspace = getWorkspace(workspaceId);
       // Between drivers first: a switch back (or a CLI's exit) still reads `terminal` until it is done (story 3.4).
+      // A hand-off is moving this chat's folder (27.4): first, so the moving chat says so too.
+      refuseWhileFolderMoves(ctx, workspace, session);
       if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
       if (session.driver === 'terminal') throw new DriverIsTerminalError();
       // A copy put away (or being put away or restored) takes no message, queued or not (27.6).

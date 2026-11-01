@@ -9,7 +9,9 @@
  * removed by `VcsPort.removeWorktree`, or `forget`); Restore brings them
  * back, in place when the folder is still there. `moveChanges` answers
  * `conflict` when `to` has a change to any of the same files, else moves
- * them all.
+ * them all; one from a folder in `failingMoves` throws, moving nothing,
+ * and one from a folder in `leavingBehind` copies them, leaving them there
+ * too (27.4).
  */
 import { VcsError, type VcsChatWorktreePort, type VcsMoveChanges, type VcsPutAway, type VcsRestoreResult } from '@ogden-agents/core';
 
@@ -35,6 +37,10 @@ export interface MemoryVcsChatWorktree extends VcsChatWorktreePort {
   readonly unsafe: Set<string>;
   /** Snapshot trees saved, by tree id: the file names they hold. */
   readonly snapshots: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Folders (by path) whose `moveChanges` from them throws, moving nothing, with the `targetClean` it reports (27.4). */
+  readonly failingMoves: Map<string, { targetClean?: boolean | undefined }>;
+  /** Folders (by path) a move from leaves its files in too (`leftBehind`: all of them), 27.4. */
+  readonly leavingBehind: Set<string>;
 }
 
 let trees = 0;
@@ -49,6 +55,8 @@ export function createMemoryVcsChatWorktree(): MemoryVcsChatWorktree {
   const takenPaths = new Set<string>();
   const unsafe = new Set<string>();
   const byContent = new Map<string, string>();
+  const failingMoves = new Map<string, { targetClean?: boolean | undefined }>();
+  const leavingBehind = new Set<string>();
   const changes = (path: string): Set<string> => {
     let found = folders.get(path);
     if (found === undefined) {
@@ -68,6 +76,8 @@ export function createMemoryVcsChatWorktree(): MemoryVcsChatWorktree {
     takenPaths,
     unsafe,
     snapshots,
+    failingMoves,
+    leavingBehind,
     async saveForPutAway(repoPath, worktreePath, branch): Promise<VcsPutAway> {
       calls.push(`saveForPutAway ${repoPath} ${worktreePath} ${branch}`);
       if (unsafe.has(worktreePath)) throw new VcsError("This chat's copy can't be put away as it is.", { step: 'put_away' });
@@ -93,15 +103,20 @@ export function createMemoryVcsChatWorktree(): MemoryVcsChatWorktree {
       return { branch, on: 'saved' };
     },
     async moveChanges(repoPath, { from, to }): Promise<VcsMoveChanges> {
-      calls.push(`moveChanges ${repoPath} ${from} ${to}`);
-      const moving = changes(from);
-      const target = changes(to);
+      calls.push(`moveChanges ${repoPath} ${from.path} ${to.path}`);
+      const moving = changes(from.path);
+      const target = changes(to.path);
+      const snapshots = { from: nextTree(), to: nextTree() };
+      const failing = failingMoves.get(from.path);
+      if (failing !== undefined) throw new VcsError("git couldn't move the changes.", { step: 'move', snapshots, ...(failing.targetClean === undefined ? {} : { targetClean: failing.targetClean }) });
       const clashes = [...moving].filter((file) => target.has(file)).length;
-      if (clashes > 0) return { result: 'conflict', files: clashes };
+      if (clashes > 0) return { result: 'conflict', files: clashes, leftBehind: 0, snapshots };
       const files = moving.size;
       for (const file of moving) target.add(file);
-      moving.clear();
-      return { result: 'moved', files };
+      // A source that couldn't be cleaned keeps its files too (`leavingBehind`).
+      const leftBehind = leavingBehind.has(from.path) ? files : 0;
+      if (leftBehind === 0) moving.clear();
+      return { result: 'moved', files, leftBehind, snapshots };
     },
   };
 }

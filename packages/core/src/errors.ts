@@ -844,12 +844,13 @@ export class RestoreFailedError extends CoreError {
 
 /**
  * Retention (CAP-35, 27.6): the chat's copy is put away, or being put away,
- * so no message starts. 409 `worktree_put_away`; nothing was sent.
+ * so no message starts and it doesn't move (27.4). 409 `worktree_put_away`;
+ * nothing was sent or moved.
  */
 export class WorktreePutAwayError extends CoreError {
   override readonly name = 'WorktreePutAwayError';
-  constructor() {
-    super('worktree_put_away', WORKTREE_PUT_AWAY_SEND_MESSAGE);
+  constructor(message: string = WORKTREE_PUT_AWAY_SEND_MESSAGE) {
+    super('worktree_put_away', message);
   }
 }
 

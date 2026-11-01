@@ -144,8 +144,12 @@ export const HANDOFF_TO_THIS_FOLDER_DESCRIPTION = 'Brings this chat and its chan
 /** The hand-off's menu item in a this-folder chat, and its line. */
 export const HANDOFF_TO_WORKTREE_LABEL = 'Move to its own worktree';
 export const HANDOFF_TO_WORKTREE_DESCRIPTION = 'Takes this chat and its changes to a separate copy on its own branch.';
+/** The hand-off's confirmation title (its sentence is the item's line). */
+export const HANDOFF_CONFIRM_TITLE = 'Move this chat?';
 /** The hand-off's confirm button. */
 export const HANDOFF_CONFIRM_LABEL = 'Move';
+/** A hand-off that couldn't finish (409 `invalid_operation`): nothing moved. */
+export const HANDOFF_FAILED_TEXT = "This chat couldn't move. Its changes are where they were.";
 /** The transcript's divider after a hand-off. */
 export const handOffDividerText = (location: ChatLocation, branch: string | null): string =>
   location === 'this_folder' ? 'Moved to this folder' : branch === null ? 'Moved to its own worktree' : `Moved to its own worktree: ${branch}`;
@@ -154,8 +158,15 @@ export const handOffConflictText = (files: number): string =>
   `This folder has its own changes to ${files} of the same files. Commit or set them aside first, then move.`;
 /** The 409 `handoff_conflict` message (the server counts no files in it). */
 export const HANDOFF_CONFLICT_MESSAGE = 'This folder has its own changes to some of the same files. Commit or set them aside first, then move.';
+/** A hand-off to its own worktree refused because the chat's kept branch changed the same files (409 `handoff_conflict`). */
+export const handOffWorktreeConflictText = (files: number): string =>
+  `This chat's branch changed ${files} of the same files since, so its changes can't go there. Commit or set them aside first, then move.`;
 /** A hand-off asked for while the agent works or waits. */
 export const handOffMidTurnText = (agentName: string): string => `Move once ${agentName} has finished.`;
+/** A hand-off refused (409 `worktree_put_away`) because the chat's copy is put away (27.6), or being put away or restored. */
+export const HANDOFF_PUT_AWAY_TEXT = "This chat's copy was put away to save space. Restore it, then move it.";
+/** A hand-off refused (409 `agent_mid_turn`) because another chat working in the project folder holds it. */
+export const HANDOFF_FOLDER_BUSY_TEXT = 'Move once the agents working in this folder have finished.';
 
 /** A chat whose copy retention put away. */
 export const WORKTREE_PUT_AWAY_TEXT = "This chat's copy was put away to save space.";

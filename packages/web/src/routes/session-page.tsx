@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ArrowsLeftRight, ChatCircle, House, Stop } from '@phosphor-icons/react';
-import { chatOnMachineText, DELETE_CHAT_NOT_DELETABLE_TEXT, DELETE_CHAT_REMOTE_TEXT, DELETE_CHAT_TERMINAL_TEXT, deleteChatBusyText, WORKTREE_BADGE_TOOLTIP_TEXT, WORKTREE_PUT_AWAY_COMPOSER_TEXT, worktreeBadgeLabel, type PermissionMode } from '@ogden-agents/shared';
+import { chatOnMachineText, DELETE_CHAT_NOT_DELETABLE_TEXT, DELETE_CHAT_REMOTE_TEXT, DELETE_CHAT_TERMINAL_TEXT, deleteChatBusyText, HANDOFF_PUT_AWAY_TEXT, handOffMidTurnText, WORKTREE_BADGE_TOOLTIP_TEXT, WORKTREE_PUT_AWAY_COMPOSER_TEXT, worktreeBadgeLabel, type PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
@@ -16,13 +16,14 @@ import { onBeforeChatDetailChange, setChatDetail, useChatDetail } from '@/chat/d
 import { NewChatButton } from '@/chat/new-chat-button';
 import { useOpenNewChat } from '@/chat/new-chat';
 import { DeleteChatDialog } from '@/chat/delete-chat-dialog';
+import { HandOffDialog } from '@/chat/hand-off-dialog';
 import { CONTINUE_WITH_ANOTHER_AGENT, SessionMenu } from '@/chat/session-menu';
 import { LocationChip, SessionAgentChip } from '@/chat/setup-row';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
 import { sessionView, type TranscriptCheckIn, type TranscriptItem } from '@/chat/transcript';
-import { AgentChangedMarker, EarlierHistory, InterruptedNote, Message, ResumedMarker, TurnChangesRow } from '@/chat/transcript-parts';
+import { AgentChangedMarker, EarlierHistory, InterruptedNote, LocationChangedMarker, Message, ResumedMarker, TurnChangesRow } from '@/chat/transcript-parts';
 import { QueuedMessages } from '@/chat/queued-messages';
 import { otherWayShortcutLabel, useWhileWorking } from '@/chat/send-mode';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
@@ -69,6 +70,8 @@ const itemKey = (item: TranscriptItem, index: number): string =>
           ? `document-${item.path}`
           : item.type === 'agent_changed'
             ? `agent-${item.at}-${index}`
+          : item.type === 'location_changed'
+            ? `location-${item.at}-${index}`
           : item.type === 'interrupted'
             ? `interrupted-${item.messageId}`
           : item.type === 'turn_changes'
@@ -143,6 +146,7 @@ export function SessionPage() {
   const queryClient = useQueryClient();
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [handOffOpen, setHandOffOpen] = useState(false);
   const openNewChat = useOpenNewChat();
   // Continue with another agent stays open for a chat whose agent was removed: the server hands it over.
   const severalAgents = (chatAgents.data?.agents.length ?? 0) > 1;
@@ -404,10 +408,17 @@ export function SessionPage() {
   const resumedSeq = useMemo(() => events.findLast((event) => event.type === 'session.resumed')?.seq, [events]);
   // And when the chat continues with another agent (handoff): its modes are the new agent's.
   const agentChangedSeq = useMemo(() => events.findLast((event) => event.type === 'session.agent_changed')?.seq, [events]);
+  // And when it moved between this folder and its own worktree (27.4): its place, branch and the sidebar's row follow.
+  const locationChangedSeq = useMemo(() => events.findLast((event) => event.type === 'session.location_changed')?.seq, [events]);
   const agentWorking = state === 'working';
   useEffect(() => {
     if (agentWorking || resumedSeq !== undefined || agentChangedSeq !== undefined) void refetchSession();
   }, [agentWorking, resumedSeq, agentChangedSeq, refetchSession]);
+  useEffect(() => {
+    if (locationChangedSeq === undefined) return;
+    void refetchSession();
+    void queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
+  }, [locationChangedSeq, refetchSession, queryClient, wsId]);
 
   // Whether the waiting card is out of view, for the "waiting for you" bar. Not while the terminal
   // drives: the conversation is read-only then, and nothing in it takes focus (3.6 review F2).
@@ -533,6 +544,17 @@ export function SessionPage() {
         : busy || switchingTo !== undefined
           ? deleteChatBusyText(agentName)
           : undefined;
+  // Hand off (27.4): a started local chat, never while its copy is put away (27.6), mid-turn, switching or while the terminal drives.
+  const location = (session.data?.session.worktreePath ?? null) === null ? 'this_folder' : 'worktree';
+  const handOffReason = putAway
+    ? HANDOFF_PUT_AWAY_TEXT
+    : terminalDrives
+    ? DELETE_CHAT_TERMINAL_TEXT
+    : switchingTo !== undefined
+      ? 'This chat is switching to or from the terminal.'
+      : busy
+        ? handOffMidTurnText(agentName)
+        : undefined;
 
   /** A send refused with `agent_removed` (story 21.4): read the agent list again, so the page closes the chat. */
   const noteAgentRemoved = (failure: unknown) => {
@@ -631,6 +653,18 @@ export function SessionPage() {
           openNewChat(wsId);
         }}
       />
+      <HandOffDialog
+        open={handOffOpen}
+        onOpenChange={setHandOffOpen}
+        wsId={wsId}
+        sesId={sesId}
+        to={location === 'worktree' ? 'this_folder' : 'worktree'}
+        onMoved={() => {
+          void refetchSession();
+          void queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
+          focusComposer();
+        }}
+      />
       <HandoffDialog
         open={handoffOpen}
         onOpenChange={setHandoffOpen}
@@ -709,6 +743,8 @@ export function SessionPage() {
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
                   ) : item.type === 'agent_changed' ? (
                     <AgentChangedMarker key={`agent-${item.at}-${index}`} agentName={nameOf(item.agentId)} />
+                  ) : item.type === 'location_changed' ? (
+                    <LocationChangedMarker key={`location-${item.at}-${index}`} location={item.location} branch={item.branch} />
                   ) : item.type === 'interrupted' ? (
                     <InterruptedNote key={`interrupted-${item.messageId}`} cancelledRequest={item.cancelledRequest} />
                   ) : item.type === 'turn_changes' ? (
@@ -899,9 +935,15 @@ export function SessionPage() {
                   changing={modeChanging}
                   onChoose={(mode, confirmed) => changeMode(mode, confirmed)}
                 />
-                {/* A remote chat's place is its machine (27.5). */}
+                {/* A remote chat's place is its machine (27.5); a local chat moves between this folder and its own worktree (27.4). */}
                 {session.data === undefined ? null : (
-                  <LocationChip value={(session.data.session.worktreePath ?? null) === null ? 'this_folder' : 'worktree'} machineId={machineId} branch={branch} />
+                  <LocationChip
+                    value={location}
+                    machineId={machineId}
+                    branch={branch}
+                    onHandOff={sessionKind === 'chat' ? () => setHandOffOpen(true) : undefined}
+                    handOffReason={handOffReason}
+                  />
                 )}
               </>
             }

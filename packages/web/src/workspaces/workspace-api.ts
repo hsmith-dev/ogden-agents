@@ -86,7 +86,8 @@ export async function createFolder(parent: string, name: string, auth: Auth = ta
 function useListInvalidation(): void {
   useEventInvalidation((event) => {
     if (event.type === 'workspace.created') return [['workspaces']];
-    if ((event.type === 'session.created' || event.type === 'workspace.history_deleted' || event.type === 'workspace.chat_deleted') && event.workspaceId !== null) return [['sessions', event.workspaceId]];
+    // A hand-off (27.4) changes a chat's folder and branch: the list is read again, so its row and the Workbench follow.
+    if ((event.type === 'session.created' || event.type === 'workspace.history_deleted' || event.type === 'workspace.chat_deleted' || event.type === 'session.location_changed') && event.workspaceId !== null) return [['sessions', event.workspaceId]];
     return [];
   });
 }
@@ -190,6 +191,10 @@ export function useAllSessionsStatus(): AllSessions {
         // Continued with another agent (handoff): the row names its new agent.
         const session = byId.get(event.payload.sessionId);
         if (session !== undefined) byId.set(session.id, { ...session, agentId: event.payload.agentId });
+      } else if (event.type === 'session.location_changed') {
+        // Moved to this folder (27.4): no branch and no copy before the refetch lands; a move to a worktree waits for it (the path is never evented).
+        const session = byId.get(event.payload.sessionId);
+        if (session !== undefined && event.payload.location === 'this_folder') byId.set(session.id, { ...session, worktreePath: null, branch: null });
       } else if (event.type === 'workspace.history_deleted') {
         for (const [id, session] of byId) if (session.workspaceId === event.workspaceId) byId.delete(id);
       } else if (event.type === 'workspace.chat_deleted') {

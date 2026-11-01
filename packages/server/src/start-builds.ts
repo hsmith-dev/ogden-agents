@@ -48,12 +48,16 @@ export const WORKING_TREE_GIT_TIMEOUT_MS = 30_000;
  * A test's own (`StartOptions.vcsWorkingTreePort`) replaces it.
  */
 export function createServerWorkingTree(options: StartOptions, dataDir: string): VcsWorkingTreePort {
-  return options.vcsWorkingTreePort ?? createGitWorkingTree({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), snapshotsRoot: snapshotsRootOf(dataDir), timeoutMs: WORKING_TREE_GIT_TIMEOUT_MS });
+  return options.vcsWorkingTreePort ?? gitWorkingTree(dataDir);
 }
+
+const gitWorkingTree = (dataDir: string) =>
+  createGitWorkingTree({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), snapshotsRoot: snapshotsRootOf(dataDir), timeoutMs: WORKING_TREE_GIT_TIMEOUT_MS });
 
 /**
  * Retention's git (27.6): a chat worktree's changes saved before it is put
- * away, Restore, and the snapshot store's cleanup, with the Workbench's
+ * away, Restore, and the snapshot store's cleanup; a chat's hand-off between
+ * this folder and its own worktree (27.4) moves its changes with it, with the Workbench's
  * environment, hooks folder and store. A test's own
  * (`StartOptions.vcsChatWorktree`) replaces it.
  */

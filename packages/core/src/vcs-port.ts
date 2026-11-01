@@ -93,8 +93,12 @@ export interface VcsPort {
   staged(repoPath: string): Promise<string[]>;
   /** Puts `paths` (repo-relative) back as `HEAD` has them, in the index and the working tree. */
   restore(repoPath: string, paths: readonly string[]): Promise<void>;
-  /** Creates `path` (which must not exist) as a worktree on a new `branch` started at `base`. */
-  addWorktree(repoPath: string, input: { path: string; branch: string; base: string }): Promise<void>;
+  /**
+   * Creates `path` (which must not exist) as a worktree on a new `branch`
+   * started at `base`; with `existingBranch` (a chat's kept branch moved to
+   * a worktree again, 27.4), on that branch as it is (`base` unused).
+   */
+  addWorktree(repoPath: string, input: { path: string; branch: string; base: string; existingBranch?: boolean | undefined }): Promise<void>;
   /** The worktree's git folders, for its branch `branch` (one of the form `<prefix>/<folder>/<name>`). */
   worktreeGitPaths(worktreePath: string, branch: string): Promise<VcsWorktreeGitPaths>;
   /**
@@ -292,10 +296,20 @@ export interface VcsPutAway {
  */
 export type VcsRestoreResult = { branch: string; on: RestoredOn } | 'path_taken';
 
-/** What moving uncommitted changes did: `conflict` (the target has its own changes to `files` of the same files) moves nothing. */
+/**
+ * What moving uncommitted changes did: `conflict` (the target has its own
+ * changes to `files` of the same files, or the changes don't apply there)
+ * moves nothing. `moved`: the target holds all `files`; `leftBehind` of
+ * them still differ from `HEAD` in the source (it couldn't be cleaned, or
+ * changed meanwhile), never thrown. `snapshots` are both folders' trees in
+ * AD-37's store, taken before anything moved (for the log; never a path);
+ * a thrown `VcsError` after them carries them in `details.snapshots`.
+ */
 export interface VcsMoveChanges {
   result: 'moved' | 'conflict';
   files: number;
+  leftBehind: number;
+  snapshots: { from: string; to: string };
 }
 
 /**
@@ -340,12 +354,18 @@ export interface VcsChatWorktreePort {
    */
   restore(repoPath: string, input: { path: string; branch: string; head: string; snapshotTree: string | null; newBranch: string }): Promise<VcsRestoreResult>;
   /**
-   * Hand off (user decision 2026-11-01): moves the uncommitted changes from
-   * the folder `from` to the folder `to` (the project folder or the chat's
-   * worktree), all or nothing; `conflict` when `to` has its own changes to
-   * any of the same files.
+   * Hand off (user decision 2026-11-01; 27.4): moves the uncommitted
+   * changes (staged, unstaged and untracked) from the folder `from` to the
+   * folder `to` (the project folder, or the chat's worktree with its pin),
+   * all or nothing: both are snapshotted first, the changes are applied to
+   * `to` (checked first), then taken from `from`; they arrive unstaged.
+   * `conflict` when `to` has its own changes to any of the same files or
+   * they don't apply there. Once `to` holds them they are never undone (the
+   * source is cleaned best effort, `leftBehind` counted). A throw leaves
+   * `from` holding its changes; its `details` carry `snapshots` and, when
+   * writing `to` failed partway, `targetClean` (whether `to` reads as before).
    */
-  moveChanges(repoPath: string, input: { from: string; to: string }): Promise<VcsMoveChanges>;
+  moveChanges(repoPath: string, input: { from: VcsFolder; to: VcsFolder }): Promise<VcsMoveChanges>;
 }
 
 /** A git operation failed; `message` is plain words, `details` are for the log and hold no secret. */

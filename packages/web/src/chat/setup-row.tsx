@@ -8,6 +8,10 @@ import {
   CHAT_MACHINE_UNREACHABLE_TEXT,
   CHAT_REMOTE_FIXED_TEXT,
   CHAT_REMOTE_MACHINE_WORDS,
+  HANDOFF_TO_THIS_FOLDER_DESCRIPTION,
+  HANDOFF_TO_THIS_FOLDER_LABEL,
+  HANDOFF_TO_WORKTREE_DESCRIPTION,
+  HANDOFF_TO_WORKTREE_LABEL,
   type ChatLocation,
   type RemoteMachine,
   type RemoteMachineId,
@@ -53,6 +57,10 @@ export interface LocationChipProps {
   localOnlyReason?: string | undefined;
   /** A started worktree chat's branch (27.3), shown beside the word. */
   branch?: string | null | undefined;
+  /** A started chat's hand-off to the other place (27.4); absent: the place is fixed (a planning chat). */
+  onHandOff?: (() => void) | undefined;
+  /** Why the hand-off can't be taken now (the agent works or waits, the terminal drives). */
+  handOffReason?: string | undefined;
 }
 
 /** A machine's words in the Location menu (27.5): its name with its live state, and the sentence under it. */
@@ -73,9 +81,12 @@ function machineWords(machine: RemoteMachine, state: MachineState | undefined, l
  * the server when the menu opens; then Add a remote machine. A machine the
  * chosen agent can't take, can't be reached, or whose host key changed is
  * disabled but focusable with why. In a started chat it shows the place
- * (a remote chat its machine) and the others are disabled with why.
+ * (a remote chat its machine) and the others are disabled with why; a
+ * started local chat that can move (`onHandOff`) lists its own place and
+ * one hand-off item instead (27.4: Move to its own worktree, Move to this
+ * folder) with its line, or disabled with why. A remote chat never moves.
  */
-export function LocationChip({ value, machineId = null, onChange, localOnlyReason, branch }: LocationChipProps) {
+export function LocationChip({ value, machineId = null, onChange, localOnlyReason, branch, onHandOff, handOffReason }: LocationChipProps) {
   const started = onChange === undefined;
   const [open, setOpen] = useState(false);
   const machines = useRemoteMachines();
@@ -87,6 +98,9 @@ export function LocationChip({ value, machineId = null, onChange, localOnlyReaso
   const machine = remote ? (machines.data ?? []).find((each) => each.id === machineId) : undefined;
   const Glyph = remote ? Desktop : LOCATION_GLYPHS[value];
   const shownLabel = remote ? (machine?.label ?? CHAT_REMOTE_MACHINE_WORDS) : CHAT_LOCATION_LABELS[value];
+  // A started local chat moves between this folder and its own worktree (27.4); a remote one stays on its machine.
+  const handOff = started && !remote && onHandOff !== undefined;
+  const handOffBlocked = handOffReason !== undefined;
   // A started worktree chat names its branch (27.3).
   const shownBranch = started && !remote && value === 'worktree' && branch !== undefined && branch !== null ? branch : undefined;
   const reasonFor = (each: ChatLocation): string | undefined => {
@@ -124,7 +138,7 @@ export function LocationChip({ value, machineId = null, onChange, localOnlyReaso
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" data-testid="location-menu">
         <DropdownMenuLabel>{started ? 'Where this chat works' : 'Where the new chat works'}</DropdownMenuLabel>
-        {CHAT_LOCATIONS.map((each) => {
+        {CHAT_LOCATIONS.filter((each) => !handOff || each === value).map((each) => {
           const reason = reasonFor(each);
           return (
             <DropdownMenuChoiceItem
@@ -186,6 +200,34 @@ export function LocationChip({ value, machineId = null, onChange, localOnlyReaso
             </DropdownMenuItem>
           </>
         )}
+        {handOff ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              data-testid="location-hand-off"
+              data-to={value === 'worktree' ? 'this_folder' : 'worktree'}
+              // Unavailable but focusable: the keyboard and a screen reader still reach its reason.
+              aria-disabled={handOffBlocked || undefined}
+              aria-describedby="location-hand-off-line"
+              className={cn('flex-col items-start gap-0.5', handOffBlocked && 'opacity-50')}
+              onSelect={(event) => {
+                if (handOffBlocked) {
+                  event.preventDefault();
+                  return;
+                }
+                onHandOff?.();
+              }}
+            >
+              <span className="flex items-center gap-2">
+                <ArrowsLeftRight aria-hidden />
+                {value === 'worktree' ? HANDOFF_TO_THIS_FOLDER_LABEL : HANDOFF_TO_WORKTREE_LABEL}
+              </span>
+              <span id="location-hand-off-line" className="max-w-72 text-caption text-muted-foreground" data-testid="location-hand-off-line">
+                {handOffReason ?? (value === 'worktree' ? HANDOFF_TO_THIS_FOLDER_DESCRIPTION : HANDOFF_TO_WORKTREE_DESCRIPTION)}
+              </span>
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

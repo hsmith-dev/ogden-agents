@@ -52,11 +52,53 @@
  * first, and then forgets it. A restart forgets every one. A This turn
  * revert needs each hunk's lines in the folder's file exactly once. A
  * write to the folder keeps the file's own permission bits.
+ *
+ * Moving changes (27.4, a chat's hand-off): both folders are located (a
+ * worktree by its pin, and only a real folder, never a link) and refused,
+ * before anything is snapshotted, while a merge, rebase, cherry-pick or
+ * revert is in progress, with unmerged entries, or with entries marked
+ * assume-unchanged or skip-worktree. Both are snapshotted into the store as
+ * above before anything moves; every answer and every throw after that
+ * carries both tree ids (the store may then hold the only copy). The moved
+ * paths are `diff-tree` of the source's `HEAD` tree against its snapshot (a
+ * gitlink, or a path whose folders or file are not plain, refuses it all);
+ * the target's own changes are its `HEAD` tree against its snapshot, and any
+ * path in both is a conflict. A moved file whose raw bytes aren't its
+ * snapshot blob (git would convert its line endings) and text that isn't
+ * UTF-8 are refused before anything is written; after the apply the
+ * target's raw bytes are checked against the same blobs, and a mismatch is
+ * a failed apply. The patch is `diff --binary
+ * --full-index --no-renames` of those two trees (the store an alternate),
+ * applied to the target's files only (never its index): `--check` first (a
+ * failed check is a conflict over the moved files that differ between the
+ * two `HEAD`s, nothing written), never `--3way`. `git apply` writes file by
+ * file, so an apply that fails partway (or times out) is reversed (`-R`,
+ * checked) and thrown with `targetClean` (whether that worked and the
+ * target reads as its snapshot); never put back from the snapshot, which
+ * would overwrite another write; the source is untouched. Once the target
+ * applied it is never undone: the source is cleaned best effort (`-R`,
+ * `--check` first) and snapshotted again, and a moved path still differing
+ * from its `HEAD` is counted `leftBehind` (never thrown). Each moved file
+ * arrives with the source's exact mode, and what the source keeps goes back
+ * to its own. Last, the source's index entries for the moved paths that
+ * left it, as the snapshot has them (or intent-to-add ones of files gone),
+ * go back to its `HEAD`'s (in chunks, best effort), so the changes arrive
+ * unstaged; one partly staged keeps its staged version.
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
-import { isRealFolder, VcsError, type VcsChangedFiles, type VcsChangesTarget, type VcsFolder, type VcsHunkResult, type VcsWorkingTreePort } from '@ogden-agents/core';
+import {
+  isRealFolder,
+  VcsError,
+  type VcsChangedFiles,
+  type VcsChangesTarget,
+  type VcsChatWorktreePort,
+  type VcsFolder,
+  type VcsHunkResult,
+  type VcsMoveChanges,
+  type VcsWorkingTreePort,
+} from '@ogden-agents/core';
 import {
   GIT_POINTER_UNUSUAL_MESSAGE,
   HUNK_ACTIONS_BY_VIEW,
@@ -279,6 +321,15 @@ function parseListing(out: string): { raw: RawEntry[]; counts: Map<string, { add
   return { raw, counts };
 }
 
+/** The working tree's port, with the chat-worktree half's hand-off (27.4). */
+export type GitWorkingTree = VcsWorkingTreePort & Pick<VcsChatWorktreePort, 'moveChanges'>;
+
+/** The all-zero object id `update-index --index-info` removes an entry with. */
+const NO_OBJECT = '0'.repeat(40);
+
+/** How many paths go on one git command line (a hand-off's index reads and restore patches, 27.4). */
+const PATH_CHUNK = 200;
+
 /** The working tree's own git and store (27.6: shared with `chat-worktree.ts`, which saves and restores chat worktrees through them). */
 export interface WorkingTreeInternals {
   readonly runner: GitRunner;
@@ -460,9 +511,9 @@ export function createWorkingTreeInternals(options: GitWorkingTreeOptions): Work
   return { runner, present, realFolder, storeOf, storeFolderOf, tempIndex, storeEnv, locate, snapshotLocated };
 }
 
-export function createGitWorkingTree(options: GitWorkingTreeOptions): VcsWorkingTreePort {
+export function createGitWorkingTree(options: GitWorkingTreeOptions): GitWorkingTree {
   const internals = createWorkingTreeInternals(options);
-  const { runner, storeOf, tempIndex, storeEnv, locate } = internals;
+  const { runner, present, storeOf, tempIndex, storeEnv, locate } = internals;
   const { run, must } = runner;
 
   /** The branch Branch compares with and its commit: `origin/HEAD`'s, else `main`, else `master`. */
@@ -671,7 +722,293 @@ export function createGitWorkingTree(options: GitWorkingTreeOptions): VcsWorking
     return id;
   };
 
+  /** Snapshots the located folder's working tree (tracked and untracked, not ignored) into the store: its tree id. */
+  const snapshotOf = internals.snapshotLocated;
+
+  /** The located folder's `HEAD` tree. */
+  const headTree = async (located: Located): Promise<string> => {
+    const tree = (await must(located.cwd, [...located.flags, 'rev-parse', '--verify', 'HEAD^{tree}'], 'read the branch', undefined, located.env)).trim();
+    if (!REVISION.test(tree)) throw new VcsError("git couldn't read the branch.", { step: 'move' });
+    return tree;
+  };
+
+  /** The paths that differ between two trees (the store an alternate), with their modes. */
+  const treeChanges = async (located: Located, store: string, from: string, to: string): Promise<RawEntry[]> => {
+    if (from === to) return [];
+    const out = await must(located.cwd, [...located.flags, 'diff-tree', '-r', '--no-renames', '--no-abbrev', '--raw', '-z', from, to], 'read the changes', 64 * 1024 * 1024, { ...located.env, GIT_ALTERNATE_OBJECT_DIRECTORIES: store });
+    return parseListing(out).raw;
+  };
+
+  /** Whether git runs at the top of the repo's working tree in the located folder (a hand-off's paths are the repo's). */
+  const atTop = async (located: Located): Promise<boolean> =>
+    (await must(located.cwd, [...located.flags, 'rev-parse', '--show-prefix'], 'read the repository', undefined, located.env)).trim() === '';
+
+  /** `paths` in lists short enough for one command line (thousands of long paths would be too long for one). */
+  const inChunks = (paths: readonly string[]): string[][] => {
+    const out: string[][] = [];
+    for (let at = 0; at < paths.length; at += PATH_CHUNK) out.push(paths.slice(at, at + PATH_CHUNK));
+    return out;
+  };
+
+  /**
+   * One `git apply` of `patch` to the located folder's files only (never its index): `--check` alone, or the
+   * apply itself. Whether git took it; a throw (a timeout, a kill) is `false` too, never a rejection.
+   */
+  const applyOnce = async (located: Located, patch: string, flags: { reverse: boolean; check: boolean }): Promise<boolean> => {
+    try {
+      const out = await run(located.cwd, [...located.flags, ...APPLY, ...(flags.reverse ? ['-R'] : []), ...(flags.check ? ['--check'] : []), '-'], 64 * 1024 * 1024, located.env, patch);
+      return out.code === 0;
+    } catch {
+      return false;
+    }
+  };
+
+  /** `--check` then the apply: whether both took it. */
+  const applyChecked = async (located: Located, patch: string, reverse: boolean): Promise<boolean> =>
+    (await applyOnce(located, patch, { reverse, check: true })) && (await applyOnce(located, patch, { reverse, check: false }));
+
+  /** The patch from tree `from` to tree `to` (the store an alternate): whole, or only `paths` (in chunks). */
+  const patchBetween = async (located: Located, store: string, from: string, to: string, paths?: readonly string[]): Promise<string> => {
+    const args = [...located.flags, '-c', 'core.quotePath=false', '--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '--binary', '--full-index', '--src-prefix=a/', '--dst-prefix=b/', from, to];
+    const env = { ...located.env, GIT_ALTERNATE_OBJECT_DIRECTORIES: store };
+    if (paths === undefined) return must(located.cwd, args, 'read the changes', 256 * 1024 * 1024, env);
+    let patch = '';
+    for (const chunk of inChunks(paths)) patch += await must(located.cwd, [...args, '--', ...chunk], 'read the changes', 256 * 1024 * 1024, env);
+    return patch;
+  };
+
+  /** Which of `paths` differ between tree `from` and the located folder as it reads now (snapshotted again). */
+  const differingNow = async (located: Located, store: string, from: string, paths: ReadonlySet<string>): Promise<Set<string>> => {
+    const now = await snapshotOf(located);
+    return new Set((await treeChanges(located, store, from, now)).filter((entry) => paths.has(entry.path)).map((entry) => entry.path));
+  };
+
+  /** Each of `paths` that is a regular file in `cwd` now: its permission bits. */
+  const modesOf = (cwd: string, paths: readonly string[]): Map<string, number> => {
+    const modes = new Map<string, number>();
+    for (const path of paths) {
+      const stat = statOf(join(cwd, ...path.split('/')));
+      if (stat?.isFile() === true) modes.set(path, stat.mode & 0o7777);
+    }
+    return modes;
+  };
+
+  /**
+   * A write by `git apply` recreates a file with git's mode (and with `core.fileMode=false` none at all): each of
+   * `paths` that is a regular file is set to the exact mode `modes` holds for it (a 0600 file stays so, a 0755
+   * script stays runnable, a setuid bit is kept), best effort, never through a link.
+   */
+  const setModes = (cwd: string, paths: readonly string[], modes: ReadonlyMap<string, number>): void => {
+    for (const path of paths) {
+      const mode = modes.get(path);
+      if (mode === undefined) continue;
+      const file = join(cwd, ...path.split('/'));
+      const stat = statOf(file);
+      if (stat?.isFile() !== true || (stat.mode & 0o7777) === mode) continue;
+      try {
+        chmodSync(file, mode);
+      } catch {
+        // Best effort: the content moved either way.
+      }
+    }
+  };
+
+  /** `path` → `<mode> <object>` of a `ls-files --stage -z` (stage 0 only; a path with a conflict's stages is `conflicted`) or `ls-tree -r -z` listing. */
+  const entriesOf = (out: string, staged: boolean): Map<string, string> => {
+    const entries = new Map<string, string>();
+    for (const record of out.split('\0')) {
+      const tab = record.indexOf('\t');
+      if (tab <= 0) continue;
+      const fields = record.slice(0, tab).split(' ');
+      const path = record.slice(tab + 1);
+      if (staged) entries.set(path, fields[2] === '0' && entries.get(path) !== 'conflicted' ? `${fields[0]} ${fields[1]}` : 'conflicted');
+      else entries.set(path, `${fields[0]} ${fields[2]}`);
+    }
+    return entries;
+  };
+
+  /**
+   * Sets the located folder's index entries of `paths` back to its `HEAD`'s (removed when `HEAD` has none), so the
+   * moved changes leave nothing staged: only an entry as the snapshot `snapshotTree` has it (what was staged was all
+   * of it), never one that differs (a file partly staged keeps its staged version) or a conflict; and a path that
+   * `HEAD` doesn't have and that is gone from the folder loses its entry whatever it holds (an intent-to-add one).
+   * Only paths that left the folder are passed. In chunks, each exit checked; best effort.
+   */
+  const unstage = async (located: Located, store: string, snapshotTree: string, paths: readonly string[]): Promise<void> => {
+    try {
+      const storeRead = { ...located.env, GIT_ALTERNATE_OBJECT_DIRECTORIES: store };
+      for (const chunk of inChunks(paths)) {
+        const listed = (tree: string, env: Readonly<Record<string, string>>) =>
+          must(located.cwd, [...located.flags, '--literal-pathspecs', 'ls-tree', '-r', '--full-tree', '-z', tree, '--', ...chunk], 'read the branch', 64 * 1024 * 1024, env);
+        const index = entriesOf(await must(located.cwd, [...located.flags, '--literal-pathspecs', 'ls-files', '--stage', '-z', '--', ...chunk], 'read the index', 64 * 1024 * 1024, located.env), true);
+        const snapshot = entriesOf(await listed(snapshotTree, storeRead), false);
+        const head = entriesOf(await listed('HEAD', located.env), false);
+        const lines: string[] = [];
+        for (const path of chunk) {
+          const entry = index.get(path);
+          if (entry === undefined || entry === 'conflicted' || entry === head.get(path)) continue;
+          const gone = head.get(path) === undefined && statOf(join(located.cwd, ...path.split('/'))) === undefined;
+          if (!gone && entry !== snapshot.get(path)) continue;
+          lines.push(`${head.get(path) ?? `0 ${NO_OBJECT}`}\t${path}`);
+        }
+        if (lines.length > 0) await must(located.cwd, [...located.flags, 'update-index', '-z', '--index-info'], 'unstage the changes', undefined, located.env, `${lines.join('\0')}\0`);
+      }
+    } catch {
+      // Best effort: the changes moved; a staged entry left behind is only the index's.
+    }
+  };
+
+  /**
+   * Refuses a folder a hand-off can't move whole, before anything is snapshotted: a merge, rebase, cherry-pick or
+   * revert in progress, or unmerged entries (the state would split from its resolution), and index entries marked
+   * assume-unchanged or skip-worktree (their edits aren't snapshotted, so they'd be left out).
+   */
+  const refuseUnmovable = async (located: Located): Promise<void> => {
+    const markers = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply'];
+    const out = await must(located.cwd, [...located.flags, 'rev-parse', '--path-format=absolute', ...markers.flatMap((name) => ['--git-path', name])], 'read the repository', undefined, located.env);
+    const paths = out.split(/\r?\n/).filter((line) => line !== '');
+    if (paths.length !== markers.length) throw new VcsError("git couldn't read the repository, so nothing moved.", { step: 'move' });
+    if (paths.some((path) => present(path))) throw new VcsError('A merge, rebase, cherry-pick or revert is in progress, so nothing moved. Finish or stop it first.', { step: 'move' });
+    const unmerged = await must(located.cwd, [...located.flags, 'ls-files', '-u', '-z'], 'read the index', 64 * 1024 * 1024, located.env);
+    if (unmerged !== '') throw new VcsError('Some files have unresolved conflicts, so nothing moved. Resolve them first.', { step: 'move' });
+    const tagged = await must(located.cwd, [...located.flags, 'ls-files', '-v', '-z'], 'read the index', 256 * 1024 * 1024, located.env);
+    for (const record of tagged.split('\0')) {
+      const tag = record[0];
+      if (tag === undefined || record[1] !== ' ') continue;
+      if (tag === 'S' || tag !== tag.toUpperCase()) throw new VcsError('Some files are marked for git to skip or assume unchanged, so nothing moved.', { step: 'move' });
+    }
+  };
+
+  /** The message of a move whose bytes git would change (line endings converted, a filter's work). */
+  const BYTES_CHANGED = "git would change some changed files' bytes (their line endings), so nothing moved.";
+
+  /**
+   * Whether each of `blobs`' paths that is in the located folder now holds exactly that blob's bytes, read raw
+   * (`hash-object --no-filters`, nothing written): the snapshot and the patch carry what git's clean step made, so a
+   * conversion (`core.autocrlf`, a `text` or `eol` attribute) shows as a difference. Paths go on stdin.
+   */
+  const sameBytes = async (located: Located, blobs: ReadonlyMap<string, string>): Promise<boolean> => {
+    const present = [...blobs.keys()].filter((path) => statOf(join(located.cwd, ...path.split('/')))?.isFile() === true);
+    if (present.length === 0) return true;
+    const out = await must(located.cwd, [...located.flags, 'hash-object', '--no-filters', '--stdin-paths'], 'read the changes', 64 * 1024 * 1024, located.env, `${present.join('\n')}\n`);
+    const ids = out.split(/\r?\n/).filter((line) => line !== '');
+    return ids.length === present.length && present.every((path, at) => ids[at] === blobs.get(path));
+  };
+
+  /** A failure of a hand-off with both snapshots (and `extra`) in its details, for the log: the store may hold the only copy. */
+  const withSnapshots = (error: unknown, snapshots: { from: string; to: string }, extra: Readonly<Record<string, unknown>> = {}): VcsError =>
+    error instanceof VcsError
+      ? new VcsError(error.message, { ...error.details, ...extra, snapshots })
+      : new VcsError("git couldn't move the changes.", { step: 'move', ...extra, snapshots });
+
+  /** Hand off (27.4): see the file's header. */
+  const moveChanges = async (repoPath: string, input: { from: VcsFolder; to: VcsFolder }): Promise<VcsMoveChanges> => {
+    checkPath(repoPath);
+    // A chat's copy is a real folder of its own, never a link to one.
+    for (const folder of [input.from, input.to]) {
+      if (folder.worktree !== undefined && !isRealFolder(folder.path)) throw new VcsError("The chat's copy isn't a folder of its own, so nothing moved.", { step: 'move' });
+    }
+    const source = await locate(input.from);
+    const target = await locate(input.to);
+    if (source === undefined || target === undefined) throw new VcsError('That folder is in no repository, so nothing moved.', { step: 'move' });
+    if (source.common !== target.common || realOf(source.cwd) === realOf(target.cwd)) throw new VcsError("Those folders aren't two places of one repository, so nothing moved.", { step: 'move' });
+    if (!(await atTop(source)) || !(await atTop(target))) throw new VcsError("A folder isn't its repository's top folder, so nothing moved.", { step: 'move' });
+    await refuseUnmovable(source);
+    await refuseUnmovable(target);
+    const store = storeOf(source.common, true)!;
+    // Both snapshotted before anything moves (AD-37's store): what either held is kept whatever happens next.
+    const snapshots = { from: await snapshotOf(source), to: await snapshotOf(target) };
+    let paths: string[] = [];
+    let patch = '';
+    let targetModes = new Map<string, number>();
+    const blobs = new Map<string, string>();
+    try {
+      const sourceHead = await headTree(source);
+      const targetHead = await headTree(target);
+      const moved = await treeChanges(source, store, sourceHead, snapshots.from);
+      for (const entry of moved) {
+        checkRelative(entry.path);
+        if (entry.oldMode === '160000' || entry.newMode === '160000') throw new VcsError('A submodule has changes, so nothing moved.', { step: 'move' });
+        if (!plainPath(source.cwd, entry.path, true) || !plainPath(target.cwd, entry.path, false)) throw new VcsError("A changed file isn't a plain file, so nothing moved.", { step: 'move' });
+      }
+      paths = moved.map((entry) => entry.path);
+      if (paths.length === 0) return { result: 'moved', files: 0, leftBehind: 0, snapshots };
+      const own = new Set((await treeChanges(target, store, targetHead, snapshots.to)).map((entry) => entry.path));
+      const overlap = paths.filter((path) => own.has(path)).length;
+      if (overlap > 0) return { result: 'conflict', files: overlap, leftBehind: 0, snapshots };
+      // Byte for byte: a moved file whose raw bytes aren't its snapshot blob would arrive changed.
+      if (paths.some((path) => /[\n\r]/.test(path))) throw new VcsError("A changed file's name can't be moved, so nothing moved.", { step: 'move' });
+      for (const entry of moved) if (!EMPTY_ID.test(entry.newId)) blobs.set(entry.path, entry.newId);
+      if (!(await sameBytes(source, blobs))) throw new VcsError(BYTES_CHANGED, { step: 'move' });
+      patch = await patchBetween(source, store, sourceHead, snapshots.from);
+      // git's output is read as UTF-8: text in another encoding would arrive changed.
+      if (patch.includes('\uFFFD')) throw new VcsError("A changed file isn't UTF-8 text, so nothing moved.", { step: 'move' });
+      // Checked first, nothing written: one that doesn't apply there is a conflict over the files the two branches have differently.
+      const checked = await run(target.cwd, [...target.flags, ...APPLY, '--check', '-'], 64 * 1024 * 1024, target.env, patch);
+      if (checked.code !== 0) {
+        const differ = new Set((await treeChanges(source, store, sourceHead, targetHead)).map((entry) => entry.path));
+        return { result: 'conflict', files: Math.max(1, paths.filter((path) => differ.has(path)).length), leftBehind: 0, snapshots };
+      }
+      targetModes = modesOf(target.cwd, paths);
+    } catch (error) {
+      throw withSnapshots(error, snapshots);
+    }
+    const sourceModes = modesOf(source.cwd, paths);
+    const movedPaths = new Set(paths);
+
+    // Forward: `git apply` writes file by file, so one that fails partway (or times out) is reversed, and checked. Never
+    // put back from the snapshot: that would overwrite whatever else wrote the target meanwhile.
+    // An apply that wrote other bytes than the snapshot's (a conversion) counts as one that failed.
+    const appliedAsIs = async (): Promise<boolean> => {
+      if (!(await applyOnce(target, patch, { reverse: false, check: false }))) return false;
+      try {
+        return await sameBytes(target, blobs);
+      } catch {
+        return false;
+      }
+    };
+    if (!(await appliedAsIs())) {
+      let targetClean = false;
+      try {
+        if (await applyChecked(target, patch, true)) {
+          setModes(target.cwd, paths, targetModes);
+          targetClean = (await differingNow(target, store, snapshots.to, movedPaths)).size === 0;
+        }
+      } catch {
+        targetClean = false;
+      }
+      throw withSnapshots(new VcsError("git couldn't write the changes there, so they stay where they were.", { step: 'move' }), snapshots, { targetClean });
+    }
+    setModes(target.cwd, paths, sourceModes);
+
+    // Once the target applied it is never undone: the changes are safe there. The source is cleaned best effort and checked.
+    await applyChecked(source, patch, true);
+    // Each file the source keeps goes back to its own mode; where git tracks the executable bit, as git wrote it.
+    const tracksExec = await run(source.cwd, [...source.flags, 'config', '--bool', '--get', 'core.fileMode'], undefined, source.env).then(
+      (out) => !(out.code === 0 && out.stdout.trim() === 'false'),
+      () => true,
+    );
+    const ownModes = new Map<string, number>();
+    for (const [path, mode] of sourceModes) {
+      const now = statOf(join(source.cwd, ...path.split('/')));
+      if (now?.isFile() === true) ownModes.set(path, tracksExec ? (mode & ~0o111) | (now.mode & 0o111) : mode);
+    }
+    setModes(source.cwd, paths, ownModes);
+    let left: ReadonlySet<string> = movedPaths;
+    try {
+      left = await differingNow(source, store, await headTree(source), movedPaths);
+    } catch {
+      // Unread: every moved path is counted as left behind, so nothing is removed as if clean.
+    }
+    // Only what left the source: its index and modes, a path left behind keeps both.
+    const gone = paths.filter((path) => !left.has(path));
+    await unstage(source, store, snapshots.from, gone);
+    return { result: 'moved', files: paths.length, leftBehind: left.size, snapshots };
+  };
+
   return {
+    moveChanges,
+
     async applyHunk(folder, { target, action, path, hunkId, hunkIds }): Promise<VcsHunkResult> {
       checkRelative(path);
       if (!HUNK_ACTIONS_BY_VIEW[target.view].includes(action)) throw new VcsError("That view doesn't offer that action.", { step: 'apply' });

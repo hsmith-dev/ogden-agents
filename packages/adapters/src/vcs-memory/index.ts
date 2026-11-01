@@ -133,10 +133,16 @@ export function createMemoryVcs(): MemoryVcs {
       state.status = state.status.filter((path) => !paths.includes(path));
       state.staged = state.staged.filter((path) => !paths.includes(path));
     },
-    async addWorktree(repoPath, { path, branch, base }) {
-      calls.push(`addWorktree ${repoPath} ${path} ${branch} ${base}`);
+    async addWorktree(repoPath, { path, branch, base, existingBranch }) {
+      calls.push(`addWorktree ${repoPath} ${path} ${branch} ${existingBranch === true ? 'existing' : base}`);
       const state = repo(repoPath);
       if (worktrees.has(path)) throw new VcsError('The run folder already exists.', { step: 'worktree' });
+      if (existingBranch === true) {
+        // A kept branch (27.4): checked out as it is, in one worktree only.
+        if (!state.branches.has(branch) || [...worktrees.values()].some((one) => one.repoPath === repoPath && one.branch === branch)) throw new VcsError("git couldn't add the worktree.", { step: 'add the worktree' });
+        worktrees.set(path, { repoPath, branch });
+        return;
+      }
       if (state.branches.has(branch)) throw new VcsError("git couldn't add the worktree.", { step: 'add the worktree' });
       state.branches.set(branch, base);
       state.changes.set(branch, []);

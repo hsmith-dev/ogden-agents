@@ -12,6 +12,7 @@ import {
   createChat,
   createDataDir,
   createNewProjectDefaults,
+  createChatLocations,
   createOnboarding,
   createRemoteWorktreeSync,
   clampCheckInDelay,
@@ -431,12 +432,15 @@ async function listenAndAnnounce({
     vcs,
     // Whether a worktree chat's copy has uncommitted changes before it is deleted (27.3): the Workbench's own git.
     vcsWorkingTree: createServerWorkingTree(options, dataDir),
+    // Both folders' snapshots taken before a hand-off moved anything (AD-37): tree ids, never a path.
+    onHandOffSnapshot: (sessionId, snapshots) => log.info('a chat hand-off snapshotted both folders', { sessionId, fromTree: snapshots.from, toTree: snapshots.to }),
     // A deleted chat's copy that couldn't be removed (27.3): the session id and the step, never a path.
     onWorktreeCleanupError: (sessionId, step, error) =>
       log.warn('a chat worktree was left in place', { sessionId, step, code: error instanceof CoreError ? error.code : error === undefined ? 'refused' : 'unexpected' }),
     // Each prompt's snapshots for This turn (AD-37, story 8.4).
     turnSnapshots: core.turnSnapshots,
     // Retention (27.6): a copy's changes saved before it is put away, and Restore; a put-away chat takes no message.
+    // A chat's hand-off between this folder and its own worktree (27.4) moves its uncommitted changes with the same git.
     vcsChatWorktree: chatWorktree,
     worktreePutAway: core.worktreePutAway,
     // One more chat worktree (made, or restored): the sweep runs, sparing it.
@@ -581,6 +585,8 @@ async function listenAndAnnounce({
     // Changes and Open in editor (epic 8 entry 2): undefined until their lanes wire a port (8.4, 8.10), so 501.
     workspaceChanges: core.workspaceChanges,
     editorLaunch: core.editorLaunch,
+    // A chat's Location and its hand-off (27.4): the chat's own, its ids and body parsed here.
+    chatLocations: createChatLocations(chat),
     // Problems (AD-38; 8.9): only in a trusted project, only the confirmed text.
     projectCommands: core.projectCommands,
     notifications,

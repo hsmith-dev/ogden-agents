@@ -64,6 +64,12 @@ export interface ChatContext {
   readonly puttingAway: Set<SessionId>;
   /** Throws `WorktreePutAwayError` while the chat's copy is put away, or being put away or restored (27.6). */
   readonly requireCopyPresent: (sessionId: SessionId) => void;
+  /**
+   * Folders a hand-off is moving changes out of or into (27.4): no chat
+   * working there takes a message or switches to its terminal until it is
+   * done (`chat/folder-hold.ts`).
+   */
+  readonly movingFolders: Set<string>;
   /** The permission modes each session's agent session offered when it last started this run (permission modes). */
   readonly sessionModes: Map<SessionId, readonly PermissionMode[]>;
   /** The permission modes the agent session started last in this run offered, per agent (any chat of it): a chat whose own agent hasn't started yet. */
@@ -195,6 +201,7 @@ export function createChatContext(options: ChatOptions): ChatContext {
     switching,
     puttingAway,
     requireCopyPresent,
+    movingFolders: new Set<string>(),
     sessionModes,
     lastSessionModes: new Map(),
     sessionModels,

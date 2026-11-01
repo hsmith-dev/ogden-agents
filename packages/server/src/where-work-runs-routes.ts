@@ -22,7 +22,6 @@ import {
   restoreBranchMovedText,
   RestoreWorktreeResponse,
   SessionLocationResponse,
-  WORKTREE_PUT_AWAY_SEND_MESSAGE,
   TrialResponse,
   WorktreeRetentionSetting,
 } from '@ogden-agents/shared';
@@ -57,7 +56,7 @@ export function registerWhereWorkRunsRoutes(app: Hono, { chatLocations, worktree
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', error.message);
     if (error instanceof HandOffConflictError) return apiError(c, 409, 'handoff_conflict', HANDOFF_CONFLICT_MESSAGE, { files: error.files });
     if (error instanceof RestoreFailedError) return apiError(c, 409, 'restore_failed', restoreFailedText(error), { reason: error.reason });
-    if (error instanceof WorktreePutAwayError) return apiError(c, 409, 'worktree_put_away', WORKTREE_PUT_AWAY_SEND_MESSAGE);
+    if (error instanceof WorktreePutAwayError) return apiError(c, 409, 'worktree_put_away', error.message);
     return workbench(c, error);
   };
   const limit = bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });

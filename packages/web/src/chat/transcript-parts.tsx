@@ -4,7 +4,7 @@
  * earlier, the resumed marker, the handoff divider, and one message; the
  * Changed row at the end of a turn that changed files (story 8.4).
  */
-import { ORCHESTRATION_MANAGER_AUTO_MARK, ORCHESTRATION_MANAGER_MARK, REVIEW_CHANGES_LABEL, turnChangedText } from '@ogden-agents/shared';
+import { handOffDividerText, ORCHESTRATION_MANAGER_AUTO_MARK, ORCHESTRATION_MANAGER_MARK, REVIEW_CHANGES_LABEL, turnChangedText, type ChatLocation } from '@ogden-agents/shared';
 import { ArrowClockwise, FileText } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import type { TranscriptMessage } from '@/chat/transcript';
@@ -72,6 +72,20 @@ export function AgentChangedMarker({ agentName }: { agentName: string }) {
     <div role="separator" aria-label={words} data-testid="agent-changed-marker" className="flex items-center gap-3">
       <Separator className="flex-1" />
       <Text as="span" variant="caption" className="shrink-0">
+        {words}
+      </Text>
+      <Separator className="flex-1" />
+    </div>
+  );
+}
+
+/** Where the chat moved here (Hand off, 27.4): "Moved to this folder" or "Moved to its own worktree: <branch>". */
+export function LocationChangedMarker({ location, branch }: { location: ChatLocation; branch: string | null }) {
+  const words = handOffDividerText(location, branch);
+  return (
+    <div role="separator" aria-label={words} data-testid="location-changed-marker" data-location={location} className="flex items-center gap-3">
+      <Separator className="flex-1" />
+      <Text as="span" variant="caption" className="min-w-0 truncate">
         {words}
       </Text>
       <Separator className="flex-1" />

@@ -38,6 +38,7 @@ import type { Agents } from './agents.js';
 import type { Models } from './model.js';
 import { AGENT_SESSION_REF, agentSessionRefOf, HANDOFF_PENDING_REF, HANDOFF_PREVIEW_TTL_MS, handoffLeftRefOf, MAX_HANDOFF_PREVIEWS } from './constants.js';
 import type { ChatContext } from './context.js';
+import { refuseWhileFolderMoves } from './folder-hold.js';
 import type { Chat } from './types.js';
 import { requireAgentReady } from './workspaces.js';
 
@@ -88,6 +89,8 @@ export function createHandoff(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent
   const checkNow = (workspaceId: WorkspaceId, sessionId: SessionId, agentId: AgentId): { session: Session; current: AgentId } => {
     const session = getSession(workspaceId, sessionId);
     const current = ctx.agentIdOf(session);
+    // A hand-off between this folder and a worktree is moving its folder (27.4): no agent switch meanwhile.
+    refuseWhileFolderMoves(ctx, getWorkspace(workspaceId), session);
     if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
     // A put-away copy takes no message, so no other agent either, until Restore (27.6).
     ctx.requireCopyPresent(sessionId);

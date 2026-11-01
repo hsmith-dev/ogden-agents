@@ -169,7 +169,7 @@ function realOrUndefined(path: string): string | undefined {
 }
 
 /** A chat's own worktree as made: its session id, real path and branch. */
-interface MadeChatWorktree {
+export interface MadeChatWorktree {
   id: SessionId;
   worktreePath: string;
   branch: string;
@@ -182,41 +182,50 @@ interface MadeChatWorktree {
  * serialized. Every refusal is an {@link InvalidOperationError} in a plain
  * sentence; a failure once `addWorktree` started removes its folder, best effort.
  */
-async function makeChatWorktree(ctx: ChatContext, workspaceId: WorkspaceId): Promise<MadeChatWorktree> {
+function makeChatWorktree(ctx: ChatContext, workspaceId: WorkspaceId): Promise<MadeChatWorktree> {
+  const repoPath = workspaceFolder(ctx.getWorkspace(workspaceId));
+  return serializedByRepo(repoPath, () => addChatWorktree(ctx, repoPath, newId('ses') as SessionId));
+}
+
+/**
+ * {@link makeChatWorktree}'s step for the chat `id` (27.4's hand-off moves
+ * an existing chat to one), with the caller holding the repo's chain: on
+ * `ogden/chat/<id>` from the checked-out commit, or with `existingBranch`
+ * on that branch as it was kept (it has commits). A failure once
+ * `addWorktree` started removes the folder (and a new branch), best effort.
+ */
+export async function addChatWorktree(ctx: ChatContext, repoPath: string, id: SessionId, options: { existingBranch?: boolean | undefined; mergedOnly?: boolean | undefined } = {}): Promise<MadeChatWorktree> {
   const vcs = ctx.options.vcs;
   if (vcs === undefined) throw new InvalidOperationError(CHAT_WORKTREE_FAILED_TEXT);
-  const repoPath = workspaceFolder(ctx.getWorkspace(workspaceId));
-  return serializedByRepo(repoPath, async () => {
-    // A worktree is of the whole repository: the project must be its top folder.
-    const top = await vcs.topLevel(repoPath);
-    if (top === undefined) throw new InvalidOperationError(CHAT_WORKTREE_NOT_REPO_TEXT);
-    if ((realOrUndefined(top) ?? top) !== (realOrUndefined(repoPath) ?? repoPath)) throw new InvalidOperationError(CHAT_WORKTREE_NOT_TOP_TEXT);
-    const head = await vcs.head(repoPath);
-    if (head === undefined) throw new InvalidOperationError(CHAT_WORKTREE_NOT_REPO_TEXT);
-    let parent: string;
-    try {
-      parent = ensureChatWorktreesRoot(ctx.options.dataDir);
-    } catch {
-      throw new InvalidOperationError(CHAT_WORKTREE_FAILED_TEXT);
-    }
-    // A folder name no chat has yet (40 random bits, tried a few times).
-    let short = runShortId();
-    for (let attempt = 0; existsSync(join(parent, short)); attempt++) {
-      if (attempt >= 5) throw new InvalidOperationError(CHAT_WORKTREE_FAILED_TEXT);
-      short = runShortId();
-    }
-    const id = newId('ses') as SessionId;
-    const branch = chatWorktreeBranch(id);
-    const path = join(parent, short);
-    try {
-      await vcs.addWorktree(repoPath, { path, branch, base: head.revision });
-    } catch {
-      // Already in the repo's chain: cleaned up here, not through `discardChatWorktree`.
-      await removeUnusedWorktree(ctx, repoPath, { id, worktreePath: path, branch });
-      throw new InvalidOperationError(CHAT_WORKTREE_FAILED_TEXT);
-    }
-    return { id, worktreePath: realOrUndefined(path) ?? path, branch };
-  });
+  // A worktree is of the whole repository: the project must be its top folder.
+  const top = await vcs.topLevel(repoPath);
+  if (top === undefined) throw new InvalidOperationError(CHAT_WORKTREE_NOT_REPO_TEXT);
+  if ((realOrUndefined(top) ?? top) !== (realOrUndefined(repoPath) ?? repoPath)) throw new InvalidOperationError(CHAT_WORKTREE_NOT_TOP_TEXT);
+  const head = await vcs.head(repoPath);
+  if (head === undefined) throw new InvalidOperationError(CHAT_WORKTREE_NOT_REPO_TEXT);
+  let parent: string;
+  try {
+    parent = ensureChatWorktreesRoot(ctx.options.dataDir);
+  } catch {
+    throw new InvalidOperationError(CHAT_WORKTREE_FAILED_TEXT);
+  }
+  // A folder name no chat has yet (40 random bits, tried a few times).
+  let short = runShortId();
+  for (let attempt = 0; existsSync(join(parent, short)); attempt++) {
+    if (attempt >= 5) throw new InvalidOperationError(CHAT_WORKTREE_FAILED_TEXT);
+    short = runShortId();
+  }
+  const branch = chatWorktreeBranch(id);
+  const path = join(parent, short);
+  const existingBranch = options.existingBranch === true;
+  try {
+    await vcs.addWorktree(repoPath, { path, branch, base: head.revision, ...(existingBranch ? { existingBranch } : {}) });
+  } catch {
+    // Already in the repo's chain: cleaned up here, not through `discardChatWorktree`.
+    await removeUnusedWorktree(ctx, repoPath, { id, worktreePath: path, branch }, { keepBranch: existingBranch, mergedOnly: options.mergedOnly });
+    throw new InvalidOperationError(CHAT_WORKTREE_FAILED_TEXT);
+  }
+  return { id, worktreePath: realOrUndefined(path) ?? path, branch };
 }
 
 /** Removes a chat worktree's folder that no chat got, best effort (never through a link: `rmSync` doesn't follow one). */
@@ -230,14 +239,16 @@ function removeFolder(path: string): void {
 
 /**
  * A worktree no chat got (27.3): git's record of it and its branch through
- * `VcsPort` (the branch has no commit yet), then whatever of the folder is
+ * `VcsPort` (the branch has no commit yet; `keepBranch` for a kept branch
+ * a hand-off checked out again, 27.4; `mergedOnly` for a hand-off's copy:
+ * an unmerged branch is never deleted), then whatever of the folder is
  * left, best effort. Only a path `isChatWorktreePath` accepts; the caller
  * holds the repo's chain.
  */
-async function removeUnusedWorktree(ctx: ChatContext, repoPath: string, worktree: MadeChatWorktree): Promise<void> {
+export async function removeUnusedWorktree(ctx: ChatContext, repoPath: string, worktree: MadeChatWorktree, options: { keepBranch?: boolean | undefined; mergedOnly?: boolean | undefined } = {}): Promise<void> {
   if (!isChatWorktreePath(ctx.options.dataDir, worktree.worktreePath)) return;
   try {
-    await ctx.options.vcs?.removeWorktree(repoPath, worktree.worktreePath, { deleteBranch: worktree.branch });
+    await ctx.options.vcs?.removeWorktree(repoPath, worktree.worktreePath, options.keepBranch === true ? {} : options.mergedOnly === true ? { deleteBranch: worktree.branch, mergedOnly: true, keepUnmerged: true } : { deleteBranch: worktree.branch });
   } catch (error) {
     try {
       ctx.options.onWorktreeCleanupError?.(worktree.id, 'remove', error);

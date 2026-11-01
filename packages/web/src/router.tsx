@@ -187,6 +187,19 @@ const workspaceTerminalsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-terminals-page'), 'WorkspaceTerminalsPage'),
 });
 
+/** The Workbench's search: `?path=` is the file the Files panel shows (AD-36). */
+export interface WorkbenchSearch {
+  path?: string;
+}
+
+/** A project's Workbench (AD-36): its Files panel, the project's tree and one file read-only. */
+const workspaceWorkbenchRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/workbench',
+  validateSearch: (search: Record<string, unknown>): WorkbenchSearch => (typeof search.path === 'string' && search.path !== '' ? { path: search.path } : {}),
+  component: lazyRouteComponent(() => import('./routes/workspace-workbench-page'), 'WorkspaceWorkbenchPage'),
+});
+
 /** A ticket's build review (story 5.2, the tracer), `/w/:wsId/review/:ref`. */
 const workspaceReviewRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -220,6 +233,7 @@ const routeTree = rootRoute.addChildren([
   workspaceRunsRoute,
   workspaceOrchestrateRoute,
   workspaceTerminalsRoute,
+  workspaceWorkbenchRoute,
   sessionRoute,
   settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, alwaysAllowSettingsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);

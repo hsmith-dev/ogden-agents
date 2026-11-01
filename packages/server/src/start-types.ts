@@ -8,7 +8,7 @@ import type { AntigravityPorts } from './antigravity-wiring.js';
 import type { CodexPorts } from './codex-wiring.js';
 import type { GrokPorts } from './grok-wiring.js';
 import type { LocalPorts } from './local-wiring.js';
-import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, NotifierPort, PaneLaunchers, RemoteHostPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
+import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, WorkspaceFilesPort, NotifierPort, PaneLaunchers, RemoteHostPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -49,6 +49,8 @@ export interface StartOptions {
   toolchain?: ToolchainPort;
   /** Override generic developer CLI tools' catalog and OS mechanics (tests; CAP-25). Default: the `dev-tools-catalog` adapter. */
   devToolsPort?: DevToolsPort;
+  /** Override the Workbench's Files reader (tests; AD-36). Default: the `workspace-files-node` adapter on the user's home and `dataDir`. */
+  workspaceFilesPort?: WorkspaceFilesPort;
   /** Override Claude Code's chat agent (tests). Default: the `acp-claude-code` adapter. */
   agent?: AgentPort;
   /**

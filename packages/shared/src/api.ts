@@ -477,6 +477,23 @@ export const API_ROUTES = {
    */
   workspaceDocument: `${API_BASE}/workspaces/:wsId/documents`,
   /**
+   * `GET ?path=<workspace-relative folder>` → `WorkspaceFolderResponse`
+   * (Workbench Files, AD-36): one folder of the project, folders first; no
+   * `path` lists the root. 400 `invalid_request` for a malformed path, 403
+   * `path_protected` for `.git`, a credential folder or anything whose real
+   * path leaves the project, 404 `not_found` for a missing folder, a file or
+   * an unknown project. Behind the gate only (AD-15); read-only.
+   */
+  workspaceFiles: `${API_BASE}/workspaces/:wsId/files`,
+  /**
+   * `GET ?path=<workspace-relative file>` → `WorkspaceFileResponse`
+   * (Workbench Files): one file, read-only, `text` (an environment file's
+   * values masked), `binary` or `too_large` (over `MAX_WORKSPACE_FILE_BYTES`,
+   * no content). The same refusals as {@link API_ROUTES.workspaceFiles}; a
+   * folder answers 404. The content is only ever in this response.
+   */
+  workspaceFileContent: `${API_BASE}/workspaces/:wsId/files/content`,
+  /**
    * `POST StartBuildRequest` → 201 `BuildResponse` (story 5.2): builds one
    * ticket unattended in its own worktree and `build` session; `{ all: true }`
    * → 202 `AllReadyBuildsResponse` (5.8; 501 until then). Serves the

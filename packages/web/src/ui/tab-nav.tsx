@@ -21,13 +21,15 @@ export interface TabNavItemProps extends ComponentProps<'a'> {
   current: boolean;
   /** Render the child element (a router link) with the tab's styling. */
   asChild?: boolean;
+  /** Classes for the tab's list item (to leave the whole tab out at a width, with no empty item left behind). */
+  itemClassName?: string | undefined;
 }
 
 /** One tab, in its own list item. */
-export function TabNavItem({ current, asChild = false, className, ...props }: TabNavItemProps) {
+export function TabNavItem({ current, asChild = false, className, itemClassName, ...props }: TabNavItemProps) {
   const Comp = asChild ? Slot.Root : 'a';
   return (
-    <li>
+    <li className={itemClassName}>
       <Comp
         data-slot="tab-nav-item"
         aria-current={current ? 'page' : undefined}

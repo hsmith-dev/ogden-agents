@@ -326,7 +326,7 @@ test('the Plan home (story 4.6): tabs and g shortcuts, groups in order, names in
       // Planning and Board on: the tabs, and g b / g p / g c move between them.
       // (Chats focuses its composer, where g types; so the round starts on Plan and ends on Chats.)
       await page.goto(`${server.url}/w/${wsId}/plan`);
-      await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Plan', 'Board']);
+      await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Workbench', 'Plan', 'Board']);
       await page.keyboard.press('g');
       await page.keyboard.press('b');
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}/board$`));
@@ -377,7 +377,7 @@ test('the Plan home (story 4.6): tabs and g shortcuts, groups in order, names in
       // Planning off: no Plan tab, and g p does nothing.
       await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board'] });
       await page.goto(`${server.url}/w/${wsId}/board`);
-      await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Board', 'Terminals']);
+      await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Workbench', 'Board', 'Terminals']);
       await page.keyboard.press('g');
       await page.keyboard.press('p');
       // A shortcut navigates in its own keydown; give a wrong one a moment to show, then check g p did nothing.

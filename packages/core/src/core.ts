@@ -19,6 +19,8 @@ import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
 import { createBuildSessions, type BuildSessions } from './build-sessions.js';
 import { createBuildSettings, type BuildSettings } from './build-settings.js';
 import { createDevTools, type DevTools, type DevToolsPort } from './dev-tools.js';
+import { createWorkspaceFiles, type WorkspaceFiles } from './workspace-files.js';
+import type { WorkspaceFilesPort } from './workspace-files-port.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
 import type { RemoteHostPort } from './remote-host-port.js';
@@ -94,6 +96,8 @@ export interface Core {
   readonly buildSettings: BuildSettings;
   /** Generic developer CLI tools: the catalog, confirmed real installs, and each project's unattended-build allowlist (CAP-25). */
   readonly devTools: DevTools;
+  /** The Workbench's Files (AD-36): one folder listed, one file read, read-only; `undefined` without a {@link OpenCoreOptions.workspaceFilesPort}. */
+  readonly workspaceFiles: WorkspaceFiles | undefined;
   /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
   readonly createNotifications: (ports: NotificationsPorts) => Notifications;
   /**
@@ -177,6 +181,12 @@ export type OpenCoreOptions = OpenDatabaseOptions &
      */
     devToolsPort?: DevToolsPort;
     /**
+     * Reading a project's files for the Workbench (AD-36): the server wires
+     * the `workspace-files-node` adapter. Absent: no Files use-case at all
+     * (`core.workspaceFiles` is `undefined`), never a stand-in that reads.
+     */
+    workspaceFilesPort?: WorkspaceFilesPort;
+    /**
      * The repo-relative files the registered agents that need project trust
      * run (their descriptors' `projectFiles`, epic 12, 12.3); the trust is
      * bound to their contents. Read at each call. Absent: none.
@@ -256,6 +266,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     buildSessions: createBuildSessions(),
     buildSettings: createBuildSettings({ db, events, entities }),
     devTools: createDevTools({ db, events, entities, port: options.devToolsPort ?? NOOP_DEV_TOOLS_PORT }),
+    workspaceFiles: options.workspaceFilesPort === undefined ? undefined : createWorkspaceFiles({ entities, port: options.workspaceFilesPort }),
     paneStore: createPaneStore({ db }),
     terminalsSettings: createTerminalsSettings({ db, events }),
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),

@@ -228,6 +228,8 @@ export const API_ERROR_CODES = [
   'custom_agent_test_failed',
   /** Story 21.3: a Test of the same agent (or of an unsaved command) is still running (409). Nothing was started. */
   'custom_agent_test_running',
+  /** Workbench Files (AD-36): the path is `.git`, a credential folder, or its real path leaves the project (403). Nothing was read. */
+  'path_protected',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

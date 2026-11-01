@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, createWorkspaceFilesNode, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
@@ -203,6 +204,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       isAgentRegistered: registeredAgent(options, hooks),
       // Generic developer CLI tools (CAP-25): the real adapter, or a test's own.
       devToolsPort: options.devToolsPort ?? createDevToolsAdapter(),
+      // The Workbench's Files (AD-36): confined to each project, with the home credential and data-folder fences.
+      workspaceFilesPort: options.workspaceFilesPort ?? createWorkspaceFilesNode({ home: homedir(), dataDir }),
       agentConfigFolders: () => agentConfigFolders(descriptors.current),
       agentProjectFiles: () => agentProjectFiles(descriptors.current),
       projectFilesFingerprint,
@@ -512,6 +515,7 @@ async function listenAndAnnounce({
     builds,
     buildSettings: core.buildSettings,
     devTools: core.devTools,
+    workspaceFiles: core.workspaceFiles,
     notifications,
     remoteMachines,
     ...endpointApi,

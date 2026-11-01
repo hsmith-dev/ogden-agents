@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 /**
- * The header's project tabs with their real queries (story 10.6): Chats alone
+ * The header's project tabs with their real queries (story 10.6): Chats and
+ * Workbench alone
  * while the project's settings load or fail, including a refetch that fails
  * after a good load (the query keeps its last data then). Story 4.6: `g`
  * then a shown tab's key opens it (`g c`, `g p`, `g b`), a tab that isn't
@@ -100,29 +101,29 @@ afterEach(() => {
 });
 
 describe('WorkspaceTabs with its queries (story 10.6)', () => {
-  it('shows Chats only while the settings load', async () => {
+  it('shows Chats and Workbench only while the settings load', async () => {
     fake.settings = 'pending';
     await mount();
-    expect(tabs()).toEqual(['Chats']);
+    expect(tabs()).toEqual(['Chats', 'Workbench']);
   });
 
-  it('shows Chats only when the settings fail', async () => {
+  it('shows Chats and Workbench only when the settings fail', async () => {
     fake.settings = 'fail';
     await mount();
-    expect(tabs()).toEqual(['Chats']);
+    expect(tabs()).toEqual(['Chats', 'Workbench']);
   });
 
   it('shows the piece tab after a good load, and Chats only once a refetch fails', async () => {
     fake.settings = 'ok';
     const client = await mount();
-    expect(tabs()).toEqual(['Chats', 'Plan']);
+    expect(tabs()).toEqual(['Chats', 'Workbench', 'Plan']);
     fake.settings = 'fail';
     await act(async () => {
       await client.refetchQueries({ queryKey: ['workspace-settings', WS] });
     });
     await flush();
     expect(client.getQueryData(['workspace-settings', WS])).toBeDefined();
-    expect(tabs()).toEqual(['Chats']);
+    expect(tabs()).toEqual(['Chats', 'Workbench']);
   });
 });
 
@@ -132,7 +133,7 @@ describe('the review page tab (26.6)', () => {
     fake.pieces = ['planning', 'board'];
     fake.boardAvailable = true;
     await mount({ active: 'review', reviewRef: '1.2' });
-    expect(tabs()).toEqual(['Chats', 'Plan', 'Board', 'Review 1.2']);
+    expect(tabs()).toEqual(['Chats', 'Workbench', 'Plan', 'Board', 'Review 1.2']);
     const review = screen.getByTestId('workspace-tab-review');
     expect(review.getAttribute('href')).toBe(`/w/${WS}/review/1.2`);
     expect(review.getAttribute('aria-current')).toBe('page');
@@ -164,7 +165,7 @@ describe('the g shortcuts (story 4.6)', () => {
 
   it('with Planning and Board on, g p, g b and g c open Plan, Board and Chats', async () => {
     await mount();
-    expect(tabs()).toEqual(['Chats', 'Plan', 'Board']);
+    expect(tabs()).toEqual(['Chats', 'Workbench', 'Plan', 'Board']);
     go('p');
     go('b');
     go('c');
@@ -172,10 +173,18 @@ describe('the g shortcuts (story 4.6)', () => {
     expect(fake.navigations[0]).toEqual({ to: '/w/$wsId/plan', params: { wsId: WS } });
   });
 
+  it('g w opens the Workbench (AD-36), whatever the pieces', async () => {
+    fake.pieces = [];
+    await mount();
+    expect(tabs()).toEqual(['Chats', 'Workbench']);
+    go('w');
+    expect(went()).toEqual(['/w/$wsId/workbench']);
+  });
+
   it('with Planning off, g p does nothing (no tab, no shortcut); g r, with no Runs tab, neither', async () => {
     fake.pieces = ['board'];
     await mount();
-    expect(tabs()).toEqual(['Chats', 'Board']);
+    expect(tabs()).toEqual(['Chats', 'Workbench', 'Board']);
     go('p');
     go('r');
     expect(went()).toEqual([]);

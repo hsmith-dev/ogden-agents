@@ -81,6 +81,10 @@ export * from './vcs-port.js';
 export * from './build-verify.js';
 export * from './build-settings.js';
 export * from './dev-tools.js';
+export * from './workspace-files.js';
+export * from './workspace-files-port.js';
+// The home credential fences, for the Files adapter's confinement (AD-36).
+export { CREDENTIAL_FOLDERS, credentialReadFences } from './build-names.js';
 export * from './local-endpoints.js';
 export * from './remote-host-port.js';
 export * from './remote-machines.js';

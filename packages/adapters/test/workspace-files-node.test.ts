@@ -583,8 +583,9 @@ describe('workspace-files-node: review rows (defensive check)', () => {
 
   // A multi-line value's continuation line that looks like `WORD=` (a base64 line ending in `=` or `==`) is masked whole.
   it('masks a base64 continuation line of a multi-line value', () => {
-    const text = 'PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7==\n-----END PRIVATE KEY-----"\n';
-    expect(maskEnvironmentText(text)).not.toContain('MIIEvQIBADAN');
+    // A fake key: the continuation line is base64-shaped and ends in `==`, nothing more.
+    const text = 'PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nTESTONLYbase64TESTONLYbase64TESTONLYAA==\n-----END PRIVATE KEY-----"\n'; // secret-scan:allow TEST_ONLY fake key
+    expect(maskEnvironmentText(text)).not.toContain('TESTONLYbase64');
   });
 
   // Every comment's text is masked whole, so a commented `NAME: value` secret is never shown.

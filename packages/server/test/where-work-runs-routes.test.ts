@@ -1,13 +1,14 @@
 /**
  * Where work runs (epic 27 entry 2; CAP-35). On a real server, through the
- * gate: every route answers 501 until its lane wires it. In-process, with
+ * gate: every route answers 501 until its lane wires it (retention and
+ * Restore are wired since 27.6). In-process, with
  * stand-in use-cases: each wired route answers with the shared schema and
  * `no-store`, a hand-off conflict is 409 `handoff_conflict` with the count,
  * a failed Restore is 409 `restore_failed` with its reason, mid-turn is 409
  * `agent_mid_turn`, and a too-large body is refused before the use-case.
  */
 import { AgentMidTurnError, HandOffConflictError, newId, NotFoundError, openCore, RestoreFailedError, type ChatLocations, type Core, type Trials, type WorktreeRetention } from '@ogden-agents/core';
-import { API_ROUTES, apiPath, ApiErrorBody, chatWorktreeBranch, WorkspaceResponse, type SessionLocationResponse } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, ApiErrorBody, chatWorktreeBranch, RESTORE_FAILED_MESSAGE, restoreBranchMovedText, WorkspaceResponse, type SessionLocationResponse } from '@ogden-agents/shared';
 import type { MiddlewareHandler } from 'hono';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fullTestApp, signIn, startTestServer, tempDataDir } from './helpers.js';
@@ -35,10 +36,6 @@ describe('where work runs routes on the real server', () => {
     const unwired: Array<[string, string]> = [
       ['GET', apiPath(API_ROUTES.sessionLocation, { wsId, sesId })],
       ['POST', apiPath(API_ROUTES.sessionLocation, { wsId, sesId })],
-      ['POST', apiPath(API_ROUTES.sessionWorktreeRestore, { wsId, sesId })],
-      ['GET', apiPath(API_ROUTES.workspacePutAwayWorktrees, { wsId })],
-      ['GET', API_ROUTES.worktreeRetention],
-      ['PUT', API_ROUTES.worktreeRetention],
       ['POST', apiPath(API_ROUTES.workspaceTrials, { wsId })],
       ['GET', apiPath(API_ROUTES.workspaceTrial, { wsId, tryId })],
       ['POST', apiPath(API_ROUTES.workspaceTrialKeep, { wsId, tryId })],
@@ -47,6 +44,12 @@ describe('where work runs routes on the real server', () => {
       await expectError(await fetch(`${server.url}${path}`, { method, headers }), 501, 'not_implemented');
       // The gate is in front of every one.
       expect((await fetch(`${server.url}${path}`, { method })).status, path).toBe(401);
+    }
+    // Retention and Restore are wired (27.6), behind the gate too.
+    expect((await fetch(`${server.url}${API_ROUTES.worktreeRetention}`, { headers })).status).toBe(200);
+    expect((await fetch(`${server.url}${apiPath(API_ROUTES.workspacePutAwayWorktrees, { wsId })}`, { headers })).status).toBe(200);
+    for (const path of [API_ROUTES.worktreeRetention, apiPath(API_ROUTES.workspacePutAwayWorktrees, { wsId }), apiPath(API_ROUTES.sessionWorktreeRestore, { wsId, sesId })]) {
+      expect((await fetch(`${server.url}${path}`, { method: path.endsWith('restore') ? 'POST' : 'GET' })).status, path).toBe(401);
     }
   });
 });
@@ -148,6 +151,21 @@ describe('where work runs routes in-process, with stand-in use-cases', () => {
       throw new RestoreFailedError('gone', 'branch_missing');
     });
     expect((await expectError(await json('POST', restore, {}), 409, 'restore_failed')).details).toEqual({ reason: 'branch_missing' });
+    // The branch's own sentence when core names the chat's branch (never a path), the fixed one otherwise.
+    const branch = chatWorktreeBranch(sesId);
+    setRestore(async () => {
+      throw new RestoreFailedError('moved', 'branch_moved', branch);
+    });
+    const moved = await expectError(await json('POST', restore, {}), 409, 'restore_failed');
+    expect(moved).toMatchObject({ message: restoreBranchMovedText(branch), details: { reason: 'branch_moved' } });
+    setRestore(async () => {
+      throw new RestoreFailedError('moved', 'branch_moved', '/tmp/a path');
+    });
+    expect((await expectError(await json('POST', restore, {}), 409, 'restore_failed')).message).toBe(RESTORE_FAILED_MESSAGE);
+    setRestore(async () => {
+      throw new AgentMidTurnError('busy');
+    });
+    await expectError(await json('POST', restore, {}), 409, 'agent_mid_turn');
     setRestore(async () => {
       throw new NotFoundError('session', sesId);
     });

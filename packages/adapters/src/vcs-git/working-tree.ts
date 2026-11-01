@@ -72,7 +72,7 @@ import {
 import { readRegularFile, type RegularFileRead } from '../fs-safe.js';
 import { BRANCH, checkPath, checkRelative, REVISION, realOf, SAFE_CONFIG } from './checks.js';
 import { checkGitPointer, type GitPointer } from './git-pointer.js';
-import { createGitRunner, OUTPUT_TOO_LARGE, type GitRunnerOptions } from './runner.js';
+import { createGitRunner, OUTPUT_TOO_LARGE, type GitRunner, type GitRunnerOptions } from './runner.js';
 
 export interface GitWorkingTreeOptions extends GitRunnerOptions {
   /** `<data>/snapshots`: made if missing; refused (no snapshot, no read of one) when it is a link or not a folder. */
@@ -82,7 +82,7 @@ export interface GitWorkingTreeOptions extends GitRunnerOptions {
 }
 
 /** Where git runs for a folder: its cwd, Ogden's pins (a worktree), the repo's shared git folder and the folder's index. */
-interface Located {
+export interface Located {
   cwd: string;
   env: Readonly<Record<string, string>>;
   common: string;
@@ -279,7 +279,28 @@ function parseListing(out: string): { raw: RawEntry[]; counts: Map<string, { add
   return { raw, counts };
 }
 
-export function createGitWorkingTree(options: GitWorkingTreeOptions): VcsWorkingTreePort {
+/** The working tree's own git and store (27.6: shared with `chat-worktree.ts`, which saves and restores chat worktrees through them). */
+export interface WorkingTreeInternals {
+  readonly runner: GitRunner;
+  /** Whether anything (a link too) is at `path`. */
+  present(path: string): boolean;
+  /** A real folder (made if missing), or a refusal: never a link, never a file. */
+  realFolder(path: string): string;
+  /** The repo's store of snapshot objects (`create`: made if missing), else a refusal; `undefined` when it isn't there and isn't made. */
+  storeOf(common: string, create: boolean): string | undefined;
+  /** The store's folder (`<snapshots>/<sha256(real common dir)[:16]>`) of a repo's shared git folder, by path only. */
+  storeFolderOf(common: string): string;
+  /** A temporary copy of the folder's index in `<snapshots>/tmp`, and its removal. */
+  tempIndex(located: Located): { path: string; remove(): void };
+  /** Writes go to the store; the repo's objects are read through alternates. */
+  storeEnv(located: Located, store: string, index: string): Record<string, string>;
+  /** Where git runs for `folder`; `undefined` when it is in no repository's working tree. */
+  locate(folder: VcsFolder): Promise<Located | undefined>;
+  /** The folder's working tree as a tree object in the store (tracked and untracked, not ignored). */
+  snapshotLocated(located: Located): Promise<string>;
+}
+
+export function createWorkingTreeInternals(options: GitWorkingTreeOptions): WorkingTreeInternals {
   // The user's own checkout as its config says (never `core.autocrlf=false` here), and never a fetch, a split index
   // (`sharedindex.*` written beside the repo's index) or an untracked cache (written into the index read).
   const runner = createGitRunner({ ...options, overrideAutocrlf: false, extraConfig: WORKING_TREE_CONFIG, extraEnv: { GIT_NO_LAZY_FETCH: '1' } });
@@ -310,7 +331,7 @@ export function createGitWorkingTree(options: GitWorkingTreeOptions): VcsWorking
   const storeOf = (common: string, create: boolean): string | undefined => {
     const root = options.snapshotsRoot;
     checkPath(root);
-    const folder = join(root, createHash('sha256').update(realOf(common)).digest('hex').slice(0, 16));
+    const folder = storeFolderOf(common);
     const objects = join(folder, 'objects');
     for (const path of [root, folder, objects]) {
       if (create) realFolder(path);
@@ -418,6 +439,31 @@ export function createGitWorkingTree(options: GitWorkingTreeOptions): VcsWorking
     }
     return [...names].flatMap((name) => ['-c', `filter.${name}.clean=`, '-c', `filter.${name}.smudge=`, '-c', `filter.${name}.process=`, '-c', `filter.${name}.required=false`]);
   };
+
+
+  const storeFolderOf = (common: string): string => join(options.snapshotsRoot, createHash('sha256').update(realOf(common)).digest('hex').slice(0, 16));
+
+  const snapshotLocated = async (located: Located): Promise<string> => {
+    const store = storeOf(located.common, true)!;
+    const index = tempIndex(located);
+    try {
+      const env = storeEnv(located, store, index.path);
+      await must(located.cwd, [...located.flags, '--literal-pathspecs', 'add', '--all', '--', '.'], 'snapshot the folder', undefined, env);
+      const tree = (await must(located.cwd, [...located.flags, 'write-tree'], 'snapshot the folder', undefined, env)).trim();
+      if (!REVISION.test(tree)) throw new VcsError("git couldn't snapshot the folder.", { step: 'snapshot' });
+      return tree;
+    } finally {
+      index.remove();
+    }
+  };
+
+  return { runner, present, realFolder, storeOf, storeFolderOf, tempIndex, storeEnv, locate, snapshotLocated };
+}
+
+export function createGitWorkingTree(options: GitWorkingTreeOptions): VcsWorkingTreePort {
+  const internals = createWorkingTreeInternals(options);
+  const { runner, storeOf, tempIndex, storeEnv, locate } = internals;
+  const { run, must } = runner;
 
   /** The branch Branch compares with and its commit: `origin/HEAD`'s, else `main`, else `master`. */
   const branchBase = async (located: Located): Promise<{ name: string; revision: string } | undefined> => {
@@ -719,17 +765,7 @@ export function createGitWorkingTree(options: GitWorkingTreeOptions): VcsWorking
     async snapshot(folder) {
       const located = await locate(folder);
       if (located === undefined) return undefined;
-      const store = storeOf(located.common, true)!;
-      const index = tempIndex(located);
-      try {
-        const env = storeEnv(located, store, index.path);
-        await must(located.cwd, [...located.flags, '--literal-pathspecs', 'add', '--all', '--', '.'], 'snapshot the folder', undefined, env);
-        const tree = (await must(located.cwd, [...located.flags, 'write-tree'], 'snapshot the folder', undefined, env)).trim();
-        if (!REVISION.test(tree)) throw new VcsError("git couldn't snapshot the folder.", { step: 'snapshot' });
-        return tree;
-      } finally {
-        index.remove();
-      }
+      return internals.snapshotLocated(located);
     },
 
     async commitAll(folder, message) {

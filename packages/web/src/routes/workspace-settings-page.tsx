@@ -19,6 +19,7 @@ import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { ProjectBuildLimit } from '@/planning/build-limit-fields';
 import { EmptyState, PageBody, PageSection } from '@/ui/page';
+import { PutAwayCopiesSection } from '@/worktrees/put-away-section';
 import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
 import { Text } from '@/ui/typography';
 import { deleteHistory, fetchSessions, fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
@@ -71,6 +72,7 @@ export function WorkspaceSettingsPage() {
             <BuildLimitSection wsId={wsId} />
             <DevToolsAllowSection wsId={wsId} />
             <AlwaysAllowRulesSection wsId={wsId} name={workspaceName(workspace.data)} />
+            <PutAwayCopiesSection wsId={wsId} />
             <DeleteHistorySection wsId={wsId} name={workspaceName(workspace.data)} />
           </>
         )}

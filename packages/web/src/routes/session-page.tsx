@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ArrowsLeftRight, ChatCircle, House, Stop } from '@phosphor-icons/react';
-import { DELETE_CHAT_NOT_DELETABLE_TEXT, DELETE_CHAT_REMOTE_TEXT, DELETE_CHAT_TERMINAL_TEXT, deleteChatBusyText, WORKTREE_BADGE_TOOLTIP_TEXT, worktreeBadgeLabel, type PermissionMode } from '@ogden-agents/shared';
+import { DELETE_CHAT_NOT_DELETABLE_TEXT, DELETE_CHAT_REMOTE_TEXT, DELETE_CHAT_TERMINAL_TEXT, deleteChatBusyText, WORKTREE_BADGE_TOOLTIP_TEXT, WORKTREE_PUT_AWAY_COMPOSER_TEXT, worktreeBadgeLabel, type PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
@@ -50,6 +50,8 @@ import { StateGlyph } from '@/ui/state-glyph';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { Text } from '@/ui/typography';
 import { fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
+import { PutAwayNotice } from '@/worktrees/put-away-notice';
+import { usePutAwayWorktrees } from '@/worktrees/worktree-retention';
 
 /** How close to the bottom (px) still counts as at the bottom, for auto-scroll. */
 const AT_BOTTOM_PX = 48;
@@ -448,6 +450,8 @@ export function SessionPage() {
     card.focus({ preventScroll: true });
   }, [linked, opens, view.pendingPermissions, terminalDrives]);
 
+  // Retention (27.6): a worktree chat whose copy was put away reads only, until Restore. Above every early return (hooks).
+  const putAwayList = usePutAwayWorktrees(wsId, { enabled: (session.data?.session.branch ?? null) !== null });
   if (session.error instanceof ChatApiError && session.error.status === 404) {
     return (
       <>
@@ -510,6 +514,7 @@ export function SessionPage() {
   // Delete chat (27.3): a plain local chat only (a planning or remote one says why; a build's has no item), never mid-turn or while the terminal drives.
   const sessionKind = session.data?.session.kind;
   const branch = session.data?.session.branch ?? null;
+  const putAway = branch !== null && (putAwayList.data ?? []).some((worktree) => worktree.sessionId === sesId);
   const deleteBlocked =
     sessionKind !== 'chat'
       ? DELETE_CHAT_NOT_DELETABLE_TEXT
@@ -632,6 +637,7 @@ export function SessionPage() {
       {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
       {permissionMode === 'skip_all' && !agentRemoved ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
       {isBuild ? <BuildRunPanel wsId={wsId} run={buildRun.data} /> : null}
+      {putAway ? <PutAwayNotice key={`put-away-${sesId}`} wsId={wsId} sesId={sesId} onRestored={() => void refetchSession()} /> : null}
       <StartModeNote key={sesId} note={startModeNote} />
       {agentRemoved ? (
         <Banner data-testid="agent-removed-banner">
@@ -832,7 +838,9 @@ export function SessionPage() {
           <Composer
             label={`Message ${agentName}`}
             blockedReason={
-              driver === 'terminal'
+              putAway
+                ? WORKTREE_PUT_AWAY_COMPOSER_TEXT
+                : driver === 'terminal'
                 ? TERMINAL_DRIVING_REASON
                 : state === 'waiting'
                   ? `${agentName} is waiting for your answer above.`

@@ -23,10 +23,12 @@ import { createWorkspaceFiles, type WorkspaceFiles } from './workspace-files.js'
 import type { WorkspaceFilesPort } from './workspace-files-port.js';
 import { createWorkspaceChanges, type WorkspaceChanges } from './workspace-changes.js';
 import { createTurnSnapshots, type TurnSnapshots } from './turn-snapshots.js';
-import type { VcsWorkingTreePort } from './vcs-port.js';
+import type { VcsSnapshotStorePort, VcsWorkingTreePort } from './vcs-port.js';
+import { createWorktreePutAwayStore, type WorktreePutAwayStore } from './worktree-put-away-store.js';
+import { createSnapshotCleanup, createWorktreeRetention, type SnapshotCleanup, type WorktreeRetentionOptions, type WorktreeRetentionSweep } from './worktree-retention.js';
 import { createEditorLaunch, type EditorLaunch } from './editor-launch.js';
 import type { EditorLauncherPort } from './editor-launcher-port.js';
-import type { ChatLocations, Trials, WorktreePorts, WorktreeRetention } from './where-work-runs.js';
+import type { ChatLocations, Trials, WorktreePorts } from './where-work-runs.js';
 import { createProjectCommands, type ProjectCommandRunner, type ProjectCommands } from './project-commands.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
@@ -118,7 +120,12 @@ export interface Core {
    * `VcsChatWorktreePort` and `PortProbePort`, so their routes answer 501.
    */
   readonly chatLocations: ChatLocations | undefined;
-  readonly worktreeRetention: WorktreeRetention | undefined;
+  /** Put-away chat worktrees and the install's cap (27.6), for `createChat`'s `worktreePutAway` and retention. */
+  readonly worktreePutAway: WorktreePutAwayStore;
+  /** Worktree retention and Restore (27.6) over the server's chat; call once, after the chat. */
+  readonly createWorktreeRetention: (ports: Pick<WorktreeRetentionOptions, 'chat' | 'dataDir' | 'onSkipped'>) => WorktreeRetentionSweep;
+  /** The snapshot store's cleanup (27.6) over the server's store port. */
+  readonly createSnapshotCleanup: (port: VcsSnapshotStorePort) => SnapshotCleanup;
   readonly worktreePorts: WorktreePorts | undefined;
   readonly trials: Trials | undefined;
   /** Problems (AD-38; 8.9): the project's declared commands, their runs and parsed failures; `undefined` without a {@link OpenCoreOptions.projectCommandRunner} and a files port. */
@@ -285,6 +292,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     ...(options.onPermissionError === undefined ? {} : { onError: options.onPermissionError }),
   });
   const workspaceFiles = options.workspaceFilesPort === undefined ? undefined : createWorkspaceFiles({ entities, port: options.workspaceFilesPort });
+  const worktreePutAway = createWorktreePutAwayStore({ db, events, sessionEvents });
   return {
     events,
     sessionEvents,
@@ -307,9 +315,11 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     workspaceChanges: options.vcsWorkingTreePort === undefined ? undefined : createWorkspaceChanges({ entities, sessionEvents, port: options.vcsWorkingTreePort }),
     turnSnapshots: options.vcsWorkingTreePort === undefined ? undefined : createTurnSnapshots({ entities, sessionEvents, port: options.vcsWorkingTreePort, ...(options.onTurnSnapshotError === undefined ? {} : { onError: options.onTurnSnapshotError }) }),
     editorLaunch: options.editorLauncherPort === undefined || workspaceFiles?.locate === undefined ? undefined : createEditorLaunch({ entities, files: { locate: workspaceFiles.locate }, launcher: options.editorLauncherPort }),
-    // Where work runs (epic 27 entry 2): contracts only until 27.4 to 27.8.
+    // Where work runs (epic 27 entry 2): contracts only until 27.4, 27.7 and 27.8; retention (27.6) is made over the server's chat.
     chatLocations: undefined,
-    worktreeRetention: undefined,
+    worktreePutAway,
+    createWorktreeRetention: (ports) => createWorktreeRetention({ ...ports, entities, store: worktreePutAway }),
+    createSnapshotCleanup: (port) => createSnapshotCleanup({ entities, store: worktreePutAway, port }),
     worktreePorts: undefined,
     trials: undefined,
     projectCommands:

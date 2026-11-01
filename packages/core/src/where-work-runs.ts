@@ -60,15 +60,17 @@ export interface WorktreeRetention {
   /** The project's put-away chat worktrees, newest first. */
   listPutAway(workspaceId: unknown): Promise<PutAwayWorktreesResponse>;
   /**
-   * Puts one chat's worktree away: `VcsChatWorktreePort.putAway` (snapshot,
-   * then remove, branch kept), appending `session.worktree_put_away`. Refused
-   * mid-turn. Called by {@link enforce} and by a trial's Keep this one.
+   * Puts one chat's worktree away (`Chat.putAwayWorktree`):
+   * `VcsChatWorktreePort.saveForPutAway`, the record with
+   * `session.worktree_put_away`, then `VcsPort.removeWorktree`, branch kept.
+   * Refused mid-turn. Called by {@link enforce} and by a trial's Keep this one.
    */
   putAway(sessionId: SessionId, cause: PutAwayCause): Promise<PutAwayWorktree>;
   /**
    * Brings a put-away chat worktree back on its branch with its saved
    * changes, appending `session.worktree_restored`. `RestoreFailedError`
-   * (`branch_missing`, `path_taken`) keeps the snapshot; refused mid-turn.
+   * (`branch_missing`, `branch_moved`, `path_taken`) keeps the snapshot;
+   * refused mid-turn.
    */
   restore(workspaceId: unknown, sessionId: unknown): Promise<SessionLocationResponse>;
   /**

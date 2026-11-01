@@ -64,6 +64,7 @@ import type { SessionEvents } from './session-events.js';
 import type { VcsChangesTarget, VcsHunkResult, VcsWorkingTreePort } from './vcs-port.js';
 import { checkedWorkspacePath, isRefusedWorkspacePath } from './workspace-files.js';
 import { resolveWorkspaceRoot, sessionFolder, vcsFolderOf, workspaceFolder } from './workspace-root.js';
+import { keptTurns } from './worktree-retention.js';
 
 export interface WorkspaceChanges {
   /** `ChangesQuery` → the view's changed files. {@link ValidationError}, {@link NotFoundError} (a foreign chat or turn). */
@@ -100,8 +101,8 @@ const shownPath = (path: string): boolean => WorkspaceRelativePath.safeParse(pat
 export const shownFile = (file: ChangedFile): boolean => shownPath(file.path) && (file.previousPath === undefined || shownPath(file.previousPath));
 
 export function createWorkspaceChanges({ entities, sessionEvents, port }: WorkspaceChangesOptions): WorkspaceChanges {
-  const recordedTurns = (session: Session): SessionTurnChangesRecordedEvent[] =>
-    entities.listSessionEvents(session.id, ['session.turn_changes_recorded']).filter((event): event is SessionTurnChangesRecordedEvent => event.type === 'session.turn_changes_recorded');
+  // Only the turns whose snapshots are kept (27.6): older ones are cleaned up from the store.
+  const recordedTurns = (session: Session): SessionTurnChangesRecordedEvent[] => keptTurns(entities, session.id);
 
   /** The port's target for a view: This turn's named turn (else the latest), `undefined` when the chat has recorded none. */
   const targetOf = (view: ChangesQuery['view'], session: Session | undefined, turn: TurnId | undefined): { target: VcsChangesTarget; turnId?: TurnId } | undefined => {

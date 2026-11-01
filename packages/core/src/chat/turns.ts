@@ -351,6 +351,8 @@ export function createTurns(
       // Between drivers first: a switch back (or a CLI's exit) still reads `terminal` until it is done (story 3.4).
       if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
       if (session.driver === 'terminal') throw new DriverIsTerminalError();
+      // A copy put away (or being put away or restored) takes no message, queued or not (27.6).
+      ctx.requireCopyPresent(sessionId);
       const current = busy.get(sessionId);
       if (current !== undefined) {
         // A failed turn is ending: nothing more goes after it.

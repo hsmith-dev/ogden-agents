@@ -68,6 +68,13 @@ const buildsSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/builds-settings-page'), 'BuildsSettingsPage'),
 });
 
+/** How many chat worktrees the install keeps before it puts the oldest idle one away (epic 27, 27.6). */
+const worktreesSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/worktrees',
+  component: lazyRouteComponent(() => import('./routes/worktrees-settings-page'), 'WorktreesSettingsPage'),
+});
+
 /** Generic developer CLI tools: detect, confirmed install, and each project's unattended-build allowlist (CAP-25). */
 const devToolsSettingsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -278,7 +285,7 @@ const routeTree = rootRoute.addChildren([
   workspaceTerminalsRoute,
   workspaceWorkbenchRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, alwaysAllowSettingsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, alwaysAllowSettingsRoute, buildsSettingsRoute, worktreesSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

@@ -12,6 +12,7 @@ import type {
   BuildAgent,
   CautionLevel,
   PermissionMode,
+  PutAwayCause,
   RemoteMachineId,
   RunDecision,
   RunOutcome,
@@ -594,3 +595,40 @@ export const customAgents = sqliteTable('custom_agents', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/**
+ * The install's chat worktree cap (27.6; one row, `id = 1`, written on first
+ * change): how many chat worktrees, over every project, are kept before the
+ * oldest idle one is put away. A missing row reads as the default.
+ */
+export const chatWorktreeRetention = sqliteTable('chat_worktree_retention', {
+  id: integer('id').primaryKey(),
+  keep: integer('keep').notNull(),
+});
+
+/**
+ * A chat worktree put away (27.6; AD-17 CAP-33 note's exception): its saved
+ * changes' tree in AD-37's snapshot store (`NULL` when it had none), the
+ * branch's commit they were taken on and how many files they hold. Written
+ * before the folder is removed and removed once Restore brought it back, so
+ * a row always exists while the copy may be gone. No path.
+ */
+export const chatWorktreesPutAway = sqliteTable(
+  'chat_worktrees_put_away',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    branch: text('branch').notNull(),
+    snapshotTree: text('snapshot_tree'),
+    head: text('head').notNull(),
+    files: integer('files').notNull(),
+    cause: text('cause').$type<PutAwayCause>().notNull(),
+    putAwayAt: text('put_away_at').notNull(),
+  },
+  (t) => [uniqueIndex('chat_worktrees_put_away_session_unique').on(t.sessionId), index('chat_worktrees_put_away_workspace_idx').on(t.workspaceId)],
+);

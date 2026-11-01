@@ -10,7 +10,7 @@ import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
 import { fetchBuildAgents, fetchBuildSettings, fetchRunLimits, saveBuildSettings, saveRunLimits } from './builds-api';
 
 /** One whole-number setting: its field, a Save button that waits for a changed valid value, and what happened. */
-function NumberSetting({
+export function NumberSetting({
   id,
   label,
   description,

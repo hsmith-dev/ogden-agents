@@ -27,7 +27,7 @@ import {
   type AgentPort,
   type Core,
 } from '@ogden-agents/core';
-import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERRUPTED, SERVER_STREAM, type AgentId, type LocalEndpointId, type RemoteMachineId, type Session } from '@ogden-agents/shared';
+import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERRUPTED, SERVER_STREAM, type AgentId, type LocalEndpointId, type RemoteMachineId, type Session, type SessionId } from '@ogden-agents/shared';
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
@@ -49,7 +49,7 @@ import { wireAgents } from './start-agents.js';
 import { createPanesWiring } from './start-panes.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
-import { createBuildsWiring, createServerVcs, createServerWorkingTree } from './start-builds.js';
+import { createBuildsWiring, createServerChatWorktree, createServerVcs, createServerWorkingTree } from './start-builds.js';
 import { createNotificationsWiring } from './start-notifications.js';
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
@@ -94,6 +94,11 @@ function defaultWebRoot(): string {
 
 /** How long a stopping server waits for a killed install to remove its temp folder. */
 const INSTALL_STOP_MS = 10_000;
+/** How long a stop waits for a put-away or Restore in progress (27.6). */
+const RETENTION_STOP_MS = 15_000;
+/** The snapshot store's first cleanup after a start, then how often (27.6). */
+const SNAPSHOT_CLEANUP_DELAY_MS = 60_000;
+const SNAPSHOT_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /** Session states that keep the server from restarting (AD-4, AD-20). */
 const BUSY_STATES = new Set(['working', 'waiting']);
@@ -391,6 +396,9 @@ async function listenAndAnnounce({
   const panes = createPanesWiring({ options, hooks, core, terminal, dataDir, onError: (error) => log.warn('a terminal pane listener failed', { error: error instanceof Error ? error.name : 'unknown' }), onSweep: (result) => log.info('terminal panes left running by a hard stop were cleaned up', result) });
   // Document cards (story 4.7, `start-planning.ts`).
   const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, agentOf, log });
+  // Retention (27.6): the chat's put-aways and Restore on the user's git; the sweep is bound once it exists, below.
+  const chatWorktree = createServerChatWorktree(options, dataDir);
+  const sweepRef: { current: ((sessionId: SessionId) => void) | undefined } = { current: undefined };
   const chat = createChat({
     dataDir,
     entities: core.entities,
@@ -428,9 +436,29 @@ async function listenAndAnnounce({
       log.warn('a chat worktree was left in place', { sessionId, step, code: error instanceof CoreError ? error.code : error === undefined ? 'refused' : 'unexpected' }),
     // Each prompt's snapshots for This turn (AD-37, story 8.4).
     turnSnapshots: core.turnSnapshots,
+    // Retention (27.6): a copy's changes saved before it is put away, and Restore; a put-away chat takes no message.
+    vcsChatWorktree: chatWorktree,
+    worktreePutAway: core.worktreePutAway,
+    // One more chat worktree (made, or restored): the sweep runs, sparing it.
+    onChatWorktreeAdded: (sessionId) => sweepRef.current?.(sessionId),
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   stopChats.current = (agentId) => chat.stopAgent(agentId);
+  // Worktree retention (27.6): one cap for the install; a refusal or failure is logged with ids and codes only.
+  const worktreeRetention = core.createWorktreeRetention({
+    chat,
+    dataDir,
+    onSkipped: (sessionId, error) => log.warn('a chat worktree was not put away', { sessionId, code: error instanceof CoreError ? error.code : 'unexpected' }),
+  });
+  const sweep = (spare?: SessionId) =>
+    void worktreeRetention.enforce({ spare }).then(
+      (putAway) => {
+        if (putAway.length > 0) log.info('chat worktrees were put away to keep the limit', { sessions: putAway.map((each) => each.sessionId) });
+      },
+      (error: unknown) => log.warn('the worktree retention sweep failed', { code: error instanceof CoreError ? error.code : 'unexpected' }),
+    );
+  sweepRef.current = (sessionId) => sweep(sessionId);
+  const snapshotCleanup = core.createSnapshotCleanup(chatWorktree);
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
   const { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
     vcs,
@@ -575,6 +603,8 @@ async function listenAndAnnounce({
     panes,
     terminalsSettings: core.terminalsSettings,
     tabs,
+    // Retention and Restore (27.6).
+    worktreeRetention,
   });
 
   // Saved API keys and, for an agent with one, its subscription state, before the first chat (story 9.2).
@@ -625,6 +655,8 @@ async function listenAndAnnounce({
     writePortFile(portFile, identity);
     core.events.append({ type: 'server.started', workspaceId: null, streamId: SERVER_STREAM, payload: { version } });
     ticketWatcher.start();
+    // A lower cap set while the server was stopped, or chats made by an older version: the sweep runs once now (27.6).
+    sweep();
   } catch (error) {
     // As on stop: the runner's close kills any run a watch waits on.
     const watching = ticketWatcher.close();
@@ -648,6 +680,28 @@ async function listenAndAnnounce({
   // Only when asked: a code nobody redeems is a live secret for nothing.
   const launchUrl = options.launch === true || options.open === true ? issueLaunchUrl() : undefined;
 
+  // The snapshot store's cleanup (27.6): a minute after the start, then daily; counts only in the log. Never keeps the process alive.
+  const cleanSnapshots = () =>
+    void snapshotCleanup.run().then(
+      (pruned) => {
+        if (pruned.objects + pruned.stores + pruned.temporary > 0) log.info('snapshot store cleaned', { objects: pruned.objects, stores: pruned.stores, temporary: pruned.temporary });
+        // A link where a store or the snapshots folder should be, or a project that couldn't be read: left whole, said so.
+        if (pruned.refused > 0) log.warn('snapshot store cleanup left stores whole', { refused: pruned.refused });
+      },
+      (error: unknown) => log.warn('the snapshot store cleanup failed', { code: error instanceof CoreError ? error.code : 'unexpected' }),
+    );
+  let cleanupInterval: ReturnType<typeof setInterval> | undefined;
+  const cleanupStart = setTimeout(() => {
+    cleanSnapshots();
+    cleanupInterval = setInterval(cleanSnapshots, SNAPSHOT_CLEANUP_INTERVAL_MS);
+    cleanupInterval.unref();
+  }, options.snapshotCleanupDelayMs ?? SNAPSHOT_CLEANUP_DELAY_MS);
+  cleanupStart.unref();
+  const stopCleanup = () => {
+    clearTimeout(cleanupStart);
+    if (cleanupInterval !== undefined) clearInterval(cleanupInterval);
+  };
+
   let resolveStopped!: (reason: StopReason) => void;
   const stopped = new Promise<StopReason>((resolve) => (resolveStopped = resolve));
   let closing: Promise<void> | undefined;
@@ -666,6 +720,11 @@ async function listenAndAnnounce({
       // So does every project command and its tree (AD-38): their finish is recorded first.
       .finally(() => core.projectCommands?.close().catch((error: unknown) => log.warn('stopping project commands failed', { reason: String(error) })))
       .finally(releaseCrashKill)
+      // No cleanup starts any more; a put-away in progress finishes (bounded) before the agents stop.
+      .finally(async () => {
+        stopCleanup();
+        await Promise.race([Promise.all([worktreeRetention.settled(), chat.worktreeOpsSettled()]), new Promise((resolve) => setTimeout(resolve, RETENTION_STOP_MS).unref())]);
+      })
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
       // An outcome being worked out finishes (bounded by its own reads), then the builds stop following the log.
       .finally(async () => {

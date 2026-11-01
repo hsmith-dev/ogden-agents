@@ -164,12 +164,41 @@ export const WORKTREE_RESTORED_TEXT = 'Restored.';
 export const WORKTREE_RESTORE_RETRY_LABEL = 'Try again';
 /** Restore couldn't finish: the branch is gone. */
 export const restoreBranchMissingText = (branch: string): string => `Restore couldn't finish: the branch ${branch} no longer exists. The saved changes are kept.`;
+/** Restore couldn't finish: the branch has commits made since the copy was put away, and the saved changes were made on the commit before them. */
+export const restoreBranchMovedText = (branch: string): string =>
+  `Restore couldn't finish: the branch ${branch} has new commits since this copy was put away. The saved changes are kept.`;
 /** Restore couldn't finish: something else is where the copy goes. */
 export const RESTORE_PATH_TAKEN_TEXT = "Restore couldn't finish: something else is where this chat's copy goes. The saved changes are kept.";
+/** Why Restore couldn't finish (409 `restore_failed`, `details.reason`; `failed`: git couldn't, for another reason): the saved changes are kept. */
+export const RESTORE_FAILED_REASONS = ['branch_missing', 'branch_moved', 'path_taken', 'failed'] as const;
+export const RestoreFailedReason = z.enum(RESTORE_FAILED_REASONS);
+export type RestoreFailedReason = z.infer<typeof RestoreFailedReason>;
 /** The 409 `restore_failed` message when the reason has no words of its own. */
 export const RESTORE_FAILED_MESSAGE = "Restore couldn't finish. The saved changes are kept.";
 /** The retention setting's label. */
 export const worktreeRetentionLabel = (keep: number): string => `Keep the last ${keep} ${keep === 1 ? 'worktree' : 'worktrees'}`;
+/** The retention setting's field label (the number is the field's own). */
+export const WORKTREE_RETENTION_FIELD_LABEL = 'Keep the last N worktrees';
+/** Settings, Projects: the Worktrees page's title and its lines. */
+export const WORKTREES_SETTINGS_TITLE = 'Worktrees';
+export const WORKTREES_SETTINGS_DESCRIPTION = "Counted over every project's chat worktrees. Beyond the limit, the oldest idle chat's copy is put away to save space, with its uncommitted changes saved, and Restore brings it back.";
+/** What a put-away copy doesn't keep, said plainly. */
+export const WORKTREE_PUT_AWAY_NOT_KEPT_TEXT =
+  "Ignored files (like .env or node_modules) and empty folders aren't kept, and staged changes come back unstaged. A copy with partly staged changes, skipped files or a nested repository is kept as it is rather than put away.";
+/** A message sent to a chat whose copy is put away, or being put away (409 `worktree_put_away`). */
+export const WORKTREE_PUT_AWAY_SEND_MESSAGE = "This chat's copy was put away to save space. Restore it to send a message.";
+/** The composer's reason while the copy is put away. */
+export const WORKTREE_PUT_AWAY_COMPOSER_TEXT = 'Restore this chat to send a message.';
+/** Workspace settings: the list of put-away copies. */
+export const PUT_AWAY_COPIES_TITLE = 'Put-away copies';
+export const PUT_AWAY_COPIES_DESCRIPTION = "Chats whose copy was put away to save space. Restore brings a copy back on its branch with its saved changes.";
+export const PUT_AWAY_COPIES_EMPTY_TEXT = 'No copies are put away.';
+/** One put-away copy's line: how many files its saved changes hold. */
+export const putAwayFilesText = (files: number): string => (files === 0 ? 'No uncommitted changes' : `${files} ${files === 1 ? 'file' : 'files'} with saved changes`);
+/** Restore's accessible name in the list, naming the branch. */
+export const restoreWorktreeLabel = (branch: string): string => `Restore ${branch}`;
+/** How many of each chat's latest turns keep their snapshots (This turn lists only these; older ones are cleaned up). */
+export const TURN_SNAPSHOTS_KEPT = 50;
 
 /** The branch badge's tooltip (27.3): the branch is Ogden's and stays local. */
 export const WORKTREE_BADGE_TOOLTIP_TEXT = 'Never pushed. Merge it yourself when ready.';

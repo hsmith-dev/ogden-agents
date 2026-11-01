@@ -9,7 +9,7 @@ import { monotonicFactory } from 'ulid';
 import { AgentError, unregisteredAgent, type AgentPort, type AgentRegistry, type AgentSessionModels, type ProtectedPaths } from '../agent-port.js';
 import { agentConfigFolders } from '../agent-descriptor.js';
 import { canonicalWorkspacePath, type Entities } from '../entities.js';
-import { NotFoundError } from '../errors.js';
+import { NotFoundError, WorktreePutAwayError } from '../errors.js';
 import { protectedPathsWith } from '../permission-matching.js';
 import { createDecliningPermissions, type Permissions } from '../permissions.js';
 import type { SessionEvents } from '../session-events.js';
@@ -60,6 +60,10 @@ export interface ChatContext {
   readonly terminals: Map<SessionId, Terminal>;
   /** Sessions between drivers: no message is taken and no other switch starts. */
   readonly switching: Set<SessionId>;
+  /** Chats whose copy is being put away or restored (27.6): no message is taken and no switch starts. */
+  readonly puttingAway: Set<SessionId>;
+  /** Throws `WorktreePutAwayError` while the chat's copy is put away, or being put away or restored (27.6). */
+  readonly requireCopyPresent: (sessionId: SessionId) => void;
   /** The permission modes each session's agent session offered when it last started this run (permission modes). */
   readonly sessionModes: Map<SessionId, readonly PermissionMode[]>;
   /** The permission modes the agent session started last in this run offered, per agent (any chat of it): a chat whose own agent hasn't started yet. */
@@ -113,6 +117,10 @@ export function createChatContext(options: ChatOptions): ChatContext {
   const droppedAgents = new Map<SessionId, Promise<void>>();
   const terminals = new Map<SessionId, Terminal>();
   const switching = new Set<SessionId>();
+  const puttingAway = new Set<SessionId>();
+  const requireCopyPresent = (sessionId: SessionId): void => {
+    if (puttingAway.has(sessionId) || options.worktreePutAway?.get(sessionId) !== undefined) throw new WorktreePutAwayError();
+  };
   const sessionModes = new Map<SessionId, readonly PermissionMode[]>();
   const permissionModeTimeoutMs = options.permissionModeTimeoutMs ?? PERMISSION_MODE_TIMEOUT_MS;
   const sessionModels = new Map<SessionId, AgentSessionModels>();
@@ -185,6 +193,8 @@ export function createChatContext(options: ChatOptions): ChatContext {
     droppedAgents,
     terminals,
     switching,
+    puttingAway,
+    requireCopyPresent,
     sessionModes,
     lastSessionModes: new Map(),
     sessionModels,

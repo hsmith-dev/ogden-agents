@@ -8,9 +8,9 @@
 import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createLocalBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createGitWorkingTree, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createLocalBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitChatWorktree, createGitVcs, createGitWorkingTree, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
-import { chatWorktreesRootOf, createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsPort, type VcsWorkingTreePort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
+import { chatWorktreesRootOf, createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsPort, type VcsWorkingTreePort, type VcsChatWorktreePort, type VcsSnapshotStorePort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import { createPerAgentSandbox } from './build-agent-sandbox.js';
 import type { Logger } from './log.js';
 import { agentEnvironment, withoutAgentKeys } from './start-env.js';
@@ -49,6 +49,19 @@ export const WORKING_TREE_GIT_TIMEOUT_MS = 30_000;
  */
 export function createServerWorkingTree(options: StartOptions, dataDir: string): VcsWorkingTreePort {
   return options.vcsWorkingTreePort ?? createGitWorkingTree({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), snapshotsRoot: snapshotsRootOf(dataDir), timeoutMs: WORKING_TREE_GIT_TIMEOUT_MS });
+}
+
+/**
+ * Retention's git (27.6): a chat worktree's changes saved before it is put
+ * away, Restore, and the snapshot store's cleanup, with the Workbench's
+ * environment, hooks folder and store. A test's own
+ * (`StartOptions.vcsChatWorktree`) replaces it.
+ */
+export function createServerChatWorktree(options: StartOptions, dataDir: string): VcsChatWorktreePort & VcsSnapshotStorePort {
+  return (
+    options.vcsChatWorktree ??
+    createGitChatWorktree({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), snapshotsRoot: snapshotsRootOf(dataDir), chatWorktreesRoot: chatWorktreesRootOf(dataDir), timeoutMs: WORKING_TREE_GIT_TIMEOUT_MS })
+  );
 }
 
 export function createBuildsWiring({

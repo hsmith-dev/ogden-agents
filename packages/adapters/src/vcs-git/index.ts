@@ -34,7 +34,7 @@
  * path (never a `prune`, which would touch the user's other worktrees), and
  * a branch is deleted only when it is one Ogden made (`ogden/…`).
  */
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
@@ -60,6 +60,7 @@ import { createGitRunner } from './runner.js';
 export { gitVersionAtLeast, parseGitVersion, type GitVcsOptions } from './checks.js';
 export { headerPaths } from './patch.js';
 export { createGitWorkingTree, type GitWorkingTreeOptions } from './working-tree.js';
+export { createGitChatWorktree, type GitChatWorktreeOptions } from './chat-worktree.js';
 
 export function createGitVcs(options: GitVcsOptions): VcsPort {
 
@@ -91,55 +92,10 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
   };
 
   const runner = createGitRunner(options);
-  const { git, timeout, run, must, identityFlags } = runner;
+  const { git, run, must, identityFlags } = runner;
 
-  /**
-   * Runs git with `input` on its stdin and keeps its stdout as bytes (at
-   * most {@link MAX_IMPORT_BYTES}); `undefined` when git can't run or the
-   * output is over the bound (the child is stopped).
-   */
-  const runBinary = (cwd: string, args: readonly string[], input: string | Buffer, extraEnv: Readonly<Record<string, string>>): Promise<{ code: number; stdout: Buffer } | undefined> =>
-    new Promise((resolvePromise) => {
-      let base: string[];
-      try {
-        base = runner.baseArgs();
-      } catch {
-        resolvePromise(undefined);
-        return;
-      }
-      const child = spawn(git, [...base, ...args], {
-        cwd,
-        env: runner.env(extraEnv),
-        stdio: ['pipe', 'pipe', 'ignore'],
-        windowsHide: true,
-      });
-      const chunks: Buffer[] = [];
-      let size = 0;
-      let settled = false;
-      const finish = (answer: { code: number; stdout: Buffer } | undefined) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolvePromise(answer);
-      };
-      const timer = setTimeout(() => {
-        child.kill();
-        finish(undefined);
-      }, Math.max(timeout, 600_000));
-      child.stdout.on('data', (chunk: Buffer) => {
-        size += chunk.length;
-        if (size > MAX_IMPORT_BYTES) {
-          child.kill();
-          finish(undefined);
-          return;
-        }
-        chunks.push(chunk);
-      });
-      child.on('error', () => finish(undefined));
-      child.on('close', (code) => finish({ code: code ?? 1, stdout: Buffer.concat(chunks) }));
-      child.stdin.on('error', () => undefined);
-      child.stdin.end(input);
-    });
+  /** Runs git with `input` on its stdin and keeps its stdout as bytes (at most {@link MAX_IMPORT_BYTES}; `runner.ts`). */
+  const runBinary = (cwd: string, args: readonly string[], input: string | Buffer, extraEnv: Readonly<Record<string, string>>) => runner.runBinary(cwd, args, input, extraEnv, MAX_IMPORT_BYTES);
 
   const head = async (repoPath: string): Promise<VcsHead | undefined> => {
     const ref = await run(checkPath(repoPath), ['symbolic-ref', '--quiet', 'HEAD']);

@@ -5,36 +5,46 @@
  * `port-probe-memory` (never the real network). Each records its calls.
  */
 import { describe, expect, it } from 'vitest';
-import { createMemoryPortProbe, createMemoryVcsChatWorktree } from '../src/index.js';
+import { VcsError } from '@ogden-agents/core';
+import { createMemoryPortProbe, createMemoryVcsChatWorktree, MEMORY_BRANCH_HEAD } from '../src/index.js';
 
 const REPO = '/repo';
 const TREE = '/data/worktrees/chat-1';
 const BRANCH = 'ogden/chat/ses_01J9Z3K4M5N6P7Q8R9S0T1V2W4';
 
 describe('vcs-memory chat worktrees', () => {
-  it('puts a worktree away with a snapshot of its changes, and restores them on its branch', async () => {
+  it("saves a worktree's changes for a put-away, and restores them on its branch", async () => {
     const vcs = createMemoryVcsChatWorktree();
     vcs.changes(TREE).add('a.ts').add('b.ts');
-    const away = await vcs.putAway(REPO, TREE, BRANCH);
+    const away = await vcs.saveForPutAway(REPO, TREE, BRANCH);
     expect(away.files).toBe(2);
     expect(away.snapshotTree).toMatch(/^[0-9a-f]{40}$/);
-    expect(await vcs.restore(REPO, { path: TREE, branch: BRANCH, snapshotTree: away.snapshotTree })).toBe('restored');
+    expect(away.head).toBe(MEMORY_BRANCH_HEAD);
+    vcs.forget(TREE);
+    expect(await vcs.restore(REPO, { path: TREE, branch: BRANCH, head: away.head, snapshotTree: away.snapshotTree })).toBe('restored');
     expect([...vcs.changes(TREE)].sort()).toEqual(['a.ts', 'b.ts']);
     // A clean worktree saves no snapshot.
-    expect(await vcs.putAway(REPO, '/data/worktrees/clean', BRANCH)).toEqual({ snapshotTree: null, files: 0 });
-    expect(vcs.calls).toEqual([`putAway ${REPO} ${TREE} ${BRANCH}`, `restore ${REPO} ${TREE} ${BRANCH} ${away.snapshotTree}`, `putAway ${REPO} /data/worktrees/clean ${BRANCH}`]);
+    expect(await vcs.saveForPutAway(REPO, '/data/worktrees/clean', BRANCH)).toEqual({ snapshotTree: null, head: MEMORY_BRANCH_HEAD, files: 0 });
+    expect(vcs.calls).toEqual([`saveForPutAway ${REPO} ${TREE} ${BRANCH}`, `restore ${REPO} ${TREE} ${BRANCH} ${away.snapshotTree}`, `saveForPutAway ${REPO} /data/worktrees/clean ${BRANCH}`]);
   });
 
-  it('answers branch_missing and path_taken, keeping the snapshot', async () => {
+  it('answers branch_missing, branch_moved and path_taken, keeping the snapshot; refuses an unsafe copy', async () => {
     const vcs = createMemoryVcsChatWorktree();
     vcs.changes(TREE).add('a.ts');
-    const { snapshotTree } = await vcs.putAway(REPO, TREE, BRANCH);
+    const { snapshotTree, head } = await vcs.saveForPutAway(REPO, TREE, BRANCH);
     vcs.missingBranches.add(BRANCH);
-    expect(await vcs.restore(REPO, { path: TREE, branch: BRANCH, snapshotTree })).toBe('branch_missing');
+    expect(await vcs.restore(REPO, { path: TREE, branch: BRANCH, head, snapshotTree })).toBe('branch_missing');
     vcs.missingBranches.clear();
+    vcs.heads.set(BRANCH, 'd'.repeat(40));
+    expect(await vcs.restore(REPO, { path: TREE, branch: BRANCH, head, snapshotTree })).toBe('branch_moved');
+    // A clean copy restores on the new tip.
+    expect(await vcs.restore(REPO, { path: '/data/worktrees/clean', branch: BRANCH, head, snapshotTree: null })).toBe('restored');
+    vcs.heads.clear();
     vcs.takenPaths.add(TREE);
-    expect(await vcs.restore(REPO, { path: TREE, branch: BRANCH, snapshotTree })).toBe('path_taken');
+    expect(await vcs.restore(REPO, { path: TREE, branch: BRANCH, head, snapshotTree })).toBe('path_taken');
     expect(vcs.snapshots.get(snapshotTree!)).toEqual(new Set(['a.ts']));
+    vcs.unsafe.add(TREE);
+    await expect(vcs.saveForPutAway(REPO, TREE, BRANCH)).rejects.toThrow(VcsError);
   });
 
   it('moves changes between folders, or answers conflict and moves nothing', async () => {

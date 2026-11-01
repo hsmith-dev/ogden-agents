@@ -2,7 +2,7 @@
 
 ## Open items
 
-Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 2 retrospective, action A7); updated 2026-10-01 by the epic 9 and epic 3 retrospectives, 2026-10-03 by the epic 4 sweep (4.12), 2026-10-04 by the epic 6 sweep (6.9), 2026-10-04 by the maintained-fork story, 2026-10-02 by the epic 10 retrospective, 2026-10-31 by the epic 26 sweep (26.9), and 2026-11-01 by 26.10. Every entry stays in the log below for history, resolved ones included; an entry that starts with "Resolved:" closes an earlier one. When you add or resolve an entry, update this index too.
+Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 2 retrospective, action A7); updated 2026-10-01 by the epic 9 and epic 3 retrospectives, 2026-10-03 by the epic 4 sweep (4.12), 2026-10-04 by the epic 6 sweep (6.9), 2026-10-04 by the maintained-fork story, 2026-10-02 by the epic 10 retrospective, 2026-10-31 by the epic 26 sweep (26.9), and 2026-11-01 by 26.10 and by the epic 8 sweep (8.12). Every entry stays in the log below for history, resolved ones included; an entry that starts with "Resolved:" closes an earlier one. When you add or resolve an entry, update this index too.
 
 Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim from its Log entry's summary (story 10.8). Log entries are append-only, so the phrase never goes stale; `node scripts/check-provenance.mjs` (CI job Provenance) fails on a line whose phrase is missing or matches no summary, on a line whose phrase a `Resolved:` summary contains (the entry is closed, so the line is stale), and (entry 4.12) on a Log entry added since the base branch that isn't `Resolved:`, contains no index line's phrase, and isn't quoted (`"<part of its summary>"`) by a `Resolved:` summary. A partial close starts `Resolved (…):` and leaves its index line in place.
 
@@ -136,6 +136,60 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Unowned (remote machines): about 1 in 200 Ed25519 keys from ssh2's `generateKeyPairSync` fail its own `parseKey` ("Malformed OpenSSH private key"); check the key before saving it and generate again. From 26.9's test runs. (log: "About 1 in 200 Ed25519 key pairs that ssh2 generates")
 - Unowned (a later sweep): the epic 26 sweep's leftovers: two files over 600 lines, helpers repeated across test files, two `command-palette.tsx` file names and exports used only in their own module. From 26.9. (log: "Left by the epic 26 sweep (26.9)")
 - Unowned (Always allow rules list): show in which chat each rule was added; the rule row stores none. From 26.8 review Q5. (log: "Show in which chat each Always allow rule was added")
+- Unowned (Windows CI): The Files tab has not been checked on the win32 CI run with Windows reserved device names (`CON`, `COM1`, `aux.js`): they should be refused or not found without stalling. From 8.1. (log: "The Files tab has not been checked on the win32 CI run with Windows reserved device names")
+- Unowned: A folder with over 5000 entries lists an arbitrary subset in directory order in the Files tab. From 8.1. (log: "A folder with over 5000 entries lists an arbitrary subset")
+- Unowned (TOCTOU, needs a concurrent writer): The Files tab checks a path's folders with lstat, then opens the file: a folder swapped for a link in between could be followed (Node has no `openat` or `O_BENEATH`). From 8.1. (log: "The Files tab checks a path's folders with lstat, then opens the file")
+- Unowned (API consistency): The files routes parse the path before resolving the project (an unknown project with a malformed path is 400), while core's files and editor use-cases resolve the project first (404); pick one order. From 8.2. (log: "The files routes parse the path before resolving the project")
+- Epic 27 (27.3): A chat's `worktreePath` should be checked to lie in its chat-worktrees folder when the chat is created; today core checks only that it is absolute, and the adapter that it is strictly inside the data folder. From 8.2. (log: "A chat's `worktreePath` should be checked to lie in its chat-worktrees folder")
+- Unowned (by decision, log only): `session.created` carries the absolute `worktreePath` (as the Session does); the no-absolute-path rule holds only on the four Workbench events. From 8.2. (log: "`session.created` carries the absolute `worktreePath`")
+- Unowned (by decision, log only): The architecture test's git-command check exempts `packages/core/src/remote-worktree-sync.ts`, which runs git on a remote machine over SSH (CAP-24). From 8.2. (log: "The architecture test's git-command check exempts `packages/core/src/remote-worktree-sync.ts`")
+- Unowned (accessibility): The diff viewer's Side by side reads an unchanged line twice to screen readers (once per side); one label per row pair would read better. From 8.3. (log: "Side by side reads an unchanged line twice to screen readers")
+- Unowned (design polish): Wrapped diff lines have a hanging indent but not DESIGN.md's muted return glyph. From 8.3. (log: "Wrapped diff lines have a hanging indent but not")
+- Unowned: Gaps between diff hunks are a static "N unchanged lines" row; "Show 24 more lines" needs a file's content at a revision, a route the changes port could add. From 8.3. (log: "Gaps between diff hunks are a static")
+- Unowned: The diff viewer's `layout.ts` repeats Tailwind's `lg` breakpoint (1024) as a number because the theme emits no breakpoint variable; a shared breakpoint token would remove the copy. From 8.3. (log: "The diff viewer's `layout.ts` repeats Tailwind's `lg` breakpoint")
+- Unowned (needs an event contract change): A turn whose start snapshot timed out or failed records nothing, so This turn shows the previous turn; a "not recorded" marker needs an event contract change. From 8.4. (log: "A turn whose start snapshot timed out or failed records nothing")
+- Unowned: This turn's counts stop at `MAX_CHANGED_FILES` (1000) files; a `--shortstat` count would be exact. From 8.4. (log: "This turn's counts stop at `MAX_CHANGED_FILES` (1000) files")
+- Epic 27 (retention): The turn snapshot store under `<data>/snapshots` is never cleaned and holds full copies of non-ignored files, `.env` included; retention and clean-up belong with epic 27's retention. From 8.4. (log: "The turn snapshot store under `<data>/snapshots` is never cleaned")
+- Unowned: With git filter drivers disabled, git-lfs files show as changed against their pointers in Unstaged and This turn; an allowlist of known-safe drivers (or `--attr-source` once the minimum git is 2.40) would fix it. From 8.4. (log: "git-lfs files show as changed against their pointers")
+- Unowned (TOCTOU, needs a concurrent writer): Git filter names are read, then blanked on the next call: an agent that adds a filter between the two calls could still race one run. From 8.4. (log: "Git filter names are read, then blanked on the next call")
+- Unowned (EXPERIENCE.md Changes): The Changes panel opens in the Workbench, not as a sheet beside the chat; the session header's Changes count is not built; terminal-driven turns get no snapshots. From 8.4. (log: "The Changes panel opens in the Workbench, not as a sheet beside the chat")
+- Unowned (revisit if slow): Unstaged copies the git index for every request, once per file diff (up to 100 per panel load). From 8.4. (log: "Unstaged copies the git index for every request")
+- Unowned: Revert follows the repo's `core.autocrlf` and `.gitattributes` `eol`, `ident` and `working-tree-encoding`, so a file out of step with them is rewritten whole; writing the result blob with no conversion would fix it but breaks CRLF checkouts. From 8.5. (log: "Revert follows the repo's `core.autocrlf`")
+- Unowned: A hunk action taking over 10 s lets a new turn's prompt go out while it writes, since the turn's start snapshot stops waiting for the repo lock. From 8.5. (log: "A hunk action taking over 10 s lets a new turn")
+- Unowned: Hunk actions refused mid-turn do not see overlapping projects (`repo` and `repo/src`) or terminal-pane agents. From 8.5. (log: "Hunk actions refused mid-turn do not see overlapping projects")
+- Unowned: An empty new file or a mode-only change can't be staged or reverted from the Changes panel: git prints no hunk for it. From 8.5. (log: "An empty new file or a mode-only change")
+- Unowned (EXPERIENCE.md Line comments): The transcript's "N review comments" block whose rows link back to the lines is not built; a sent line-comment message shows as plain text. From 8.6. (log: "block whose rows link back to the lines is not built")
+- Unowned (EXPERIENCE.md Line comments): A diff line's menu and Shift with arrows for a comment range are not built; ranges come from Shift with click or `C`. From 8.6. (log: "A diff line's menu and Shift with arrows for a comment range")
+- UX spec owner: EXPERIENCE.md Accessibility still says sending line comments announces "3 comments sent to Claude Code"; Send now opens the chat with the message in its composer, so the announcement belongs to the composer's own send. From 8.6. (log: "EXPERIENCE.md Accessibility still says sending line comments announces")
+- Unowned (by decision, log only): Line comments are kept in browser storage, so they don't follow the user to another browser. From 8.6. (log: "Line comments are kept in browser storage")
+- Unowned: A path in `_emphasis_` in a reply is never linked: link candidates come from the raw text, and rendering asks after emphasis is split. From 8.7. (log: "A path in `_emphasis_` in a reply is never linked")
+- Unowned (EXPERIENCE.md Path links): The file viewer opens as the Workbench Files page; the side panel beside the chat at `xl` is not built. From 8.7. (log: "the side panel beside the chat at `xl` is not built")
+- Unowned (EXPERIENCE.md Path links): Paths in tool-call rows are not linked to the viewer (Problems rows and search results are). From 8.7. (log: "Paths in tool-call rows are not linked to the viewer")
+- Unowned: An absolute path inside the project in a reply (`/Users/me/proj/src/a.ts`) stays plain text; mapping it to a relative path needs the project's real path in the client. From 8.7. (log: "An absolute path inside the project in a reply")
+- Unowned: Project search searches a tracked file symlink into an ignored folder under the link's name; nothing refused leaks. From 8.8. (log: "Project search searches a tracked file symlink into an ignored folder")
+- Unowned (TOCTOU, needs a concurrent writer): Project search: a folder swapped for a link between its check and `opendir` could list outside entries; candidates are re-checked, so nothing leaks. From 8.8. (log: "Project search: a folder swapped for a link between its check and `opendir`")
+- Unowned: Project search reads no `.git/info/exclude`, global excludes or `core.ignorecase`; `.gitignore` matching is case sensitive. From 8.8. (log: "Project search reads no `.git/info/exclude`")
+- Unowned: A project search queued behind two others starts its 5 s deadline when it gets a slot (up to about 10 s overall). From 8.8. (log: "A project search queued behind two others")
+- Unowned (Windows, E8-R11): Problems refuses Windows `.cmd` and `.bat` shims (`npm`, `pnpm`, `yarn`) in plain words, so package.json scripts don't run on Windows yet; resolving npm's `npm-cli.js` through `node.exe` is the likely fix. From 8.9. (log: "Problems refuses Windows `.cmd` and `.bat` shims")
+- Unowned (TOCTOU, needs a concurrent writer): Problems checks a script's binding, then the package manager reads `package.json` itself a moment later, so an edit in that window runs unconfirmed text; a re-check after start that kills on a mismatch would narrow it. From 8.9. (log: "Problems checks a script's binding, then the package manager reads `package.json` itself")
+- User decision (architecture note): AD-38 should say plainly that a detected `package.json` script runs through the package manager's own shell (Ogden never starts one itself). From 8.9. (log: "AD-38 should say plainly that a detected `package.json` script runs through the package manager")
+- Unowned (Windows): On Windows, after a Problems command's main process exits normally, `taskkill /T` can't walk to grandchildren it left. From 8.9. (log: "after a Problems command's main process exits normally, `taskkill /T`")
+- Unowned: Go test failures print paths relative to the package folder, so a Problems link for a nested package can point at a file that isn't there. From 8.9. (log: "Go test failures print paths relative to the package folder")
+- Unowned: Problems run history lives in memory only and is gone after a server restart. From 8.9. (log: "Problems run history lives in memory only")
+- Unowned (by decision, log only): Problems allows `node -e`, `python -c` and `npx -y` commands: the user typed and confirmed them and no shell interprets them; the refusal reasons don't promise more. From 8.9. (log: "Problems allows `node -e`, `python -c` and `npx -y` commands")
+- Unowned (by decision, log only): The Problems list response returns a command's and script's text unmasked (the user's own settings, needed for exact-text confirmation); only the draft and output are masked. From 8.9. (log: "The Problems list response returns a command's and script's text unmasked")
+- Unowned (TOCTOU, needs a concurrent writer): Open in editor locates the file, then the editor opens it by name a moment later: an agent that swaps a parent folder for a symlink in between gets an outside file shown in the user's editor. From 8.10. (log: "Open in editor locates the file, then the editor opens it by name a moment later")
+- Unowned: Review's Open in editor opens the project's copy of a file, not the build worktree's, so a file the build added is "Couldn't open". From 8.10. (log: "Review's Open in editor opens the project's copy of a file")
+- Unowned (remote machines): Open in editor for a remote chat's file ("This file is on build-box.", EXPERIENCE.md) is not built: it opens nothing special. From 8.10. (log: "Open in editor for a remote chat's file")
+- Unowned (Windows live check): Open in editor's Windows `.cmd` shim path and real `cmd.exe` quoting are unit-tested with a simulated platform only; the end-to-end suite has run on macOS. From 8.10. (log: "Open in editor's Windows `.cmd` shim path and real `cmd.exe` quoting")
+- Unowned (accessibility): A long chat has one hidden status region per path link; one shared announcer would be lighter. From 8.10. (log: "one hidden status region per path link")
+- Unowned (palette): The command palette has no Run tests action yet; Problems (8.9) is built, so it could run the project's declared test command. From 8.11. (log: "The command palette has no Run tests action yet")
+- User decision (security): Agent chat processes and terminal panes still get the server's PATH with its empty and relative entries (baseEnvironment), so a bare name an agent or a shell runs in the project could resolve to a program planted there; the 8.12 launch rule covers the editor, pane-launcher detection, linked commands and Problems only. From 8.12. (log: "Agent chat processes and terminal panes still get the server's PATH with its empty and relative entries")
+- Unowned (a later sweep): Left by the epic 8 sweep (8.12), recorded rather than fixed: `packages/adapters/src/vcs-git/working-tree.ts` is 763 lines; `dev-tools-catalog` keeps its own copy of `candidatesFor`; `linesOf` is written twice (web `code-view.tsx`, adapters `workspace-files-node`); a path's file name is taken three ways in the web; the three "inside a folder" checks (`vcs-git/checks.ts`, `workspace-files-node`, the server's test confinement) answer slightly different rules; many epic 8 exports are used only in their own module. From 8.12. (log: "Left by the epic 8 sweep (8.12)")
+- Unowned (security, launch rule): The Claude Code lookup (`acp-claude-code/detect.ts` `findClaudeExecutable`) filters PATH with `isAbsolute`, which on Windows keeps root-relative (`\bin`) and share entries the 8.12 launch rule drops. From the 8.12 review. (log: "The Claude Code lookup (`acp-claude-code/detect.ts` `findClaudeExecutable`) filters PATH with `isAbsolute`")
+- Unowned (security, launch rule): The Grok token probe (`setup-grok/token-probe.ts`) starts the Grok binary in the shared temp folder with `baseEnvironment()` (PATH with empty and relative entries); its own private home folder and `launchEnvironment` would follow the 8.12 launch rule. From the 8.12 review. (log: "The Grok token probe (`setup-grok/token-probe.ts`) starts the Grok binary in the shared temp folder")
+- Unowned (Windows, Problems): On Windows a Problems command runs in the project folder, and `CreateProcess` and `cmd.exe` look in the working folder before PATH, so a bare name the command runs in turn could still be one planted in the project; `NoDefaultCurrentDirectoryInExePath` in its environment would close it. From the 8.12 review. (log: "On Windows a Problems command runs in the project folder, and `CreateProcess` and `cmd.exe` look in the working folder before PATH")
+- Unowned (palette): On the Workbench at `?session=` of a worktree chat, the palette's Files searches the project root and opens a file without `session`, because the palette knows only the chat page's chat (`useChatOnScreen`). From the 8.12 review. (log: "the palette's Files searches the project root and opens a file without `session`")
 
 ## Log
 
@@ -1107,3 +1161,165 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-bring-your-own-agent/story-refactor-sweep-plan.md`
   summary: Resolved: "The fake OpenCode asks on every tool call whatever Ogden's permission config says" is closed: the fake honours the `permission` block of `OPENCODE_CONFIG` as OpenCode does (`bash`, `edit`, `external_directory` first for a write outside the folder; OpenCode's defaults for a missing key), with the test switch `FAKE_OPENCODE_PERMISSION` over it, so the Local build row's cards prove Ogden's config sets `ask`.
   evidence: 21.7; `tests/fixtures/fake-opencode.mjs` (`permissionOf`), `tests/fixtures/fake-build-turn.mjs` (`decide(path)` in place of `editsInsideWithoutAsking`), `tests/fixtures/fake-acp-agent.mjs` (Codex keeps its rule through it); `server/test/build-conformance.test.ts` Local case: with `edit: allow` the write inside needs no card and the write outside still asks.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-tracer-bullet-the-files-tab-lists-the-project-and-shows-one-plan.md`
+  summary: The Files tab has not been checked on the win32 CI run with Windows reserved device names (`CON`, `COM1`, `aux.js`): they should be refused or not found without stalling.
+  evidence: 8.1 row 11.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-tracer-bullet-the-files-tab-lists-the-project-and-shows-one-plan.md`
+  summary: A folder with over 5000 entries lists an arbitrary subset in directory order in the Files tab.
+  evidence: 8.1 row 19; `packages/adapters/src/workspace-files-node/index.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-tracer-bullet-the-files-tab-lists-the-project-and-shows-one-plan.md`
+  summary: The Files tab checks a path's folders with lstat, then opens the file: a folder swapped for a link in between could be followed (Node has no `openat` or `O_BENEATH`).
+  evidence: 8.1 row 20; the opened handle is re-checked where it can be.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-epic-contracts-and-stubs-files-search-diff-views-hunk-action-plan.md`
+  summary: The files routes parse the path before resolving the project (an unknown project with a malformed path is 400), while core's files and editor use-cases resolve the project first (404); pick one order.
+  evidence: 8.2 Deferred; changing it changes a status code, which the 8.12 sweep rules out.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-epic-contracts-and-stubs-files-search-diff-views-hunk-action-plan.md`
+  summary: A chat's `worktreePath` should be checked to lie in its chat-worktrees folder when the chat is created; today core checks only that it is absolute, and the adapter that it is strictly inside the data folder.
+  evidence: 8.2 Deferred; `packages/core/src/entities.ts` `checkedWorktree`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-epic-contracts-and-stubs-files-search-diff-views-hunk-action-plan.md`
+  summary: `session.created` carries the absolute `worktreePath` (as the Session does); the no-absolute-path rule holds only on the four Workbench events.
+  evidence: 8.2 Deferred; `packages/shared/src/events-workbench.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-epic-contracts-and-stubs-files-search-diff-views-hunk-action-plan.md`
+  summary: The architecture test's git-command check exempts `packages/core/src/remote-worktree-sync.ts`, which runs git on a remote machine over SSH (CAP-24).
+  evidence: 8.2 Deferred; `tests/architecture.test.ts` `GIT_COMMAND_EXEMPT`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-the-diff-viewer-component-used-by-review-first-plan.md`
+  summary: The diff viewer's Side by side reads an unchanged line twice to screen readers (once per side); one label per row pair would read better.
+  evidence: 8.3 Deferred; `packages/web/src/ui/diff/`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-the-diff-viewer-component-used-by-review-first-plan.md`
+  summary: Wrapped diff lines have a hanging indent but not DESIGN.md's muted return glyph.
+  evidence: 8.3 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-the-diff-viewer-component-used-by-review-first-plan.md`
+  summary: Gaps between diff hunks are a static "N unchanged lines" row; "Show 24 more lines" needs a file's content at a revision, a route the changes port could add.
+  evidence: 8.3 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-the-diff-viewer-component-used-by-review-first-plan.md`
+  summary: The diff viewer's `layout.ts` repeats Tailwind's `lg` breakpoint (1024) as a number because the theme emits no breakpoint variable; a shared breakpoint token would remove the copy.
+  evidence: 8.3 Deferred; `packages/web/src/ui/diff/layout.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-changes-panel-this-turn-unstaged-staged-and-branch-turn-snap-plan.md`
+  summary: A turn whose start snapshot timed out or failed records nothing, so This turn shows the previous turn; a "not recorded" marker needs an event contract change.
+  evidence: 8.4 review #13.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-changes-panel-this-turn-unstaged-staged-and-branch-turn-snap-plan.md`
+  summary: This turn's counts stop at `MAX_CHANGED_FILES` (1000) files; a `--shortstat` count would be exact.
+  evidence: 8.4 review #14.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-changes-panel-this-turn-unstaged-staged-and-branch-turn-snap-plan.md`
+  summary: The turn snapshot store under `<data>/snapshots` is never cleaned and holds full copies of non-ignored files, `.env` included; retention and clean-up belong with epic 27's retention.
+  evidence: 8.4 review #15.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-changes-panel-this-turn-unstaged-staged-and-branch-turn-snap-plan.md`
+  summary: With git filter drivers disabled, git-lfs files show as changed against their pointers in Unstaged and This turn; an allowlist of known-safe drivers (or `--attr-source` once the minimum git is 2.40) would fix it.
+  evidence: 8.4 Deferred; `packages/adapters/src/vcs-git/`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-changes-panel-this-turn-unstaged-staged-and-branch-turn-snap-plan.md`
+  summary: Git filter names are read, then blanked on the next call: an agent that adds a filter between the two calls could still race one run.
+  evidence: 8.4 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-changes-panel-this-turn-unstaged-staged-and-branch-turn-snap-plan.md`
+  summary: The Changes panel opens in the Workbench, not as a sheet beside the chat; the session header's Changes count is not built; terminal-driven turns get no snapshots.
+  evidence: 8.4 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-changes-panel-this-turn-unstaged-staged-and-branch-turn-snap-plan.md`
+  summary: Unstaged copies the git index for every request, once per file diff (up to 100 per panel load).
+  evidence: 8.4 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-hunk-stage-unstage-and-revert-refused-mid-turn-plan.md`
+  summary: Revert follows the repo's `core.autocrlf` and `.gitattributes` `eol`, `ident` and `working-tree-encoding`, so a file out of step with them is rewritten whole; writing the result blob with no conversion would fix it but breaks CRLF checkouts.
+  evidence: 8.5 review #10.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-hunk-stage-unstage-and-revert-refused-mid-turn-plan.md`
+  summary: A hunk action taking over 10 s lets a new turn's prompt go out while it writes, since the turn's start snapshot stops waiting for the repo lock.
+  evidence: 8.5 review #11.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-hunk-stage-unstage-and-revert-refused-mid-turn-plan.md`
+  summary: Hunk actions refused mid-turn do not see overlapping projects (`repo` and `repo/src`) or terminal-pane agents.
+  evidence: 8.5 review #12.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-hunk-stage-unstage-and-revert-refused-mid-turn-plan.md`
+  summary: An empty new file or a mode-only change can't be staged or reverted from the Changes panel: git prints no hunk for it.
+  evidence: 8.5 review #13.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-line-comments-sent-to-the-agent-as-one-message-plan.md`
+  summary: The transcript's "N review comments" block whose rows link back to the lines is not built; a sent line-comment message shows as plain text.
+  evidence: 8.6 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-line-comments-sent-to-the-agent-as-one-message-plan.md`
+  summary: A diff line's menu and Shift with arrows for a comment range are not built; ranges come from Shift with click or `C`.
+  evidence: 8.6 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-line-comments-sent-to-the-agent-as-one-message-plan.md`
+  summary: EXPERIENCE.md Accessibility still says sending line comments announces "3 comments sent to Claude Code"; Send now opens the chat with the message in its composer, so the announcement belongs to the composer's own send.
+  evidence: 8.6 Deferred; a design-document change, left for its owner.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-line-comments-sent-to-the-agent-as-one-message-plan.md`
+  summary: Line comments are kept in browser storage, so they don't follow the user to another browser.
+  evidence: 8.6 Design Notes.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-files-and-viewer-markdown-rendered-links-from-chat-paths-and-plan.md`
+  summary: A path in `_emphasis_` in a reply is never linked: link candidates come from the raw text, and rendering asks after emphasis is split.
+  evidence: 8.7 row 10.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-files-and-viewer-markdown-rendered-links-from-chat-paths-and-plan.md`
+  summary: The file viewer opens as the Workbench Files page; the side panel beside the chat at `xl` is not built.
+  evidence: 8.7 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-files-and-viewer-markdown-rendered-links-from-chat-paths-and-plan.md`
+  summary: Paths in tool-call rows are not linked to the viewer (Problems rows and search results are).
+  evidence: 8.7 Deferred; `packages/web/src/chat/tool-call-row.tsx`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-files-and-viewer-markdown-rendered-links-from-chat-paths-and-plan.md`
+  summary: An absolute path inside the project in a reply (`/Users/me/proj/src/a.ts`) stays plain text; mapping it to a relative path needs the project's real path in the client.
+  evidence: 8.7 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-project-search-plan.md`
+  summary: Project search searches a tracked file symlink into an ignored folder under the link's name; nothing refused leaks.
+  evidence: 8.8 row 4.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-project-search-plan.md`
+  summary: Project search: a folder swapped for a link between its check and `opendir` could list outside entries; candidates are re-checked, so nothing leaks.
+  evidence: 8.8 row 15 (as 8.1 row 20).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-project-search-plan.md`
+  summary: Project search reads no `.git/info/exclude`, global excludes or `core.ignorecase`; `.gitignore` matching is case sensitive.
+  evidence: 8.8 Deferred; `packages/adapters/src/workspace-files-node/gitignore.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-project-search-plan.md`
+  summary: A project search queued behind two others starts its 5 s deadline when it gets a slot (up to about 10 s overall).
+  evidence: 8.8 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-problems-declared-commands-trusted-only-failures-as-file-lin-plan.md`
+  summary: Problems refuses Windows `.cmd` and `.bat` shims (`npm`, `pnpm`, `yarn`) in plain words, so package.json scripts don't run on Windows yet; resolving npm's `npm-cli.js` through `node.exe` is the likely fix.
+  evidence: 8.9 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-problems-declared-commands-trusted-only-failures-as-file-lin-plan.md`
+  summary: Problems checks a script's binding, then the package manager reads `package.json` itself a moment later, so an edit in that window runs unconfirmed text; a re-check after start that kills on a mismatch would narrow it.
+  evidence: 8.9 security review 4.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-problems-declared-commands-trusted-only-failures-as-file-lin-plan.md`
+  summary: AD-38 should say plainly that a detected `package.json` script runs through the package manager's own shell (Ogden never starts one itself).
+  evidence: 8.9 Deferred; an architecture change, which the sweep does not make.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-problems-declared-commands-trusted-only-failures-as-file-lin-plan.md`
+  summary: On Windows, after a Problems command's main process exits normally, `taskkill /T` can't walk to grandchildren it left.
+  evidence: 8.9 security review 7, Windows half.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-problems-declared-commands-trusted-only-failures-as-file-lin-plan.md`
+  summary: Go test failures print paths relative to the package folder, so a Problems link for a nested package can point at a file that isn't there.
+  evidence: 8.9 Deferred; `packages/core/src/project-command-parsers.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-problems-declared-commands-trusted-only-failures-as-file-lin-plan.md`
+  summary: Problems run history lives in memory only and is gone after a server restart.
+  evidence: 8.9 Deferred; `packages/core/src/project-commands.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-problems-declared-commands-trusted-only-failures-as-file-lin-plan.md`
+  summary: Problems allows `node -e`, `python -c` and `npx -y` commands: the user typed and confirmed them and no shell interprets them; the refusal reasons don't promise more.
+  evidence: 8.9 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-problems-declared-commands-trusted-only-failures-as-file-lin-plan.md`
+  summary: The Problems list response returns a command's and script's text unmasked (the user's own settings, needed for exact-text confirmation); only the draft and output are masked.
+  evidence: 8.9 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-open-in-editor-plan.md`
+  summary: Open in editor locates the file, then the editor opens it by name a moment later: an agent that swaps a parent folder for a symlink in between gets an outside file shown in the user's editor.
+  evidence: 8.10 security review S2; a re-check just before spawn would only narrow it.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-open-in-editor-plan.md`
+  summary: Review's Open in editor opens the project's copy of a file, not the build worktree's, so a file the build added is "Couldn't open".
+  evidence: 8.10 review D1.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-open-in-editor-plan.md`
+  summary: Open in editor for a remote chat's file ("This file is on build-box.", EXPERIENCE.md) is not built: it opens nothing special.
+  evidence: 8.10 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-open-in-editor-plan.md`
+  summary: Open in editor's Windows `.cmd` shim path and real `cmd.exe` quoting are unit-tested with a simulated platform only; the end-to-end suite has run on macOS.
+  evidence: 8.10 Deferred.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-open-in-editor-plan.md`
+  summary: A long chat has one hidden status region per path link; one shared announcer would be lighter.
+  evidence: 8.10 Deferred; `packages/web/src/workbench/path-links.tsx`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-command-palette-gains-files-plan.md`
+  summary: The command palette has no Run tests action yet; Problems (8.9) is built, so it could run the project's declared test command.
+  evidence: 8.11 Deferred; `packages/web/src/palette/palette-sources.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-refactor-sweep-plan.md`
+  summary: Agent chat processes and terminal panes still get the server's PATH with its empty and relative entries (baseEnvironment), so a bare name an agent or a shell runs in the project could resolve to a program planted there; the 8.12 launch rule covers the editor, pane-launcher detection, linked commands and Problems only.
+  evidence: 8.12 Design Notes: changing every agent's and terminal's environment is a decision, not a sweep change; `packages/adapters/src/child-env.ts` `baseEnvironment`, `program-launch.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-refactor-sweep-plan.md`
+  summary: Left by the epic 8 sweep (8.12), recorded rather than fixed: `packages/adapters/src/vcs-git/working-tree.ts` is 763 lines; `dev-tools-catalog` keeps its own copy of `candidatesFor`; `linesOf` is written twice (web `code-view.tsx`, adapters `workspace-files-node`); a path's file name is taken three ways in the web; the three "inside a folder" checks (`vcs-git/checks.ts`, `workspace-files-node`, the server's test confinement) answer slightly different rules; many epic 8 exports are used only in their own module.
+  evidence: 8.12 Implementation Notes (the survey).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-refactor-sweep-plan.md`
+  summary: The Claude Code lookup (`acp-claude-code/detect.ts` `findClaudeExecutable`) filters PATH with `isAbsolute`, which on Windows keeps root-relative (`\bin`) and share entries the 8.12 launch rule drops.
+  evidence: 8.12 review (quick lens); pre-existing, outside epic 8; `packages/adapters/src/program-launch.ts` `absolutePathFolders` is the rule to reuse.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-refactor-sweep-plan.md`
+  summary: The Grok token probe (`setup-grok/token-probe.ts`) starts the Grok binary in the shared temp folder with `baseEnvironment()` (PATH with empty and relative entries); its own private home folder and `launchEnvironment` would follow the 8.12 launch rule.
+  evidence: 8.12 review (quick lens); pre-existing, outside epic 8.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-refactor-sweep-plan.md`
+  summary: On Windows a Problems command runs in the project folder, and `CreateProcess` and `cmd.exe` look in the working folder before PATH, so a bare name the command runs in turn could still be one planted in the project; `NoDefaultCurrentDirectoryInExePath` in its environment would close it.
+  evidence: 8.12 review (quick lens); `packages/adapters/src/project-commands-node/index.ts`; the planted-program tests are POSIX only.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-refactor-sweep-plan.md`
+  summary: On the Workbench at `?session=` of a worktree chat, the palette's Files searches the project root and opens a file without `session`, because the palette knows only the chat page's chat (`useChatOnScreen`).
+  evidence: 8.12 review (quick lens); `packages/web/src/palette/command-palette.tsx` `useChatOnScreen`, `palette-sources.ts` `useFileItems`.

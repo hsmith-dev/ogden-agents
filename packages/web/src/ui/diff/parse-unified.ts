@@ -1,4 +1,4 @@
-import type { ChangedFile, DiffHunk, DiffLine, FileChange } from '@ogden-agents/shared';
+import { UNIFIED_HUNK_HEADER, type ChangedFile, type DiffHunk, type DiffLine, type FileChange } from '@ogden-agents/shared';
 
 /**
  * A unified diff's text (Review's `diff`, as the VCS port prints it) parsed
@@ -22,7 +22,6 @@ export interface ParsedDiff {
 }
 
 const FILE_HEADER = 'diff --git ';
-const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 /** The one-letter side prefixes git may print (`a/`, `b/`, and the mnemonic `c/ i/ o/ w/`). */
 const SIDE_PREFIX = /^[abciow]\//;
 const ESCAPES: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, '\\': 92 };
@@ -191,7 +190,7 @@ export function parseUnifiedDiff(text: string, truncated: boolean): ParsedDiff |
       hunk = undefined;
     }
     if (line.startsWith('\\')) continue;
-    const range = HUNK_HEADER.exec(line);
+    const range = UNIFIED_HUNK_HEADER.exec(line);
     if (range !== null) {
       const [, oldStart, oldCount, newStart, newCount] = range;
       hunk = {

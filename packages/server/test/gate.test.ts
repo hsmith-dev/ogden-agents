@@ -616,6 +616,7 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspaceProjectCommandRun}`,
   `POST ${API_ROUTES.workspaceProjectCommandRunStop}`,
   `GET ${API_ROUTES.editors}`,
+  `PUT ${API_ROUTES.editors}`,
   // Where work runs (epic 27 entry 2, CAP-35): behind the gate only, on no device allowlist; 501 until each lane wires it.
   `GET ${API_ROUTES.sessionLocation}`,
   `POST ${API_ROUTES.sessionLocation}`,

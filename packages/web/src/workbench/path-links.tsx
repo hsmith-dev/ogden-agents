@@ -8,13 +8,14 @@
  * (`/w/:wsId/workbench?path=&line=&session=`): never an absolute path, a
  * `file:` address or anything the browser leaves the app for.
  */
-import { API_ROUTES, apiPath, MAX_WORKSPACE_FILE_LINKS, WorkspaceFileLinksResponse, WorkspaceRelativePath, workspaceFileLinkTitle } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, EDITOR_OPEN_FAILED_LABEL, MAX_WORKSPACE_FILE_LINKS, WorkspaceFileLinksResponse, WorkspaceRelativePath, workspaceFileLinkTitle } from '@ogden-agents/shared';
 import { useQueries } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useMemo, type ReactNode } from 'react';
 import { call, postJson, type Auth } from '@/api/http';
 import { tabAuth } from '@/auth/tab-token';
 import { pathTokens, UNSAFE_CHARACTERS, type FileTarget, type MarkdownLinks } from '@/ui/markdown';
+import { EditorStatus, openInEditorClick, useEditors, useOpenInEditor } from './open-in-editor';
 import { parentOf } from './workbench-api';
 
 /** The highest line a link may name. */
@@ -227,9 +228,17 @@ export function viewerSearch(target: FileTarget, session: string | undefined): {
   return { path: target.path, ...(target.line === undefined ? {} : { line: target.line }), ...(session === undefined ? {} : { session }) };
 }
 
-/** A link to the viewer: mono, in-app, titled "Open <path> at line <n>"; its name is the text as written. */
+/**
+ * A link to the viewer: mono, in-app, titled "Open <path> at line <n>"; its
+ * name is the text as written. `Cmd`/`Ctrl`+click opens the file at its line
+ * in the user's editor instead (8.10), or, with none found, says so; what
+ * happened is said in a `role=status` beside it.
+ */
 export function PathLink({ wsId, session, target, children }: { wsId: string; session: string | undefined; target: FileTarget; children: ReactNode }) {
+  const editors = useEditors();
+  const { open, refuse, feedback } = useOpenInEditor(wsId, session);
   return (
+    <>
     <Link
       to="/w/$wsId/workbench"
       params={{ wsId }}
@@ -238,9 +247,17 @@ export function PathLink({ wsId, session, target, children }: { wsId: string; se
       data-slot="markdown-path-link"
       data-path={target.path}
       className="font-mono text-mono-compact break-all text-foreground underline underline-offset-2"
+      onClick={(event) => openInEditorClick(event, editors, target, open, refuse)}
     >
       {children}
     </Link>
+    {feedback === undefined ? null : (
+      <span className="ml-1 font-sans text-caption text-muted-foreground" aria-hidden data-testid="path-link-editor-feedback">
+        {feedback.kind === 'opened' ? feedback.text : EDITOR_OPEN_FAILED_LABEL}
+      </span>
+    )}
+    <EditorStatus feedback={feedback} testId="path-link-editor-status" />
+    </>
   );
 }
 

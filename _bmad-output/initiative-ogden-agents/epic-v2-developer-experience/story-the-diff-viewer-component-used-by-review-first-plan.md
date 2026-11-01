@@ -104,11 +104,11 @@ Pass 1 (2026-11-01; lens: quick). Verdicts: high 0, medium 1, low 6, false 0, ma
 
 ## Deferred (for the sweep)
 
-- Side by side reads an unchanged line twice to screen readers (once per side); a single label per row pair would read better.
-- Wrapped lines have a hanging indent but not DESIGN.md's muted return glyph.
-- Gaps between hunks are a static "N unchanged lines" row; "Show 24 more lines" needs file content at a revision (a route 8.4 could add).
-- `layout.ts` repeats Tailwind's `lg` (1024) as a number because the theme emits no breakpoint variable a media query could read; a shared breakpoint token would remove the copy.
-- 8.7 (file viewer, built in parallel) should reuse `packages/web/src/ui/syntax/` rather than add a second highlighter.
+- Side by side reads an unchanged line twice to screen readers (once per side); a single label per row pair would read better. (8.12: logged in `deferred-work.md`.)
+- Wrapped lines have a hanging indent but not DESIGN.md's muted return glyph. (8.12: logged in `deferred-work.md`.)
+- Gaps between hunks are a static "N unchanged lines" row; "Show 24 more lines" needs file content at a revision (a route 8.4 could add). (8.12: logged in `deferred-work.md`.)
+- `layout.ts` repeats Tailwind's `lg` (1024) as a number because the theme emits no breakpoint variable a media query could read; a shared breakpoint token would remove the copy. (8.12: logged in `deferred-work.md`.)
+- 8.7 (file viewer, built in parallel) should reuse `packages/web/src/ui/syntax/` rather than add a second highlighter. (8.12: done by 8.7 (0ef09b61: the viewer colours code through `ui/syntax/`).)
 
 ## Design Notes
 

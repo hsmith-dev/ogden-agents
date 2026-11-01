@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createProjectCommandsNode } from '../src/index.js';
+import { plantedProgram, type PlantedProgram } from './planted-program.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -90,8 +91,20 @@ describe('project-commands-node', () => {
     const { started, pids } = await startTree(runner);
     runner.killAll!();
     await until(() => !alive(pids.child) && !alive(pids.grandchild));
-    expect((await started.done).exitCode).toBeNull();
+    expect(await started.done).toEqual({ exitCode: null, stopped: true });
     expect((await runner.start({ cwd: tmpdir(), argv: ['node', '-e', '1'] }).done).error).toMatch(/stopping/);
+  });
+
+  it('killAll reports Ogden\'s stop even when the kill ends the command with an exit code (taskkill /F on Windows exits 1)', async () => {
+    // Simulates Windows on any platform: the injected kill makes the command exit 1, as `taskkill /T /F` does.
+    const runner = createProjectCommandsNode({ source, killTree: (pid) => {
+        if (pid !== undefined) process.kill(pid, 'SIGTERM');
+      },
+    });
+    const started = runner.start({ cwd: tmpdir(), argv: ['node', '-e', "process.on('SIGTERM', () => process.exit(1)); console.log('ready'); setInterval(() => {}, 1000)"] });
+    await until(() => started.output().text.includes('ready'));
+    runner.killAll!();
+    expect(await started.done).toEqual({ exitCode: null, stopped: true });
   });
 
   it('gives the child the allowlist plus CI, NO_COLOR and FORCE_COLOR, never a planted key or process.env', async () => {
@@ -145,6 +158,20 @@ describe('project-commands-node', () => {
     expect((await relative.start({ cwd: tmpdir(), argv: ['node', '-e', '1'] }).done).error).toMatch(/wasn't found/);
     expect(spawned).toEqual([]);
   });
+
+  for (const kind of ['empty', 'relative'] as const) {
+    it.skipIf(process.platform === 'win32')(`hands the command only the absolute PATH folders: a bare name it runs is never one planted behind ${kind === 'empty' ? 'an empty' : 'a relative'} entry in the project (8.12)`, async () => {
+      const fixture: PlantedProgram = plantedProgram('ogden-tool', 'tool done');
+      dirs.push(fixture.root);
+      const seen: Array<Readonly<Record<string, string>>> = [];
+      const runner = createProjectCommandsNode({ source: () => ({ PATH: fixture.paths[kind], HOME: tmpdir() }), onSpawn: (_file, _args, env) => seen.push(env) });
+      const started = runner.start({ cwd: fixture.work, argv: ['ogden-tool'] });
+      expect(await started.done).toEqual({ exitCode: 0, stopped: false });
+      expect(started.output().text).toContain('tool done');
+      expect(seen[0]!.PATH).toBe(fixture.bin);
+      expect(fixture.ran()).toBe(false);
+    });
+  }
 
   it('keeps the last bytes of the output, and stops a run past its time limit with error', async () => {
     const runner = createProjectCommandsNode({ source, maxOutputBytes: 64 });

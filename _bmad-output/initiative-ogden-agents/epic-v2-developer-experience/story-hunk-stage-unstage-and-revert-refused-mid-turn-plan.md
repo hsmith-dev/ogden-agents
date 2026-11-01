@@ -107,10 +107,10 @@ Pass 1 (2026-11-01; lenses: quick, security). Verdicts: high 1, medium 6, low 6,
 
 ## Deferred (for the sweep)
 
-- Revert follows the repo's `core.autocrlf` and `.gitattributes` `eol`, `ident` and `working-tree-encoding`, so a file out of step with them is rewritten whole (review #10). Writing the result blob ourselves with no conversion would fix it but breaks CRLF checkouts.
-- A hunk action taking over 10 s lets a new turn's prompt go out while it writes, since the start snapshot stops waiting for the repo lock (review #11).
-- Overlapping projects (`repo` and `repo/src`) don't block each other mid-turn, and terminal-pane agents aren't checked (review #12).
-- An empty new file or a mode-only change can't be staged or reverted: git prints no hunk (review #13).
+- Revert follows the repo's `core.autocrlf` and `.gitattributes` `eol`, `ident` and `working-tree-encoding`, so a file out of step with them is rewritten whole (review #10). Writing the result blob ourselves with no conversion would fix it but breaks CRLF checkouts. (8.12: logged in `deferred-work.md`.)
+- A hunk action taking over 10 s lets a new turn's prompt go out while it writes, since the start snapshot stops waiting for the repo lock (review #11). (8.12: logged in `deferred-work.md`.)
+- Overlapping projects (`repo` and `repo/src`) don't block each other mid-turn, and terminal-pane agents aren't checked (review #12). (8.12: logged in `deferred-work.md`.)
+- An empty new file or a mode-only change can't be staged or reverted: git prints no hunk (review #13). (8.12: logged in `deferred-work.md`.)
 
 ## Design Notes
 

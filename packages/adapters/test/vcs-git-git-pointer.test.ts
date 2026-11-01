@@ -10,13 +10,36 @@
  * the other repo is never read or written.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { VcsError, type VcsFolder } from '@ogden-agents/core';
 import { GIT_POINTER_UNUSUAL_MESSAGE } from '@ogden-agents/shared';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGitWorkingTree } from '../src/index.js';
+
+/** Every path the adapter hands the synchronous file system, so a remote-shaped pointer can be shown never looked up (on Windows that is a network request). */
+const fsCalls = vi.hoisted(() => [] as string[]);
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const recorded = <F extends (...args: never[]) => unknown>(name: string, fn: F): F =>
+    ((...args: Parameters<F>) => {
+      fsCalls.push(`${name} ${String(args[0])}`);
+      return fn(...args);
+    }) as F;
+  const overrides = {
+    realpathSync: Object.assign(recorded('realpathSync', actual.realpathSync), { native: recorded('realpathSync.native', actual.realpathSync.native) }),
+    statSync: recorded('statSync', actual.statSync),
+    lstatSync: recorded('lstatSync', actual.lstatSync),
+    readlinkSync: recorded('readlinkSync', actual.readlinkSync),
+    existsSync: recorded('existsSync', actual.existsSync),
+    openSync: recorded('openSync', actual.openSync),
+  };
+  return { ...actual, ...overrides, default: { ...actual, ...overrides } };
+});
+
+/** `relative`, spelled with `/` on every platform. */
+const posixRelative = (from: string, to: string) => relative(from, to).split(sep).join('/');
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -111,6 +134,8 @@ describe("vcs-git working tree: a project's .git file (user decision 2026-11-01)
     const main = repoAt(join(root, 'main'));
     const bare = join(root, 'project.git');
     git(root, 'clone', '-q', '--bare', main, bare);
+    // As `repoAt` does: a Windows runner's system config (`core.autocrlf=true`) would check README.md out with CRLF, which the adapter's own config-free git reads as changed.
+    git(bare, 'config', 'core.autocrlf', 'false');
     const worktree = join(root, 'feature');
     git(bare, 'worktree', 'add', '-q', '-b', 'feature', worktree, 'HEAD');
     writeFileSync(join(worktree, 'new.txt'), 'new\n');
@@ -188,13 +213,27 @@ describe("vcs-git working tree: a project's .git file (user decision 2026-11-01)
     const other = repoAt(join(root, 'elsewhere', 'other'));
     const project = join(root, 'a', 'b', 'project');
     mkdirSync(project, { recursive: true });
-    writeFileSync(join(project, '.git'), `gitdir: ${relative(project, join(other, '.git'))}\n`);
+    // Written with `/`, as git writes a pointer on every platform (`relative` uses `\\` on Windows).
+    writeFileSync(join(project, '.git'), `gitdir: ${posixRelative(project, join(other, '.git'))}\n`);
     expect(readFileSync(join(project, '.git'), 'utf8')).toMatch(/^gitdir: \.\.\//);
     await expectAllRefused(vcs, project, other);
     // Through `modules` and back out by `..`: the real path is what counts.
     const superproject = repoAt(join(root, 'super'));
     mkdirSync(join(superproject, '.git', 'modules'));
-    writeFileSync(join(project, '.git'), `gitdir: ${relative(project, join(superproject, '.git', 'modules'))}/../../../elsewhere/other/.git\n`);
+    writeFileSync(join(project, '.git'), `gitdir: ${posixRelative(project, join(superproject, '.git', 'modules'))}/../../../elsewhere/other/.git\n`);
     await expectAllRefused(vcs, project, other);
+  });
+
+  it('refuses a pointer, or a link on the way, that names another computer, and never looks it up', async () => {
+    const { root, vcs } = setup();
+    const project = join(root, 'project');
+    mkdirSync(project, { recursive: true });
+    symlinkSync('//server/share', join(root, 'net'));
+    for (const pointer of ['//server/share/repo/.git/worktrees/x', '\\\\server\\share\\repo\\.git', '\\\\?\\UNC\\server\\share\\.git', '../net/repo/.git/worktrees/x']) {
+      writeFileSync(join(project, '.git'), `gitdir: ${pointer}\n`);
+      fsCalls.length = 0;
+      await expectRefused(vcs.changedFiles({ path: project }, { view: 'unstaged' }));
+      expect(fsCalls.filter((call) => /server/.test(call)), pointer).toEqual([]);
+    }
   });
 });

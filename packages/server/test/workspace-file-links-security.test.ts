@@ -6,7 +6,7 @@
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { API_ROUTES, apiPath, ApiErrorBody, WorkspaceFileLinksResponse, WorkspaceResponse } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { signIn, startTestServer, tempDataDir } from './helpers.js';
@@ -66,7 +66,7 @@ describe('links route: nothing outside the project is confirmed', () => {
       'head-link.ts',
       'datadir/fenced-1a2b.ts',
       'data-link.ts',
-      `up/${outside.split('/').at(-1)}/secret.ts`,
+      `up/${basename(outside)}/secret.ts`,
       'src/ok-1a2b.ts',
     ];
     const response = await post({ paths: asked });
@@ -77,8 +77,8 @@ describe('links route: nothing outside the project is confirmed', () => {
   it('confirms an alias through a link only when its real target is inside the project (the same file read would open)', async () => {
     const { repo, post } = await setup();
     symlinkSync(dirname(repo), join(repo, 'up'));
-    const alias = `up/${repo.split('/').at(-1)}/src/ok-1a2b.ts`;
-    const response = await post({ paths: [alias, `up/${repo.split('/').at(-1)}/.git/config`] });
+    const alias = `up/${basename(repo)}/src/ok-1a2b.ts`;
+    const response = await post({ paths: [alias, `up/${basename(repo)}/.git/config`] });
     expect(WorkspaceFileLinksResponse.parse(await response.json()).found).toEqual([alias]);
   });
 
@@ -103,7 +103,7 @@ describe('links route: nothing outside the project is confirmed', () => {
     const parentFile = join(dirname(repo), `links-sec-parent-${repo.split('-').at(-1)}.ts`);
     writeFileSync(parentFile, 'PARENT');
     dirs.push(parentFile);
-    const name = parentFile.split('/').at(-1)!;
+    const name = basename(parentFile);
     const response = await post({ paths: [`%2e%2e/${name}`, `%252e%252e/${name}`, `\u2025/${name}`, `\uff0e\uff0e/${name}`, `src/%2e%2e/%2e%2e/${name}`, `~/${name}`] });
     expect(response.status).toBe(200);
     expect(WorkspaceFileLinksResponse.parse(await response.json()).found).toEqual([]);

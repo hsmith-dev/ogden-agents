@@ -22,8 +22,16 @@ export interface ResolvedWorkspaceRoot {
 /** The workspace's real path (its stored path when it has none). */
 export const workspaceFolder = (workspace: Workspace): string => workspace.realPath ?? workspace.path;
 
-/** The folder a session works in: its worktree, else its project's folder. */
-export const sessionFolder = (workspace: Workspace, session: Session): string => session.worktreePath ?? workspaceFolder(workspace);
+/**
+ * The folder a chat works in: its worktree, else its project's folder. The
+ * one rule every epic 8 root follows (files, search, changes, hunks, turn
+ * snapshots, Problems links and Open in editor), through
+ * {@link resolveWorkspaceRoot} and {@link vcsFolderOf}.
+ */
+export const sessionFolder = (workspace: Workspace, session: Session | undefined): string => session?.worktreePath ?? workspaceFolder(workspace);
+
+/** A request body's or query's `session`, unparsed (checked by {@link resolveWorkspaceRoot}). */
+export const namedSession = (value: unknown): unknown => (value as { session?: unknown } | null | undefined)?.session;
 
 /**
  * The folder git runs in for `session` (else the project): a chat's
@@ -31,8 +39,9 @@ export const sessionFolder = (workspace: Workspace, session: Session): string =>
  * adapter checks the worktree and pins git's folders before it runs there.
  */
 export function vcsFolderOf(workspace: Workspace, session: Session | undefined): VcsFolder {
+  // Only a worktree with its branch is pinned; anything less runs in the project, never an unchecked folder.
   if (session === undefined || session.worktreePath === null || session.branch === null) return { path: workspaceFolder(workspace) };
-  return { path: session.worktreePath, worktree: { repoPath: workspaceFolder(workspace), branch: session.branch } };
+  return { path: sessionFolder(workspace, session), worktree: { repoPath: workspaceFolder(workspace), branch: session.branch } };
 }
 
 /** The root of a request for `workspaceId` and (optionally) `session`, or {@link NotFoundError}. */
@@ -40,13 +49,13 @@ export function resolveWorkspaceRoot(entities: Pick<Entities, 'getWorkspace' | '
   const id = WorkspaceId.safeParse(workspaceId);
   const workspace = id.success ? entities.getWorkspace(id.data) : undefined;
   if (workspace === undefined) throw new NotFoundError('workspace', 'requested');
-  if (session === undefined || session === '') return { workspace, root: { path: workspaceFolder(workspace), kind: 'project' }, session: undefined };
+  if (session === undefined || session === '') return { workspace, root: { path: sessionFolder(workspace, undefined), kind: 'project' }, session: undefined };
   const sessionId = SessionId.safeParse(session);
   const found = sessionId.success ? entities.getSession(sessionId.data) : undefined;
   if (found === undefined || found.workspaceId !== workspace.id) throw new NotFoundError('session', 'requested');
   return {
     workspace,
-    root: found.worktreePath === null ? { path: workspaceFolder(workspace), kind: 'project' } : { path: found.worktreePath, kind: 'chat_worktree' },
+    root: { path: sessionFolder(workspace, found), kind: found.worktreePath === null ? 'project' : 'chat_worktree' },
     session: found,
   };
 }

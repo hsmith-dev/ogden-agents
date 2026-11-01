@@ -10,16 +10,19 @@ import {
   CHANGES_VIEW_LABELS,
   CHANGES_VIEW_SWITCH_LABEL,
   changesEmptyText,
+  chatName,
+  COMMENTS_NOT_HANDED_TEXT,
+  COMMENTS_OPEN_IN_CHAT_TEXT,
+  NEW_CHAT_NAME,
+  reviewCommentsText,
+  SEND_TO_LABEL,
+  sendCommentsLabel,
   changesMoreFilesText,
-  COMMIT_MESSAGE_LABEL,
-  COMMIT_WORKTREE_LABEL,
-  committedText,
   fileActionName,
   HUNK_ACTION_LABELS,
   HUNK_REVERTED_LABEL,
   HUNK_ACTIONS_BY_VIEW,
   hunkActionName,
-  MAX_COMMIT_MESSAGE_CHARS,
   PUT_BACK_TEXT,
   REVERT_CONFIRM_DESCRIPTION,
   REVERT_CONFIRM_TITLE,
@@ -27,7 +30,6 @@ import {
   turnPickerText,
   UNDO_GONE_TEXT,
   UNDO_LABEL,
-  WORKTREE_NEVER_PUSHED_TEXT,
   type ChangedFile,
   type ChangesView,
   type DiffHunk,
@@ -35,24 +37,29 @@ import {
   type TurnSummary,
 } from '@ogden-agents/shared';
 import { CaretDown } from '@phosphor-icons/react';
-import { useQuery } from '@tanstack/react-query';
-import { useMemo, useRef, useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
+import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { isApiError } from '@/api/http';
-import { agentNameOf, fetchSession } from '@/chat/chat-api';
+import { agentNameOf } from '@/chat/chat-api';
+import { chatDraftKey, newChatDraftKey, readDraft, writeDraft } from '@/chat/drafts';
 import { useChatAgents } from '@/chat/use-chat-agents';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent } from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
 import { hunkRangeText } from '@/ui/diff/diff-file';
 import { DiffFileList, DiffViewer, type DiffFileData, type DiffSlots, type DiffViewerHandle } from '@/ui/diff-viewer';
 import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
-import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
 import { Skeleton } from '@/ui/skeleton';
-import { Textarea } from '@/ui/textarea';
+import { withOpenInEditor } from './open-in-editor';
 import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
 import { Text } from '@/ui/typography';
 import { isBusy, useSessions } from '@/workspaces/workspace-api';
-import { useChanges, useCommitWorktree, useFileDiffs, useHunkAction, useTurns, useUndoRevert, type ChangesTarget, type HunkActionBody } from './changes-api';
+import { useChanges, useFileDiffs, useHunkAction, useTurns, useUndoRevert, type ChangesTarget, type HunkActionBody } from './changes-api';
+import { lineCommentsKey, useLineComments, type LineCommentsState } from './line-comments';
+import { chatWorktree } from './chat-folder';
+import { CommentsBar, useLineCommentSlots } from './line-comments-ui';
+import { appendDraft } from './problems-api';
+import { WorktreeCommit } from './worktree-commit';
 
 /** Where the panel goes next: a view, and for This turn the turn picked. */
 export interface ChangesNavigation {
@@ -92,6 +99,12 @@ const timeOf = (at: string): string => new Date(at).toLocaleTimeString([], { hou
  * chat's worktree, else the project); one that started since the click,
  * or a hunk that changed since it was shown, is said in the panel and the
  * diffs are read again.
+ *
+ * Story 8.6: a Comment button on every line; saved comments (kept in this
+ * browser, per chat or for the project) collect in **Comments to send (N)**,
+ * whose **Send to <agent>** (This turn: the panel's chat; else a Send to
+ * picker of the project's chats and New chat) puts one composed message in
+ * that chat's composer and opens it: the user reads it and sends it there.
  */
 export function WorkbenchChanges({ wsId, view, session, turn, onNavigate }: WorkbenchChangesProps) {
   const views = viewsFor(session);
@@ -99,6 +112,7 @@ export function WorkbenchChanges({ wsId, view, session, turn, onNavigate }: Work
   const shown: ChangesView = views.includes(asked) ? asked : 'unstaged';
   const target: ChangesTarget = { view: shown, session, turn: shown === 'turn' ? turn : undefined };
   const actions = useChangesActions(wsId, session);
+  const comments = useLineComments(lineCommentsKey(wsId, session ?? 'project'));
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="workbench-changes" data-view={shown}>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -121,9 +135,9 @@ export function WorkbenchChanges({ wsId, view, session, turn, onNavigate }: Work
         </ToggleGroup>
         {shown === 'turn' && session !== undefined ? <TurnPicker wsId={wsId} session={session} turn={turn} onPick={(picked) => onNavigate({ view: 'turn', turn: picked })} /> : null}
       </div>
-      {session === undefined ? null : <WorktreeCommit wsId={wsId} sesId={session} />}
+      {session === undefined ? null : <WorktreeCommit wsId={wsId} session={session} />}
       {actions.panel}
-      <ChangesList key={`${shown}\0${session ?? ''}\0${target.turn ?? ''}`} wsId={wsId} target={target} slotsFor={actions.slotsFor} />
+      <ChangesList key={`${shown}\0${session ?? ''}\0${target.turn ?? ''}`} wsId={wsId} target={target} slotsFor={actions.slotsFor} comments={comments} />
     </div>
   );
 }
@@ -140,8 +154,8 @@ function useBusyAgent(wsId: string, session: string | undefined): string | undef
   const { sessions } = useSessions(wsId);
   const agents = useChatAgents(wsId);
   if (sessions === undefined) return undefined;
-  const folder = session === undefined ? null : (sessions.find((one) => one.id === session)?.worktreePath ?? null);
-  const busy = sessions.find((one) => one.kind !== 'build' && one.machineId === null && isBusy(one) && (one.worktreePath ?? null) === folder);
+  const folder = chatWorktree(sessions.find((one) => one.id === session));
+  const busy = sessions.find((one) => one.kind !== 'build' && one.machineId === null && isBusy(one) && chatWorktree(one) === folder);
   return busy === undefined ? undefined : agentNameOf(agents.data, busy.agentId ?? undefined);
 }
 
@@ -369,8 +383,98 @@ function TurnPicker({ wsId, session, turn, onPick }: { wsId: string; session: st
   );
 }
 
+/**
+ * Send to: the composed comments appended to a chat's composer draft (or the
+ * new-chat one), then that chat opened, where the user reads and sends them.
+ * Comments are cleared only once the draft holds them.
+ */
+function useSendComments({ wsId, session, view, comments, onNotice }: { wsId: string; session: string | undefined; view: ChangesView; comments: LineCommentsState; onNotice: (text: string | undefined) => void }) {
+  const navigate = useNavigate();
+  const { sessions } = useSessions(wsId);
+  const agents = useChatAgents(wsId);
+  const [picking, setPicking] = useState(false);
+  const describedBy = useId();
+  const chats = (sessions ?? []).filter((one) => one.kind === 'chat');
+
+  const send = (to: string | undefined): void => {
+    if (comments.comments.length === 0) return;
+    const key = to === undefined ? newChatDraftKey(wsId) : chatDraftKey(wsId, to);
+    const next = appendDraft(readDraft(key), reviewCommentsText(comments.comments));
+    writeDraft(key, next);
+    if (readDraft(key) !== next) {
+      onNotice(COMMENTS_NOT_HANDED_TEXT);
+      return;
+    }
+    comments.clear();
+    onNotice(undefined);
+    if (to === undefined) void navigate({ to: '/w/$wsId/new', params: { wsId } });
+    else void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId: to } });
+  };
+
+  const direct = view === 'turn' && session !== undefined;
+  const hint = (
+    <Text variant="caption" id={describedBy}>
+      {COMMENTS_OPEN_IN_CHAT_TEXT}
+    </Text>
+  );
+  let control: ReactNode;
+  if (direct) {
+    const agent = agentNameOf(agents.data, sessions?.find((one) => one.id === session)?.agentId ?? undefined);
+    control = (
+      <Button type="button" aria-describedby={describedBy} data-testid="comments-send" onClick={() => send(session)}>
+        {sendCommentsLabel(agent)}
+      </Button>
+    );
+  } else {
+    control = (
+      <DropdownMenu open={picking} onOpenChange={setPicking}>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" aria-describedby={describedBy} data-testid="comments-send-to">
+            {SEND_TO_LABEL}
+            <CaretDown aria-hidden />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" data-testid="comments-send-to-menu" className="max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto">
+          <DropdownMenuLabel>{SEND_TO_LABEL}</DropdownMenuLabel>
+          {chats.map((chat) => (
+            <DropdownMenuChoiceItem
+              key={chat.id}
+              checked={false}
+              data-testid="comments-send-to-chat"
+              data-session={chat.id}
+              label={chatName(chat)}
+              description={agentNameOf(agents.data, chat.agentId ?? undefined)}
+              onSelect={() => send(chat.id)}
+            />
+          ))}
+          <DropdownMenuChoiceItem checked={false} data-testid="comments-send-to-new" label={NEW_CHAT_NAME} description={agentNameOf(agents.data, undefined)} onSelect={() => send(undefined)} />
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+  return {
+    control: (
+      <>
+        {control}
+        {hint}
+      </>
+    ),
+    onSend: () => (direct ? send(session) : setPicking(true)),
+  };
+}
+
 /** The view's files and their diffs. */
-function ChangesList({ wsId, target, slotsFor }: { wsId: string; target: ChangesTarget; slotsFor: (target: ChangesTarget, data: readonly DiffFileData[]) => DiffSlots }) {
+function ChangesList({
+  wsId,
+  target,
+  slotsFor,
+  comments,
+}: {
+  wsId: string;
+  target: ChangesTarget;
+  slotsFor: (target: ChangesTarget, data: readonly DiffFileData[]) => DiffSlots;
+  comments: LineCommentsState;
+}) {
   const changes = useChanges(wsId, target);
   const files = useMemo(() => changes.data?.files ?? [], [changes.data]);
   // This turn's diffs are read for the turn the list is of (the latest, when none was named).
@@ -383,122 +487,82 @@ function ChangesList({ wsId, target, slotsFor }: { wsId: string; target: Changes
     const byPath = new Set(loaded.map(({ file }) => file.path));
     return files.map((file) => ({ path: file.path, change: file.change, additions: file.additions, deletions: file.deletions, jumpable: byPath.has(file.path) }));
   }, [files, loaded]);
-
-  if (changes.isError) {
-    return (
-      <Notice variant="blocked" data-testid="changes-error">
-        {changes.error.message}
-      </Notice>
-    );
-  }
-  if (!changes.isSuccess) {
-    return (
-      <div className="flex flex-col gap-2" data-testid="changes-loading">
-        <span role="status" className="sr-only">
-          {CHANGES_LOADING_TEXT}
-        </span>
-        <Skeleton />
-        <Skeleton />
-      </div>
-    );
-  }
-  if (target.view === 'turn' && changes.data.turn === undefined) {
-    return (
-      <Text variant="caption" data-testid="changes-empty">
-        {CHANGES_NO_TURNS_TEXT}
-      </Text>
-    );
-  }
-  if (files.length === 0) {
-    return (
-      <Text variant="caption" data-testid="changes-empty">
-        {changesEmptyText(target.view, changes.data.base)}
-      </Text>
-    );
-  }
-  const failed = diffs.find((diff) => diff.isError);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+  // Outdated is only judged once every fetched diff has answered.
+  const settled = changes.isSuccess && diffs.every((diff) => !diff.isPending);
+  const commentSlots = useLineCommentSlots({ comments, data: settled ? loaded : undefined, origin: { view: target.view, turn: diffTarget.turn }, onNotice: setNotice });
+  const sender = useSendComments({ wsId, session: target.session, view: target.view, comments, onNotice: setNotice });
+  const bar = <CommentsBar comments={comments} outdated={commentSlots.outdated} notice={notice} onNotice={setNotice} send={sender.control} onSend={sender.onSend} />;
+  // The view's own file actions, then Open in editor (8.10).
+  const withEditor = (slots: DiffSlots): DiffSlots => ({ ...slots, fileActions: withOpenInEditor(wsId, target.session, loaded, slots.fileActions) });
+  const body = listBody();
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-testid="changes-files">
-      <DiffFileList items={items} onSelect={(path) => viewer.current?.jumpTo(path)} data-testid="changes-file-list" />
-      {changes.data.truncated || files.length > CHANGES_DIFFS_FETCHED ? (
-        <Text variant="caption" data-testid="changes-more">
-          {changesMoreFilesText(Math.min(files.length, CHANGES_DIFFS_FETCHED))}
-        </Text>
-      ) : null}
-      {failed?.error ? (
-        <Notice variant="blocked" data-testid="changes-diff-error">
-          {failed.error.message}
+    <>
+      {body}
+      {bar}
+    </>
+  );
+
+  function listBody(): ReactNode {
+    if (changes.isError) {
+      return (
+        <Notice variant="blocked" data-testid="changes-error">
+          {changes.error.message}
         </Notice>
-      ) : null}
-      {loaded.length === 0 ? (
-        <div className="flex flex-col gap-2">
+      );
+    }
+    if (!changes.isSuccess) {
+      return (
+        <div className="flex flex-col gap-2" data-testid="changes-loading">
           <span role="status" className="sr-only">
-            {CHANGES_DIFFS_LOADING_TEXT}
+            {CHANGES_LOADING_TEXT}
           </span>
           <Skeleton />
+          <Skeleton />
         </div>
-      ) : (
-        <DiffViewer ref={viewer} files={loaded} label={CHANGES_VIEW_LABELS[target.view]} {...slotsFor(diffTarget, loaded)} />
-      )}
-    </div>
-  );
-}
-
-/** Commit these changes, for a chat working in its own worktree: on its own branch, never pushed. */
-function WorktreeCommit({ wsId, sesId }: { wsId: string; sesId: string }) {
-  const session = useQuery({
-    queryKey: ['session', wsId, sesId],
-    queryFn: () => fetchSession(wsId, sesId),
-    retry: false,
-    // While its agent works, the state is read again so Commit comes back once it is done.
-    refetchInterval: (query) => (query.state.data?.session.state === 'working' || query.state.data?.session.state === 'waiting' ? 2000 : false),
-  });
-  const commit = useCommitWorktree(wsId, sesId);
-  const [message, setMessage] = useState('');
-  const found = session.data?.session;
-  if (found === undefined || found.worktreePath === null) return null;
-  const busy = found.state === 'working' || found.state === 'waiting';
-  const empty = message.trim() === '';
-  return (
-    <form
-      className="flex min-w-0 flex-col gap-2"
-      data-testid="worktree-commit"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (busy || empty || commit.isPending) return;
-        commit.mutate(message.trim(), { onSuccess: () => setMessage('') });
-      }}
-    >
-      <Field id="worktree-commit-message" label={COMMIT_MESSAGE_LABEL} description={WORKTREE_NEVER_PUSHED_TEXT}>
-        <Textarea
-          id="worktree-commit-message"
-          aria-describedby="worktree-commit-message-description"
-          value={message}
-          maxLength={MAX_COMMIT_MESSAGE_CHARS}
-          onChange={(event) => setMessage(event.target.value)}
-          data-testid="worktree-commit-message"
-        />
-      </Field>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" aria-disabled={busy || empty || commit.isPending || undefined} data-testid="worktree-commit-button">
-          {COMMIT_WORKTREE_LABEL}
-        </Button>
-        {busy ? (
-          <Text variant="caption" data-testid="worktree-commit-busy">
-            {agentMidTurnText('The agent')}
+      );
+    }
+    if (target.view === 'turn' && changes.data.turn === undefined) {
+      return (
+        <Text variant="caption" data-testid="changes-empty">
+          {CHANGES_NO_TURNS_TEXT}
+        </Text>
+      );
+    }
+    if (files.length === 0) {
+      return (
+        <Text variant="caption" data-testid="changes-empty">
+          {changesEmptyText(target.view, changes.data.base)}
+        </Text>
+      );
+    }
+    const failed = diffs.find((diff) => diff.isError);
+    return (
+      <div className="flex min-w-0 flex-col gap-3" data-testid="changes-files">
+        <DiffFileList items={items} onSelect={(path) => viewer.current?.jumpTo(path)} data-testid="changes-file-list" />
+        {changes.data.truncated || files.length > CHANGES_DIFFS_FETCHED ? (
+          <Text variant="caption" data-testid="changes-more">
+            {changesMoreFilesText(Math.min(files.length, CHANGES_DIFFS_FETCHED))}
           </Text>
         ) : null}
-        {commit.isSuccess ? (
-          <Text variant="caption" role="status" data-testid="worktree-committed">
-            {committedText(commit.data.files)}
-          </Text>
+        {failed?.error ? (
+          <Notice variant="blocked" data-testid="changes-diff-error">
+            {failed.error.message}
+          </Notice>
         ) : null}
+        {loaded.length === 0 ? (
+          <div className="flex flex-col gap-2">
+            <span role="status" className="sr-only">
+              {CHANGES_DIFFS_LOADING_TEXT}
+            </span>
+            <Skeleton />
+          </div>
+        ) : (
+          <div className="flex min-w-0 flex-col" onFocus={commentSlots.onFocus} onKeyDownCapture={commentSlots.onKeyDownCapture}>
+            <DiffViewer ref={viewer} files={loaded} label={CHANGES_VIEW_LABELS[target.view]} {...withEditor(slotsFor(diffTarget, loaded))} {...commentSlots.slots} />
+          </div>
+        )}
       </div>
-      {commit.isError ? (
-        <Notice variant="blocked" data-testid="worktree-commit-error">
-          {commit.error.message}
-        </Notice>
-      ) : null}
-    </form>
-  );
+    );
+  }
 }

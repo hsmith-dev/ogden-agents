@@ -118,9 +118,9 @@ Pass 1 (2026-10-31; lenses: quick, security-containment). Verdicts: high 3, medi
 
 ## Deferred (for the sweep)
 
-- Windows reserved device names (`CON`, `COM1`, `aux.js`): confirm on the win32 CI run that they are refused or not found without stalling (row 11).
-- Folders over 5000 entries list an arbitrary subset in directory order (row 19).
-- Residual race between the lstat chain check and the open; Node has no `openat`/`O_BENEATH` (row 20).
+- Windows reserved device names (`CON`, `COM1`, `aux.js`): confirm on the win32 CI run that they are refused or not found without stalling (row 11). (8.12: logged in `deferred-work.md`.)
+- Folders over 5000 entries list an arbitrary subset in directory order (row 19). (8.12: logged in `deferred-work.md`.)
+- Residual race between the lstat chain check and the open; Node has no `openat`/`O_BENEATH` (row 20). (8.12: logged in `deferred-work.md`.)
 
 ## Design Notes
 

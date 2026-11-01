@@ -23,13 +23,24 @@ export const EditorInfo = z.object({
 });
 export type EditorInfo = z.infer<typeof EditorInfo>;
 
-/** `GET /api/v1/editors`: the editors found, in the launcher's order; the first is the default. */
+/** `GET /api/v1/editors`: the editors found, in the launcher's order; the default is the chosen one when found, else the first. */
 export const EditorsResponse = z.object({
   editors: z.array(EditorInfo),
-  /** The editor a file opens in when none is named: the first found, `null` with none. */
+  /** The editor a file opens in when none is named: the chosen one while it is found, else the first found, `null` with none. */
   defaultEditorId: EditorId.nullable(),
+  /** The editor kept in Settings, Projects, Editor (found or not), `null` when none was chosen. */
+  chosenEditorId: EditorId.nullable(),
 });
 export type EditorsResponse = z.infer<typeof EditorsResponse>;
+
+/**
+ * `PUT /api/v1/editors`: the editor files open in (Settings, Projects,
+ * Editor), kept on the server so every tab agrees. `null` forgets the
+ * choice (the first found is the default again). Only an editor found now
+ * can be chosen (409 `editor_unavailable` otherwise).
+ */
+export const SetEditorRequest = z.object({ editorId: EditorId.nullable() }).strict();
+export type SetEditorRequest = z.infer<typeof SetEditorRequest>;
 
 /** `POST …/files/open-in-editor` → this: the editor the file was handed to. */
 export const OpenInEditorResponse = z.object({ editorId: EditorId, editorName: z.string().min(1).max(60) });
@@ -43,3 +54,19 @@ export const EDITOR_UNAVAILABLE_MESSAGE = "Ogden couldn't open that editor. Chec
 export const editorOpenedText = (editorName: string): string => `Opened in ${editorName}`;
 /** The button. */
 export const OPEN_IN_EDITOR_LABEL = 'Open in editor';
+/** The Settings page (Settings, Projects). */
+export const EDITOR_SETTINGS_LABEL = 'Editor';
+/** The radio group's label on that page. */
+export const EDITOR_CHOICE_LABEL = 'Open files in';
+/** The page's intro. */
+export const EDITOR_SETTINGS_INTRO = 'The editor Open in editor hands a file to, at its line. Ogden only lists editors it found on this computer.';
+/** Saved, on that page. */
+export const editorChosenText = (editorName: string): string => `Saved: files open in ${editorName}.`;
+/** The page couldn't save the choice. */
+export const EDITOR_SAVE_FAILED_TEXT = "Ogden couldn't save the editor. Try again.";
+/** The page couldn't load the editors. */
+export const EDITOR_LOAD_FAILED_TEXT = "Ogden couldn't look for editors";
+/** The button's word for a moment when a file couldn't be handed over (its reason is announced with it). */
+export const EDITOR_OPEN_FAILED_LABEL = "Couldn't open";
+/** The fallback reason when the request itself failed. */
+export const EDITOR_OPEN_FAILED_TEXT = "Ogden couldn't open that file in your editor.";

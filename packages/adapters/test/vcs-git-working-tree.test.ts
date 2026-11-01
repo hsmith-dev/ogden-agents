@@ -204,6 +204,8 @@ describe('vcs-git working tree (story 8.4)', () => {
     await expect(vcs.changedFiles(folder, { view: 'unstaged' })).rejects.toBeInstanceOf(VcsError);
     await expect(vcs.snapshot(folder)).rejects.toBeInstanceOf(VcsError);
     writeFileSync(join(repo, '.git', 'worktrees', 'chat-2', 'HEAD'), `ref: refs/heads/${branch}\n`);
+    // Replaced, not overwritten: git for Windows marks a worktree's `.git` file hidden, and Windows refuses to truncate a hidden file in place (EPERM).
+    rmSync(join(worktree, '.git'));
     writeFileSync(join(worktree, '.git'), `gitdir: ${join(repo, '.git')}\n`);
     await expect(vcs.commitAll(folder, 'Save')).rejects.toBeInstanceOf(VcsError);
     expect(git(repo, 'rev-parse', branch).trim()).toBe(tip);

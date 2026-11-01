@@ -17,8 +17,11 @@ import { cn } from './utils';
  * toolbar (a chat edit row). Lines always wrap: the viewer never scrolls
  * sideways. With focus inside, `n` / `p` move between hunks and `j` / `k`
  * between lines (one roving tab stop; the focused row has `data-current`).
+ * The tab stop row's line actions (8.6's Comment button) are tab stops too,
+ * and `c` on a focused line clicks its (last) one; `C` clicks it with Shift
+ * (a range from the last focused line).
  *
- * Slots for later stories: `fileActions`, `hunkActions`, `lineAfter`.
+ * Slots for later stories: `fileActions`, `hunkActions`, `lineAfter`, `lineActions`.
  */
 
 export type { DiffFileData } from './diff/parse-unified';
@@ -45,7 +48,15 @@ export interface DiffViewerProps extends DiffSlots {
 const isEditable = (target: EventTarget | null) =>
   target instanceof HTMLElement && (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT');
 
-export function DiffViewer({ files, layout = 'choice', label, onJump, ref, className, fileActions, hunkActions, lineAfter }: DiffViewerProps) {
+/** The buttons of a row's line actions. */
+const lineActionButtons = (row: HTMLElement): HTMLElement[] => [...row.querySelectorAll<HTMLElement>('[data-slot="diff-line-action"] button')];
+
+/** A row's line actions as tab stops (`on`) or not. */
+function setActionStops(row: HTMLElement, on: boolean): void {
+  for (const button of lineActionButtons(row)) button.tabIndex = on ? 0 : -1;
+}
+
+export function DiffViewer({ files, layout = 'choice', label, onJump, ref, className, fileActions, hunkActions, lineAfter, lineActions }: DiffViewerProps) {
   const stored = useDiffLayout();
   const wide = useWideEnough();
   const effective: DiffLayout = layout === 'inline' || !wide ? 'inline' : stored;
@@ -71,11 +82,13 @@ export function DiffViewer({ files, layout = 'choice', label, onJump, ref, class
     if (stop.current !== null) {
       stop.current.tabIndex = -1;
       delete stop.current.dataset.current;
+      setActionStops(stop.current, false);
     }
     stop.current = row;
     if (row !== null) {
       row.tabIndex = 0;
       row.dataset.current = 'true';
+      setActionStops(row, true);
     }
   };
   useLayoutEffect(() => {
@@ -86,6 +99,10 @@ export function DiffViewer({ files, layout = 'choice', label, onJump, ref, class
     stop.current = null;
     moveStop(root.current?.querySelector<HTMLElement>('[data-diff-nav]') ?? null);
   }, [files, flipped, effective]);
+  // A render may have put new line actions in the stop's row: they are tab stops too.
+  useLayoutEffect(() => {
+    if (stop.current !== null && stop.current.isConnected) setActionStops(stop.current, true);
+  });
 
   const announce = (path: string) => {
     if (lastPath.current === path) return;
@@ -117,6 +134,14 @@ export function DiffViewer({ files, layout = 'choice', label, onJump, ref, class
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.altKey || event.ctrlKey || event.metaKey || isEditable(event.target)) return;
     const key = event.key;
+    if (key === 'c' || key === 'C') {
+      const row = event.target instanceof HTMLElement && event.target.matches('[data-diff-nav="line"]') ? event.target : null;
+      const button = row === null ? undefined : lineActionButtons(row).at(-1);
+      if (button === undefined) return;
+      event.preventDefault();
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: key === 'C' }));
+      return;
+    }
     if (key !== 'j' && key !== 'k' && key !== 'n' && key !== 'p') return;
     const container = root.current;
     if (container === null) return;
@@ -141,7 +166,7 @@ export function DiffViewer({ files, layout = 'choice', label, onJump, ref, class
     if (row.dataset.diffPath !== undefined) announce(row.dataset.diffPath);
   };
 
-  const slots = { fileActions, hunkActions, lineAfter };
+  const slots = { fileActions, hunkActions, lineAfter, lineActions };
   const narrow = layout === 'choice' && stored === 'split' && !wide;
   return (
     <div

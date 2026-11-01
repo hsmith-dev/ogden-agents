@@ -60,6 +60,7 @@ export * from './remote-host-memory/index.js';
 export * from './workspace-files-node/index.js';
 export * from './workspace-files-memory/index.js';
 export * from './editor-launcher-memory/index.js';
+export * from './editor-launcher-node/index.js';
 export * from './project-commands-memory/index.js';
 export * from './port-probe-memory/index.js';
 export * from './port-probe-node/index.js';

@@ -48,6 +48,7 @@ import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { useSessions } from '@/workspaces/workspace-api';
 import { trustProjectScripts } from '@/workspaces/workspace-settings-api';
+import { OpenInEditorButton } from './open-in-editor';
 import { PathLink } from './path-links';
 import {
   confirmedInput,
@@ -441,7 +442,7 @@ function RunItems({ wsId, command, items, parsed, failed }: { wsId: string; comm
   );
 }
 
-/** One failure: its `file:line` link, its message, and Ask the agent to fix this. */
+/** One failure: its `file:line` link, its message, Ask the agent to fix this, and Open in editor at its line. */
 function ProblemRow({ wsId, command, item }: { wsId: string; command: ProjectCommand; item: ProblemItem }) {
   const navigate = useNavigate();
   const { sessions } = useSessions(wsId);
@@ -466,10 +467,11 @@ function ProblemRow({ wsId, command, item }: { wsId: string; command: ProjectCom
       <Text variant="caption" className="break-words text-foreground" data-testid="problems-item-message">
         {item.message}
       </Text>
-      <span>
+      <span className="flex flex-wrap items-center gap-1">
         <Button variant="outline" size="sm" data-testid="problems-ask" aria-label={`${latest === undefined ? PROBLEMS_ASK_NEW_CHAT_LABEL : PROBLEMS_ASK_AGENT_LABEL}: ${where}`} onClick={ask}>
           {latest === undefined ? PROBLEMS_ASK_NEW_CHAT_LABEL : PROBLEMS_ASK_AGENT_LABEL}
         </Button>
+        <OpenInEditorButton wsId={wsId} session={undefined} target={{ path: item.path, line: item.line, column: item.column ?? undefined }} testId="problems-open-in-editor" />
       </span>
     </li>
   );

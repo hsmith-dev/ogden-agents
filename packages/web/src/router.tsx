@@ -124,6 +124,13 @@ const newProjectsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/new-projects-page'), 'NewProjectsPage'),
 });
 
+/** The editor Open in editor hands files to (AD-39, 8.10). */
+const editorSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/editor',
+  component: lazyRouteComponent(() => import('./settings/editor-settings'), 'EditorSettingsPage'),
+});
+
 /** The first-run Welcome (onboarding 9.5). */
 const welcomeRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -293,7 +300,7 @@ const routeTree = rootRoute.addChildren([
   workspaceWorkbenchRoute,
   workspaceTryRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, alwaysAllowSettingsRoute, buildsSettingsRoute, worktreesSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, alwaysAllowSettingsRoute, buildsSettingsRoute, worktreesSettingsRoute, editorSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

@@ -8,7 +8,7 @@ import type { AntigravityPorts } from './antigravity-wiring.js';
 import type { CodexPorts } from './codex-wiring.js';
 import type { GrokPorts } from './grok-wiring.js';
 import type { LocalPorts } from './local-wiring.js';
-import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, PortProbePort, ProjectCommandRunner, WorkspaceFilesPort, NotifierPort, PaneLaunchers, RemoteHostPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort, VcsWorkingTreePort, VcsChatWorktreePort, VcsSnapshotStorePort } from '@ogden-agents/core';
+import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, DevToolsPort, EditorLauncherPort, PortProbePort, ProjectCommandRunner, WorkspaceFilesPort, NotifierPort, PaneLaunchers, RemoteHostPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort, VcsWorkingTreePort, VcsChatWorktreePort, VcsSnapshotStorePort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -51,6 +51,8 @@ export interface StartOptions {
   devToolsPort?: DevToolsPort;
   /** Override the Workbench's Files reader (tests; AD-36). Default: the `workspace-files-node` adapter on the user's home and `dataDir`. */
   workspaceFilesPort?: WorkspaceFilesPort;
+  /** Override Open in editor's launcher (tests; AD-39, 8.10). Default: the `editor-launcher-node` adapter (in a test run, confined to `OGDEN_AGENTS_TEST_EDITOR_PATH`'s folder). */
+  editorLauncher?: EditorLauncherPort;
   /** Override the Workbench's Changes git (tests; AD-37, story 8.4). Default: `vcs-git`'s working tree on the user's `git`, snapshots in `<data>/snapshots`. */
   vcsWorkingTreePort?: VcsWorkingTreePort;
   /** Override retention's git (tests; 27.6). Default: `vcs-git`'s chat worktrees on the user's `git`, snapshots in `<data>/snapshots`. */

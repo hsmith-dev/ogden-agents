@@ -448,7 +448,7 @@ describe('open in editor (AD-39)', () => {
     const editor = launcher([{ id: 'vscode', name: 'VS Code' }, { id: 'zed', name: 'Zed' }]);
     const core = openTestCore(undefined, undefined, { workspaceFilesPort: filesPort().port, editorLauncherPort: editor.port });
     const { repo, workspace } = project(core);
-    expect(await core.editorLaunch!.editors()).toEqual({ editors: [{ id: 'vscode', name: 'VS Code' }, { id: 'zed', name: 'Zed' }], defaultEditorId: 'vscode' });
+    expect(await core.editorLaunch!.editors()).toEqual({ editors: [{ id: 'vscode', name: 'VS Code' }, { id: 'zed', name: 'Zed' }], defaultEditorId: 'vscode', chosenEditorId: null });
     expect(await core.editorLaunch!.open(workspace.id, { path: 'src/a.ts', line: 42 })).toEqual({ editorId: 'vscode', editorName: 'VS Code' });
     expect(await core.editorLaunch!.open(workspace.id, { path: 'src/a.ts', line: 1, column: 2, editorId: 'zed' })).toEqual({ editorId: 'zed', editorName: 'Zed' });
     expect(editor.opens).toEqual([

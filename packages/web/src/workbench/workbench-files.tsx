@@ -19,6 +19,7 @@ import { Skeleton } from '@/ui/skeleton';
 import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
 import { Text } from '@/ui/typography';
 import { CodeView, ViewerHeader, ViewerState } from './code-view';
+import { OpenInEditorButton } from './open-in-editor';
 import { FileTree } from './file-tree';
 import { useMarkdownFileLinks } from './path-links';
 import { ancestorsOf, parentOf, useWorkspaceFile, useWorkspaceFolder } from './workbench-api';
@@ -95,15 +96,17 @@ function FileViewer({ wsId, path, line, session }: { wsId: string; path: string;
     );
   }
   const shown = file.data;
+  // A file Ogden showed (or can't show here: binary, too large, empty) can open in the user's editor, at the link's line.
+  const editor = <OpenInEditorButton wsId={wsId} session={session} target={{ path, line }} />;
   if (shown.kind === 'binary') {
     return (
-      <ViewerState path={path} testId="file-binary" detail={fileSizeWords(shown.size)}>
+      <ViewerState path={path} testId="file-binary" detail={fileSizeWords(shown.size)} actions={editor}>
         {WORKSPACE_FILE_BINARY_TEXT}
       </ViewerState>
     );
   }
-  if (shown.kind === 'too_large') return <ViewerState path={path} testId="file-too-large">{workspaceFileTooLargeText(shown.size, shown.limit)}</ViewerState>;
-  if (shown.content === '') return <ViewerState path={path} testId="file-empty">{WORKSPACE_FILE_EMPTY_TEXT}</ViewerState>;
+  if (shown.kind === 'too_large') return <ViewerState path={path} testId="file-too-large" actions={editor}>{workspaceFileTooLargeText(shown.size, shown.limit)}</ViewerState>;
+  if (shown.content === '') return <ViewerState path={path} testId="file-empty" actions={editor}>{WORKSPACE_FILE_EMPTY_TEXT}</ViewerState>;
   const notice = shown.masked ? (
     <Text variant="caption" data-testid="file-masked">
       {WORKSPACE_FILE_MASKED_TEXT}
@@ -111,7 +114,7 @@ function FileViewer({ wsId, path, line, session }: { wsId: string; path: string;
   ) : undefined;
   // A masked file is never rendered: its lines show what was hidden.
   if (isMarkdownPath(path) && !shown.masked) return <MarkdownFile wsId={wsId} path={path} text={shown.content} line={line} session={session} />;
-  return <CodeView path={path} text={shown.content} line={line} notice={notice} />;
+  return <CodeView path={path} text={shown.content} line={line} notice={notice} actions={editor} />;
 }
 
 /**
@@ -138,10 +141,16 @@ function MarkdownFile({ wsId, path, text, line, session }: { wsId: string; path:
       </ToggleGroupItem>
     </ToggleGroup>
   );
-  if (mode === 'source') return <CodeView path={path} text={text} line={line} actions={toggle} />;
+  const actions = (
+    <>
+      {toggle}
+      <OpenInEditorButton wsId={wsId} session={session} target={{ path, line }} />
+    </>
+  );
+  if (mode === 'source') return <CodeView path={path} text={text} line={line} actions={actions} />;
   return (
     <section aria-label={path} data-testid="markdown-view" className="flex min-w-0 flex-col rounded-md border border-border bg-card">
-      <ViewerHeader path={path} actions={toggle} />
+      <ViewerHeader path={path} actions={actions} />
       <Markdown source={text} variant="file" links={links} className="p-3" data-testid="markdown-rendered" />
     </section>
   );

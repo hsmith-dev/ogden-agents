@@ -43,7 +43,7 @@ import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { apiError, notImplemented } from './errors.js';
 import type { Logger } from './log.js';
-import { NO_STORE, workbenchRefusal } from './workspace-files-routes.js';
+import { NO_STORE, workbenchRefusal } from './workbench-refusal.js';
 
 /** A failed Restore's sentence: the branch's own when core named the chat's branch (never a path), else the fixed one for its reason. */
 function restoreFailedText(error: RestoreFailedError): string {

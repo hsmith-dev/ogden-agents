@@ -31,6 +31,7 @@ import type { EditorLauncherPort } from './editor-launcher-port.js';
 import type { ChatLocations, PortProbePort, Trials, WorktreePorts } from './where-work-runs.js';
 import { createWorktreePorts } from './worktree-ports.js';
 import { createTrials, createTrialStore, type TrialStore, type TrialsOptions } from './trials.js';
+import { createEditorChoice } from './editor-choice.js';
 import { createProjectCommands, type ProjectCommandRunner, type ProjectCommands } from './project-commands.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
@@ -233,6 +234,8 @@ export type OpenCoreOptions = OpenDatabaseOptions &
     onTurnSnapshotError?: (sessionId: SessionId, error: unknown) => void;
     /** The editor launcher (AD-39; 8.10). Absent: no Open in editor use-case. */
     editorLauncherPort?: EditorLauncherPort;
+    /** The kept editor choice (`<dataDir>/editor.json`) exists but can't be read: its code only (8.10). */
+    onEditorChoiceError?: (code: string) => void;
     /** Runs a project's declared commands (AD-38; 8.9: `project-commands-node`). Absent: no Problems use-case. The server closes it on stop. */
     projectCommandRunner?: ProjectCommandRunner;
     /** Whether a port on this computer is free (27.7: `port-probe-node`, on `127.0.0.1` only). Absent: no worktree chat is given a port. */
@@ -323,7 +326,10 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     workspaceFiles,
     workspaceChanges: options.vcsWorkingTreePort === undefined ? undefined : createWorkspaceChanges({ entities, sessionEvents, port: options.vcsWorkingTreePort }),
     turnSnapshots: options.vcsWorkingTreePort === undefined ? undefined : createTurnSnapshots({ entities, sessionEvents, port: options.vcsWorkingTreePort, ...(options.onTurnSnapshotError === undefined ? {} : { onError: options.onTurnSnapshotError }) }),
-    editorLaunch: options.editorLauncherPort === undefined || workspaceFiles?.locate === undefined ? undefined : createEditorLaunch({ entities, files: { locate: workspaceFiles.locate }, launcher: options.editorLauncherPort }),
+    editorLaunch:
+      options.editorLauncherPort === undefined || workspaceFiles?.locate === undefined
+        ? undefined
+        : createEditorLaunch({ entities, files: { locate: workspaceFiles.locate }, launcher: options.editorLauncherPort, choice: createEditorChoice({ dataDir, ...(options.onEditorChoiceError === undefined ? {} : { onError: options.onEditorChoiceError }) }) }),
     // Where work runs (epic 27 entry 2): contracts only until 27.4, 27.7 and 27.8; retention (27.6) is made over the server's chat.
     chatLocations: undefined,
     worktreePutAway,

@@ -56,6 +56,7 @@ import { PutAwayNotice } from '@/worktrees/put-away-notice';
 import { TrialLink } from '@/trials/trial-link';
 import { usePutAwayWorktrees } from '@/worktrees/worktree-retention';
 import { WorktreeCopyStatus } from '@/worktrees/worktree-copy-status';
+import { chatRoots, sessionKey } from '@/workbench/chat-folder';
 
 /** How close to the bottom (px) still counts as at the bottom, for auto-scroll. */
 const AT_BOTTOM_PX = 48;
@@ -135,7 +136,7 @@ export function SessionPage() {
     [workspaceEvents],
   );
   const view = useMemo(() => sessionView(events, sesId, rulesRemoved), [events, sesId, rulesRemoved]);
-  const session = useQuery({ queryKey: ['session', wsId, sesId], queryFn: () => fetchSession(wsId, sesId), retry: false });
+  const session = useQuery({ queryKey: sessionKey(wsId, sesId), queryFn: () => fetchSession(wsId, sesId), retry: false });
   // The chat's own agent, by its product name (epic 6, E6-R1).
   const chatAgents = useChatAgents();
   // Until the session has loaded its agent isn't known: no agent's name is guessed (review: a second agent's chat named Claude Code).
@@ -156,6 +157,8 @@ export function SessionPage() {
   const setups = useAgents();
   const signsInHere = agentId !== undefined && setups.data?.some((setup) => setup.agentId === agentId) === true;
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
+  // The chat's folder, for Open in editor on an agent's absolute edit paths (8.10): its worktree, else the project.
+  const roots = chatRoots(session.data?.session, workspace.data);
   const end = useRef<HTMLDivElement>(null);
   const lastText = view.messages.at(-1)?.text.length ?? 0;
   const projectName = workspace.data === undefined ? 'this project' : workspaceName(workspace.data);
@@ -744,7 +747,7 @@ export function SessionPage() {
                   item.type === 'message' ? (
                     <Message key={item.message.messageId} message={item.message} agentName={nameOf(item.message.agentId)} wsId={wsId} sesId={sesId} />
                   ) : item.type === 'tools' ? (
-                    <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} detail={detail} />
+                    <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} detail={detail} chat={{ wsId, sesId, roots }} />
                   ) : item.type === 'resumed' ? (
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
                   ) : item.type === 'agent_changed' ? (

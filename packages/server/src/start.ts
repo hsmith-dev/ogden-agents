@@ -48,6 +48,7 @@ import { resolveTestHooks, type TestHooks } from './test-hooks.js';
 import { VERSION } from './version.js';
 import { wireAgents } from './start-agents.js';
 import { createPanesWiring } from './start-panes.js';
+import { createServerEditorLauncher } from './start-editor.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
 import { createBuildsWiring, createServerChatWorktree, createServerVcs, createServerWorkingTree } from './start-builds.js';
@@ -223,6 +224,9 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       workspaceFilesPort: options.workspaceFilesPort ?? createWorkspaceFilesNode({ home: homedir(), dataDir }),
       // The Workbench's Changes (AD-37, story 8.4): the user's git, no hook, snapshots in the data folder.
       vcsWorkingTreePort: createServerWorkingTree(options, dataDir),
+      // Open in editor (AD-39; 8.10): a fixed list of editors found on this computer, argv only, no shell; a test run looks only in its own folder.
+      editorLauncherPort: createServerEditorLauncher(options, hooks),
+      onEditorChoiceError: (code) => log.warn('editor choice unusable', { code }),
       projectCommandRunner,
       // A worktree chat's own port (27.7): probed free on 127.0.0.1 only.
       portProbe: options.portProbe ?? createPortProbeNode(),
@@ -607,7 +611,7 @@ async function listenAndAnnounce({
     buildSettings: core.buildSettings,
     devTools: core.devTools,
     workspaceFiles: core.workspaceFiles,
-    // Changes and Open in editor (epic 8 entry 2): undefined until their lanes wire a port (8.4, 8.10), so 501.
+    // Changes and Open in editor (epic 8 entry 2; 8.4, 8.10).
     workspaceChanges: core.workspaceChanges,
     editorLaunch: core.editorLaunch,
     // A chat's Location and its hand-off (27.4): the chat's own, its ids and body parsed here.

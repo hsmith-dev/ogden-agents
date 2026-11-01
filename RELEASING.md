@@ -472,6 +472,16 @@ Epic 26's stories (26.1 to 26.9, and 26.10's end-to-end journey and docs) make t
 
 Record each result in the 26.10 plan's **For the user** table (`_bmad-output/initiative-ogden-agents/epic-everyday-polish/story-end-to-end-suite-and-v1-3-release-part-the-user-s-check-in-t-plan.md`); the plan stays in review until they are recorded.
 
+## Live checks for the Workbench (epic 8)
+
+Epic 8's stories (8.1 to 8.12, and 8.13's end-to-end journey and docs) add the Workbench. CI runs only fakes (the fake agent, temp data and home folders, fake repos and a fake `code` through a test hook), on macOS, Windows and Linux, in the browser and against the installed package (the `workbench` project of `pnpm e2e:installed`), so a real agent and a real editor need these live checks, which an agent cannot run. Run them in the installed desktop app (and with `npx ogden-agents@latest` for the npm route) in scratch git repos, **on macOS, Windows (x64) and Linux (x64)**.
+
+1. A real agent answers sent comments: with Claude Code (and any other agent you use), let a turn change two files, open This turn from **Review changes**, revert one hunk (and Undo it), comment on a line of another file and send the comments. The agent's next turn answers each comment at its `file:line`.
+2. Open in a real editor: in a trusted project, declare a failing test or lint command in Problems and run it. **Open in editor** on its failure opens real VS Code at the failure's line (and column), and, with Cursor chosen in Settings > Projects > Editor, real Cursor does too. `Cmd`/`Ctrl`+click on a `file:line` link in a reply does the same.
+3. Windows: Problems refuses a detected `package.json` script (`npm test`, a `.cmd` shim there) with its plain reason, and a declared `node` command (such as `node --test`) runs and lists its failures.
+
+Record each result in the 8.13 plan's **For the user** table (`_bmad-output/initiative-ogden-agents/epic-v2-developer-experience/story-end-to-end-suite-and-v1-3-release-part-live-checks-with-a-re-plan.md`); the plan stays in review until they are recorded.
+
 ## Epic 15 live check: can a real model be the manager
 
 Epic 15 lets a model manage and the other agents be told what to do. CI never runs a real model, so whether a model is dependable enough to manage is your live check. CI proves Ogden handles every kind of manager answer, good, wrapped, cut off, over the rules and hostile (the table in `tests/fixtures/manager-cases.ts`, played by the fake manager of story 15.1). It cannot say how often a real model gets it right. The report function `measureModel` in `tests/fixtures/manager-harness.ts` tallies that over three sample goals; a later story wires it to a button, and until then the Test as a manager button (Settings, Agents, the endpoint's model list) is the way to ask a real model by hand.

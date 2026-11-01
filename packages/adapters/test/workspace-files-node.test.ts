@@ -35,6 +35,24 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   }) as typeof actual.realpath;
   return { ...actual, stat, realpath, default: { ...actual, stat, realpath } };
 });
+/** Every path handed to the synchronous file system (a pass-through otherwise), to show a link to another computer is never followed. */
+const syncCalls = vi.hoisted(() => [] as string[]);
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const recorded = <F extends (...args: never[]) => unknown>(name: string, fn: F): F =>
+    ((...args: Parameters<F>) => {
+      syncCalls.push(`${name} ${String(args[0])}`);
+      return fn(...args);
+    }) as F;
+  const overrides = {
+    realpathSync: Object.assign(recorded('realpathSync', actual.realpathSync), { native: recorded('realpathSync.native', actual.realpathSync.native) }),
+    statSync: recorded('statSync', actual.statSync),
+    lstatSync: recorded('lstatSync', actual.lstatSync),
+    readlinkSync: recorded('readlinkSync', actual.readlinkSync),
+  };
+  return { ...actual, ...overrides, default: { ...actual, ...overrides } };
+});
+
 afterEach(() => {
   fsHooks.beforeStat = undefined;
   fsHooks.beforeRealpath = undefined;
@@ -186,6 +204,30 @@ describe('workspace-files-node: listing', () => {
     expect(await port.list(root, '')).toMatchObject({ entries: [{ name: 'data', protected: true }] });
     expect(await port.list(root, 'data')).toEqual(PROTECTED);
     expect(await port.read(root, 'data/ogden.db')).toEqual(PROTECTED);
+  });
+});
+
+describe('workspace-files-node: links to another computer', () => {
+  it('a link, or a chain of links, to `//host/share` is protected in a listing, unreadable, and never followed', async () => {
+    const { root, port } = setup({ 'a.txt': 'a' });
+    symlinkSync('//server/share', join(root, 'net'));
+    symlinkSync('net', join(root, 'net2'));
+    symlinkSync('net2', join(root, 'net3.txt'));
+    const remote: string[] = [];
+    fsHooks.beforeStat = (path) => void (/server/.test(path) && remote.push(`stat ${path}`));
+    fsHooks.beforeRealpath = (path) => void (/server/.test(path) && remote.push(`realpath ${path}`));
+    syncCalls.length = 0;
+    const listed = await port.list(root, '');
+    expect('entries' in listed && listed.entries.filter((entry) => entry.name.startsWith('net')).map((entry) => [entry.name, entry.protected])).toEqual([
+      ['net', true],
+      ['net2', true],
+      ['net3.txt', true],
+    ]);
+    for (const path of ['net/x', 'net2/x', 'net3.txt']) {
+      expect('refused' in (await port.read(root, path)), path).toBe(true);
+      expect('refused' in (await port.list(root, path)), path).toBe(true);
+    }
+    expect([...remote, ...syncCalls.filter((call) => /server/.test(call))]).toEqual([]);
   });
 });
 
@@ -373,14 +415,13 @@ describe('workspace-files-node: environment files', () => {
 
 describe('workspace-files-node: review rows (defensive check)', () => {
   /** Whether the temp folder's file system folds case (macOS and Windows by default). */
-  const foldsCase = (root: string): boolean => existsSync(join(root, '.SSH'));
-
   it('refuses Unicode case-fold variants of a credential folder (long s, Kelvin sign) on read and list', async () => {
     const { root, port } = setup({ '.ssh/id_rsa': 'PRIVATE KEY', '.kube/config': 'token: k' });
-    const expected = foldsCase(root) ? PROTECTED : NOT_FOUND;
+    // Core's NFKC fold turns the long s into `s` (and the Kelvin sign into `K`), so every variant is refused as protected whether or not the file system folds case (stricter).
+    const expected = PROTECTED;
     for (const path of ['.ſſh/id_rsa', '.ſsh/id_rsa', '.Kube/config']) {
       const read = await port.read(root, path);
-      expect(read, path).toEqual(path.includes('K') ? PROTECTED : expected);
+      expect(read, path).toEqual(expected);
       expect(JSON.stringify(read)).not.toContain('PRIVATE KEY');
     }
     expect(await port.list(root, '.ſſh')).toEqual(expected);
@@ -583,8 +624,9 @@ describe('workspace-files-node: review rows (defensive check)', () => {
 
   // A multi-line value's continuation line that looks like `WORD=` (a base64 line ending in `=` or `==`) is masked whole.
   it('masks a base64 continuation line of a multi-line value', () => {
-    const text = 'PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7==\n-----END PRIVATE KEY-----"\n';
-    expect(maskEnvironmentText(text)).not.toContain('MIIEvQIBADAN');
+    // A fake key: the continuation line is base64-shaped and ends in `==`, nothing more.
+    const text = 'PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nTESTONLYbase64TESTONLYbase64TESTONLYAA==\n-----END PRIVATE KEY-----"\n'; // secret-scan:allow TEST_ONLY fake key
+    expect(maskEnvironmentText(text)).not.toContain('TESTONLYbase64');
   });
 
   // Every comment's text is masked whole, so a commented `NAME: value` secret is never shown.

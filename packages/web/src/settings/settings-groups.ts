@@ -1,4 +1,4 @@
-import { NEW_PROJECTS_SETTINGS_LABEL, WORKTREES_SETTINGS_TITLE } from '@ogden-agents/shared';
+import { EDITOR_SETTINGS_LABEL, NEW_PROJECTS_SETTINGS_LABEL, WORKTREES_SETTINGS_TITLE } from '@ogden-agents/shared';
 
 /*
  * Settings' groups (epic 26, E26-R7; EXPERIENCE.md Information Architecture):
@@ -42,6 +42,8 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
       { label: 'Builds', to: '/settings/builds' },
       // The install's chat worktree cap (epic 27, 27.6).
       { label: WORKTREES_SETTINGS_TITLE, to: '/settings/worktrees' },
+      // The editor Open in editor hands files to (AD-39, 8.10).
+      { label: EDITOR_SETTINGS_LABEL, to: '/settings/editor' },
     ],
   },
   { id: 'appearance', label: 'Appearance', glyph: 'Palette', pages: [{ label: 'Appearance', to: '/settings/appearance' }] },

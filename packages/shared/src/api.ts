@@ -570,7 +570,7 @@ export const API_ROUTES = {
   workspaceProjectCommandRun: `${API_BASE}/workspaces/:wsId/project-command-runs/:runId`,
   /** `POST` → `ProjectCommandRunResponse`: stops a running command. */
   workspaceProjectCommandRunStop: `${API_BASE}/workspaces/:wsId/project-command-runs/:runId/stop`,
-  /** `GET` → `EditorsResponse` (AD-39; 8.10): the editors found on this computer. */
+  /** `GET` → `EditorsResponse` (AD-39; 8.10): the editors found on this computer. `PUT SetEditorRequest` → `EditorsResponse`: the editor files open in (409 `editor_unavailable` when not found). */
   editors: `${API_BASE}/editors`,
   // Where work runs (CAP-35; epic 27 entry 2's contract): each is behind the gate only (AD-15), on no
   // paired-device allowlist (AD-34), not a BMad piece, and answers 501 `not_implemented` until its lane wires it.

@@ -9,6 +9,8 @@ import {
   REVIEW_NO_CHANGES_TEXT,
   REVIEW_NO_FINDINGS_TEXT,
   REVIEW_SHOW_CHANGES_LABEL,
+  reviewCommentsGoWithText,
+  reviewCommentsText,
   RUN_PHASE_LABELS,
   runPhase,
   UPDATE_AND_RETRY_LABEL,
@@ -17,6 +19,10 @@ import {
 import { ArrowsClockwise, CheckCircle, XCircle } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { useMemo, useRef, useState } from 'react';
+import { lineCommentsKey, useLineComments, type LineCommentsState } from '@/workbench/line-comments';
+import { CommentsBar, useLineCommentSlots } from '@/workbench/line-comments-ui';
+import { withOpenInEditor } from '@/workbench/open-in-editor';
+import { appendDraft } from '@/workbench/problems-api';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { parseUnifiedDiff } from '@/ui/diff/parse-unified';
@@ -48,10 +54,15 @@ export const REVIEW_DIFF_CUT_TEXT = 'Only the start of these changes is shown.';
  * the shared diff viewer, without hunk actions (the build's branch is not
  * edited from Review). Text that isn't a unified diff shows as it was, in a
  * wrapped block that never scrolls sideways.
+ *
+ * Story 8.6: line comments, collected in a bar with no send: they go with
+ * Reject and retry, as its note.
  */
-function ReviewChanges({ files, diff, truncated }: Pick<ReviewResponse, 'files' | 'diff' | 'truncated'>) {
+function ReviewChanges({ wsId, files, diff, truncated, comments }: Pick<ReviewResponse, 'files' | 'diff' | 'truncated'> & { wsId: string; comments: LineCommentsState }) {
   const parsed = useMemo(() => parseUnifiedDiff(diff, truncated), [diff, truncated]);
   const viewer = useRef<DiffViewerHandle>(null);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+  const commentSlots = useLineCommentSlots({ comments, data: parsed?.files ?? [], onNotice: setNotice });
   const items = useMemo(() => {
     const byPath = new Map((parsed?.files ?? []).map(({ file }) => [file.path, file]));
     return files.map((path) => {
@@ -70,7 +81,10 @@ function ReviewChanges({ files, diff, truncated }: Pick<ReviewResponse, 'files' 
         </pre>
       ) : (
         <div data-testid="review-diff" className="flex min-w-0 flex-col gap-2">
-          <DiffViewer ref={viewer} files={parsed.files} label="The build's changes" />
+          <div className="flex min-w-0 flex-col" onFocus={commentSlots.onFocus} onKeyDownCapture={commentSlots.onKeyDownCapture}>
+            {/* Open in editor opens the project's copy of a file (a build's worktree is not a Workbench root). */}
+            <DiffViewer ref={viewer} files={parsed.files} label="The build's changes" fileActions={withOpenInEditor(wsId, undefined, parsed.files)} {...commentSlots.slots} />
+          </div>
           {parsed.cut ? (
             <Text variant="caption" data-testid="review-diff-cut">
               {REVIEW_DIFF_CUT_TEXT}
@@ -78,6 +92,17 @@ function ReviewChanges({ files, diff, truncated }: Pick<ReviewResponse, 'files' 
           ) : null}
         </div>
       )}
+      <CommentsBar
+        comments={comments}
+        outdated={commentSlots.outdated}
+        notice={notice}
+        onNotice={setNotice}
+        caption={
+          <Text variant="caption" data-testid="review-comments-go-with">
+            {reviewCommentsGoWithText(comments.comments.length)}
+          </Text>
+        }
+      />
     </div>
   );
 }
@@ -99,6 +124,9 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
   const [failure, setFailure] = useState<string | undefined>();
   const [note, setNote] = useState('');
   const [asking, setAsking] = useState(false);
+  const comments = useLineComments(review.data === undefined ? undefined : lineCommentsKey(wsId, `review:${review.data.run.id}`));
+  // The comments put in the note, and the text they became (opening Reject and retry again with other comments replaces it).
+  const [seeded, setSeeded] = useState<{ ids: string[]; text: string } | undefined>(undefined);
   const acting = approve.isPending || reject.isPending || update.isPending;
   if (review.data === undefined) {
     if (review.error !== null) {
@@ -115,6 +143,21 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
   const approveShown = outcome === 'verified' && !merged;
   const canReject = outcome !== 'running' && !(outcome === 'verified' && merged);
   const conflicted = outcome === 'blocked' && run.blockedCode === 'merge_conflict' && (run.decision ?? null) === null;
+  const askReject = () => {
+    const ids = comments.comments.map((comment) => comment.id);
+    const same = seeded !== undefined && seeded.ids.length === ids.length && seeded.ids.every((id, index) => id === ids[index]);
+    if (!same) {
+      // The earlier comments' text, still in the note as it was put there, is replaced; else the new text is added.
+      const previous = seeded !== undefined && note.includes(seeded.text) ? seeded.text : undefined;
+      const rest = previous !== undefined ? note.length - previous.length : note.trim() === '' ? 0 : note.replace(/\s+$/, '').length + 2;
+      const composed = ids.length === 0 ? '' : reviewCommentsText(comments.comments, MAX_RUN_NOTE_LENGTH - rest);
+      if (previous !== undefined) setNote(composed === '' ? note.replace(previous, '').replace(/\s+$/, '') : note.replace(previous, () => composed));
+      else if (composed !== '') setNote(appendDraft(note, composed));
+      // Nothing fitted: nothing went with the note, so nothing is cleared after the reject.
+      setSeeded(composed === '' ? undefined : { ids, text: composed });
+    }
+    setAsking(true);
+  };
   const act = (start: () => Promise<unknown>) => {
     if (acting) return;
     setFailure(undefined);
@@ -187,13 +230,18 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
       </section>
       <details className="flex min-w-0 flex-col gap-2" data-testid="review-changes">
         <summary className="cursor-pointer text-label">{REVIEW_SHOW_CHANGES_LABEL(files.length)}</summary>
-        <ReviewChanges files={files} diff={diff} truncated={truncated} />
+        <ReviewChanges wsId={wsId} files={files} diff={diff} truncated={truncated} comments={comments} />
       </details>
       {asking ? (
         <div className="flex flex-col gap-2" data-testid="review-reject-form">
           <label className="text-label" htmlFor="review-note">
             {REJECT_NOTE_LABEL}
           </label>
+          {seeded !== undefined ? (
+            <Text variant="caption" data-testid="review-note-comments">
+              {reviewCommentsGoWithText(seeded.ids.length)}
+            </Text>
+          ) : null}
           <textarea
             id="review-note"
             data-testid="review-note"
@@ -221,7 +269,20 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
         {canReject ? (
           asking ? (
             <>
-              <Button variant="outline" data-testid="review-reject-confirm" disabled={acting} onClick={() => act(() => reject.mutateAsync({ note }))}>
+              <Button
+                variant="outline"
+                data-testid="review-reject-confirm"
+                disabled={acting}
+                onClick={() =>
+                  act(() =>
+                    reject.mutateAsync({ note }).then(() => {
+                      // Only once the reject succeeded: the comments that went with it.
+                      for (const id of seeded?.ids ?? []) comments.remove(id);
+                      setSeeded(undefined);
+                    }),
+                  )
+                }
+              >
                 <XCircle aria-hidden />
                 {REJECT_AND_RETRY_LABEL}
               </Button>
@@ -230,7 +291,7 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
               </Button>
             </>
           ) : (
-            <Button variant="outline" data-testid="review-reject" disabled={acting} onClick={() => setAsking(true)}>
+            <Button variant="outline" data-testid="review-reject" disabled={acting} onClick={askReject}>
               <XCircle aria-hidden />
               {REJECT_AND_RETRY_LABEL}
             </Button>

@@ -142,11 +142,11 @@ async function openChats(page: Page, origin: string, wsId: string): Promise<void
   await expect(page.getByTestId('workspace-name')).toBeVisible();
 }
 
-/** The header's project tabs: exactly Chats, marked as the current page. */
+/** The header's project tabs with nothing BMad: Chats (the current page) and the Workbench (epic 8, every project), never Board, Plan or Runs. */
 async function expectChatsTabOnly(page: Page) {
   const nav = page.getByRole('navigation', { name: 'Project sections' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('link')).toHaveCount(1);
+  await expect(nav.getByRole('link')).toHaveText(['Chats', 'Workbench']);
   await expect(nav.getByRole('link', { name: 'Chats' })).toHaveAttribute('aria-current', 'page');
 }
 

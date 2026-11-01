@@ -27,7 +27,7 @@ import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { apiError, notImplemented } from './errors.js';
 import type { Logger } from './log.js';
-import { NO_STORE, workbenchRefusal } from './workspace-files-routes.js';
+import { NO_STORE, workbenchRefusal } from './workbench-refusal.js';
 
 /** The largest body any of these routes takes (`SetProjectCommandsRequest`: 20 commands of 2000 characters, twice). */
 const MAX_BODY_BYTES = 256 * 1024;
@@ -167,11 +167,22 @@ export function registerWorkbenchRoutes(app: Hono, { workspaceChanges, projectCo
   // The editor launcher (AD-39): 8.10.
   if (editorLaunch === undefined) {
     app.get(API_ROUTES.editors, notImplemented);
+    app.put(API_ROUTES.editors, notImplemented);
     app.post(API_ROUTES.workspaceFileOpenInEditor, notImplemented);
   } else {
     app.get(API_ROUTES.editors, async (c) => {
       try {
         return c.json(EditorsResponse.parse(await editorLaunch.editors()), 200, NO_STORE);
+      } catch (error) {
+        return refusal(c, error);
+      }
+    });
+    // The editor files open in (Settings, Projects, Editor): one found now, or `null`.
+    app.put(API_ROUTES.editors, limit, async (c) => {
+      const read = await readJson(c);
+      if ('response' in read) return read.response;
+      try {
+        return c.json(EditorsResponse.parse(await editorLaunch.setChoice(read.body)), 200, NO_STORE);
       } catch (error) {
         return refusal(c, error);
       }

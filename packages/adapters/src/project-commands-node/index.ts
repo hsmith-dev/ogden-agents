@@ -12,7 +12,11 @@
  *   refused in plain words (it needs a shell; deferred);
  * - it is spawned with `shell: false`, stdin ignored, in its own process
  *   group on POSIX (`detached`), with `baseEnvironment()` plus `CI=1`,
- *   `NO_COLOR=1` and `FORCE_COLOR=0`: never `process.env`, never a key;
+ *   `NO_COLOR=1` and `FORCE_COLOR=0`, its `PATH` only the absolute folders
+ *   (so on POSIX a bare name the command runs in turn, `node` behind npm's
+ *   shim, is never one planted in the project; Windows also looks in the
+ *   working folder, logged in `deferred-work.md`; `program-launch.ts`,
+ *   8.12): never `process.env`, never a key;
  *   a worktree copy's setup (27.7) adds `PORT` and nothing else, its value
  *   a decimal in `WORKTREE_PORT_RANGE` (any other name or value is refused);
  * - stdout and stderr together keep only their last
@@ -29,6 +33,7 @@ import { argvShellRefusal, type ProjectCommandExit, type ProjectCommandProcess, 
 import { isWorktreePort, PROJECT_COMMAND_MAX_RUN_MS, PROJECT_COMMAND_OUTPUT_MAX_BYTES, PROJECT_COMMAND_REFUSALS, WORKTREE_PORT_ENV } from '@ogden-agents/shared';
 import { findProgram } from '../acp-base/linked-command.js';
 import { baseEnvironment } from '../child-env.js';
+import { withAbsolutePath } from '../program-launch.js';
 import { killProcessTree } from '../process-tree.js';
 
 /** How long a killed tree has to report its exit before the run gives up waiting. */
@@ -120,7 +125,7 @@ export function createProjectCommandsNode(options: ProjectCommandsNodeOptions = 
       const from = source();
       const found = findProgram(argv[0]!, from, { platform });
       if (!found.ok) return notStarted(found.reason);
-      const env: Record<string, string> = { ...baseEnvironment(from, platform), CI: '1', NO_COLOR: '1', FORCE_COLOR: '0', ...added };
+      const env: Record<string, string> = { ...withAbsolutePath(baseEnvironment(from, platform), platform), CI: '1', NO_COLOR: '1', FORCE_COLOR: '0', ...added };
       const args = argv.slice(1);
       const output = tail(maxOutputBytes);
 
@@ -175,7 +180,13 @@ export function createProjectCommandsNode(options: ProjectCommandsNodeOptions = 
         return notStarted(`Ogden couldn't start ${argv[0]!}.`);
       }
       inFlight.add(handle);
-      killNow.set(handle, () => killTree(child?.pid));
+      // Recorded as Ogden's stop before the kill, as Stop does: on Windows `taskkill /F` ends the tree with exit code 1, which is no exit code of the command's own.
+      killNow.set(handle, () => {
+        if (settled || exited !== undefined) return;
+        killed ??= { exitCode: null, stopped: true };
+        clearTimeout(timer);
+        killTree(child?.pid);
+      });
       child.stdout?.on('data', (chunk: Buffer) => output.push(chunk));
       child.stderr?.on('data', (chunk: Buffer) => output.push(chunk));
       child.stdout?.on('error', () => {});

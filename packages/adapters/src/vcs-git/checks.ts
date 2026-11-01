@@ -2,9 +2,9 @@
  * `vcs-git`'s options and the checks it makes before using a name, a path or an
  * object store (story 5.10 split `index.ts`): pure, no git is run here.
  */
-import { existsSync, lstatSync, readdirSync, realpathSync, type Dirent } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, type Dirent } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { VcsError } from '@ogden-agents/core';
+import { localRealpathSync, VcsError } from '@ogden-agents/core';
 
 export interface GitVcsOptions {
   /**
@@ -93,10 +93,14 @@ export function checkRelative(path: string): string {
 /** Config git must not take from anywhere for a rebase or a patch: no signing program, no ref rewriting elsewhere. */
 export const SAFE_CONFIG = ['-c', 'commit.gpgsign=false', '-c', 'rebase.updateRefs=false', '-c', 'core.sshCommand=false'];
 
-/** The real path of `dir`, or its resolved path when it doesn't exist. */
+/**
+ * The real path of `dir`, or its resolved path when it doesn't exist or
+ * names another computer (`//host/share`, or a link on the way to one),
+ * which is never looked up: on Windows that lookup is a network request.
+ */
 export function realOf(dir: string): string {
   try {
-    return realpathSync.native(dir);
+    return localRealpathSync(dir);
   } catch {
     return resolve(dir);
   }

@@ -90,8 +90,20 @@ describe('project-commands-node', () => {
     const { started, pids } = await startTree(runner);
     runner.killAll!();
     await until(() => !alive(pids.child) && !alive(pids.grandchild));
-    expect((await started.done).exitCode).toBeNull();
+    expect(await started.done).toEqual({ exitCode: null, stopped: true });
     expect((await runner.start({ cwd: tmpdir(), argv: ['node', '-e', '1'] }).done).error).toMatch(/stopping/);
+  });
+
+  it('killAll reports Ogden\'s stop even when the kill ends the command with an exit code (taskkill /F on Windows exits 1)', async () => {
+    // Simulates Windows on any platform: the injected kill makes the command exit 1, as `taskkill /T /F` does.
+    const runner = createProjectCommandsNode({ source, killTree: (pid) => {
+        if (pid !== undefined) process.kill(pid, 'SIGTERM');
+      },
+    });
+    const started = runner.start({ cwd: tmpdir(), argv: ['node', '-e', "process.on('SIGTERM', () => process.exit(1)); console.log('ready'); setInterval(() => {}, 1000)"] });
+    await until(() => started.output().text.includes('ready'));
+    runner.killAll!();
+    expect(await started.done).toEqual({ exitCode: null, stopped: true });
   });
 
   it('gives the child the allowlist plus CI, NO_COLOR and FORCE_COLOR, never a planted key or process.env', async () => {

@@ -162,7 +162,13 @@ export function createProjectCommandsNode(options: ProjectCommandsNodeOptions = 
         return notStarted(`Ogden couldn't start ${argv[0]!}.`);
       }
       inFlight.add(handle);
-      killNow.set(handle, () => killTree(child?.pid));
+      // Recorded as Ogden's stop before the kill, as Stop does: on Windows `taskkill /F` ends the tree with exit code 1, which is no exit code of the command's own.
+      killNow.set(handle, () => {
+        if (settled || exited !== undefined) return;
+        killed ??= { exitCode: null, stopped: true };
+        clearTimeout(timer);
+        killTree(child?.pid);
+      });
       child.stdout?.on('data', (chunk: Buffer) => output.push(chunk));
       child.stderr?.on('data', (chunk: Buffer) => output.push(chunk));
       child.stdout?.on('error', () => {});

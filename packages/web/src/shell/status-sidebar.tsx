@@ -21,8 +21,8 @@ import {
 } from '@/ui/sidebar';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
-import { STATE_WORDS } from '@/ui/state-glyph';
 import { AddProjectDialog } from '@/workspaces/add-project-dialog';
+import { HelpMenu } from './help-menu';
 import { NeedsYouGroup } from './needs-you-group';
 import { markNeedsYouOpened, needsYouTarget } from './needs-you-target';
 import { NewTabButton } from './new-tab-button';
@@ -30,7 +30,7 @@ import { QuitButton } from './quit-button';
 import { ServerStatus } from './server-status';
 import { useSidebarData } from './sidebar-data';
 import { SidebarStartChat } from './sidebar-start-chat';
-import { holdOrder, relativeTime, type SidebarModel, type SidebarRow } from './sidebar-model';
+import { activityWords, holdOrder, type SidebarModel, type SidebarRow } from './sidebar-model';
 import { Wordmark } from './wordmark';
 import { filterProjects, showsProjectFilter } from './project-filter';
 
@@ -39,7 +39,7 @@ import { filterProjects, showsProjectFilter } from './project-filter';
  * to see, open, add and manage projects (backlog story 13). Needs you on top,
  * then each workspace (its name opens it, a gear its settings) with its
  * session rows (story 2.11), a filter when there are many, and Add project,
- * then the footer with Settings, New tab, Quit Ogden Agents and the server status.
+ * then the footer with Settings, Help, New tab, Quit Ogden Agents and the server status.
  */
 export function StatusSidebar() {
   return (
@@ -240,6 +240,7 @@ function StatusSidebarBody() {
       </SidebarContent>
       <SidebarFooter>
         <SettingsLink />
+        <HelpMenu />
         <NewTabButton />
         <QuitButton />
         <ServerStatus />
@@ -265,10 +266,9 @@ function SessionRows({ rows, now }: { rows: readonly SidebarRow[]; now: number }
           state={row.state}
           title={row.title}
           userTitle={row.userTitle}
-          updatedAt={row.updatedAt}
           agentName={row.agentName}
           model={row.model}
-          time={relativeTime(row.updatedAt, now)}
+          activity={activityWords(row.updatedAt, now)}
           active={params.sesId === row.sesId}
         />
       ))}
@@ -283,12 +283,11 @@ const SessionRow = memo(function SessionRow({
   state,
   title,
   userTitle,
-  updatedAt,
   agentName,
   model,
-  time,
+  activity,
   active,
-}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'userTitle' | 'updatedAt' | 'agentName' | 'model'> & { time: string; active: boolean }) {
+}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'userTitle' | 'agentName' | 'model'> & { activity: string; active: boolean }) {
   // Rename in place (backlog story 12): double click the row or press F2 on it.
   const rename = useChatRename({ wsId, sesId, name: title, title: userTitle });
   const item = useRef<HTMLLIElement>(null);
@@ -309,9 +308,9 @@ const SessionRow = memo(function SessionRow({
           data-testid="status-row"
           state={state}
           title={title}
-          caption={`${agentName}, ${STATE_WORDS[state].toLowerCase()}`}
+          agent={agentName}
+          activity={activity}
           detail={model === undefined ? undefined : `${agentName} on ${model}`}
-          time={{ label: time, dateTime: updatedAt }}
           isActive={active}
           aria-keyshortcuts="F2"
           onDoubleClick={startRename}

@@ -13,7 +13,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { API_ROUTES, fakeAgentSetup, fakeSecondAgent, makeDataDir, removeDataDir, SECOND_AGENT, startServer } from '../support.js';
 import { startChat, withChatServer } from './chat-server.js';
-import { launchLink, openConnected, storedToken } from './tab.js';
+import { launchLink, openConnected, rowsWithAgent, storedToken } from './tab.js';
 
 const THIRD = { agentId: 'third-agent', displayName: 'Third Agent' } as const;
 
@@ -97,8 +97,8 @@ test("a new chat preselects the project's default, set in one tab and followed b
       // Every sidebar row names its agent.
       const rows = page.getByTestId('status-row');
       await expect(rows).toHaveCount(2);
-      await expect(rows.filter({ hasText: SECOND_AGENT.displayName })).toHaveCount(1);
-      await expect(rows.filter({ hasText: 'Claude Code' })).toHaveCount(1);
+      await expect(rowsWithAgent(rows, SECOND_AGENT.displayName)).toHaveCount(1);
+      await expect(rowsWithAgent(rows, 'Claude Code')).toHaveCount(1);
     },
     { extra: { extraAgents: [second, third] } },
   );

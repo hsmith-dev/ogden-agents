@@ -122,6 +122,8 @@ export type TranscriptItem =
   | { type: 'document'; path: string; next: CatalogNext | null; toolCallId: string | null; at: string }
   /** The user continued the chat with another agent here (handoff, `session.agent_changed`): the "Continued with" divider. */
   | { type: 'agent_changed'; agentId: string; previous: string; at: string }
+  /** A turn that changed files ended (`session.turn_changes_recorded`, story 8.4): its counts, and Review changes on it. */
+  | { type: 'turn_changes'; turnId: string; files: number; additions: number; deletions: number; at: string }
   /** The agent's current step was stopped so a message sent right away goes at once (`session.turn_interrupted`). */
   | {
       type: 'interrupted';
@@ -334,6 +336,12 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
       case 'session.check_in':
         view.checkIn = { waitingOn: event.payload.waitingOn, at: event.at };
         break;
+      case 'session.turn_changes_recorded': {
+        // Only a turn that changed files says so; one that changed nothing adds no row.
+        const { turnId, files, additions, deletions } = event.payload;
+        if (files > 0) view.items.push({ type: 'turn_changes', turnId, files, additions, deletions, at: event.at });
+        break;
+      }
       case 'session.resumed': {
         // The chat reopens on the user's next message: the break goes just before it.
         const reopenedBy = view.items.findLastIndex((item) => item.type === 'message' && item.message.role === 'user' && item.message.status === undefined);

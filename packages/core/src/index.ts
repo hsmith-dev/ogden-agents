@@ -85,6 +85,7 @@ export * from './workspace-files.js';
 export * from './workspace-files-port.js';
 export * from './workspace-root.js';
 export * from './workspace-changes.js';
+export * from './turn-snapshots.js';
 export * from './editor-launcher-port.js';
 export * from './editor-launch.js';
 export * from './project-commands.js';

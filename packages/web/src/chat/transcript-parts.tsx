@@ -1,10 +1,12 @@
 /**
  * Parts of the session page's transcript (moved out of
  * `routes/session-page.tsx` by story 6.9 to keep it under 600 lines): Show
- * earlier, the resumed marker, the handoff divider, and one message.
+ * earlier, the resumed marker, the handoff divider, and one message; the
+ * Changed row at the end of a turn that changed files (story 8.4).
  */
-import { ORCHESTRATION_MANAGER_AUTO_MARK, ORCHESTRATION_MANAGER_MARK } from '@ogden-agents/shared';
-import { ArrowClockwise } from '@phosphor-icons/react';
+import { ORCHESTRATION_MANAGER_AUTO_MARK, ORCHESTRATION_MANAGER_MARK, REVIEW_CHANGES_LABEL, turnChangedText } from '@ogden-agents/shared';
+import { ArrowClockwise, FileText } from '@phosphor-icons/react';
+import { Link } from '@tanstack/react-router';
 import type { TranscriptMessage } from '@/chat/transcript';
 import { Button } from '@/ui/button';
 import { Markdown } from '@/ui/markdown';
@@ -152,6 +154,27 @@ export function InterruptedNote({ cancelledRequest = false }: { cancelledRequest
         {cancelledRequest ? ' A pending approval request was cancelled; the agent can ask again.' : ''}
       </Text>
       <Separator className="flex-1" />
+    </div>
+  );
+}
+
+/**
+ * The end of a turn that changed files (story 8.4): "Changed N files +A -D"
+ * and Review changes, which opens the Workbench's Changes on This turn of
+ * that very turn.
+ */
+export function TurnChangesRow({ wsId, sesId, turnId, files, additions, deletions }: { wsId: string; sesId: string; turnId: string; files: number; additions: number; deletions: number }) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1" data-testid="turn-changes" data-turn={turnId}>
+      <FileText aria-hidden className="shrink-0 text-muted-foreground" />
+      <Text as="span" variant="caption" data-testid="turn-changes-text">
+        {turnChangedText(files, additions, deletions)}
+      </Text>
+      <Button asChild variant="link" size="sm" className="h-auto px-0">
+        <Link to="/w/$wsId/workbench" params={{ wsId }} search={{ panel: 'changes', session: sesId, view: 'turn', turn: turnId }} data-testid="turn-changes-review">
+          {REVIEW_CHANGES_LABEL}
+        </Link>
+      </Button>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect } from '@tanstack/react-router';
+import { ChangesView, SessionId, TurnId } from '@ogden-agents/shared';
 import { newChatSearch, type NewChatSearch } from './chat/new-chat';
 import { HomePage } from './routes/home-page';
 import { NotFoundPage } from './routes/not-found-page';
@@ -187,16 +188,40 @@ const workspaceTerminalsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-terminals-page'), 'WorkspaceTerminalsPage'),
 });
 
-/** The Workbench's search: `?path=` is the file the Files panel shows (AD-36). */
+/**
+ * The Workbench's search: `?path=` is the file the Files panel shows (AD-36);
+ * `?panel=changes` opens Changes (story 8.4) on `?view=`, for the chat
+ * `?session=` (This turn, and its worktree's Commit) on its turn `?turn=`.
+ */
 export interface WorkbenchSearch {
   path?: string;
+  panel?: 'changes';
+  view?: ChangesView;
+  session?: string;
+  turn?: string;
+}
+
+/** The Workbench's search as given, keeping only what it understands. */
+export function workbenchSearch(search: Record<string, unknown>): WorkbenchSearch {
+  const text = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
+  const path = text(search.path);
+  const view = ChangesView.safeParse(search.view);
+  const session = SessionId.safeParse(search.session);
+  const turn = TurnId.safeParse(search.turn);
+  return {
+    ...(path === undefined ? {} : { path }),
+    ...(search.panel === 'changes' ? { panel: 'changes' as const } : {}),
+    ...(view.success ? { view: view.data } : {}),
+    ...(session.success ? { session: session.data } : {}),
+    ...(turn.success ? { turn: turn.data } : {}),
+  };
 }
 
 /** A project's Workbench (AD-36): its Files panel, the project's tree and one file read-only. */
 const workspaceWorkbenchRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/w/$wsId/workbench',
-  validateSearch: (search: Record<string, unknown>): WorkbenchSearch => (typeof search.path === 'string' && search.path !== '' ? { path: search.path } : {}),
+  validateSearch: workbenchSearch,
   component: lazyRouteComponent(() => import('./routes/workspace-workbench-page'), 'WorkspaceWorkbenchPage'),
 });
 

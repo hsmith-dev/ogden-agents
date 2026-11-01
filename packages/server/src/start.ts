@@ -15,6 +15,7 @@ import {
   createOnboarding,
   createRemoteWorktreeSync,
   clampCheckInDelay,
+  CoreError,
   openRemoteConnection,
   RESTARTED_REASON,
   createToolchain,
@@ -48,7 +49,7 @@ import { wireAgents } from './start-agents.js';
 import { createPanesWiring } from './start-panes.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
-import { createBuildsWiring, createServerVcs } from './start-builds.js';
+import { createBuildsWiring, createServerVcs, createServerWorkingTree } from './start-builds.js';
 import { createNotificationsWiring } from './start-notifications.js';
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
@@ -198,6 +199,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       bmadCatalog,
       onBmadSetupFailure: bmadSetupFailureLogger(log),
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
+      // A turn snapshot that failed (story 8.4): its code only, never a message that could name a path.
+      onTurnSnapshotError: (sessionId, error) => log.warn('a turn snapshot failed', { sessionId, code: error instanceof CoreError ? error.code : 'unexpected' }),
       // The request is declined all the same; the reason names no command.
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
       // A project's default agent (epic 6, entry 6) is one this server registers: Claude Code and any extra agent.
@@ -206,6 +209,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       devToolsPort: options.devToolsPort ?? createDevToolsAdapter(),
       // The Workbench's Files (AD-36): confined to each project, with the home credential and data-folder fences.
       workspaceFilesPort: options.workspaceFilesPort ?? createWorkspaceFilesNode({ home: homedir(), dataDir }),
+      // The Workbench's Changes (AD-37, story 8.4): the user's git, no hook, snapshots in the data folder.
+      vcsWorkingTreePort: createServerWorkingTree(options, dataDir),
       agentConfigFolders: () => agentConfigFolders(descriptors.current),
       agentProjectFiles: () => agentProjectFiles(descriptors.current),
       projectFilesFingerprint,
@@ -397,6 +402,8 @@ async function listenAndAnnounce({
     buildSessions: core.buildSessions,
     // A plain chat's remote target (CAP-24, epic 19 story 19.7): `Session.machineId`, opened fresh at each agent start.
     remote,
+    // Each prompt's snapshots for This turn (AD-37, story 8.4).
+    turnSnapshots: core.turnSnapshots,
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   stopChats.current = (agentId) => chat.stopAgent(agentId);

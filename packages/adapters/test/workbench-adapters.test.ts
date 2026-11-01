@@ -119,16 +119,18 @@ describe('the Workbench memory stubs', () => {
 
   it('vcs-memory working tree: stage moves a hunk to Staged, an outdated hunk is refused, commit clears', async () => {
     const vcs = createMemoryVcsWorkingTree();
+    const w = { path: '/w' };
     const hunk = { id: 'h1', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ kind: 'add' as const, text: 'x', newLine: 1 }] };
     vcs.folder('/w').unstaged.push({ file: { path: 'a.ts', change: 'changed', additions: 1, deletions: 0, binary: false, tooLarge: false }, hunks: [hunk, { ...hunk, id: 'h2' }] });
-    expect(await vcs.applyHunk('/w', { target: { view: 'unstaged' }, action: 'stage', path: 'a.ts', hunkId: 'h1' })).toBe('applied');
-    expect((await vcs.changedFiles('/w', { view: 'staged' })).files).toMatchObject([{ path: 'a.ts', additions: 1 }]);
+    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'stage', path: 'a.ts', hunkId: 'h1' })).toBe('applied');
+    expect((await vcs.changedFiles(w, { view: 'staged' })).files).toMatchObject([{ path: 'a.ts', additions: 1 }]);
     vcs.outdated.add('h2');
-    expect(await vcs.applyHunk('/w', { target: { view: 'unstaged' }, action: 'revert', path: 'a.ts', hunkId: 'h2' })).toBe('outdated');
-    expect(await vcs.applyHunk('/w', { target: { view: 'unstaged' }, action: 'revert', path: 'b.ts' })).toBe('not_found');
-    expect(await vcs.commitAll('/w', 'msg')).toMatchObject({ files: 1 });
-    expect((await vcs.changedFiles('/w', { view: 'unstaged' })).files).toEqual([]);
-    expect(await vcs.snapshot('/w')).toMatch(/^[0-9a-f]{40}$/);
+    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'revert', path: 'a.ts', hunkId: 'h2' })).toBe('outdated');
+    expect(await vcs.applyHunk(w, { target: { view: 'unstaged' }, action: 'revert', path: 'b.ts' })).toBe('not_found');
+    expect(await vcs.commitAll(w, 'msg')).toMatchObject({ files: 1 });
+    expect((await vcs.changedFiles(w, { view: 'unstaged' })).files).toEqual([]);
+    expect(await vcs.snapshot(w)).toMatch(/^[0-9a-f]{40}$/);
+    expect(await vcs.commitAll(w, 'again')).toBe('nothing');
   });
 
   it('editor-launcher-memory records opens; project-commands-memory starts nothing until finished', async () => {

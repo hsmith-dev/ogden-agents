@@ -102,7 +102,7 @@ test('Review shows each file in the diff viewer: the list jumps, both layouts fi
       // The file list jumps: it moves focus to the file's header and scrolls it into view.
       const list = page.getByTestId('review-files');
       await list.getByRole('button', { name: /src\/built-1\.1\.txt/ }).click();
-      await expect(built.getByRole('button', { name: 'src/built-1.1.txt' })).toBeFocused();
+      await expect(built.getByRole('button', { name: 'src/built-1.1.txt', exact: true })).toBeFocused();
       await expect(built).toBeInViewport();
 
       // Inline at 1280px.

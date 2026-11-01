@@ -68,6 +68,13 @@ const buildsSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/builds-settings-page'), 'BuildsSettingsPage'),
 });
 
+/** How many chat worktrees the install keeps before it puts the oldest idle one away (epic 27, 27.6). */
+const worktreesSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/worktrees',
+  component: lazyRouteComponent(() => import('./routes/worktrees-settings-page'), 'WorktreesSettingsPage'),
+});
+
 /** Generic developer CLI tools: detect, confirmed install, and each project's unattended-build allowlist (CAP-25). */
 const devToolsSettingsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -257,6 +264,13 @@ const workspaceReviewRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-review-page'), 'WorkspaceReviewPage'),
 });
 
+/** One task tried by several agents (27.8), `/w/:wsId/try/:tryId`: a column per agent, keep one. */
+const workspaceTryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/try/$tryId',
+  component: lazyRouteComponent(() => import('./routes/try-page'), 'TryPage'),
+});
+
 /** The session view's search: `?driver=terminal` mirrors who drives the chat (story 3.6); it never switches by itself. */
 export interface SessionSearch {
   driver?: 'terminal';
@@ -284,8 +298,9 @@ const routeTree = rootRoute.addChildren([
   workspaceOrchestrateRoute,
   workspaceTerminalsRoute,
   workspaceWorkbenchRoute,
+  workspaceTryRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, alwaysAllowSettingsRoute, buildsSettingsRoute, editorSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, alwaysAllowSettingsRoute, buildsSettingsRoute, worktreesSettingsRoute, editorSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

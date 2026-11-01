@@ -9,7 +9,7 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openCore, type Core } from '@ogden-agents/core';
+import { openCore, WorktreePutAwayError, type Core, type Orchestration, type OrchestrationFeature } from '@ogden-agents/core';
 import {
   API_BASE,
   API_ROUTES,
@@ -29,7 +29,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PROCESS_TEST_TIMEOUT_MS } from '../../../tests/fixtures/test-timeouts.js';
 import { guardedRouteKeys } from '../src/bmad-pieces.js';
 import { createLogger } from '../src/log.js';
-import { orchestrationRouteKeys, orchestrationRoutes, SHIPPED_ORCHESTRATION } from '../src/orchestration-routes.js';
+import { orchestrationRouteKeys, orchestrationRoutes, registerOrchestrationRoutes, SHIPPED_ORCHESTRATION } from '../src/orchestration-routes.js';
 import { fullTestApp, send, signIn, startTestServer, tempDataDir, type SignedIn, type TestServer } from './helpers.js';
 
 // Each test starts a server and its agents' processes (test-timeouts.ts): a hang limit, not a measurement.
@@ -170,5 +170,22 @@ describe('the route helper', () => {
     expect(() => orchestrationRoutes(app, { orchestration: core.orchestration, log }).get(`${API_BASE}/orchestration`, (c) => c.json({}))).toThrow(/inside a workspace/);
     expect(orchestrationRouteKeys(app)).toEqual([]);
     expect(orchestrationRouteKeys(new Hono())).toEqual([]);
+  });
+});
+
+describe("a worker chat whose copy is put away (27.6; 27.9 sweep)", () => {
+  it('answers a send refused for it 409 worktree_put_away in its own words, not a 500', async () => {
+    const app = new Hono();
+    const on = { requireOrchestration: () => undefined } as unknown as OrchestrationFeature;
+    const runs = {
+      dispatchStep: async () => {
+        throw new WorktreePutAwayError();
+      },
+    } as unknown as Orchestration;
+    registerOrchestrationRoutes(app, { orchestration: on, runs, log: createLogger(() => {}) });
+    const path = apiPath(API_ROUTES.workspaceOrchestrationStepDispatch, { wsId: UNKNOWN, runId: 'orr_01J9Z3K4M5N6P7Q8R9S0T1V2W3', stepId: 'ors_01J9Z3K4M5N6P7Q8R9S0T1V2W3' });
+    const response = await app.request(path, { method: 'POST' });
+    expect(response.status).toBe(409);
+    expect(ApiErrorBody.parse(await response.json()).error).toMatchObject({ code: 'worktree_put_away', message: new WorktreePutAwayError().message });
   });
 });

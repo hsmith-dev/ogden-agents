@@ -26,6 +26,12 @@ export interface GitVcsOptions {
    */
   worktreesRoot?: string;
   /**
+   * The folder every chat's own worktree is made in (`<data>/cw`; 27.1,
+   * 27.3): a direct child of it may be removed too, with only a chat's
+   * branch (`ogden/chat/<ses_…>`). Refused when it is a link.
+   */
+  chatWorktreesRoot?: string;
+  /**
    * The folder of every run's folder (`<data>/r`; story 5.6). A run's own
    * object store is `<runsRoot>/<run8>/objects`, found from its `ogden/<run8>/…`
    * branch name: reads of that branch take it as an alternate, and a rebase
@@ -58,8 +64,8 @@ export const REVISION = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 export const RUN_BRANCH = /^ogden\/([a-z2-7]{8})\//;
 /** The most bytes of new objects approve imports from one run (a pack held in memory). */
 export const MAX_IMPORT_BYTES = 512 * 1024 * 1024;
-/** A branch name as Ogden makes them, and as git accepts them. */
-export const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+/** A branch name as Ogden makes them, and as git accepts them (`_` for a chat's `ogden/chat/ses_…`, 27.1). */
+export const BRANCH = /^[A-Za-z0-9][A-Za-z0-9_./-]*$/;
 
 export function checkBranch(branch: string): string {
   if (!BRANCH.test(branch) || branch.includes('..') || branch.includes('//') || branch.endsWith('/') || branch.endsWith('.') || branch.endsWith('.lock') || branch.includes('@{')) {

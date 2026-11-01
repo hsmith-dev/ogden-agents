@@ -1,6 +1,7 @@
-import { ArrowsLeftRight, DotsThree, ListBullets, ListDashes } from '@phosphor-icons/react';
+import { DELETE_CHAT_LABEL } from '@ogden-agents/shared';
+import { ArrowsLeftRight, DotsThree, ListBullets, ListDashes, Trash } from '@phosphor-icons/react';
 import { Button } from '@/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/ui/dropdown-menu';
 import { DETAIL_MENU_WORDS, type ChatDetail } from './detail-level';
 
 /** The handoff action's words, in the header menu and on a usage-limit notice. */
@@ -13,19 +14,26 @@ export const CONTINUE_WITH_ANOTHER_AGENT = 'Continue with another agent';
  * when `onContinue` is given (the install has several agents): while the chat
  * can't be handed over (the agent works or waits, the terminal drives), the
  * item stays reachable by keyboard with its reason read under it, and does
- * nothing.
+ * nothing. Delete chat (27.3) only when `onDelete` is given (a plain chat),
+ * in the same way: reachable with its reason while it can't be deleted.
  */
 export function SessionMenu({
   detail,
   onDetail,
   blockedReason,
   onContinue,
+  onDelete,
+  deleteBlockedReason,
 }: {
   detail: ChatDetail;
   onDetail: (next: ChatDetail) => void;
   blockedReason?: string | undefined;
   onContinue?: (() => void) | undefined;
+  onDelete?: (() => void) | undefined;
+  /** Why the chat can't be deleted now (the agent works or waits, the terminal drives, or it isn't a plain chat). */
+  deleteBlockedReason?: string | undefined;
 }) {
+  const deleteBlocked = deleteBlockedReason !== undefined;
   const blocked = blockedReason !== undefined;
   const next: ChatDetail = detail === 'normal' ? 'verbose' : 'normal';
   const DetailIcon = next === 'verbose' ? ListBullets : ListDashes;
@@ -62,6 +70,32 @@ export function SessionMenu({
             {blocked ? (
               <DropdownMenuLabel id="session-menu-continue-reason" className="max-w-72 text-caption font-normal text-muted-foreground" data-testid="session-menu-continue-reason">
                 {blockedReason}
+              </DropdownMenuLabel>
+            ) : null}
+          </>
+        )}
+        {onDelete === undefined ? null : (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              data-testid="session-menu-delete"
+              aria-disabled={deleteBlocked || undefined}
+              aria-describedby={deleteBlocked ? 'session-menu-delete-reason' : undefined}
+              className={deleteBlocked ? 'opacity-50' : 'text-destructive'}
+              onSelect={(event) => {
+                if (deleteBlocked) {
+                  event.preventDefault();
+                  return;
+                }
+                onDelete();
+              }}
+            >
+              <Trash aria-hidden />
+              {DELETE_CHAT_LABEL}…
+            </DropdownMenuItem>
+            {deleteBlocked ? (
+              <DropdownMenuLabel id="session-menu-delete-reason" className="max-w-72 text-caption font-normal text-muted-foreground" data-testid="session-menu-delete-reason">
+                {deleteBlockedReason}
               </DropdownMenuLabel>
             ) : null}
           </>

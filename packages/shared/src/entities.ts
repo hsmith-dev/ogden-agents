@@ -146,12 +146,12 @@ export const Session = z.object({
   machineId: RemoteMachineId.nullable().default(null),
   /**
    * The chat's own worktree (AD-8 CAP-33 note, epic 27): an absolute path in
-   * Ogden's data directory, set at creation and never changed. Its files
+   * Ogden's data directory, set at creation; changed only by Hand off (`setSessionWorktree`, recorded as `session.location_changed`). Its files
    * and changes are rooted there (AD-36, AD-37). `null` for a chat in the
    * project folder, and in sessions from before it.
    */
   worktreePath: z.string().min(1).nullable().default(null),
-  /** The worktree's branch, `ogden/chat/<this session's id>`, set with {@link worktreePath} and never changed; `null` without one. */
+  /** The worktree's branch, `ogden/chat/<this session's id>`, set with {@link worktreePath}; changed only by Hand off with it, or by a Restore onto a new branch (`…-restored`); `null` without one. */
   branch: z.string().min(1).nullable().default(null),
   /** The user's name for the chat (backlog story 12); `null` until they give one. */
   title: z.string().nullable(),

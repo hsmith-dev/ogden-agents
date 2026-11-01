@@ -8,7 +8,36 @@
  * calls, xterm and the terminal socket are stand-ins; the parts have their
  * own tests in `driver-toggle.dom.test.tsx` and `terminal-panel.dom.test.tsx`.
  */
-import type { CoreEvent, SessionDriver, SessionResponse } from '@ogden-agents/shared';
+import {
+  CHAT_REMOTE_FIXED_TEXT,
+  chatOnMachineText,
+  DELETE_AND_DISCARD_LABEL,
+  DELETE_CHAT_CONFIRM_TITLE,
+  DELETE_CHAT_NOT_DELETABLE_TEXT,
+  DELETE_CHAT_UNCOMMITTED_TEXT,
+  deleteChatBusyText,
+  DELETE_CHAT_REMOTE_TEXT,
+  deleteChatConfirmText,
+  RESTORE_PATH_TAKEN_TEXT,
+  COPY_IGNORED_FILES_TEXT,
+  COPY_IGNORED_FILES_UNREAD_TEXT,
+  HANDOFF_CONFIRM_TITLE,
+  HANDOFF_TO_WORKTREE_DESCRIPTION,
+  HANDOFF_FOLDER_BUSY_TEXT,
+  handOffConflictText,
+  handOffMidTurnText,
+  handOffWorktreeConflictText,
+  WORKTREE_BADGE_TOOLTIP_TEXT,
+  WORKTREE_PUT_AWAY_COMPOSER_TEXT,
+  WORKTREE_PUT_AWAY_TEXT,
+  worktreeRestoredText,
+  WORKTREE_RESTORE_LABEL,
+  WORKTREE_RESTORE_RETRY_LABEL,
+  worktreeBadgeLabel,
+  type CoreEvent,
+  type SessionDriver,
+  type SessionResponse,
+} from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -44,8 +73,39 @@ const fake = vi.hoisted(() => ({
   sendResult: (() => Promise.resolve({ messageId: 'msg_x', queued: false })) as () => Promise<unknown>,
   /** The location's hash, without `#` (a Needs you row names its card there, epic 26). */
   hash: '',
+  /** The chat's own worktree (27.1), or `null` for one in the project's folder. */
+  worktreePath: null as string | null,
+  machineId: null as string | null,
   /** The location's path: another page's while the router is on its way there (story 26.10). */
   pathname: '/w/ws_1/s/ses_1',
+  /** The session's kind (Delete chat, 27.3). */
+  kind: 'chat' as string,
+  /** The session's state as the REST read gives it. */
+  state: 'idle' as string,
+  /** Each Delete chat asked: whether it discarded uncommitted changes. */
+  deletes: [] as boolean[],
+  /** What each Delete chat answers, in turn (the last repeats). */
+  deleteResults: [] as Array<() => Promise<unknown>>,
+  /** The new-chat drafts opened. */
+  newChats: [] as string[],
+  /** The install's remote machines (27.5: a remote chat names its own). */
+  machines: [] as unknown[],
+  /** Host-key probes asked (a started chat's chip never probes). */
+  probes: 0,
+  /** Whether the chat's copy is put away (27.6), and each Restore asked with what it answers. */
+  putAway: false,
+  /** The chat was deleted: its read answers 404. */
+  gone: false,
+  restores: [] as string[],
+  restoreResult: (() => Promise.resolve()) as () => Promise<unknown>,
+  restoredText: 'Restored.',
+  /** Each hand-off asked (27.4): where to. */
+  handOffs: [] as string[],
+  /** The copy's ignored files as the server lists them (user decision 2026-11-01), and each read of them. */
+  ignored: { files: [] as string[], more: 0, listed: true },
+  ignoredReads: 0,
+  /** What each hand-off answers, in turn (the last repeats). */
+  handOffResults: [] as Array<() => Promise<unknown>>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -54,7 +114,25 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => fake.navigate,
   useRouterState: ({ select }: { select: (state: { location: { pathname: string; hash: string; href: string; state: Record<string, string> } }) => unknown }) =>
     select({ location: { pathname: fake.pathname, hash: fake.hash, href: `${fake.pathname}#${fake.hash}`, state: { __TSR_key: 'key_1' } } }),
-  Link: ({ children }: { children: ReactNode }) => <a href="/">{children}</a>,
+  Link: ({ children, to, params: _params, search, activeOptions: _active, ...rest }: { children: ReactNode; to?: string; params?: unknown; search?: unknown; activeOptions?: unknown } & Record<string, unknown>) => (
+    <a href="/" data-to={to} data-search={search === undefined ? undefined : JSON.stringify(search)} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+vi.mock('@/chat/new-chat', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/chat/new-chat')>()),
+  useOpenNewChat: () => (wsId: string) => fake.newChats.push(wsId),
+}));
+vi.mock('@/worktrees/worktree-retention', () => ({
+  usePutAwayWorktrees: () => ({
+    data: fake.putAway ? [{ id: 'wsn_1', sessionId: 'ses_1', workspaceId: 'ws_1', branch: 'ogden/chat/ses_1', files: 2, cause: 'retention', putAwayAt: '2026-11-01T00:00:00.000Z' }] : [],
+  }),
+  useRestoreWorktree: () => async (sesId: string) => {
+    fake.restores.push(sesId);
+    await fake.restoreResult();
+    return fake.restoredText;
+  },
 }));
 vi.mock('@/shell/workspace-header', () => ({ WorkspaceHeader: ({ children }: { children?: ReactNode }) => <header>{children}</header> }));
 vi.mock('@/events/event-stream', () => ({
@@ -68,6 +146,13 @@ vi.mock('@/appearance/appearance-provider', () => ({
   useAppearance: () => ({ appearance: { developerMode: true, density: 'comfortable', terminalScreenReader: false } }),
 }));
 vi.mock('@/workspaces/workspace-api', () => ({ fetchWorkspace: async () => ({ id: 'ws_1', path: '/repo' }), workspaceName: () => 'repo' }));
+vi.mock('@/remote-machines/remote-machines-api', () => ({
+  useRemoteMachines: () => ({ data: fake.machines }),
+  checkRemoteMachineHostKey: async () => {
+    fake.probes++;
+    return { fingerprint: 'fp' };
+  },
+}));
 vi.mock('@/agents/agent-setup-api', () => ({ useAgents: () => ({ data: [] }), useSignIn: () => ({}) }));
 vi.mock('@/chat/chat-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/chat/chat-api')>()),
@@ -100,8 +185,23 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
   }),
   fetchSession: async (): Promise<SessionResponse> => {
     fake.fetches++;
+    if (fake.gone) {
+      const { ChatApiError: Gone } = await import('../src/chat/chat-api');
+      throw new Gone('That chat is gone.', 404, 'not_found');
+    }
     return {
-      session: { id: 'ses_1', workspaceId: 'ws_1', state: 'idle', driver: fake.driver, adapterRefs: {}, ...(fake.agentId === undefined ? {} : { agentId: fake.agentId }) },
+      session: {
+        id: 'ses_1',
+        workspaceId: 'ws_1',
+        kind: fake.kind,
+        state: fake.state,
+        driver: fake.driver,
+        adapterRefs: {},
+        machineId: fake.machineId,
+        worktreePath: fake.worktreePath,
+        branch: fake.worktreePath === null ? null : 'ogden/chat/ses_1',
+        ...(fake.agentId === undefined ? {} : { agentId: fake.agentId }),
+      },
       terminal: { available: true },
     } as unknown as SessionResponse;
   },
@@ -114,6 +214,20 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
     return fake.sendResult();
   },
   cancelSession: async () => undefined,
+  handOffChat: async (_wsId: string, _sesId: string, to: string) => {
+    fake.handOffs.push(to);
+    const result = fake.handOffResults[Math.min(fake.handOffs.length - 1, fake.handOffResults.length - 1)];
+    return result === undefined ? { id: 'ses_1' } : result();
+  },
+  fetchCopyIgnoredFiles: async () => {
+    fake.ignoredReads += 1;
+    return fake.ignored;
+  },
+  deleteChat: async (_wsId: string, _sesId: string, discard: boolean) => {
+    fake.deletes.push(discard);
+    const result = fake.deleteResults[Math.min(fake.deletes.length - 1, fake.deleteResults.length - 1)];
+    return result === undefined ? { sessionId: 'ses_1', worktreeRemoved: false, branchKept: false } : result();
+  },
 }));
 // xterm and its socket: the panel's real effect runs, and xterm's focus lands on a textarea of its own.
 vi.mock('@xterm/xterm', () => ({
@@ -203,6 +317,24 @@ beforeEach(() => {
   fake.focused = 0;
   fake.connections = 0;
   fake.sent = [];
+  fake.worktreePath = null;
+  fake.machineId = null;
+  fake.machines = [];
+  fake.probes = 0;
+  fake.kind = 'chat';
+  fake.state = 'idle';
+  fake.deletes = [];
+  fake.deleteResults = [];
+  fake.newChats = [];
+  fake.putAway = false;
+  fake.gone = false;
+  fake.restores = [];
+  fake.restoreResult = () => Promise.resolve();
+  fake.restoredText = 'Restored.';
+  fake.handOffs = [];
+  fake.ignored = { files: [], more: 0, listed: true };
+  fake.ignoredReads = 0;
+  fake.handOffResults = [];
   fake.agentId = undefined;
   fake.claudeListed = true;
   fake.sendResult = () => Promise.resolve({ messageId: 'msg_x', queued: false });
@@ -452,5 +584,384 @@ describe('a chat whose agent was removed opens read-only (story 21.4)', () => {
     expect(screen.getByTestId('session-action-error').textContent).toBe('This agent was removed.');
     expect(screen.getByTestId('agent-removed-banner')).toBeTruthy();
     expect(screen.queryByTestId('composer')).toBeNull();
+  });
+});
+
+describe('the composer setup row (epic 27, 27.1)', () => {
+  it('has the Agent, Model, Mode and Location chips, and the header has no mode picker', async () => {
+    fake.agentId = 'claude-code';
+    await mount();
+    const row = await screen.findByTestId('setup-row');
+    const header = document.querySelector('header')!;
+    expect(header.querySelector('[data-testid="permission-mode-picker"]')).toBeNull();
+    for (const chip of ['session-agent-chip', 'model-picker', 'permission-mode-picker', 'location-chip']) {
+      expect(row.querySelector(`[data-testid="${chip}"]`), chip).not.toBeNull();
+    }
+    expect(row.querySelector('[data-testid="session-agent-chip"]')!.textContent).toContain('Claude Code');
+    expect(row.querySelector('[data-testid="location-chip"]')!.getAttribute('data-location')).toBe('this_folder');
+  });
+
+  it("shows a worktree chat's place, which can't be changed", async () => {
+    fake.agentId = 'claude-code';
+    fake.worktreePath = '/data/cw/abcdefgh';
+    await mount();
+    const chip = await screen.findByTestId('location-chip');
+    expect(chip.getAttribute('data-location')).toBe('worktree');
+    expect(chip.textContent).toContain('Worktree');
+    // 27.3: the branch beside the word.
+    expect(chip.querySelector('[data-testid="location-branch"]')!.textContent).toBe('ogden/chat/ses_1');
+  });
+});
+
+/** Opens a Radix menu the way a pointer does (happy-dom has no layout). */
+function openMenu(trigger: HTMLElement) {
+  act(() => {
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  });
+}
+
+describe('a worktree chat\'s branch badge (27.3)', () => {
+  it('shows the branch in the header, linking to the Workbench rooted at the chat, with its tooltip', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    await mount();
+    const badge = await screen.findByTestId('worktree-badge');
+    expect(badge.textContent).toBe('ogden/chat/ses_1');
+    expect(badge.getAttribute('data-to')).toBe('/w/$wsId/workbench');
+    expect(JSON.parse(badge.getAttribute('data-search')!)).toEqual({ session: SES });
+    expect(badge.getAttribute('aria-label')).toBe(worktreeBadgeLabel('ogden/chat/ses_1'));
+    await act(async () => {
+      fireEvent.focus(badge);
+    });
+    expect((await screen.findAllByText(WORKTREE_BADGE_TOOLTIP_TEXT)).length).toBeGreaterThan(0);
+  });
+
+  it('a chat in the project folder has no badge', async () => {
+    await mount();
+    await screen.findByTestId('location-chip');
+    expect(screen.queryByTestId('worktree-badge')).toBeNull();
+    expect(screen.queryByTestId('location-branch')).toBeNull();
+  });
+});
+
+describe('a remote chat (27.5)', () => {
+  const MACHINE = 'mach_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
+  const buildBox = { id: MACHINE, host: 'box.local', port: 22, username: 'ada', label: 'build-box', hostKeyFingerprint: 'fp', publicKey: null, hostKeyConfirmed: true, createdAt: '' };
+
+  it('says its machine in the header and on the Location chip, where the place is fixed', async () => {
+    fake.machineId = MACHINE;
+    fake.machines = [buildBox];
+    await mount();
+    expect((await screen.findByTestId('machine-badge')).textContent).toBe(chatOnMachineText('build-box'));
+    const chip = screen.getByTestId('location-chip');
+    expect(chip.getAttribute('data-machine')).toBe(MACHINE);
+    expect(chip.textContent).toContain('build-box');
+    expect(chip.getAttribute('aria-label')).toBe('Location: build-box');
+    openMenu(chip);
+    const own = await screen.findByTestId('location-machine');
+    expect(own.getAttribute('aria-checked')).toBe('true');
+    expect(own.textContent).toContain(CHAT_REMOTE_FIXED_TEXT);
+    for (const place of ['location-this_folder', 'location-worktree']) {
+      expect(screen.getByTestId(place).getAttribute('aria-disabled')).toBe('true');
+      expect(screen.getByTestId(place).textContent).toContain(CHAT_REMOTE_FIXED_TEXT);
+    }
+    // A started chat lists no other machine, offers no Add, and probes nothing.
+    expect(screen.queryByTestId('location-add-machine')).toBeNull();
+    await flush();
+    expect(fake.probes).toBe(0);
+  });
+
+  it('whose machine was removed says "on a remote machine"', async () => {
+    fake.machineId = MACHINE;
+    await mount();
+    expect((await screen.findByTestId('machine-badge')).textContent).toBe('on a remote machine');
+  });
+
+  it('a local chat has no machine badge', async () => {
+    fake.machines = [buildBox];
+    await mount();
+    await screen.findByTestId('location-chip');
+    expect(screen.queryByTestId('machine-badge')).toBeNull();
+    expect(screen.getByTestId('location-chip').getAttribute('data-machine')).toBeNull();
+  });
+});
+
+describe('Delete chat (27.3)', () => {
+  const openDelete = async () => {
+    openMenu(await screen.findByTestId('session-menu'));
+    fireEvent.click(await screen.findByTestId('session-menu-delete'));
+    return screen.findByTestId('delete-chat-confirm');
+  };
+
+  it('confirms a plain chat once, deletes it and opens the new-chat draft', async () => {
+    await mount();
+    const dialog = await openDelete();
+    expect(dialog.textContent).toContain(DELETE_CHAT_CONFIRM_TITLE);
+    expect(dialog.textContent).toContain(deleteChatConfirmText(null));
+    fireEvent.click(screen.getByTestId('delete-chat-confirm-button'));
+    await flush();
+    expect(fake.deletes).toEqual([false]);
+    expect(fake.newChats).toEqual([WS]);
+    expect(screen.queryByTestId('delete-chat-confirm')).toBeNull();
+  });
+
+  it('a worktree chat names its copy and branch, and its one confirmation discards uncommitted changes', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    await mount();
+    const dialog = await openDelete();
+    expect(dialog.textContent).toContain(deleteChatConfirmText('ogden/chat/ses_1'));
+    expect(dialog.textContent).toContain('any changes not committed');
+    fireEvent.click(screen.getByTestId('delete-chat-confirm-button'));
+    await flush();
+    expect(fake.deletes).toEqual([true]);
+    expect(fake.newChats).toEqual([WS]);
+  });
+
+  it("a worktree chat's confirmation lists its copy's ignored files, capped, so they can be copied first (user decision 2026-11-01)", async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.ignored = { files: ['.env', 'secrets/'], more: 7, listed: true };
+    await mount();
+    const dialog = await openDelete();
+    await flush();
+    expect(dialog.textContent).toContain(COPY_IGNORED_FILES_TEXT);
+    expect(screen.getAllByTestId('copy-ignored-file').map((item) => item.textContent)).toEqual(['.env', 'secrets/']);
+    expect(screen.getByTestId('copy-ignored-files-more').textContent).toBe('and 7 more');
+    expect(dialog.textContent).not.toMatch(/[\u2013\u2014]/);
+  });
+
+  it('a plain chat reads no ignored files; one the server could not list says so', async () => {
+    fake.ignored = { files: ['.env'], more: 0, listed: true };
+    await mount();
+    await openDelete();
+    await flush();
+    expect(fake.ignoredReads).toBe(0);
+    expect(screen.queryByTestId('copy-ignored-files')).toBeNull();
+    cleanup();
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.ignored = { files: [], more: 0, listed: false };
+    await mount();
+    await openDelete();
+    await flush();
+    expect(screen.getByTestId('copy-ignored-files-unread').textContent).toBe(COPY_IGNORED_FILES_UNREAD_TEXT);
+  });
+
+  it('a plain chat refused for uncommitted changes all the same names them and asks again (fallback)', async () => {
+    fake.deleteResults = [() => Promise.reject(new ChatApiError('changes', 409, 'uncommitted_changes')), () => Promise.resolve({ sessionId: SES, worktreeRemoved: true, branchKept: false })];
+    await mount();
+    const dialog = await openDelete();
+    fireEvent.click(screen.getByTestId('delete-chat-confirm-button'));
+    await flush();
+    expect(fake.deletes).toEqual([false]);
+    expect(dialog.textContent).toContain(DELETE_CHAT_UNCOMMITTED_TEXT);
+    expect(screen.getByTestId('delete-chat-confirm-button').textContent).toBe(DELETE_AND_DISCARD_LABEL);
+    fireEvent.click(screen.getByTestId('delete-chat-confirm-button'));
+    await flush();
+    expect(fake.deletes).toEqual([false, true]);
+    expect(fake.newChats).toEqual([WS]);
+  });
+
+  it('another refusal stays in the dialog', async () => {
+    fake.deleteResults = [() => Promise.reject(new ChatApiError('Only a chat you started can be deleted on its own.', 409, 'invalid_operation'))];
+    await mount();
+    await openDelete();
+    fireEvent.click(screen.getByTestId('delete-chat-confirm-button'));
+    await flush();
+    expect(screen.getByRole('alert').textContent).toContain('Only a chat you started');
+    expect(fake.newChats).toEqual([]);
+  });
+
+  it('is reachable but does nothing while the agent works, saying why', async () => {
+    fake.state = 'working';
+    fake.events = [created(), event('session.state_changed', { sessionId: SES, state: 'working', previous: 'idle' })];
+    await mount();
+    openMenu(await screen.findByTestId('session-menu'));
+    const item = await screen.findByTestId('session-menu-delete');
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByTestId('session-menu-delete-reason').textContent).toBe(deleteChatBusyText('Codex'));
+    fireEvent.click(item);
+    await flush();
+    expect(screen.queryByTestId('delete-chat-confirm')).toBeNull();
+  });
+
+  it('a remote chat says it is not deleted on its own', async () => {
+    fake.machineId = 'mach_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
+    await mount();
+    openMenu(await screen.findByTestId('session-menu'));
+    expect((await screen.findByTestId('session-menu-delete-reason')).textContent).toBe(DELETE_CHAT_REMOTE_TEXT);
+  });
+
+  it('a planning session says it is not deleted on its own; a build has no item', async () => {
+    fake.kind = 'planning';
+    await mount();
+    openMenu(await screen.findByTestId('session-menu'));
+    expect((await screen.findByTestId('session-menu-delete-reason')).textContent).toBe(DELETE_CHAT_NOT_DELETABLE_TEXT);
+  });
+});
+
+describe("a chat whose copy was put away (27.6)", () => {
+  it('says so with Restore, and the composer takes no message until then', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.putAway = true;
+    await mount();
+    const notice = await screen.findByTestId('worktree-put-away');
+    expect(notice.textContent).toContain(WORKTREE_PUT_AWAY_TEXT);
+    expect(screen.getByTestId('worktree-restore').textContent).toBe(WORKTREE_RESTORE_LABEL);
+    expect(screen.getByTestId('composer').textContent).toContain(WORKTREE_PUT_AWAY_COMPOSER_TEXT);
+
+    const fetchesBefore = fake.fetches;
+    fireEvent.click(screen.getByTestId('worktree-restore'));
+    await flush();
+    expect(fake.restores).toEqual([SES]);
+    // The session is read again once restored.
+    expect(fake.fetches).toBeGreaterThan(fetchesBefore);
+  });
+
+  it('says plainly when Restore put the copy on a new branch, once the notice goes', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.putAway = true;
+    const text = worktreeRestoredText('moved', 'ogden/chat/ses_1-restored');
+    fake.restoredText = text;
+    fake.restoreResult = async () => {
+      fake.putAway = false;
+    };
+    await mount();
+    fireEvent.click(await screen.findByTestId('worktree-restore'));
+    await flush();
+    expect(text).toBe('The branch had moved, so this copy is on a new branch: ogden/chat/ses_1-restored.');
+    expect((await screen.findByTestId('worktree-restored')).textContent).toBe(text);
+    expect(screen.queryByTestId('worktree-put-away')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/[\u2013\u2014]/);
+  });
+
+  it("shows why Restore couldn't finish, with Try again", async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.putAway = true;
+    fake.restoreResult = () => Promise.reject(new ChatApiError(RESTORE_PATH_TAKEN_TEXT, 409, 'restore_failed'));
+    await mount();
+    fireEvent.click(await screen.findByTestId('worktree-restore'));
+    await flush();
+    expect(screen.getByTestId('worktree-restore-error').textContent).toBe(RESTORE_PATH_TAKEN_TEXT);
+    expect(screen.getByTestId('worktree-restore').textContent).toBe(WORKTREE_RESTORE_RETRY_LABEL);
+    fake.restoreResult = () => Promise.resolve();
+    fireEvent.click(screen.getByTestId('worktree-restore'));
+    await flush();
+    expect(fake.restores).toEqual([SES, SES]);
+  });
+
+  it('a worktree chat that is not put away has no notice', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    await mount();
+    await screen.findByTestId('worktree-badge');
+    expect(screen.queryByTestId('worktree-put-away')).toBeNull();
+  });
+
+  it('a worktree chat deleted while open reads as gone, without a hooks error', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    const { push } = await mount();
+    await screen.findByTestId('worktree-badge');
+    fake.gone = true;
+    fake.driver = 'terminal';
+    await push(driverChanged('terminal'));
+    expect(await screen.findByTestId('session-not-found')).toBeTruthy();
+    expect(screen.queryByTestId('worktree-badge')).toBeNull();
+  });
+});
+
+describe('Hand off from the Location chip (27.4)', () => {
+  const openHandOff = async () => {
+    openMenu(await screen.findByTestId('location-chip'));
+    fireEvent.click(await screen.findByTestId('location-hand-off'));
+    return screen.findByTestId('hand-off-confirm');
+  };
+
+  it('confirms once, moves the chat and reads it again', async () => {
+    await mount();
+    const dialog = await openHandOff();
+    // To its own worktree nothing is removed: no ignored files read.
+    expect(fake.ignoredReads).toBe(0);
+    expect(dialog.textContent).toContain(HANDOFF_CONFIRM_TITLE);
+    expect(dialog.textContent).toContain(HANDOFF_TO_WORKTREE_DESCRIPTION);
+    const before = fake.fetches;
+    fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
+    await flush();
+    expect(fake.handOffs).toEqual(['worktree']);
+    expect(screen.queryByTestId('hand-off-confirm')).toBeNull();
+    expect(fake.fetches).toBeGreaterThan(before);
+  });
+
+  it('a worktree chat moves to this folder', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.ignored = { files: ['.env'], more: 0, listed: true };
+    await mount();
+    await openHandOff();
+    await flush();
+    // Its copy goes: the ignored .env is listed first (user decision 2026-11-01).
+    // Waited for, not flushed: the ignored files are a second read after the dialog opens (slow on a loaded CI runner).
+    expect((await screen.findAllByTestId('copy-ignored-file')).map((item) => item.textContent)).toEqual(['.env']);
+    fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
+    await flush();
+    expect(fake.handOffs).toEqual(['this_folder']);
+  });
+
+  it('a conflict or the folder still busy stays in the dialog, in plain words for where it moves', async () => {
+    fake.handOffResults = [
+      () => Promise.reject(new ChatApiError('changes', 409, 'handoff_conflict', { files: 2 })),
+      () => Promise.reject(new ChatApiError('mid-turn', 409, 'agent_mid_turn')),
+    ];
+    await mount();
+    await openHandOff();
+    fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
+    await flush();
+    // To its worktree: the clash is in the chat's branch, not this folder.
+    expect(screen.getByRole('alert').textContent).toContain(handOffWorktreeConflictText(2));
+    fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
+    await flush();
+    // Another chat in the folder works: never this chat's agent name.
+    expect(screen.getByRole('alert').textContent).toContain(HANDOFF_FOLDER_BUSY_TEXT);
+    expect(screen.getByRole('alert').textContent).not.toContain('Codex');
+    expect(screen.getByTestId('hand-off-confirm')).toBeTruthy();
+  });
+
+  it('moving to this folder, a conflict names this folder\'s own changes', async () => {
+    fake.worktreePath = '/data/cw/abcdefgh';
+    fake.handOffResults = [() => Promise.reject(new ChatApiError('changes', 409, 'handoff_conflict', { files: 1 }))];
+    await mount();
+    await openHandOff();
+    fireEvent.click(screen.getByTestId('hand-off-confirm-button'));
+    await flush();
+    expect(screen.getByRole('alert').textContent).toContain(handOffConflictText(1));
+  });
+
+  it('is reachable but does nothing while the agent works, saying why', async () => {
+    fake.state = 'working';
+    fake.events = [created(), event('session.state_changed', { sessionId: SES, state: 'working', previous: 'idle' })];
+    await mount();
+    openMenu(await screen.findByTestId('location-chip'));
+    const item = await screen.findByTestId('location-hand-off');
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByTestId('location-hand-off-line').textContent).toBe(handOffMidTurnText('Codex'));
+    fireEvent.click(item);
+    await flush();
+    expect(screen.queryByTestId('hand-off-confirm')).toBeNull();
+  });
+
+  it('a planning session has no hand-off item', async () => {
+    fake.kind = 'planning';
+    await mount();
+    openMenu(await screen.findByTestId('location-chip'));
+    await screen.findByTestId('location-menu');
+    expect(screen.queryByTestId('location-hand-off')).toBeNull();
+  });
+
+  it('the transcript shows a divider where the chat moved, and the page reads the chat again', async () => {
+    const { push } = await mount();
+    const before = fake.fetches;
+    await push(
+      event('session.location_changed', { sessionId: SES, location: 'worktree', previous: 'this_folder', branch: 'ogden/chat/ses_1', files: 1, resumes: true }),
+      event('session.location_changed', { sessionId: SES, location: 'this_folder', previous: 'worktree', branch: null, files: 1, resumes: true }),
+    );
+    const markers = screen.getAllByTestId('location-changed-marker');
+    expect(markers.map((marker) => marker.textContent)).toEqual(['Moved to its own worktree: ogden/chat/ses_1', 'Moved to this folder']);
+    expect(markers[0]!.getAttribute('role')).toBe('separator');
+    expect(fake.fetches).toBeGreaterThan(before);
   });
 });

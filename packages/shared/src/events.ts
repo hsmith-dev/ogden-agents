@@ -165,6 +165,26 @@ import {
   WorkspaceProjectCommandsChangedEvent,
   WorkspaceProjectCommandsChangedInput,
 } from './events-workbench.js';
+import {
+  SessionLocationChangedEvent,
+  SessionLocationChangedInput,
+  SessionWorktreePutAwayEvent,
+  SessionWorktreePutAwayInput,
+  SessionWorktreeRestoredEvent,
+  SessionWorktreeRestoredInput,
+  SessionPortAssignedEvent,
+  SessionPortAssignedInput,
+  SessionPortReleasedEvent,
+  SessionPortReleasedInput,
+  SettingsWorktreeRetentionChangedEvent,
+  SettingsWorktreeRetentionChangedInput,
+  WorkspaceTrialStartedEvent,
+  WorkspaceTrialStartedInput,
+  WorkspaceTrialKeptEvent,
+  WorkspaceTrialKeptInput,
+  WorkspaceChatDeletedEvent,
+  WorkspaceChatDeletedInput,
+} from './events-where-work-runs.js';
 import { ApiErrorCode } from './errors.js';
 import { PermissionRuleId, RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
@@ -251,6 +271,27 @@ export { DevToolsCatalogChangedEvent, DevToolsCatalogChangeReason, WorkspaceDevT
 
 // The Workbench's events (epic 8 entry 2): ids, states and counts only.
 export { SessionTurnChangesRecordedEvent, SessionWorktreeCommittedEvent, WorkspaceProjectCommandStartedEvent, WorkspaceProjectCommandFinishedEvent, WorkspaceProjectCommandsChangedEvent } from './events-workbench.js';
+
+// Where work runs (epic 27 entry 2): ids, states, branches, ports and counts only.
+export {
+  SessionLocationChangedEvent,
+  SessionWorktreePutAwayEvent,
+  SessionWorktreeRestoredEvent,
+  SessionPortAssignedEvent,
+  SessionPortReleasedEvent,
+  SettingsWorktreeRetentionChangedEvent,
+  WorkspaceTrialStartedEvent,
+  WorkspaceTrialKeptEvent,
+  WorkspaceChatDeletedEvent,
+  PutAwayCause,
+  PUT_AWAY_CAUSES,
+  TcpPort,
+  TRIAL_AGENTS_MIN,
+  TRIAL_AGENTS_MAX,
+  WORKTREE_RETENTION_MIN,
+  WORKTREE_RETENTION_MAX,
+  WorktreeRetentionKeep,
+} from './events-where-work-runs.js';
 
 // ---------------------------------------------------------------------------
 // Event types. Each is defined once without the core-assigned fields (what a
@@ -449,6 +490,16 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SessionWorktreeCommittedEvent,
   WorkspaceProjectCommandStartedEvent,
   WorkspaceProjectCommandFinishedEvent,
+  // Where work runs (epic 27 entry 2): ids, states, branches, ports and counts only.
+  SessionLocationChangedEvent,
+  SessionWorktreePutAwayEvent,
+  SessionWorktreeRestoredEvent,
+  SessionPortAssignedEvent,
+  SessionPortReleasedEvent,
+  SettingsWorktreeRetentionChangedEvent,
+  WorkspaceTrialStartedEvent,
+  WorkspaceTrialKeptEvent,
+  WorkspaceChatDeletedEvent,
   WorkspaceProjectCommandsChangedEvent,
   SettingsDeveloperModeChangedEvent,
   SettingsAgentDefaultModelChangedEvent,
@@ -530,6 +581,15 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SessionWorktreeCommittedInput,
   WorkspaceProjectCommandStartedInput,
   WorkspaceProjectCommandFinishedInput,
+  SessionLocationChangedInput,
+  SessionWorktreePutAwayInput,
+  SessionWorktreeRestoredInput,
+  SessionPortAssignedInput,
+  SessionPortReleasedInput,
+  SettingsWorktreeRetentionChangedInput,
+  WorkspaceTrialStartedInput,
+  WorkspaceTrialKeptInput,
+  WorkspaceChatDeletedInput,
   WorkspaceProjectCommandsChangedInput,
   SettingsDeveloperModeChangedInput,
   SettingsAgentDefaultModelChangedInput,

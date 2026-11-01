@@ -9,14 +9,16 @@
  * Against `startServer(dataDir, 0, { remoteHost: hosts, secrets })` (19.3's
  * own pattern, `createMemoryRemoteHostPort()`): add a machine and confirm
  * its host key (over REST -- the add/confirm UI itself is
- * `remote-machines.spec.ts`'s own proof), pick it in the chat composer
- * (`MachinePicker`, beside the agent picker) and send a message, then pick
+ * `remote-machines.spec.ts`'s own proof), pick it in the draft's Location
+ * chip (27.5) and send a message (its header then says "on <machine>"),
+ * open the draft from the Chats list's machine picker, then pick
  * it in the Build dialog for an attended build and approve. The real
  * fake-agent fixture (`fake-acp-agent.mjs`) runs both times through the
  * fake remote host's own real local `sh -c` -- never a scripted stand-in --
  * so this is the first test in the whole epic where an agent's process
  * genuinely runs somewhere else and the result is pulled back for real.
  */
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { FAKE_BMAD_FILES, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, fixtureGit } from '../fixtures/fake-bmad-repo.ts';
@@ -24,7 +26,7 @@ import { fixedSandbox } from '../fixtures/fixed-sandbox.ts';
 import { createPlanFileTicketStore } from '../fixtures/plan-file-ticket-store.ts';
 import { API_ROUTES, serverModule } from '../support.js';
 import { withChatServer } from './chat-server.js';
-import { storedToken } from './tab.js';
+import { expectNoHorizontalOverflow, storedToken } from './tab.js';
 
 const TICKETS = [{ ref: '1.1', title: 'Build the thing', plan: FAKE_BUILD_PLAN }];
 const FILES = { ...FAKE_BMAD_FILES, '_bmad/config.toml': '[core]\noutput_folder = "{project-root}/_bmad-output"\n', ...FAKE_BUILD_REPO_FILES };
@@ -70,22 +72,19 @@ test('a confirmed remote machine runs a chat and an attended build, pulled back 
 
       // --- Chat (CAP-24, epic 19 story 19.7: a plain chat targeting a remote machine for the first time) ---
 
-      // A chat already exists so the header's pickers show (the empty project's own composer, mirrored by every
-      // other chat spec, has no machine choice: the same place AgentPicker itself is never offered there either).
-      await page.goto(`${origin}/w/${wsId}`);
-      const firstComposer = page.getByRole('textbox', { name: 'Message Claude Code' });
-      await firstComposer.fill('hello local');
-      await firstComposer.press('Enter');
-      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_`));
-
-      await page.goto(`${origin}/w/${wsId}`);
-      await page.getByTestId('machine-picker').click();
-      await page.locator(`[data-testid="machine-option"][data-machine="${machineId}"]`).click();
-      await expect(page.getByTestId('machine-picker')).toContainText('Build bench');
-      // New chat opens the draft with the machine picked (epic 26); its first message starts the chat there.
-      await page.getByTestId('new-chat').click();
-      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/new\\?machine=${machineId}$`));
-      await expect(page.getByTestId('machine-picker')).toContainText('Build bench');
+      // The draft's Location chip (27.5) lists the confirmed machine with its live state, probed by the server
+      // when the menu opens; picking it and sending starts the chat there.
+      await page.goto(`${origin}/w/${wsId}/new`);
+      await expect(page.getByTestId('machine-picker')).toHaveCount(0);
+      await page.getByTestId('location-chip').click();
+      const machineItem = page.locator(`[data-testid="location-machine"][data-machine="${machineId}"]`);
+      await expect(machineItem).toContainText('Build bench, connected');
+      await expect(page.getByTestId('location-add-machine')).toBeVisible();
+      const menuAxe = await new AxeBuilder({ page }).include('[data-testid="location-menu"]').analyze();
+      expect(menuAxe.violations.map((v) => `${v.id}: ${v.nodes.map((node) => node.target.join(' ')).join(', ')}`)).toEqual([]);
+      await machineItem.click();
+      await expect(page.getByTestId('location-chip')).toHaveAttribute('data-machine', machineId);
+      await expect(page.getByTestId('location-chip')).toContainText('Build bench');
 
       const remoteComposer = page.getByRole('textbox', { name: 'Message Claude Code' });
       await remoteComposer.fill('session-start');
@@ -96,6 +95,22 @@ test('a confirmed remote machine runs a chat and an attended build, pulled back 
       // through the fake remote host's real local `sh -c`, not a scripted stand-in.
       await expect(page.getByTestId('message-agent').last()).toContainText('"cwd":"."');
       await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+      // Its header and its chip say where it runs.
+      await expect(page.getByTestId('machine-badge')).toHaveText('on Build bench');
+      await expect(page.getByTestId('setup-row').getByTestId('location-chip')).toHaveAttribute('data-machine', machineId);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expectNoHorizontalOverflow(page);
+      await page.setViewportSize({ width: 1280, height: 800 });
+
+      // The Chats list's own machine picker (19.7) still opens the draft with the machine picked (`?machine=`).
+      await page.goto(`${origin}/w/${wsId}`);
+      await page.getByTestId('machine-picker').click();
+      await page.locator(`[data-testid="machine-option"][data-machine="${machineId}"]`).click();
+      await expect(page.getByTestId('machine-picker')).toContainText('Build bench');
+      await page.getByTestId('new-chat').click();
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/new\\?machine=${machineId}$`));
+      await expect(page.getByTestId('location-chip')).toHaveAttribute('data-machine', machineId);
+      await expect(page.getByTestId('machine-picker')).toHaveCount(0);
 
       // --- Build (CAP-24, epic 19 story 19.7: the real route and dialog reach 19.6's own attended-remote path) ---
 

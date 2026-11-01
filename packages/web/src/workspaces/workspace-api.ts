@@ -52,9 +52,17 @@ export async function fetchSessions(wsId: string, auth: Auth = tabAuth): Promise
   return SessionsResponse.parse(json).sessions;
 }
 
-/** `DELETE /api/v1/workspaces/:wsId/history`: refused (409) while a chat is working or waiting. */
-export async function deleteHistory(wsId: string, auth: Auth = tabAuth): Promise<HistoryDeletedResponse> {
-  const json = await call(auth, apiPath(API_ROUTES.workspaceHistory, { wsId }), { method: 'DELETE' }, "Ogden Agents couldn't delete the history");
+/**
+ * `DELETE /api/v1/workspaces/:wsId/history`: refused (409) while a chat is working or waiting, and (27.3) with
+ * `uncommitted_changes` while a chat's copy has uncommitted changes, unless `discardUncommitted` (after a confirmation naming that).
+ */
+export async function deleteHistory(wsId: string, discardUncommitted = false, auth: Auth = tabAuth): Promise<HistoryDeletedResponse> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceHistory, { wsId }),
+    { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ discardUncommitted }) },
+    "Ogden Agents couldn't delete the history",
+  );
   return HistoryDeletedResponse.parse(json);
 }
 
@@ -73,12 +81,13 @@ export async function createFolder(parent: string, name: string, auth: Auth = ta
 
 /**
  * Invalidates `['workspaces']` on `workspace.created`, and `['sessions', wsId]`
- * on `session.created` and `workspace.history_deleted`, for each new event.
+ * on `session.created`, `workspace.history_deleted` and `workspace.chat_deleted` (27.3), for each new event.
  */
 function useListInvalidation(): void {
   useEventInvalidation((event) => {
     if (event.type === 'workspace.created') return [['workspaces']];
-    if ((event.type === 'session.created' || event.type === 'workspace.history_deleted') && event.workspaceId !== null) return [['sessions', event.workspaceId]];
+    // A hand-off (27.4) changes a chat's folder and branch: the list is read again, so its row and the Workbench follow.
+    if ((event.type === 'session.created' || event.type === 'workspace.history_deleted' || event.type === 'workspace.chat_deleted' || event.type === 'session.location_changed') && event.workspaceId !== null) return [['sessions', event.workspaceId]];
     return [];
   });
 }
@@ -182,8 +191,15 @@ export function useAllSessionsStatus(): AllSessions {
         // Continued with another agent (handoff): the row names its new agent.
         const session = byId.get(event.payload.sessionId);
         if (session !== undefined) byId.set(session.id, { ...session, agentId: event.payload.agentId });
+      } else if (event.type === 'session.location_changed') {
+        // Moved to this folder (27.4): no branch and no copy before the refetch lands; a move to a worktree waits for it (the path is never evented).
+        const session = byId.get(event.payload.sessionId);
+        if (session !== undefined && event.payload.location === 'this_folder') byId.set(session.id, { ...session, worktreePath: null, branch: null });
       } else if (event.type === 'workspace.history_deleted') {
         for (const [id, session] of byId) if (session.workspaceId === event.workspaceId) byId.delete(id);
+      } else if (event.type === 'workspace.chat_deleted') {
+        // Delete chat (27.3): the row goes before the refetch lands.
+        byId.delete(event.payload.sessionId as Session['id']);
       }
     }
     return [...byId.values()];

@@ -5,7 +5,8 @@
  * `NO_COLOR` and `FORCE_COLOR`, with no planted key and nothing else of
  * `process.env`; a shell-needing argv never reaches spawn; a missing
  * program says so in plain words; the output keeps its last bytes; a run
- * past its time limit is stopped with `error`.
+ * past its time limit is stopped with `error`; a worktree setup's `PORT`
+ * (27.7) is the only name added.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -120,6 +121,24 @@ describe('project-commands-node', () => {
     } finally {
       delete process.env.OGDEN_TEST_PROCESS_ONLY;
     }
+  });
+
+  it("adds a worktree copy's PORT (27.7) and refuses any other name or a value that is not a worktree port", async () => {
+    const runner = createProjectCommandsNode({ source });
+    const cwd = project({ 'env.js': 'console.log(JSON.stringify(process.env));' });
+    const started = runner.start({ cwd, argv: ['node', 'env.js'], env: { PORT: '41007' } });
+    expect(await started.done).toEqual({ exitCode: 0, stopped: false });
+    const env = JSON.parse(started.output().text) as Record<string, string>;
+    expect(env.PORT).toBe('41007');
+    expect(env).toMatchObject({ CI: '1', PATH: dirname(process.execPath) });
+    expect(env.OGDEN_PLANTED_KEY).toBeUndefined();
+    const spawned: string[] = [];
+    const watched = createProjectCommandsNode({ source, onSpawn: (file) => spawned.push(file) });
+    for (const bad of [{ PORT: '80' }, { PORT: '41000x' }, { PORT: '041000' }, { PORT: 41_000 }, { ANTHROPIC_API_KEY: 'sk' }, { PORT: '41000', NODE_OPTIONS: '--require x' }]) {
+      const refused = watched.start({ cwd, argv: ['node', 'env.js'], env: bad as never });
+      expect(await refused.done, JSON.stringify(bad)).toMatchObject({ exitCode: null, stopped: false, error: expect.stringContaining('PORT') });
+    }
+    expect(spawned).toEqual([]);
   });
 
   it('never spawns a shell-needing argv, and says when a program is missing', async () => {

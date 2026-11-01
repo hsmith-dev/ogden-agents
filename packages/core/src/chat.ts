@@ -93,6 +93,10 @@ import { createTerminal } from './chat/terminal.js';
 import { createTurns } from './chat/turns.js';
 import type { Chat, ChatOptions } from './chat/types.js';
 import { createWorkspaces } from './chat/workspaces.js';
+import { createChatDeletion } from './chat/delete-chat.js';
+import { createPutAway } from './chat/put-away.js';
+import { createChatLocation } from './chat/location.js';
+import { createCopyIgnoredFiles } from './chat/ignored-files.js';
 
 export * from './chat/constants.js';
 export type { Chat, ChatOptions, TerminalSize, TerminalViewer } from './chat/types.js';
@@ -134,7 +138,10 @@ export function createChat(options: ChatOptions): Chat {
   const sendNow = createSendNow(ctx, { sendMessage: turns.sendMessage, stop: turns.stop, finishReply, flushSession });
   const terminal = createTerminal(ctx, { releaseAgent, storedAgentSessionId });
   const { stopTerminal, closeTerminals } = terminal;
-  const workspaces = createWorkspaces(ctx, { drop, stopTerminal, initialModel: models.initialModel });
+  const workspaces = createWorkspaces(ctx, { initialModel: models.initialModel });
+  const deletion = createChatDeletion(ctx, { drop, stopTerminal });
+  const putAway = createPutAway(ctx, { drop, stopTerminal });
+  const location = createChatLocation(ctx, { releaseAgent, storedAgentSessionId });
   const handoff = createHandoff(ctx, { releaseAgent, storedAgentSessionId, sendMessage: turns.sendMessage, initialModel: models.initialModel });
   // A stop that couldn't import the terminal's turns (a crash): they come in now (story 3.4).
   terminal.importAfterRestart();
@@ -154,7 +161,12 @@ export function createChat(options: ChatOptions): Chat {
     listWorkspaces: workspaces.listWorkspaces,
     getWorkspace: workspaces.getWorkspace,
     listSessions: (workspaceId) => workspaces.listSessions(workspaceId).map(withAgentId),
-    deleteHistory: workspaces.deleteHistory,
+    deleteHistory: deletion.deleteHistory,
+    deleteChat: deletion.deleteChat,
+    copyHasUncommitted: deletion.copyHasUncommitted,
+    chatLocation: location.chatLocation,
+    moveChat: location.moveChat,
+    copyIgnoredFiles: createCopyIgnoredFiles(ctx).copyIgnoredFiles,
     createChatSession: async (workspaceId, options) => withAgentId(await workspaces.createChatSession(workspaceId, options)),
     chatAgents: workspaces.chatAgents,
     getSession: (workspaceId, sessionId) => withAgentId(workspaces.getSession(workspaceId, sessionId)),
@@ -173,6 +185,10 @@ export function createChat(options: ChatOptions): Chat {
     modelOptions: models.modelOptions,
     handoffPreview: handoff.handoffPreview,
     handOff: handoff.handOff,
+    putAwayWorktree: putAway.putAwayWorktree,
+    restoreWorktree: putAway.restoreWorktree,
+    worktreeIdle: putAway.worktreeIdle,
+    worktreeOpsSettled: putAway.worktreeOpsSettled,
 
     async releaseAgent(workspaceId, sessionId) {
       ctx.getSession(workspaceId, sessionId);

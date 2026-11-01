@@ -7,7 +7,7 @@
  * `core.longpaths=true`, `core.hooksPath=<an empty folder of Ogden's own>`,
  * `core.fsmonitor=false` and `core.autocrlf=false` (see `index.ts`).
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdirSync, readdirSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { VcsError } from '@ogden-agents/core';
@@ -57,6 +57,11 @@ export interface GitRunner {
   run(cwd: string, args: readonly string[], maxBuffer?: number, extraEnv?: Readonly<Record<string, string>>, input?: string): Promise<GitResult>;
   /** Runs git and requires success. `details` never hold git's output (it can name the user's files). */
   must(cwd: string, args: readonly string[], step: string, maxBuffer?: number, extraEnv?: Readonly<Record<string, string>>, input?: string): Promise<string>;
+  /**
+   * Runs git with `input` on its stdin and keeps its stdout as bytes (at most `maxBytes`); `undefined` when git
+   * can't run, takes over 10 minutes or the output is over the bound (the child is stopped).
+   */
+  runBinary(cwd: string, args: readonly string[], input: string | Buffer, extraEnv: Readonly<Record<string, string>>, maxBytes: number): Promise<{ code: number; stdout: Buffer } | undefined>;
   /** The user's identity where git has one, else Ogden Agents' for the part missing. */
   identityFlags(repoPath: string): Promise<string[]>;
   /** Checks a worktree's own git files still name the repo and `branch`; Ogden's folders for it. */
@@ -125,6 +130,44 @@ export function createGitRunner(options: GitRunnerOptions): GitRunner {
     return result.stdout;
   };
 
+  const runBinary = (cwd: string, args: readonly string[], input: string | Buffer, extraEnv: Readonly<Record<string, string>>, maxBytes: number): Promise<{ code: number; stdout: Buffer } | undefined> =>
+    new Promise((resolvePromise) => {
+      let base: string[];
+      try {
+        base = baseArgs();
+      } catch {
+        resolvePromise(undefined);
+        return;
+      }
+      const child = spawn(git, [...base, ...args], { cwd, env: env(extraEnv), stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+      const chunks: Buffer[] = [];
+      let size = 0;
+      let settled = false;
+      const finish = (answer: { code: number; stdout: Buffer } | undefined) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolvePromise(answer);
+      };
+      const timer = setTimeout(() => {
+        child.kill();
+        finish(undefined);
+      }, Math.max(timeout, 600_000));
+      child.stdout.on('data', (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > maxBytes) {
+          child.kill();
+          finish(undefined);
+          return;
+        }
+        chunks.push(chunk);
+      });
+      child.on('error', () => finish(undefined));
+      child.on('close', (code) => finish({ code: code ?? 1, stdout: Buffer.concat(chunks) }));
+      child.stdin.on('error', () => undefined);
+      child.stdin.end(input);
+    });
+
   /**
    * The identity a merge, its commit or a rebase is made with: the user's own
    * where git has one (repo or global config), else Ogden Agents' for the part
@@ -172,5 +215,5 @@ export function createGitRunner(options: GitRunnerOptions): GitRunner {
     return { env: { GIT_DIR: gitDir, GIT_COMMON_DIR: common, GIT_WORK_TREE: worktreePath }, common };
   };
 
-  return { git, timeout, hooksDir, baseArgs, env, run, must, identityFlags, pinnedWorktree };
+  return { git, timeout, hooksDir, baseArgs, env, run, must, runBinary, identityFlags, pinnedWorktree };
 }

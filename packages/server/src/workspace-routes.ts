@@ -15,6 +15,7 @@ import {
   FeatureUnavailableError,
   OrchestrationUnavailableError,
   NotFoundError,
+  UncommittedChangesError,
   UnknownAgentError,
   ValidationError,
   WorkspaceBusyError,
@@ -28,6 +29,7 @@ import {
   API_ROUTES,
   CreateFolderRequest,
   CreateFolderResponse,
+  DeleteChatRequest,
   FEATURE_OFF_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
   ORCHESTRATION_UNAVAILABLE_MESSAGE,
@@ -91,6 +93,7 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
     // Skip all as the default (default permission mode): the server is the gate; nothing was stored.
     if (error instanceof DeveloperModeRequiredError) return apiError(c, 403, 'developer_mode_required', error.message);
     if (error instanceof ConfirmationRequiredError) return apiError(c, 400, 'confirmation_required', error.message);
+    if (error instanceof UncommittedChangesError) return apiError(c, 409, 'uncommitted_changes', error.message);
     if (error instanceof WorkspaceBusyError) {
       return apiError(c, 409, 'sessions_busy', 'A chat in this project is still working or waiting for you. Let it finish, then delete the history.');
     }
@@ -108,11 +111,14 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
     }
   });
 
-  app.delete(API_ROUTES.workspaceHistory, (c) => {
+  app.delete(API_ROUTES.workspaceHistory, limit, async (c) => {
     const scope = ids(c);
     if (chat === undefined || scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    // Its chats' copies with uncommitted changes go only when the body says so (27.3).
+    const body = await readBody(c, DeleteChatRequest, { optional: true });
+    if (!body.ok) return body.response;
     try {
-      const deleted = chat.deleteHistory(scope.workspaceId);
+      const deleted = await chat.deleteHistory(scope.workspaceId, { discardUncommitted: body.value.discardUncommitted });
       log.info('workspace history deleted', { workspaceId: scope.workspaceId, ...deleted });
       return c.json(HistoryDeletedResponse.parse(deleted));
     } catch (error) {

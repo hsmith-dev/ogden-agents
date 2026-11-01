@@ -26,7 +26,8 @@
  * A `chat_worktree` root (epic 8 entry 2: a worktree chat's own copy, which
  * lives in the data folder) lifts the data-folder fence for that call alone;
  * every other check holds, and nothing outside that root is ever shown. Such
- * a root must lie strictly inside the data folder, else every call is `protected`.
+ * a root must lie strictly inside the chat worktrees' folder
+ * (`chatWorktreesRoot`, `<data>/cw`; 27.9), else every call is `protected`.
  * `locate` checks a file exactly as `read` does and answers its real path,
  * for the editor launcher.
  *
@@ -84,6 +85,13 @@ export interface WorkspaceFilesNodeOptions {
   home: string;
   /** Ogden's data folder: never listed into or read, even inside a project. */
   dataDir: string;
+  /**
+   * The folder every chat's worktree lives in (`<data>/cw`, which the server
+   * passes; 27.9): a `chat_worktree` root must lie strictly inside it, so
+   * no other part of the data folder is ever shown as one. Absent: the data
+   * folder itself (tests).
+   */
+  chatWorktreesRoot?: string;
   /** Tests only: runs after a file's path is checked and before it is opened (to swap a link in). */
   afterCheck?: (realPath: string) => Promise<void> | void;
   /** Tests only: a search's limits (time in ms, files looked at) in place of the shared caps. */
@@ -155,13 +163,29 @@ const remoteTarget = (target: string): boolean => target.startsWith('\\\\') || t
 /** Moved to `@ogden-agents/shared` (8.6); kept exported here for this adapter's callers. */
 export { isEnvironmentFileName, maskEnvironmentText };
 
-export function createWorkspaceFilesNode({ home, dataDir, afterCheck, searchLimits }: WorkspaceFilesNodeOptions): WorkspaceFilesPort {
+export function createWorkspaceFilesNode({ home, dataDir, chatWorktreesRoot = dataDir, afterCheck, searchLimits }: WorkspaceFilesNodeOptions): WorkspaceFilesPort {
   /**
    * The fenced folders, worked out at each call (a credential folder may
    * appear later): the home credential folders, and the data folder unless
    * the root is a chat's worktree (which lives there).
    */
   const fences = (kind: WorkspaceRootKind): string[] => [...credentialReadFences(home, realOrUndefined), ...(kind === 'chat_worktree' ? [] : [realOrUndefined(dataDir) ?? resolve(dataDir)])];
+
+  /**
+   * Whether `root` (a real path) may be a `chat_worktree` root: strictly
+   * inside the real data folder, and strictly inside the chat worktrees'
+   * folder, which must itself be a real folder at its own place (a link
+   * there could lead anywhere, an ancestor of the data folder too).
+   */
+  const chatRootAllowed = (root: string): boolean => {
+    const data = realOrUndefined(dataDir) ?? resolve(dataDir);
+    if (root === data || !within(root, data)) return false;
+    const folder = realOrUndefined(chatWorktreesRoot);
+    if (folder === undefined) return false;
+    // Its real path is where it sits below the real data folder (`<real data>/cw`): no link on the way from the data folder to it.
+    if (folder !== join(data, relative(resolve(dataDir), resolve(chatWorktreesRoot)))) return false;
+    return root !== folder && within(root, folder);
+  };
 
   /** Whether `real` (a real path) may be shown: inside the root, no refused segment below it, in no fence. */
   const allowed = (root: string, real: string, fenced: readonly string[]): boolean =>
@@ -173,11 +197,8 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck, searchLimi
     if (isRefusedWorkspacePath(segments)) return PROTECTED;
     const root = await realRepoRoot(rootPath);
     if (root === undefined) return NOT_FOUND;
-    // A chat worktree lifts the data-folder fence only because it lives strictly inside that folder: never the folder itself or above it.
-    if (kind === 'chat_worktree') {
-      const data = realOrUndefined(dataDir) ?? resolve(dataDir);
-      if (root === data || !within(root, data)) return PROTECTED;
-    }
+    // A chat worktree lifts the data-folder fence only because it lives strictly inside the chat worktrees' folder: never that folder itself or above it.
+    if (kind === 'chat_worktree' && !chatRootAllowed(root)) return PROTECTED;
     let real: string;
     try {
       // Never `realpath`: a link on the way to another computer is refused, not followed (on Windows that would connect to it).
@@ -427,10 +448,7 @@ export function createWorkspaceFilesNode({ home, dataDir, afterCheck, searchLimi
   const runSearch = async (rootPath: string, { q, mode, matchCase, regex, signal }: WorkspaceSearchPortQuery, kind: WorkspaceRootKind): Promise<WorkspaceSearchPortResult> => {
     const root = await realRepoRoot(rootPath);
     if (root === undefined) return { files: [], truncated: false };
-    if (kind === 'chat_worktree') {
-      const data = realOrUndefined(dataDir) ?? resolve(dataDir);
-      if (root === data || !within(root, data)) return { files: [], truncated: false };
-    }
+    if (kind === 'chat_worktree' && !chatRootAllowed(root)) return { files: [], truncated: false };
     const fenced = fences(kind);
     const flags = matchCase ? 'u' : 'iu';
     // A literal never backtracks: plain characters only, matched here. A user's pattern only ever runs in the worker.

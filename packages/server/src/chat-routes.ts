@@ -12,6 +12,7 @@
  * `GET` session. Handoff adds the preview and the switch to another agent.
  */
 import {
+  AgentMidTurnError,
   AnswerFirstError,
   BUILD_SESSION_READ_ONLY_MESSAGE,
   AgentRemovedError, BuildSessionReadOnlyError,
@@ -25,6 +26,7 @@ import {
   FeatureUnavailableError,
   HandoffNotPreviewedError,
   InvalidOperationError,
+  LocalOnlyAgentError,
   MessageNotQueuedError,
   NotFoundError,
   QueueFullError,
@@ -33,8 +35,10 @@ import {
   SessionNotIdleError,
   TerminalUnavailableError,
   AgentNotReadyError,
+  UncommittedChangesError,
   UnknownAgentError,
   ValidationError,
+  WorktreePutAwayError,
   type AddProject,
   type AgentModels,
   type Chat,
@@ -42,6 +46,8 @@ import {
 import {
   API_ROUTES,
   ChatAgentsResponse,
+  ChatDeletedResponse,
+  DeleteChatRequest,
   HandoffBriefPreviewRequest,
   HandoffPreviewQuery,
   HandoffPreviewResponse,
@@ -109,6 +115,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     maxSize: MAX_BODY_BYTES,
     onError: (c) => apiError(c, 413, 'invalid_request', 'That message is too long.'),
   });
+  // Delete chat's body is one flag (27.3).
+  const deleteLimit = bodyLimit({ maxSize: MAX_RENAME_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
 
   /** Whether the session is an unattended build's (story 5.2): it runs on its own, so nobody sends it messages, a mode or a driver. */
   const isBuildSession = (workspaceId: WorkspaceId, sessionId: SessionId): boolean => chat.getSession(workspaceId, sessionId).kind === 'build';
@@ -119,6 +127,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', NOT_FOUND);
     if (error instanceof BuildSessionReadOnlyError) return readOnlyBuild(c);
     if (error instanceof AgentRemovedError) return apiError(c, 409, 'agent_removed', error.message);
+    // The chat's copy is put away (27.6): nothing was sent; Restore brings it back.
+    if (error instanceof WorktreePutAwayError) return apiError(c, 409, 'worktree_put_away', error.message);
     if (error instanceof QueueFullError) {
       return apiError(c, 409, 'session_busy', 'Too many messages are waiting. Send this one when the agent has caught up.');
     }
@@ -144,6 +154,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (error instanceof UnknownAgentError) return apiError(c, 400, 'agent_unknown', error.message);
     // The agent can't start a chat now (6.3): its plain reason, and what fixes it.
     if (error instanceof AgentNotReadyError) return apiError(c, 409, error.code, error.message, { agentId: error.agentId, action: error.action });
+    // A remote chat for an agent tied to this computer (27.5), created or handed over: the chat's place refuses it; nothing connected.
+    if (error instanceof LocalOnlyAgentError) return apiError(c, 409, 'invalid_operation', error.message);
     if (error instanceof InvalidOperationError || error instanceof ValidationError) {
       return apiError(c, 400, 'invalid_request', error.message);
     }
@@ -173,16 +185,20 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
   app.post(API_ROUTES.workspaceSessions, limit, async (c) => {
     const scope = ids(c);
     if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
-    const body = await readBody(c, CreateSessionRequest, { optional: true });
+    // A worktree on a remote machine (27.1, 27.5) is fields that don't go together: `validation_failed`.
+    const body = await readBody(c, CreateSessionRequest, { optional: true, issueCode: (path) => (path[0] === 'location' ? 'validation_failed' : undefined) });
     if (!body.ok) return body.response;
     try {
       // The agent picked (epic 6), or the default one; an id this install doesn't have is refused by core.
       // Its model (story 11): the one given (an agent handoff's), else the project's or install's default for the agent.
       // Its remote target (CAP-24, epic 19 story 19.7): the machine picked, or `null`/omitted for a local chat.
-      const session = await chat.createChatSession(scope.workspaceId, { agentId: body.value?.agentId, model: body.value?.model, machineId: body.value?.machineId });
+      // Where it works (27.1): This folder (omitted), or its own worktree.
+      const session = await chat.createChatSession(scope.workspaceId, { agentId: body.value?.agentId, model: body.value?.model, machineId: body.value?.machineId, location: body.value?.location });
       log.info('chat session created', { workspaceId: scope.workspaceId, sessionId: session.id, agentId: session.agentId });
       return c.json(SessionResponse.parse({ session }), 201);
     } catch (error) {
+      // A worktree that can't be made here (not a repo, not its top folder, git failed): the project's state refuses it.
+      if (error instanceof InvalidOperationError && body.value?.location === 'worktree') return apiError(c, 409, 'invalid_operation', error.message);
       return refusal(c, error);
     }
   });
@@ -211,6 +227,25 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
       terminal = { available: false, code: 'pty_unavailable', reason: TERMINAL_CHECK_FAILED };
     }
     return c.json(SessionResponse.parse({ session, terminal, permissionModes, models }));
+  });
+
+  // Delete chat (27.3): the chat, its events and, for a worktree chat, its copy (the branch kept when it has commits).
+  app.delete(API_ROUTES.workspaceSession, deleteLimit, async (c) => {
+    const scope = ids(c);
+    if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    const body = await readBody(c, DeleteChatRequest, { optional: true });
+    if (!body.ok) return body.response;
+    try {
+      const deleted = await chat.deleteChat(scope.workspaceId, scope.sessionId, { discardUncommitted: body.value.discardUncommitted });
+      log.info('chat deleted', { workspaceId: scope.workspaceId, ...deleted });
+      return c.json(ChatDeletedResponse.parse(deleted));
+    } catch (error) {
+      // The chat's state refuses it: nothing was deleted.
+      if (error instanceof UncommittedChangesError) return apiError(c, 409, 'uncommitted_changes', error.message);
+      if (error instanceof AgentMidTurnError) return apiError(c, 409, 'agent_mid_turn', error.message);
+      if (error instanceof InvalidOperationError) return apiError(c, 409, 'invalid_operation', error.message);
+      return refusal(c, error);
+    }
   });
 
   // The chat's model (story 11): core decides (a model the agent lists, who drives); it applies to the next message.

@@ -18,6 +18,11 @@ import {
   RemoteMachineId as RemoteMachineIdSchema,
   SessionId as SessionIdSchema,
   chatWorktreeBranch,
+  HANDOFF_CHAT_ONLY_TEXT,
+  HANDOFF_MID_TURN_MESSAGE,
+  HANDOFF_REMOTE_TEXT,
+  isChatWorktreeBranchOf,
+  localPlaceOf,
   SessionDriver as SessionDriverSchema,
   SessionKind as SessionKindSchema,
   SessionState as SessionStateSchema,
@@ -37,6 +42,10 @@ import {
   type CoreEvent,
   type CoreEventType,
   type SessionAgentChangedEvent,
+  type SessionLocationChangedEvent,
+  type WorkspaceChatDeletedEvent,
+  DELETE_CHAT_MID_TURN_MESSAGE,
+  DELETE_CHAT_NOT_DELETABLE_TEXT,
   type DriverChangeCause,
   type MessageRole,
   type ModelChangeCause,
@@ -58,10 +67,10 @@ import {
   type Workspace,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { and, asc, eq, inArray, isNull, like, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, like, ne, or } from 'drizzle-orm';
 import type { Database } from './db/database.js';
-import { events, runs, sessions, workspaceBuildSettings, workspaces } from './db/schema.js';
-import { InvalidOperationError, NotFoundError, ValidationError, WorkspaceBusyError } from './errors.js';
+import { events, orchestrationSteps, runs, sessions, workspaceBuildSettings, workspaces } from './db/schema.js';
+import { AgentMidTurnError, InvalidOperationError, NotFoundError, ValidationError, WorkspaceBusyError } from './errors.js';
 import type { EventLog, HistoryDeleted } from './event-log.js';
 import { check } from './entity-check.js';
 import { createRunEntities } from './run-entities.js';
@@ -105,10 +114,13 @@ export interface NewSession {
   id?: SessionId;
   /**
    * The chat's own worktree (AD-8 CAP-33 note): an absolute path, set at
-   * creation and never changed. Given with {@link branch} or not at all.
+   * creation; changed afterwards only by Hand off, or by a Restore that put
+   * the copy on a new branch, through {@link Entities.setSessionWorktree},
+   * which records `session.location_changed` (user decisions 2026-11-01).
+   * Given with {@link branch} or not at all.
    */
   worktreePath?: string | null;
-  /** The worktree's branch: exactly `ogden/chat/<id>`. Given with {@link worktreePath} or not at all. */
+  /** The worktree's branch: `ogden/chat/<id>` (or a Restore's `ogden/chat/<id>-restored`, `-2`, …). Given with {@link worktreePath} or not at all. */
   branch?: string | null;
 }
 
@@ -196,6 +208,19 @@ export interface Entities {
    */
   deleteWorkspaceHistory(workspaceId: WorkspaceId): HistoryDeleted;
 
+  /**
+   * Delete chat (27.3): deletes one chat's row and its stream's events and
+   * appends `workspace.chat_deleted` (with `outcome`: whether its worktree
+   * is being removed and its branch kept, the caller's to decide and do
+   * after), in one transaction. Refuses, deleting nothing:
+   * {@link InvalidOperationError} for a build or planning session or a chat
+   * an orchestration run names (a step's `chat` or `session_id`);
+   * {@link AgentMidTurnError} while it is `working` or `waiting`;
+   * {@link NotFoundError} for an unknown session. A remote chat is not
+   * refused here: Delete chat refuses one before it gets here (27.3).
+   */
+  deleteChatSession(id: SessionId, outcome: { worktreeRemoved: boolean; branchKept: boolean }): { session: Session; deletedEvents: number; event: WorkspaceChatDeletedEvent };
+
   /** Creates a session and appends `session.created`. */
   createSession(input: NewSession): Session;
   getSession(id: SessionId): Session | undefined;
@@ -241,6 +266,24 @@ export interface Entities {
     id: SessionId,
     change: { agentId: AgentId; previous: AgentId; brief: string; resumes: boolean; refs: AdapterRefs; leftAtRef?: string | undefined },
   ): { session: Session; event: SessionAgentChangedEvent };
+  /**
+   * Hand off (CAP-35, user decision 2026-11-01; AD-8 CAP-33 note): moves the
+   * chat between this folder (`null`/`null`) and its own worktree (an
+   * absolute path and exactly `ogden/chat/<id>`), the only writer of
+   * `worktreePath` and `branch` after {@link createSession}. The row and
+   * `session.location_changed` (`files` carried, whether the agent
+   * `resumes`) are written in one transaction, so history shows where each
+   * turn ran; nothing is written when the place is unchanged (`event`
+   * `undefined`). Moving the files and restarting the agent are the
+   * caller's (27.4). {@link ValidationError} for a bad path or branch, or one
+   * without the other; {@link InvalidOperationError} for a build or planning
+   * session or a remote chat; {@link AgentMidTurnError} while the chat is
+   * working or waiting; {@link NotFoundError} for an unknown session.
+   */
+  setSessionWorktree(
+    id: SessionId,
+    change: { worktreePath: string | null; branch: string | null; files: number; resumes: boolean },
+  ): { session: Session; event: SessionLocationChangedEvent | undefined };
   /** Sets the driver (AD-6), appending `session.driver_changed` (with `cause`, if given) if it changed. */
   setSessionDriver(id: SessionId, driver: SessionDriver, cause?: DriverChangeCause): Session;
   /**
@@ -350,7 +393,7 @@ const toWorkspace = (row: WorkspaceRow): Workspace => ({
 });
 
 /**
- * A new chat's worktree and branch (AD-8 CAP-33 note): both or neither, the
+ * A chat's worktree and branch (AD-8 CAP-33 note), at creation or a hand-off: both or neither, the
  * path absolute, the branch exactly `ogden/chat/<id>`; else {@link ValidationError}.
  */
 function checkedWorktree(id: SessionId, worktreePath: string | null, branch: string | null): { worktreePath: string | null; branch: string | null } {
@@ -360,7 +403,8 @@ function checkedWorktree(id: SessionId, worktreePath: string | null, branch: str
   };
   if (worktreePath === null || branch === null) return issue(worktreePath === null ? 'worktreePath' : 'branch', 'A worktree and its branch are given together.');
   if (typeof worktreePath !== 'string' || worktreePath === '' || worktreePath.includes('\0') || !isAbsolute(worktreePath)) return issue('worktreePath', 'A worktree is an absolute path.');
-  if (branch !== chatWorktreeBranch(id)) return issue('branch', `A chat worktree's branch is ${chatWorktreeBranch(id)}.`);
+  // Its own branch, or one Restore made when that branch had moved or gone (`…-restored`, `-2`, …; user decision 2026-11-01).
+  if (!isChatWorktreeBranchOf(id, branch)) return issue('branch', `A chat worktree's branch is ${chatWorktreeBranch(id)}.`);
   return { worktreePath, branch };
 }
 
@@ -525,6 +569,34 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
       });
     },
 
+    deleteChatSession(id, { worktreeRemoved, branchKept }) {
+      check(SessionIdSchema, id, 'session id');
+      if (typeof worktreeRemoved !== 'boolean' || typeof branchKept !== 'boolean') {
+        throw new ValidationError('invalid outcome', [{ path: ['outcome'], message: 'Whether the copy goes and the branch stays are true or false.' }]);
+      }
+      return log.transaction(() => {
+        const session = requireSession(id);
+        if (session.kind !== 'chat') throw new InvalidOperationError(DELETE_CHAT_NOT_DELETABLE_TEXT);
+        if (session.state === 'working' || session.state === 'waiting') throw new AgentMidTurnError(DELETE_CHAT_MID_TURN_MESSAGE);
+        const named = orm
+          .select({ stepId: orchestrationSteps.stepId })
+          .from(orchestrationSteps)
+          .where(or(eq(orchestrationSteps.sessionId, id), eq(orchestrationSteps.chat, id)))
+          .limit(1)
+          .get();
+        if (named !== undefined) throw new InvalidOperationError(DELETE_CHAT_NOT_DELETABLE_TEXT);
+        const deletedEvents = orm.delete(events).where(eq(events.streamId, id)).run().changes;
+        orm.delete(sessions).where(eq(sessions.id, id)).run();
+        const event = log.append({
+          type: 'workspace.chat_deleted',
+          workspaceId: session.workspaceId,
+          streamId: session.workspaceId,
+          payload: { sessionId: id, worktreeRemoved, branchKept },
+        });
+        return { session, deletedEvents, event };
+      });
+    },
+
     createSession(input) {
       const at = now();
       const autoTitle = input.autoTitle == null ? null : autoChatName(input.autoTitle, CHAT_NAME_MAX);
@@ -684,6 +756,33 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         const adapterRefs = { ...updated.adapterRefs, [leftAtRef]: String(event.seq) };
         orm.update(sessions).set({ adapterRefs }).where(eq(sessions.id, id)).run();
         return { session: { ...updated, adapterRefs }, event };
+      });
+    },
+
+    setSessionWorktree(id, { worktreePath: path, branch: name, files, resumes }) {
+      const checked = checkedWorktree(check(SessionIdSchema, id, 'session id'), path, name);
+      if (!Number.isInteger(files) || files < 0) throw new ValidationError('invalid file count', [{ path: ['files'], message: 'A count of files is a whole number, 0 or more.' }]);
+      if (typeof resumes !== 'boolean') throw new ValidationError('invalid resumes', [{ path: ['resumes'], message: 'Whether the agent resumes is true or false.' }]);
+      return log.transaction(() => {
+        const session = requireSession(id);
+        if (session.kind !== 'chat') throw new InvalidOperationError(HANDOFF_CHAT_ONLY_TEXT);
+        if (session.machineId !== null) throw new InvalidOperationError(HANDOFF_REMOTE_TEXT);
+        if (session.state === 'working' || session.state === 'waiting') throw new AgentMidTurnError(HANDOFF_MID_TURN_MESSAGE);
+        if (session.worktreePath === checked.worktreePath && session.branch === checked.branch) return { session, event: undefined };
+        const updated: Session = { ...session, worktreePath: checked.worktreePath, branch: checked.branch, updatedAt: now() };
+        orm.update(sessions).set({ worktreePath: checked.worktreePath, branch: checked.branch, updatedAt: updated.updatedAt }).where(eq(sessions.id, id)).run();
+        const event = sessionEvents.appendSessionEvent(session.id, {
+          type: 'session.location_changed',
+          payload: {
+            sessionId: session.id,
+            location: localPlaceOf(checked),
+            previous: localPlaceOf(session),
+            branch: checked.branch,
+            files,
+            resumes,
+          },
+        }) as SessionLocationChangedEvent;
+        return { session: updated, event };
       });
     },
 

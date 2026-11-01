@@ -10,9 +10,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { API_ROUTES, ApiErrorBody, apiPath, BuildAgentsResponse, TeamRosterViewResponse, ChatAgentsResponse, CustomAgentListResponse, CustomAgentResponse, CustomAgentTestResponse, SessionResponse, UNKNOWN_BUILD_AGENT_MESSAGE, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createCustomAgent, createMemorySecretStore, customAgentDescriptor } from '@ogden-agents/adapters';
+import { createCustomAgent, createMemorySecretStore, CUSTOM_AGENT_LOCAL_ONLY_REASON, customAgentDescriptor } from '@ogden-agents/adapters';
 import { supportsUnattendedBuild } from '../src/build-agent-sandbox.js';
-import { PREFERENCES_FILE, SecretsUnavailableError, type SecretStorePort } from '@ogden-agents/core';
+import { newId, PREFERENCES_FILE, SecretsUnavailableError, type SecretStorePort } from '@ogden-agents/core';
 import { createFakeBmadRepo, FAKE_BUILD_REPO_FILES } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { FAKE_AGENT, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -573,4 +573,32 @@ describe('epic 21 story 21.6: a custom agent chats only, and Build never offers 
     expect(((await refused.json()) as { error: { message: string } }).error.message).toBe(UNKNOWN_BUILD_AGENT_MESSAGE);
     expect(server.core.entities.listSessions(wsId)).toEqual([]);
   });
+});
+
+describe('epic 27 story 27.5: a custom agent runs only on this computer', () => {
+  it('lists its local only reason, and refuses a remote chat with it, created or handed over, 409 invalid_operation with nothing made', async () => {
+    const { server, tab, register, listed } = await setUp();
+    expect((await register({ displayName: 'My Agent', commandLine: FAKE_COMMAND })).status).toBe(201);
+    expect((await listed()).find((agent) => agent.agentId === 'custom-my-agent')?.localOnly).toBe(CUSTOM_AGENT_LOCAL_ONLY_REASON);
+    expect((await listed()).find((agent) => agent.agentId === 'claude-code')?.localOnly).toBeUndefined();
+    const { wsId } = await trustedProject(server, tab);
+    const sessions = apiPath(API_ROUTES.workspaceSessions, { wsId });
+
+    const refused = await request(server, tab, 'POST', sessions, { agentId: 'custom-my-agent', machineId: newId('mach') });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error).toEqual({ code: 'invalid_operation', message: CUSTOM_AGENT_LOCAL_ONLY_REASON });
+    expect(server.core.entities.listSessions(wsId)).toEqual([]);
+
+    // A remote chat with another agent (never started, so nothing connects) can't be handed to it.
+    const made = await request(server, tab, 'POST', sessions, { agentId: 'claude-code', machineId: newId('mach') });
+    expect(made.status).toBe(201);
+    const sesId = SessionResponse.parse(await made.json()).session.id;
+    const preview = await request(server, tab, 'GET', `${apiPath(API_ROUTES.sessionHandoff, { wsId, sesId })}?agentId=custom-my-agent`);
+    expect(preview.status).toBe(409);
+    expect(ApiErrorBody.parse(await preview.json()).error).toEqual({ code: 'invalid_operation', message: CUSTOM_AGENT_LOCAL_ONLY_REASON });
+    const handOff = await request(server, tab, 'POST', apiPath(API_ROUTES.sessionHandoff, { wsId, sesId }), { agentId: 'custom-my-agent', previewToken: 'x', brief: '', message: 'go on' });
+    expect(handOff.status).toBe(409);
+    expect(server.core.entities.getSession(sesId)!.agentId).toBe('claude-code');
+  });
+
 });

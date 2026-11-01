@@ -94,7 +94,7 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, buil
       return apiError(c, 503, 'tickets_unavailable', error.message);
     }
     if (error instanceof VcsError) {
-      log.warn('git failed', { workspaceId, ...error.details });
+      log.warn('a version control operation failed', { workspaceId, ...error.details });
       return apiError(c, 500, 'internal_error', error.message);
     }
     throw error;

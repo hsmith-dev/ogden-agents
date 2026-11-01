@@ -10,7 +10,7 @@
  * in `badPatches`.
  */
 import { VcsError, type VcsCheck, type VcsDiff, type VcsHead, type VcsPort, type VcsWorktreeGitPaths } from '@ogden-agents/core';
-import type { DiffStats } from '@ogden-agents/shared';
+import { CHAT_WORKTREE_BRANCH_PREFIX, chatOfWorktreeBranch, type DiffStats } from '@ogden-agents/shared';
 
 export interface MemoryRepo {
   /** The checked-out branch, or `undefined` for a detached `HEAD` or no commit. */
@@ -133,10 +133,16 @@ export function createMemoryVcs(): MemoryVcs {
       state.status = state.status.filter((path) => !paths.includes(path));
       state.staged = state.staged.filter((path) => !paths.includes(path));
     },
-    async addWorktree(repoPath, { path, branch, base }) {
-      calls.push(`addWorktree ${repoPath} ${path} ${branch} ${base}`);
+    async addWorktree(repoPath, { path, branch, base, existingBranch }) {
+      calls.push(`addWorktree ${repoPath} ${path} ${branch} ${existingBranch === true ? 'existing' : base}`);
       const state = repo(repoPath);
       if (worktrees.has(path)) throw new VcsError('The run folder already exists.', { step: 'worktree' });
+      if (existingBranch === true) {
+        // A kept branch (27.4): checked out as it is, in one worktree only.
+        if (!state.branches.has(branch) || [...worktrees.values()].some((one) => one.repoPath === repoPath && one.branch === branch)) throw new VcsError("git couldn't add the worktree.", { step: 'add the worktree' });
+        worktrees.set(path, { repoPath, branch });
+        return;
+      }
       if (state.branches.has(branch)) throw new VcsError("git couldn't add the worktree.", { step: 'add the worktree' });
       state.branches.set(branch, base);
       state.changes.set(branch, []);
@@ -151,8 +157,23 @@ export function createMemoryVcs(): MemoryVcs {
     },
     async removeWorktree(repoPath, path, options = {}) {
       calls.push(`removeWorktree ${repoPath} ${path}${options.deleteBranch === undefined ? '' : ` ${options.mergedOnly === true ? '-d' : '-D'} ${options.deleteBranch}`}`);
+      const branch = options.deleteBranch;
+      // As `vcs-git` (27.3): a chat's worktree (on `ogden/chat/…`) goes only with its own branch, a valid `ogden/chat/<ses_…>`.
+      const recorded = worktrees.get(path)?.branch;
+      const chatBranch = (name: string) => name.startsWith(CHAT_WORKTREE_BRANCH_PREFIX);
+      if (branch !== undefined && ((chatBranch(branch) && chatOfWorktreeBranch(branch) === undefined) || (recorded !== undefined && chatBranch(recorded) && branch !== recorded))) {
+        throw new VcsError("That is not this worktree's branch, so it was kept.", { step: 'branch' });
+      }
       worktrees.delete(path);
-      if (options.deleteBranch !== undefined) repo(repoPath).branches.delete(options.deleteBranch);
+      if (branch === undefined) return { branchKept: false };
+      const state = repo(repoPath);
+      // As git's `branch -d`, with `isMerged`'s own predicate: an unmerged branch is kept (`keepUnmerged`) or refused.
+      if (options.mergedOnly === true && state.branches.has(branch) && !state.merged.has(branch)) {
+        if (options.keepUnmerged === true) return { branchKept: true };
+        throw new VcsError("git couldn't delete the worktree's branch.", { step: 'delete the branch' });
+      }
+      state.branches.delete(branch);
+      return { branchKept: false };
     },
     async status(repoPath) {
       calls.push(`status ${repoPath}`);

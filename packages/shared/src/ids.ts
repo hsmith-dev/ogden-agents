@@ -27,6 +27,10 @@ export const ID_PREFIXES = {
   turn: 'trn',
   /** One run of a project's declared command (AD-38, epic 8 entry 2; 8.9 runs them). */
   projectCommandRun: 'pcr',
+  /** One task tried by several agents, each in its own worktree chat (CAP-35, epic 27 entry 2; the Try page `/w/:wsId/try/:tryId`). */
+  trial: 'try',
+  /** A chat worktree put away by retention: its saved changes in AD-37's snapshot store (CAP-35, epic 27 entry 2). */
+  worktreeSnapshot: 'wsn',
 } as const;
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
 
@@ -83,3 +87,11 @@ export type TurnId = z.infer<typeof TurnId>;
 /** One run of a project command (AD-38). */
 export const ProjectCommandRunId = prefixedUlid('pcr');
 export type ProjectCommandRunId = z.infer<typeof ProjectCommandRunId>;
+
+/** One task tried by several agents (CAP-35, epic 27 entry 2; 27.8 runs them). */
+export const TrialId = prefixedUlid('try');
+export type TrialId = z.infer<typeof TrialId>;
+
+/** A put-away chat worktree's saved changes (CAP-35; AD-17 CAP-33 note's retention exception). Restore reads it back. */
+export const WorktreeSnapshotId = prefixedUlid('wsn');
+export type WorktreeSnapshotId = z.infer<typeof WorktreeSnapshotId>;

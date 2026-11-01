@@ -48,6 +48,8 @@ describe('the pane environment (E16-R2, spike 16.1 finding 10)', () => {
 
   it('says truecolor whatever the server\'s own terminal says, since the pane is xterm.js', () => {
     expect(paneEnvironment({}, { PATH: '/bin', COLORTERM: '24bit' }, 'linux').COLORTERM).toBe('truecolor');
+    // The user's own terminal keeps its PATH as it is, empty and relative entries too (27.9: only agents get the launch rule's filter).
+    expect(paneEnvironment({}, { PATH: '/bin::rel:.' }, 'linux').PATH).toBe('/bin::rel:.');
   });
 
   it('on Windows adds the folders a CLI reads (APPDATA, ProgramFiles ...), names without case, and still no secret', () => {

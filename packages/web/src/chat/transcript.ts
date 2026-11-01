@@ -2,6 +2,7 @@ import type {
   AlwaysAllowScope,
   CatalogNext,
   CautionLevel,
+  ChatLocation,
   CoreEvent,
   MessageRole,
   PermissionDecision,
@@ -122,6 +123,8 @@ export type TranscriptItem =
   | { type: 'document'; path: string; next: CatalogNext | null; toolCallId: string | null; at: string }
   /** The user continued the chat with another agent here (handoff, `session.agent_changed`): the "Continued with" divider. */
   | { type: 'agent_changed'; agentId: string; previous: string; at: string }
+  /** The chat moved between this folder and its own worktree here (Hand off, `session.location_changed`, 27.4): the "Moved to" divider. */
+  | { type: 'location_changed'; location: ChatLocation; branch: string | null; at: string }
   /** A turn that changed files ended (`session.turn_changes_recorded`, story 8.4): its counts, and Review changes on it. */
   | { type: 'turn_changes'; turnId: string; files: number; additions: number; deletions: number; at: string }
   /** The agent's current step was stopped so a message sent right away goes at once (`session.turn_interrupted`). */
@@ -249,6 +252,9 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
         for (const earlier of view.messages) if (earlier.role === 'agent' && earlier.agentId === undefined) earlier.agentId = event.payload.previous;
         view.agentId = event.payload.agentId;
         view.items.push({ type: 'agent_changed', agentId: event.payload.agentId, previous: event.payload.previous, at: event.at });
+        break;
+      case 'session.location_changed':
+        view.items.push({ type: 'location_changed', location: event.payload.location, branch: event.payload.branch, at: event.at });
         break;
       case 'session.state_changed':
         view.state = event.payload.state;

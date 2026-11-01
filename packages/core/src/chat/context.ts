@@ -4,12 +4,12 @@
  * instance each, never copied or spread: the modules' identity checks rely on
  * it) and `closing`, read as `ctx.closing` at each use, never copied.
  */
-import type { AgentId, AgentModel, PermissionMode, Session, SessionId, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import { chatPlaceOf, isWorktreePort, WORKTREE_PORT_ENV, type AgentId, type AgentModel, type PermissionMode, type Session, type SessionId, type Workspace, type WorkspaceId } from '@ogden-agents/shared';
 import { monotonicFactory } from 'ulid';
 import { AgentError, unregisteredAgent, type AgentPort, type AgentRegistry, type AgentSessionModels, type ProtectedPaths } from '../agent-port.js';
 import { agentConfigFolders } from '../agent-descriptor.js';
 import { canonicalWorkspacePath, type Entities } from '../entities.js';
-import { NotFoundError } from '../errors.js';
+import { NotFoundError, WorktreePutAwayError } from '../errors.js';
 import { protectedPathsWith } from '../permission-matching.js';
 import { createDecliningPermissions, type Permissions } from '../permissions.js';
 import type { SessionEvents } from '../session-events.js';
@@ -60,6 +60,16 @@ export interface ChatContext {
   readonly terminals: Map<SessionId, Terminal>;
   /** Sessions between drivers: no message is taken and no other switch starts. */
   readonly switching: Set<SessionId>;
+  /** Chats whose copy is being put away or restored (27.6): no message is taken and no switch starts. */
+  readonly puttingAway: Set<SessionId>;
+  /** Throws `WorktreePutAwayError` while the chat's copy is put away, or being put away or restored (27.6). */
+  readonly requireCopyPresent: (sessionId: SessionId) => void;
+  /**
+   * Folders a hand-off is moving changes out of or into (27.4): no chat
+   * working there takes a message or switches to its terminal until it is
+   * done (`chat/folder-hold.ts`).
+   */
+  readonly movingFolders: Set<string>;
   /** The permission modes each session's agent session offered when it last started this run (permission modes). */
   readonly sessionModes: Map<SessionId, readonly PermissionMode[]>;
   /** The permission modes the agent session started last in this run offered, per agent (any chat of it): a chat whose own agent hasn't started yet. */
@@ -101,9 +111,24 @@ export function createChatContext(options: ChatOptions): ChatContext {
     return (session === undefined ? undefined : agents.get(agentIdOf(session))) ?? missing;
   };
   const withAgentId = (session: Session): Session => (session.agentId === undefined ? { ...session, agentId: agents.legacyAgentId } : session);
+  /** A local chat in its own copy holding a port (27.7): that port; else none. */
+  const portOf = (session: Session): number | undefined => {
+    if (session.kind !== 'chat' || chatPlaceOf(session) !== 'worktree') return undefined;
+    let port: number | null | undefined;
+    try {
+      port = options.worktreePorts?.portOf(session.id);
+    } catch {
+      return undefined;
+    }
+    return isWorktreePort(port) ? port : undefined;
+  };
   const agentEnv = (sessionId: SessionId): Readonly<Record<string, string>> => {
     const session = entities.getSession(sessionId);
-    return session === undefined ? {} : (options.agentEnv?.(agentIdOf(session)) ?? {});
+    if (session === undefined) return {};
+    const env = options.agentEnv?.(agentIdOf(session)) ?? {};
+    const port = portOf(session);
+    // Only the one name, a decimal in the range, on top of the agent's own allowlisted environment.
+    return port === undefined ? env : { ...env, [WORKTREE_PORT_ENV]: String(port) };
   };
   const checkInDelayMs = clampCheckInDelay(options.checkInDelayMs ?? DEFAULT_CHECK_IN_MS);
   const stopGraceMs = options.stopGraceMs ?? STOP_GRACE_MS;
@@ -113,6 +138,10 @@ export function createChatContext(options: ChatOptions): ChatContext {
   const droppedAgents = new Map<SessionId, Promise<void>>();
   const terminals = new Map<SessionId, Terminal>();
   const switching = new Set<SessionId>();
+  const puttingAway = new Set<SessionId>();
+  const requireCopyPresent = (sessionId: SessionId): void => {
+    if (puttingAway.has(sessionId) || options.worktreePutAway?.get(sessionId) !== undefined) throw new WorktreePutAwayError();
+  };
   const sessionModes = new Map<SessionId, readonly PermissionMode[]>();
   const permissionModeTimeoutMs = options.permissionModeTimeoutMs ?? PERMISSION_MODE_TIMEOUT_MS;
   const sessionModels = new Map<SessionId, AgentSessionModels>();
@@ -185,6 +214,9 @@ export function createChatContext(options: ChatOptions): ChatContext {
     droppedAgents,
     terminals,
     switching,
+    puttingAway,
+    requireCopyPresent,
+    movingFolders: new Set<string>(),
     sessionModes,
     lastSessionModes: new Map(),
     sessionModels,

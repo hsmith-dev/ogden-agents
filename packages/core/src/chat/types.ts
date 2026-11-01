@@ -3,7 +3,7 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { AgentId, ChatAgent, HandoffPreviewResponse, PermissionMode, RemoteMachineId, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, ChatAgent, ChatDeletedResponse, ChatLocation, CopyIgnoredFilesResponse, HandoffPreviewResponse, PermissionMode, PutAwayCause, PutAwayWorktree, RemoteMachineId, RestoreWorktreeResponse, SessionLocation, SessionLocationResponse, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentModels } from '../agent-models.js';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -15,7 +15,10 @@ import type { Permissions } from '../permissions.js';
 import type { RemoteHostConnection } from '../remote-host-port.js';
 import type { SessionEvents } from '../session-events.js';
 import type { TerminalPort, TerminalProcess } from '../terminal-port.js';
+import type { VcsChatWorktreePort, VcsPort, VcsWorkingTreePort } from '../vcs-port.js';
+import type { WorktreePutAwayStore } from '../worktree-put-away-store.js';
 import type { TurnSnapshots } from '../turn-snapshots.js';
+import type { WorktreePorts } from '../where-work-runs.js';
 
 export interface ChatOptions {
   entities: Entities;
@@ -110,6 +113,71 @@ export interface ChatOptions {
     connect(machineId: RemoteMachineId): Promise<RemoteHostConnection>;
   };
   /**
+   * Git, for a chat started in its own worktree (epic 27, 27.1): the
+   * project's top folder and commit, and the worktree made in
+   * `<data>/cw`. Absent: a worktree chat is refused (`InvalidOperationError`).
+   * `branchRevision` finds a chat's kept branch for a hand-off to its own
+   * worktree again (27.4); without it the branch is made new.
+   */
+  vcs?: Pick<VcsPort, 'topLevel' | 'head' | 'addWorktree' | 'removeWorktree' | 'isMerged'> & Partial<Pick<VcsPort, 'branchRevision'>>;
+  /** Both folders' snapshot trees a hand-off took before anything moved (27.4; AD-37's store), for the log: tree ids, never a path. */
+  onHandOffSnapshot?: ((sessionId: SessionId, snapshots: { from: string; to: string }) => void) | undefined;
+  /**
+   * The working tree's changes (AD-37; 27.3): whether a worktree chat's copy
+   * has uncommitted changes before Delete chat or Delete history removes it
+   * (staged, unstaged and untracked). Absent: every copy counts as changed,
+   * so it is removed only with `discardUncommitted`. Its `ignoredFiles`
+   * lists what removing a copy loses (user decision 2026-11-01).
+   */
+  vcsWorkingTree?: (Pick<VcsWorkingTreePort, 'changedFiles'> & Partial<Pick<VcsWorkingTreePort, 'ignoredFiles'>>) | undefined;
+  /** How long Delete chat (and a put-away, 27.6) waits for the chat's agent and terminal to exit before it leaves the copy instead (27.3). Default 10 s. */
+  stopBeforeRemovalMs?: number | undefined;
+  /**
+   * Called when removing a deleted chat's worktree (or cleaning up one a
+   * failed creation left, or a put-away copy's folder, 27.6) failed or was
+   * refused, after its rows went: for the log, the session id and a step
+   * only. The folder is left.
+   */
+  onWorktreeCleanupError?: (sessionId: SessionId, step: 'outside_data' | 'remove', error?: unknown) => void;
+  /**
+   * Retention's git (27.6): a chat worktree's uncommitted changes saved
+   * before its folder is removed through {@link vcs}, and Restore. Absent:
+   * no copy is put away or restored (`InvalidOperationError`). Its
+   * `moveChanges` moves a chat's uncommitted changes between this folder
+   * and its own worktree (27.4, Hand off); absent, a hand-off is refused
+   * (`InvalidOperationError`), nothing moved.
+   */
+  vcsChatWorktree?: Pick<VcsChatWorktreePort, 'saveForPutAway' | 'restore' | 'moveChanges'> | undefined;
+  /** The put-away records (27.6): a chat with one takes no message until Restore. Absent: no chat is put away. */
+  worktreePutAway?: WorktreePutAwayStore | undefined;
+  /**
+   * Called once a chat's own worktree was made or restored (27.6), after
+   * its row: the server's retention sweep then runs, sparing that chat. A
+   * throw is caught.
+   */
+  onChatWorktreeAdded?: ((sessionId: SessionId) => void) | undefined;
+  /**
+   * A worktree chat's own port (27.7, `core.worktreePorts`): given when its
+   * copy is made, handed off to or restored, and given back when the copy is
+   * put away or handed back. The chat's agent and its terminal get it as
+   * `PORT`. Absent: no chat has a port.
+   */
+  worktreePorts?: Pick<WorktreePorts, 'assign' | 'release' | 'portOf'> | undefined;
+  /**
+   * Called once a chat's new copy is ready (27.7): made, handed off to or
+   * restored, after its port was given (`null` when none was free or
+   * there is no {@link worktreePorts}). The server runs the project's setup
+   * command there; never awaited. A throw is caught.
+   */
+  onChatWorktreeReady?: ((sessionId: SessionId, copy: { workspaceId: WorkspaceId; worktreePath: string; port: number | null }) => void) | undefined;
+  /**
+   * Stops the chat's setup run in its copy, if still going, and resolves once
+   * it finished (27.7, `ProjectCommands.stopSetup`): awaited, bounded by
+   * {@link stopBeforeRemovalMs}, before the copy is put away, handed back or
+   * deleted (`forget`: a deleted chat). Absent: nothing to stop.
+   */
+  stopChatSetup?: ((sessionId: SessionId, options?: { forget?: boolean }) => Promise<void>) | undefined;
+  /**
    * Each prompt's snapshots (AD-37; story 8.4, `core.turnSnapshots`): taken
    * just before a prompt goes out and once it settled, each waited for at
    * most `TURN_SNAPSHOT_TIMEOUT_MS`. Never for a turn the terminal drives.
@@ -185,9 +253,59 @@ export interface Chat {
    * `WorkspaceBusyError`, deleting nothing, while one of its sessions is
    * `working` or `waiting` or its agent is still answering, and
    * `NotFoundError` for an unknown workspace. The deleted sessions'
-   * idle agents are then stopped.
+   * idle agents are then stopped. Its chats' own worktrees are removed after
+   * the rows (27.3; branches with commits kept): `UncommittedChangesError`,
+   * deleting nothing, when one has uncommitted changes and
+   * `discardUncommitted` isn't set; a worktree chat the terminal drives is
+   * `WorkspaceBusyError`.
    */
-  deleteHistory(workspaceId: WorkspaceId): Omit<HistoryDeleted, 'event'>;
+  deleteHistory(workspaceId: WorkspaceId, options?: { discardUncommitted?: boolean | undefined }): Promise<Omit<HistoryDeleted, 'event'>>;
+  /**
+   * Delete chat (27.3; EXPERIENCE.md): one plain chat, its events and, for
+   * a worktree chat, its copy through `VcsPort` (its branch deleted only
+   * when merged into the checked-out branch, else kept). Refuses, deleting
+   * nothing: `InvalidOperationError` for a build or planning session, a
+   * remote chat or a chat an orchestration run names; `AgentMidTurnError`
+   * while it works, waits, is busy, the terminal drives it or it switches,
+   * or when a turn ran while its copy was read; `UncommittedChangesError`
+   * when its copy has uncommitted changes (or they can't be read) without
+   * `discardUncommitted`; `NotFoundError` for a chat of another project.
+   * The rows go first, in one transaction; a copy outside `<data>/cw` is
+   * never touched, and a removal that fails after is logged, never thrown.
+   */
+  deleteChat(workspaceId: WorkspaceId, sessionId: SessionId, options?: { discardUncommitted?: boolean | undefined }): Promise<ChatDeletedResponse>;
+  /**
+   * Whether Delete chat would refuse this chat's copy without
+   * `discardUncommitted` (27.8, a trial's Keep with Delete): a local worktree
+   * chat whose copy has uncommitted changes, or saved ones while put away, or
+   * whose state can't be read. `false` for any other chat.
+   * `NotFoundError` for a chat of another project.
+   */
+  copyHasUncommitted(workspaceId: WorkspaceId, sessionId: SessionId): Promise<boolean>;
+  /** Where the chat works (27.4): this folder, its own worktree (branch) or its remote machine. `NotFoundError` for a chat of another project. */
+  chatLocation(workspaceId: WorkspaceId, sessionId: SessionId): SessionLocation;
+  /**
+   * Hand off (27.4; CAP-35): moves an idle local chat and every uncommitted
+   * change of the folder it leaves to `to`, all or nothing, then records it
+   * (`session.location_changed`); its agent restarts in the new folder on
+   * its own session where it can. Moving back removes the clean copy (its
+   * branch kept when it has commits). Refuses, moving nothing:
+   * `AgentMidTurnError` while it or any local chat in the project folder
+   * works, waits, is busy, switches or is terminal-driven;
+   * `HandOffConflictError` when the other place has its own changes to the
+   * same files or they don't apply there; `InvalidOperationError` for a chat
+   * already there, remote, terminal-driven, not a chat, a tampered row, or
+   * git that failed.
+   */
+  moveChat(workspaceId: WorkspaceId, sessionId: SessionId, to: ChatLocation): Promise<Session>;
+  /**
+   * The ignored files a local worktree chat's copy holds (user decision
+   * 2026-11-01), which Move to this folder and Delete chat would lose: names
+   * only, rebuildable folders left out, the first `IGNORED_FILES_SHOWN` and
+   * how many more; none for any other chat; `listed: false` when they
+   * couldn't be read. `NotFoundError` for a chat of another project.
+   */
+  copyIgnoredFiles(workspaceId: WorkspaceId, sessionId: SessionId): Promise<CopyIgnoredFilesResponse>;
   /**
    * A new session in the workspace, `idle`, with the agent `agentId` (the
    * registry's default when absent), fixed for its life (epic 6): a `chat`
@@ -206,10 +324,25 @@ export interface Chat {
    * still reachable is `agentFor`'s own connect-time refusal
    * (`agent_unavailable`), the same place a chat already refuses an agent
    * that isn't ready -- never a second place that can disagree with it.
+   *
+   * `location: 'worktree'` (epic 27, 27.1) gives a plain `chat` its own
+   * worktree, `<data>/cw/<8>` on `ogden/chat/<id>` from the project's
+   * checked-out commit, made under the repo's serialized git work and stored
+   * as its `worktreePath` and `branch`; its agent and terminal run there.
+   * Refused, making nothing: `ValidationError` with a `machineId`;
+   * `InvalidOperationError` for another kind, a project that isn't its
+   * repository's top folder with a commit, or git failing.
    */
   createChatSession(
     workspaceId: WorkspaceId,
-    options?: { kind?: SessionKind | undefined; agentId?: AgentId | undefined; autoTitle?: string | undefined; model?: string | null | undefined; machineId?: RemoteMachineId | null | undefined },
+    options?: {
+      kind?: SessionKind | undefined;
+      agentId?: AgentId | undefined;
+      autoTitle?: string | undefined;
+      model?: string | null | undefined;
+      machineId?: RemoteMachineId | null | undefined;
+      location?: ChatLocation | undefined;
+    },
   ): Promise<Session>;
   /**
    * The agents a chat can be started with, in order (epic 6; frozen in 6.3):
@@ -360,6 +493,35 @@ export interface Chat {
    * `NotFoundError`.
    */
   handOff(workspaceId: WorkspaceId, sessionId: SessionId, request: { agentId: AgentId; brief: string; message: string; previewToken: string; model?: string | null | undefined }): Promise<{ session: Session; messageId: string }>;
+  /**
+   * Puts the chat's worktree away (27.6; AD-17 CAP-33 note's exception):
+   * refused unless the chat is idle (`AgentMidTurnError` while it works,
+   * waits, is busy, switches or the terminal drives it). The chat is held
+   * (no message starts), its agent and terminal stopped (bounded), then,
+   * with the repo's other git work serialized, checked again, its
+   * uncommitted changes snapshotted, the record written with
+   * `session.worktree_put_away`, and its folder removed through `VcsPort`,
+   * branch kept. A refused or failed snapshot removes nothing
+   * (`InvalidOperationError`); a removal that fails after the record is
+   * reported and leaves the copy half put away, which Restore repairs.
+   */
+  putAwayWorktree(sessionId: SessionId, cause: PutAwayCause): Promise<PutAwayWorktree>;
+  /**
+   * Restore (27.6): brings the put-away copy back with its saved changes,
+   * removes the record with `session.worktree_restored`: on its branch, at
+   * a newer commit when the branch only moved forward and the changes apply
+   * cleanly, else on a new branch `…-restored` at the saved commit, made the
+   * chat's branch through `Entities.setSessionWorktree` in the same
+   * transaction (`session.location_changed`; user decision 2026-11-01).
+   * `RestoreFailedError` (`path_taken`, `failed`) changes nothing and keeps
+   * the record; `InvalidOperationError` for a chat with nothing put away;
+   * `AgentMidTurnError` while it is held.
+   */
+  restoreWorktree(workspaceId: WorkspaceId, sessionId: SessionId): Promise<RestoreWorktreeResponse>;
+  /** Whether the chat could be put away now: idle, not busy, switching, held or driven by the terminal (27.6). */
+  worktreeIdle(sessionId: SessionId): boolean;
+  /** Resolves once no put-away or Restore runs (shutdown, 27.6). */
+  worktreeOpsSettled(): Promise<void>;
   /** Resolves once no agent turn is running (tests, shutdown). */
   settled(): Promise<void>;
   /**

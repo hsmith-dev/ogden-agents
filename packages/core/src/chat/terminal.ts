@@ -23,6 +23,7 @@ import { omittedNote, START_MARK, turnsToImport } from '../terminal-import.js';
 import type { TerminalProcess } from '../terminal-port.js';
 import { checkTerminalReady, checkTerminalSupport } from '../terminal-checks.js';
 import { terminalUnavailableReason } from '../terminal-reasons.js';
+import { sessionFolder } from '../workspace-root.js';
 import type { Agents } from './agents.js';
 import {
   TERMINAL_CLOSE_WAIT_MS,
@@ -36,6 +37,7 @@ import {
   terminalClosedNote,
 } from './constants.js';
 import type { ChatContext } from './context.js';
+import { refuseWhileFolderMoves } from './folder-hold.js';
 import { trimBacklog } from './terminal-backlog.js';
 import type { Chat, Terminal, TerminalSize, TerminalViewerEntry, Timer } from './types.js';
 
@@ -159,7 +161,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     if (resume?.transcript === undefined) return undefined;
     const workspace = getWorkspace(session.workspaceId);
     // Bounded (review F1): a read that hangs is an unreadable record; the switch goes on.
-    const read = await bounded(resume.transcript({ agentSessionId, cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv(session.id) } }), TERMINAL_STEP_TIMEOUT_MS);
+    const read = await bounded(resume.transcript({ agentSessionId, cwd: sessionFolder(workspace, session), env: { ...agentEnv(session.id) } }), TERMINAL_STEP_TIMEOUT_MS);
     if (read === TIMED_OUT) throw new TerminalHandoffError('terminal_read_timeout');
     return read;
   };
@@ -257,8 +259,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     const opening = terminal.open({
       file: command.file,
       args: command.args,
-      // The real-cased path, as the agent had it: the CLI finds its sessions by folder.
-      cwd: workspace.realPath ?? workspace.path,
+      // The real-cased path, as the agent had it (its worktree for a worktree chat, 27.1): the CLI finds its sessions by folder.
+      cwd: sessionFolder(workspace, session),
       env: { ...command.env, TERM: 'xterm-256color' },
       cols: TERMINAL_COLS,
       rows: TERMINAL_ROWS,
@@ -542,6 +544,10 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       if (session.kind === 'build') throw new BuildSessionReadOnlyError();
       if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is already switching. Try again in a moment.');
       if (session.driver === driver) return session;
+      // A put-away copy has no folder for the CLI to start in (27.6).
+      if (driver === 'terminal') ctx.requireCopyPresent(sessionId);
+      // Another chat's hand-off is moving this chat's folder (27.4): no terminal starts there meanwhile.
+      if (driver === 'terminal') refuseWhileFolderMoves(ctx, getWorkspace(workspaceId), session);
       return holdingSwitch(sessionId, () => (driver === 'terminal' ? toTerminal(session) : toChat(session)));
     },
 

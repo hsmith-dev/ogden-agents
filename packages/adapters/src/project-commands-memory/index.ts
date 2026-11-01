@@ -10,6 +10,8 @@ import type { ProjectCommandExit, ProjectCommandProcess, ProjectCommandRunner } 
 export interface MemoryProjectCommandStart {
   cwd: string;
   argv: readonly string[];
+  /** The environment it was given on top of the allowlisted one (27.7: a worktree's `PORT`), when any. */
+  env: Readonly<Record<string, string>> | undefined;
   /** Appends output, as the process would print it. */
   write(text: string): void;
   /** Ends it with `exitCode` (or as never started, with `error`). */
@@ -36,7 +38,7 @@ export function createMemoryProjectCommandRunner(): MemoryProjectCommandRunner {
       for (const start of starts) start.process.stop();
       await Promise.all(starts.map((start) => start.process.done));
     },
-    start({ cwd, argv }) {
+    start({ cwd, argv, env }) {
       let output = '';
       let settle!: (exit: ProjectCommandExit) => void;
       let settled = false;
@@ -57,6 +59,7 @@ export function createMemoryProjectCommandRunner(): MemoryProjectCommandRunner {
       starts.push({
         cwd,
         argv: [...argv],
+        env: env === undefined ? undefined : { ...env },
         write: (text) => {
           if (!settled) output += text;
         },

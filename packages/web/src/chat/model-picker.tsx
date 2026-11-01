@@ -3,6 +3,8 @@ import { CaretDown, Cpu } from '@phosphor-icons/react';
 import { useMemo } from 'react';
 import { Button } from '@/ui/button';
 import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
+import { cn } from '@/ui/utils';
+import { SETUP_CHIP_CLASS } from './setup-row';
 
 /**
  * Models in the UI (story 11: each chat runs on a model the user can
@@ -55,6 +57,8 @@ export interface ModelMenuProps {
   onOpenChange?: ((open: boolean) => void) | undefined;
   onChoose(model: string | null): void;
   variant?: 'ghost' | 'outline';
+  /** More classes for the trigger (the setup row's chip, 27.1). */
+  className?: string | undefined;
 }
 
 /**
@@ -64,7 +68,7 @@ export interface ModelMenuProps {
  * any, the menu says when they appear. A choice the server can't take now
  * is disabled with its reason, still reachable by keyboard.
  */
-export function ModelMenu({ testId, title, ariaLabel, text, prefix, models, value, none, emptyText, disabledReason, busy, open, onOpenChange, onChoose, variant = 'ghost' }: ModelMenuProps) {
+export function ModelMenu({ testId, title, ariaLabel, text, prefix, models, value, none, emptyText, disabledReason, busy, open, onOpenChange, onChoose, variant = 'ghost', className }: ModelMenuProps) {
   const choose = (next: string | null) => {
     if (busy || disabledReason !== undefined || next === value) return;
     onChoose(next);
@@ -75,7 +79,7 @@ export function ModelMenu({ testId, title, ariaLabel, text, prefix, models, valu
   return (
     <DropdownMenu {...(open === undefined ? {} : { open })} {...(onOpenChange === undefined ? {} : { onOpenChange })}>
       <DropdownMenuTrigger asChild>
-        <Button variant={variant} size="sm" data-testid={testId} data-model={value ?? ''} aria-label={ariaLabel} aria-busy={busy || undefined} className="min-w-0 max-w-48 shrink sm:max-w-xs">
+        <Button variant={variant} size="sm" data-testid={testId} data-model={value ?? ''} aria-label={ariaLabel} aria-busy={busy || undefined} className={cn('min-w-0 max-w-48 shrink sm:max-w-xs', className)}>
           <Cpu aria-hidden />
           {prefix === undefined ? null : <span className="text-muted-foreground max-sm:sr-only">{prefix}</span>}
           <span className="truncate">{text}</span>
@@ -149,8 +153,8 @@ export interface ModelPickerProps {
 }
 
 /**
- * The chat's model picker, beside the agent's name in the composer footer
- * (story 11; DESIGN.md Composer): the model the chat runs on, and the agent's
+ * The chat's Model chip in the composer's setup row (story 11, 27.1;
+ * DESIGN.md Composer): the model the chat runs on, and the agent's
  * models to switch to. A switch applies to the next message.
  */
 export function ModelPicker({ agentName, model, models, current, terminalDrives, changing, open, onOpenChange, onChoose }: ModelPickerProps) {
@@ -172,6 +176,7 @@ export function ModelPicker({ agentName, model, models, current, terminalDrives,
       open={open}
       onOpenChange={onOpenChange}
       onChoose={onChoose}
+      className={SETUP_CHIP_CLASS}
     />
   );
 }

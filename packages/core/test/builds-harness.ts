@@ -5,7 +5,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { BUILD_RESULT_FILE, BuildRunResult, type SandboxStatus, type SessionId, type TicketDetail, type TicketStatus, type WorkspaceId } from '@ogden-agents/shared';
+import { BUILD_RESULT_FILE, BuildRunResult, type ChatAgent, type SandboxStatus, type SessionId, type TicketDetail, type TicketStatus, type WorkspaceId } from '@ogden-agents/shared';
 import { createBuilds, type BuildRunnerPort, type BuildSessionSetup, type BuildsDeps, type BuildsUseCases, type BuildRefusedError, type Core, type SandboxCheck, type SandboxPort, type SandboxRunRequest, type SandboxRunResult, type TicketStorePort, type UnattendedBuildSetup, type VcsCheck, type VcsHead, type VcsPort } from '../src/index.js';
 import type { createStarter } from '../src/build-start.js';
 import { openTestCore, tempDir, unusedCatalogParts } from './helpers.js';
@@ -303,6 +303,7 @@ export async function harness({
   ticketList,
   devTools,
   remote,
+  localOnly = {},
 }: {
   pieces?: readonly string[];
   trusted?: boolean;
@@ -313,6 +314,8 @@ export async function harness({
   devTools?: { deniedReadPathsFor: (workspaceId: WorkspaceId) => Promise<string[]> };
   /** The remote-build capability (CAP-24, epic 19 story 19.6); default: absent, exactly as before this story (no ripple). */
   remote?: BuildsDeps['remote'];
+  /** Agents tied to this computer (27.9): each id with its `localOnly` reason, as the chat agents list says it. Default: none. */
+  localOnly?: Readonly<Record<string, string>>;
 } = {}): Promise<Harness> {
   const dataDir = tempDir('ogden-agents-builds-data-');
   const repo = tempDir('ogden-agents-builds-repo-');
@@ -362,7 +365,7 @@ export async function harness({
     sandbox: fakeSandbox(() => (sandbox.available ? { available: true, kind: 'test' } : { available: false, reason: 'none' }), rerun),
     runner,
     chat: {
-      chatAgents: async () => ({ agents: [], defaultAgentId: 'claude-code' }),
+      chatAgents: async () => ({ agents: Object.entries(localOnly).map(([agentId, reason]) => ({ agentId, localOnly: reason }) as unknown as ChatAgent), defaultAgentId: 'claude-code' }),
       createChatSession: async (wsId, options) => core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat', ...(options?.autoTitle === undefined ? {} : { autoTitle: options.autoTitle }) }),
       sendMessage: (_wsId, sessionId, text, options) => {
         if (options?.build !== true) throw new Error('a build session takes only the build prompt');

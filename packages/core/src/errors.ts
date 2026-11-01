@@ -23,6 +23,8 @@ import {
   STATUS_NOT_ALLOWED_MESSAGE,
   TICKET_CHANGED_MESSAGE,
   REOPEN_NOT_CONFIRMED_MESSAGE,
+  WORKTREE_PUT_AWAY_SEND_MESSAGE,
+  type RestoreFailedReason,
   type BmadCapability,
   type BmadSetupFailureReason,
   type DispatchRefusalReason,
@@ -364,6 +366,14 @@ export class InvalidOperationError extends CoreError {
     super('invalid_operation', message);
   }
 }
+
+/**
+ * A remote chat refused for an agent tied to this computer (epic 27, 27.5):
+ * created with a machine, or handed to such an agent. `invalid_operation`
+ * with the agent's own `localOnlyReason`; nothing was made and no connection
+ * was opened. The REST layer answers it 409 (the chat's state refuses it).
+ */
+export class LocalOnlyAgentError extends InvalidOperationError {}
 
 /**
  * A session event was refused: it was appended around the session-event
@@ -789,6 +799,61 @@ export class EditorUnavailableError extends CoreError {
   override readonly name = 'EditorUnavailableError';
   constructor(message: string) {
     super('editor_unavailable', message);
+  }
+}
+
+/**
+ * Delete chat and Delete history (27.3): a chat's own worktree has
+ * uncommitted changes (or its state can't be read) and the request didn't
+ * say `discardUncommitted`. 409 `uncommitted_changes`; nothing was deleted.
+ */
+export class UncommittedChangesError extends CoreError {
+  override readonly name = 'UncommittedChangesError';
+  constructor(message: string) {
+    super('uncommitted_changes', message);
+  }
+}
+
+/**
+ * Hand off (CAP-35, epic 27): the place the chat moves to has its own
+ * uncommitted changes to `files` of the same files. 409 `handoff_conflict`;
+ * nothing moved.
+ */
+export class HandOffConflictError extends CoreError {
+  override readonly name = 'HandOffConflictError';
+  constructor(
+    message: string,
+    readonly files: number,
+  ) {
+    super('handoff_conflict', message);
+  }
+}
+
+/**
+ * Restore (CAP-35, epic 27): a put-away chat worktree could not be brought
+ * back. 409 `restore_failed`; the saved changes are kept.
+ */
+export class RestoreFailedError extends CoreError {
+  override readonly name = 'RestoreFailedError';
+  constructor(
+    message: string,
+    readonly reason: RestoreFailedReason,
+    /** The chat's branch, for the reason's sentence (`branch_missing`, `branch_moved`). */
+    readonly branch?: string,
+  ) {
+    super('restore_failed', message);
+  }
+}
+
+/**
+ * Retention (CAP-35, 27.6): the chat's copy is put away, or being put away,
+ * so no message starts and it doesn't move (27.4). 409 `worktree_put_away`;
+ * nothing was sent or moved.
+ */
+export class WorktreePutAwayError extends CoreError {
+  override readonly name = 'WorktreePutAwayError';
+  constructor(message: string = WORKTREE_PUT_AWAY_SEND_MESSAGE) {
+    super('worktree_put_away', message);
   }
 }
 

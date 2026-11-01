@@ -16,8 +16,9 @@
  *   (so on POSIX a bare name the command runs in turn, `node` behind npm's
  *   shim, is never one planted in the project; Windows also looks in the
  *   working folder, logged in `deferred-work.md`; `program-launch.ts`,
- *   8.12): never
- *   `process.env`, never a key;
+ *   8.12): never `process.env`, never a key;
+ *   a worktree copy's setup (27.7) adds `PORT` and nothing else, its value
+ *   a decimal in `WORKTREE_PORT_RANGE` (any other name or value is refused);
  * - stdout and stderr together keep only their last
  *   `PROJECT_COMMAND_OUTPUT_MAX_BYTES` (`truncated` past it);
  * - Stop, the time limit and `close()` kill the whole tree
@@ -29,7 +30,7 @@
  */
 import { spawn } from 'node:child_process';
 import { argvShellRefusal, type ProjectCommandExit, type ProjectCommandProcess, type ProjectCommandRunner } from '@ogden-agents/core';
-import { PROJECT_COMMAND_MAX_RUN_MS, PROJECT_COMMAND_OUTPUT_MAX_BYTES, PROJECT_COMMAND_REFUSALS } from '@ogden-agents/shared';
+import { isWorktreePort, PROJECT_COMMAND_MAX_RUN_MS, PROJECT_COMMAND_OUTPUT_MAX_BYTES, PROJECT_COMMAND_REFUSALS, WORKTREE_PORT_ENV } from '@ogden-agents/shared';
 import { findProgram } from '../acp-base/linked-command.js';
 import { baseEnvironment } from '../child-env.js';
 import { withAbsolutePath } from '../program-launch.js';
@@ -83,6 +84,21 @@ function tail(max: number) {
   };
 }
 
+/** What a start with an environment other than a worktree's `PORT` says. */
+const ENV_REFUSED_TEXT = 'Ogden gives a command only PORT, a worktree port.';
+
+/** The extra environment as given: `{}`, `{ PORT }` with a port in the range, or `undefined` when refused. */
+function extraEnvOf(env: unknown): Record<string, string> | undefined {
+  if (env === undefined) return {};
+  if (env === null || typeof env !== 'object') return undefined;
+  const entries = Object.entries(env as Record<string, unknown>);
+  if (entries.length === 0) return {};
+  if (entries.length !== 1 || entries[0]![0] !== WORKTREE_PORT_ENV) return undefined;
+  const value = entries[0]![1];
+  if (typeof value !== 'string' || !/^[1-9][0-9]{0,4}$/.test(value) || !isWorktreePort(Number(value))) return undefined;
+  return { [WORKTREE_PORT_ENV]: value };
+}
+
 /** A process that never started: settled at once with its plain reason. */
 function notStarted(error: string): ProjectCommandProcess {
   return { done: Promise.resolve({ exitCode: null, stopped: false, error }), stop: () => {}, output: () => ({ text: '', truncated: false }) };
@@ -100,14 +116,16 @@ export function createProjectCommandsNode(options: ProjectCommandsNodeOptions = 
   const killNow = new Map<ProjectCommandProcess, () => void>();
 
   return {
-    start({ cwd, argv }) {
+    start({ cwd, argv, env: extra }) {
       if (closed) return notStarted(CLOSED_TEXT);
+      const added = extraEnvOf(extra);
+      if (added === undefined) return notStarted(ENV_REFUSED_TEXT);
       const refusal = argvShellRefusal(argv);
       if (refusal !== undefined) return notStarted(PROJECT_COMMAND_REFUSALS[refusal]);
       const from = source();
       const found = findProgram(argv[0]!, from, { platform });
       if (!found.ok) return notStarted(found.reason);
-      const env: Record<string, string> = { ...withAbsolutePath(baseEnvironment(from, platform), platform), CI: '1', NO_COLOR: '1', FORCE_COLOR: '0' };
+      const env: Record<string, string> = { ...withAbsolutePath(baseEnvironment(from, platform), platform), CI: '1', NO_COLOR: '1', FORCE_COLOR: '0', ...added };
       const args = argv.slice(1);
       const output = tail(maxOutputBytes);
 

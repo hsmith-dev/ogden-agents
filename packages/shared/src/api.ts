@@ -42,8 +42,9 @@ export const API_ROUTES = {
   /** `GET` → `{ workspace }` (`WorkspaceResponse`; 2.5); 404 if there is no such workspace. */
   workspace: `${API_BASE}/workspaces/:wsId`,
   /**
-   * `DELETE` → `HistoryDeletedResponse` (2.5): deletes the workspace's
-   * events, sessions and runs; the workspace stays. Appends `workspace.history_deleted`.
+   * `DELETE` (body optional `DeleteChatRequest`, 27.3) → `HistoryDeletedResponse` (2.5): deletes the workspace's
+   * events, sessions and runs, and its chats' own worktrees (branches with commits kept); the workspace stays.
+   * Appends `workspace.history_deleted`. 409 `uncommitted_changes` as Delete chat.
    */
   workspaceHistory: `${API_BASE}/workspaces/:wsId/history`,
   /**
@@ -70,6 +71,14 @@ export const API_ROUTES = {
   /**
    * `GET` → `{ session, terminal }`: one session of the workspace, and whether
    * its terminal can work (story 3.2); 404 if it is another workspace's.
+   * `DELETE` (body optional `DeleteChatRequest`) → `ChatDeletedResponse`
+   * (Delete chat, 27.3): the chat, its events and, for a worktree chat, its
+   * copy (the branch kept when it has commits); appends
+   * `workspace.chat_deleted`. 409 `agent_mid_turn` while it works, waits, is
+   * busy or the terminal drives it; `uncommitted_changes` when its copy has
+   * uncommitted changes and the body doesn't say `discardUncommitted`;
+   * `invalid_operation` for a build or planning session or a chat an
+   * orchestration run names.
    */
   workspaceSession: `${API_BASE}/workspaces/:wsId/sessions/:sesId`,
   /**
@@ -563,6 +572,66 @@ export const API_ROUTES = {
   workspaceProjectCommandRunStop: `${API_BASE}/workspaces/:wsId/project-command-runs/:runId/stop`,
   /** `GET` → `EditorsResponse` (AD-39; 8.10): the editors found on this computer. `PUT SetEditorRequest` → `EditorsResponse`: the editor files open in (409 `editor_unavailable` when not found). */
   editors: `${API_BASE}/editors`,
+  // Where work runs (CAP-35; epic 27 entry 2's contract): each is behind the gate only (AD-15), on no
+  // paired-device allowlist (AD-34), not a BMad piece, and answers 501 `not_implemented` until its lane wires it.
+  // A worktree's port has no route of its own: `SessionLocation.port` carries it (27.7).
+  /**
+   * `GET` → `SessionLocationResponse` (27.3 to 27.5): where the chat works,
+   * no path. `POST HandOffRequest` → `HandOffResponse` (27.4): moves an idle
+   * chat and its uncommitted changes between this folder and its own
+   * worktree, appending `session.location_changed`. 409 `agent_mid_turn`,
+   * `handoff_conflict`, `invalid_operation`.
+   */
+  sessionLocation: `${API_BASE}/workspaces/:wsId/sessions/:sesId/location`,
+  /**
+   * `POST` → `RestoreWorktreeResponse` (27.6): brings back a put-away chat
+   * worktree with its saved changes, appending `session.worktree_restored`:
+   * on its branch, at a newer commit when the branch only moved forward and
+   * the changes apply cleanly, else on a new branch `…-restored` at the saved
+   * commit (`session.location_changed` too; user decision 2026-11-01).
+   * 409 `restore_failed` (the changes are kept),
+   * `invalid_operation` for a chat with nothing put away.
+   */
+  sessionWorktreeRestore: `${API_BASE}/workspaces/:wsId/sessions/:sesId/worktree/restore`,
+  /**
+   * `GET` → `CopyIgnoredFilesResponse` (user decision 2026-11-01): the
+   * ignored files in a local worktree chat's copy that removing it (Move to
+   * this folder, Delete chat) would lose, names only, never contents,
+   * without rebuildable folders (`REBUILDABLE_IGNORED_FOLDERS`), the first
+   * `IGNORED_FILES_SHOWN` and how many more (`no-store`). Any other chat
+   * answers none.
+   */
+  sessionWorktreeIgnoredFiles: `${API_BASE}/workspaces/:wsId/sessions/:sesId/worktree/ignored-files`,
+  /** `GET` → `PutAwayWorktreesResponse` (27.6): the project's put-away chat worktrees, newest first (`no-store`). */
+  workspacePutAwayWorktrees: `${API_BASE}/workspaces/:wsId/worktrees/put-away`,
+  /**
+   * `GET` → `WorktreeRetentionSetting`; `PUT WorktreeRetentionSetting` → the
+   * same (27.6): the install's cap over every project's chat worktrees
+   * (default `WORKTREE_RETENTION_DEFAULT`), appending
+   * `settings.worktree_retention_changed`. 400 outside 1 to 100.
+   */
+  worktreeRetention: `${API_BASE}/settings/worktree-retention`,
+  /**
+   * `POST CreateTrialRequest` → 201 `TrialResponse` (27.8): one worktree
+   * chat per agent, each sent the task, appending `workspace.trial_started`.
+   * 400 for fewer than 2, more than 4 or a repeated agent, or a `machineId`
+   * (a trial is local only); 409 `invalid_operation` naming an agent that
+   * can't start a chat now or isn't on this install (nothing made).
+   * `GET` → `TrialsResponse`: the project's trials, newest first (`no-store`).
+   */
+  workspaceTrials: `${API_BASE}/workspaces/:wsId/trials`,
+  /** `GET` → `TrialResponse` (27.8). 404 for an unknown trial. */
+  workspaceTrial: `${API_BASE}/workspaces/:wsId/trials/:tryId`,
+  /**
+   * `POST KeepTrialRequest` → `TrialResponse` (27.8): keeps one chat and
+   * puts the others' copies away (`not_kept`, restorable) or, with
+   * `others: 'delete'`, deletes them (27.3), appending `workspace.trial_kept`;
+   * one that can't go safely stays (`left`). Nothing is merged. 409
+   * `agent_mid_turn` while another works, waits or is terminal-driven;
+   * `uncommitted_changes` deleting a changed copy not named in `discard`;
+   * `invalid_operation` once kept (nothing changed).
+   */
+  workspaceTrialKeep: `${API_BASE}/workspaces/:wsId/trials/:tryId/keep`,
   /**
    * `POST StartBuildRequest` → 201 `BuildResponse` (story 5.2): builds one
    * ticket unattended in its own worktree and `build` session; `{ all: true }`

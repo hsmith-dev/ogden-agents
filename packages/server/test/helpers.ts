@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMemoryAgentSetup, createMemoryAppShortcut, createMemoryBmadCatalog, createMemoryBmadSource, createMemoryNotifier, createMemorySecretStore, createMemoryTicketStore } from '@ogden-agents/adapters';
+import { createMemoryAgentSetup, createMemoryAppShortcut, createMemoryBmadCatalog, createMemoryBmadSource, createMemoryNotifier, createMemoryPortProbe, createMemorySecretStore, createMemoryTicketStore } from '@ogden-agents/adapters';
 import { createAgentRegistry, createAgentSetup, createBmadSource, createBoard, createChat, createNewProjectDefaults, createOnboarding, createPlanning, type AgentDescriptor, type AgentPort, type Core, type RegisteredAgent } from '@ogden-agents/core';
 import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
@@ -137,6 +137,9 @@ export async function startTestServer(options: StartOptions & { lines?: string[]
     secrets: createMemorySecretStore(),
     // Webhooks are sent to a recorder, never over the network (story 11.4).
     notifier: createMemoryNotifier(),
+    // A worktree chat's port (27.7) from a probe that never touches the network, so parallel test files never race
+    // for a real port; a test of the real probe passes `portProbe: createPortProbeNode()`.
+    portProbe: createMemoryPortProbe(),
     verifyApiKey: async () => 'ok',
     // The pinned BMad Method as already downloaded (story 4.14), so no test reaches GitHub; a test of the
     // download itself passes its own source, or `bmadFetch` for the real adapter.

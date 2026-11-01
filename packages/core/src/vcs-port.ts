@@ -10,7 +10,7 @@
  * revision and path passed is core's own (validated before use), never
  * request input.
  */
-import type { ChangedFile, ChangesView, DiffHunk, DiffStats, HunkAction } from '@ogden-agents/shared';
+import type { ChangedFile, ChangesView, DiffHunk, DiffStats, HunkAction, RestoredOn } from '@ogden-agents/shared';
 import { CoreError } from './errors.js';
 
 /** The main checkout's current branch and its commit. */
@@ -41,12 +41,27 @@ export interface VcsWorktreeGitPaths {
  */
 export type VcsCheck = { ok: true; version: string } | { ok: false; reason: 'missing' } | { ok: false; reason: 'too_old'; version: string };
 
-/** How a run's worktree is removed (story 5.5). */
+/** How a run's or a chat's worktree is removed (story 5.5; chat worktrees 27.3). */
 export interface RemoveWorktreeOptions {
-  /** Its branch too (one Ogden made, `ogden/…`; any other name is refused). */
+  /**
+   * Its branch too (one Ogden made: a run's `ogden/<run8>/…` for a folder in
+   * the runs' worktrees folder, a chat's `ogden/chat/<ses_…>` for one in
+   * `<data>/cw`; any other name is refused).
+   */
   deleteBranch?: string | undefined;
-  /** Delete that branch only when it is merged into the checked-out branch (an approved run's). */
+  /** Delete that branch only when it is merged into the checked-out branch (an approved run's, a deleted chat's). */
   mergedOnly?: boolean | undefined;
+  /**
+   * With `mergedOnly`: a branch git won't delete because it has commits of
+   * its own is kept and reported (`branchKept: true`), not thrown (Delete
+   * chat, 27.3: committed work is never lost).
+   */
+  keepUnmerged?: boolean | undefined;
+}
+
+/** What a removal did: whether the branch asked to go was kept (`keepUnmerged`). */
+export interface RemovedWorktree {
+  branchKept: boolean;
 }
 
 /** A branch's changes against where it started. */
@@ -78,18 +93,25 @@ export interface VcsPort {
   staged(repoPath: string): Promise<string[]>;
   /** Puts `paths` (repo-relative) back as `HEAD` has them, in the index and the working tree. */
   restore(repoPath: string, paths: readonly string[]): Promise<void>;
-  /** Creates `path` (which must not exist) as a worktree on a new `branch` started at `base`. */
-  addWorktree(repoPath: string, input: { path: string; branch: string; base: string }): Promise<void>;
+  /**
+   * Creates `path` (which must not exist) as a worktree on a new `branch`
+   * started at `base`; with `existingBranch` (a chat's kept branch moved to
+   * a worktree again, 27.4), on that branch as it is (`base` unused).
+   */
+  addWorktree(repoPath: string, input: { path: string; branch: string; base: string; existingBranch?: boolean | undefined }): Promise<void>;
   /** The worktree's git folders, for its branch `branch` (one of the form `<prefix>/<folder>/<name>`). */
   worktreeGitPaths(worktreePath: string, branch: string): Promise<VcsWorktreeGitPaths>;
   /**
-   * Removes the run's worktree at `path` (forced: its own changes go with
-   * it) and only its own metadata in the repo (never a prune of others);
-   * with `deleteBranch`, that branch too. Missing is fine. The adapter
-   * refuses a `path` outside the folder it was given for worktrees, and
-   * never follows a link there (story 5.5).
+   * Removes the run's or the chat's worktree at `path` (forced: its own
+   * changes go with it) and only its own metadata in the repo (never a
+   * prune of others); with `deleteBranch`, that branch too. Missing is
+   * fine. The adapter refuses a `path` outside the folders it was given for
+   * worktrees (the runs' `<data>/w`, chats' `<data>/cw`), and never follows
+   * a link there: a link in its place is unlinked, its target untouched
+   * (story 5.5; 27.3). Answers whether the branch was kept (`keepUnmerged`),
+   * or nothing (an adapter from before 27.3: never kept).
    */
-  removeWorktree(repoPath: string, path: string, options?: RemoveWorktreeOptions): Promise<void>;
+  removeWorktree(repoPath: string, path: string, options?: RemoveWorktreeOptions): Promise<RemovedWorktree | void>;
   /** The paths with uncommitted changes (staged, unstaged or untracked), repo-relative, `/`-separated. */
   status(repoPath: string): Promise<string[]>;
   /** `branch`'s changes since `base`. */
@@ -229,6 +251,16 @@ export interface VcsFolder {
 export interface VcsWorkingTreePort {
   /** The view's changed files. */
   changedFiles(folder: VcsFolder, target: VcsChangesTarget): Promise<VcsChangedFiles>;
+  /**
+   * The folder's ignored files (user decision 2026-11-01: listed before a
+   * chat's copy is removed), names only and never their contents, sorted:
+   * a folder an ignore rule matches is one `dir/` entry, nothing in it
+   * listed; paths
+   * in or of a rebuildable folder (`isRebuildableIgnoredPath`) left out.
+   * The first `limit` and how many more. No names when the folder is in no
+   * repository. Absent: none can be listed.
+   */
+  ignoredFiles?(folder: VcsFolder, options: { limit: number }): Promise<{ files: string[]; more: number }>;
   /** One file's diff in the view (no hunks when it is binary or over `MAX_DIFF_FILE_BYTES`), or `undefined` when it has no change there. */
   fileDiff(folder: VcsFolder, target: VcsChangesTarget, path: string): Promise<{ file: ChangedFile; hunks: DiffHunk[] } | undefined>;
   /**
@@ -251,6 +283,101 @@ export interface VcsWorkingTreePort {
   commitAll(folder: VcsFolder, message: string): Promise<{ revision: string; files: number } | 'nothing'>;
 }
 
+/**
+ * What putting a chat worktree away saved (27.6): the snapshot of its
+ * uncommitted changes, tracked and untracked, not ignored (`null` when it
+ * had none), the branch's commit it was taken on, and how many files it
+ * holds.
+ */
+export interface VcsPutAway {
+  snapshotTree: string | null;
+  head: string;
+  files: number;
+}
+
+/**
+ * What Restore did (user decision 2026-11-01): the copy is back on `branch`,
+ * `on` its saved commit (`saved`), at the branch's newer commit (`newer`:
+ * the branch only moved forward and the saved changes applied cleanly), or
+ * on a new branch at the saved commit because the branch moved otherwise
+ * (or the changes didn't apply: `moved`) or is gone (`gone`). `path_taken`
+ * (something else is at the copy's path) changes nothing, and the snapshot
+ * stays kept.
+ */
+export type VcsRestoreResult = { branch: string; on: RestoredOn } | 'path_taken';
+
+/**
+ * What moving uncommitted changes did: `conflict` (the target has its own
+ * changes to `files` of the same files, or the changes don't apply there)
+ * moves nothing. `moved`: the target holds all `files`; `leftBehind` of
+ * them still differ from `HEAD` in the source (it couldn't be cleaned, or
+ * changed meanwhile), never thrown. `snapshots` are both folders' trees in
+ * AD-37's store, taken before anything moved (for the log; never a path);
+ * a thrown `VcsError` after them carries them in `details.snapshots`.
+ */
+export interface VcsMoveChanges {
+  result: 'moved' | 'conflict';
+  files: number;
+  leftBehind: number;
+  snapshots: { from: string; to: string };
+}
+
+/**
+ * The chat-worktree half of the VCS port (CAP-35; epic 27 entry 2's
+ * contract, 27.4 and 27.6 build it on git): kept apart from {@link VcsPort}
+ * and {@link VcsWorkingTreePort} so their adapters and fakes are untouched.
+ * `repoPath` is the workspace's stored real path; every worktree path is a
+ * chat's own, in Ogden's data directory, and every branch is
+ * `ogden/chat/<ses_…>`, both core's (never request input). Snapshots are
+ * tree objects in AD-37's snapshot store in the data directory, never a
+ * commit, a ref or the repo's own object store. Core calls none of these
+ * while an agent works or waits in either folder. AD-17's protections hold
+ * (no hook, serialized with the repo's other git work, never pushed).
+ */
+export interface VcsChatWorktreePort {
+  /**
+   * Retention (AD-17 CAP-33 note's exception, user decision 2026-11-01;
+   * 27.6): snapshots the worktree's uncommitted changes (tracked and
+   * untracked, not ignored) into the store, every changed object copied
+   * there, and removes nothing (core removes the folder through
+   * `VcsPort.removeWorktree` once the record is written). Refuses
+   * (`VcsError`) a copy whose HEAD isn't `branch`, with a merge, rebase,
+   * cherry-pick or revert in progress, or whose snapshot holds a submodule
+   * or a nested repository (a gitlink).
+   */
+  saveForPutAway(repoPath: string, worktreePath: string, branch: string): Promise<VcsPutAway>;
+  /**
+   * Restore: adds the worktree back at `path` on `branch` (git's record of
+   * a copy whose folder is gone is replaced) and writes `snapshotTree`'s
+   * files over the branch's commit, deletions too, through a temporary
+   * index; the real index stays at the commit, so tracked edits come back
+   * unstaged. Verified by a fresh snapshot. A copy still at `path` on its
+   * branch (half put away) gets the snapshot in place. When the branch is
+   * no longer at `head` (user decision 2026-11-01): if `head` is an
+   * ancestor of its tip and the saved changes merge with the newer commits
+   * without a conflict, the copy comes back at the tip with them; otherwise,
+   * or when the branch is gone, on a new branch `newBranch` (`-2`, `-3`, …
+   * when taken) made at `head`. Never overwrites or discards: an attempt at
+   * the tip that fails partway is rolled back (the copy it made removed)
+   * before the new branch is tried, and a new branch that fails is removed
+   * with its copy.
+   */
+  restore(repoPath: string, input: { path: string; branch: string; head: string; snapshotTree: string | null; newBranch: string }): Promise<VcsRestoreResult>;
+  /**
+   * Hand off (user decision 2026-11-01; 27.4): moves the uncommitted
+   * changes (staged, unstaged and untracked) from the folder `from` to the
+   * folder `to` (the project folder, or the chat's worktree with its pin),
+   * all or nothing: both are snapshotted first, the changes are applied to
+   * `to` (checked first), then taken from `from`; they arrive unstaged.
+   * `conflict` when `to` has its own changes to any of the same files or
+   * they don't apply there. Once `to` holds them they are never undone (the
+   * source is cleaned best effort, `leftBehind` counted). A throw leaves
+   * `from` holding its changes; its `details` carry `snapshots` and, when
+   * writing `to` failed partway, `targetClean` (whether `to` reads as before).
+   */
+  moveChanges(repoPath: string, input: { from: VcsFolder; to: VcsFolder }): Promise<VcsMoveChanges>;
+}
+
 /** A git operation failed; `message` is plain words, `details` are for the log and hold no secret. */
 export class VcsError extends CoreError {
   override readonly name = 'VcsError';
@@ -260,4 +387,34 @@ export class VcsError extends CoreError {
   ) {
     super('vcs_failed', message);
   }
+}
+
+/** One project's snapshots as cleanup sees them: its folder and the trees to keep (`null`: keep all, the project is busy). */
+export interface VcsSnapshotStoreEntry {
+  folder: string;
+  keep: readonly string[] | null;
+}
+
+/** What a snapshot cleanup removed. */
+export interface VcsSnapshotPruned {
+  objects: number;
+  stores: number;
+  temporary: number;
+  /** Stores (or the snapshots folder) left whole because they were a link, or a project couldn't be read: for the log. */
+  refused: number;
+}
+
+/**
+ * Cleans AD-37's snapshot store (27.6): in each project's store, the loose
+ * objects no kept tree reaches and older than `olderThanMs` (packs are
+ * left), one store at a time whatever number of projects share it (their
+ * keep lists joined, all kept when any is `null`); a store no project maps
+ * to, whole, only when every project's folder was read and it holds none of
+ * `protect` (every put-away copy's tree of the install); files in the store's `tmp` older than `olderThanMs`.
+ * Only regular files and empty folders under a real snapshots folder are
+ * removed, never through a link; the repos' own objects, refs and index
+ * are never touched.
+ */
+export interface VcsSnapshotStorePort {
+  pruneSnapshots(entries: readonly VcsSnapshotStoreEntry[], options: { olderThanMs: number; protect?: readonly string[] | undefined }): Promise<VcsSnapshotPruned>;
 }

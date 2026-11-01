@@ -4,7 +4,7 @@
  * precedence rule reads (story 9.2). The test-only switches moved to
  * `test-hooks.ts` (story 10.8) and are re-exported here.
  */
-import { ANTIGRAVITY_DESCRIPTOR, baseEnvironment, CLAUDE_CODE_DESCRIPTOR, CODEX_DESCRIPTOR, GROK_DESCRIPTOR } from '@ogden-agents/adapters';
+import { ANTIGRAVITY_DESCRIPTOR, baseEnvironment, CLAUDE_CODE_DESCRIPTOR, CODEX_DESCRIPTOR, GROK_DESCRIPTOR, withAbsolutePath } from '@ogden-agents/adapters';
 import { agentEnvKeys } from '@ogden-agents/core';
 
 // The test-only switches live with every other test hook; re-exported so imports stay the same (story 10.8).
@@ -48,12 +48,19 @@ export function withoutAgentKeys(env: Readonly<Record<string, string>>, names: r
  * (`child-env.ts`: what a CLI needs to run as the user), and nothing else of
  * this server's environment. Agent keys are added only by core's precedence
  * rule (story 9.2), each to its own agent's process. Never logged.
+ *
+ * Its `PATH` keeps only absolute folders, by the launch rule
+ * (`program-launch.ts`, 8.12; 27.9): an empty or relative entry means the
+ * working folder, the project or the chat's copy, so a bare name the agent
+ * runs there could be a program planted in the repo. The git and sandbox
+ * processes built from it get the same. The user's own terminal panes keep
+ * their `PATH` as it is (`paneEnvironment`), by the user's decision.
  */
 export function agentEnvironment(
   source: Readonly<Record<string, string | undefined>> = process.env,
   platform: NodeJS.Platform = process.platform,
 ): Record<string, string> {
-  return baseEnvironment(source, platform);
+  return withAbsolutePath(baseEnvironment(source, platform), platform);
 }
 
 /**

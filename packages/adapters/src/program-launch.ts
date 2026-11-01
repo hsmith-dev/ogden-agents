@@ -48,7 +48,10 @@ export function withAbsolutePath(env: Readonly<Record<string, string>>, platform
   const out: Record<string, string> = { ...env };
   for (const key of Object.keys(out)) {
     if (win ? key.toUpperCase() !== 'PATH' : key !== 'PATH') continue;
-    out[key] = absolutePathFolders(out[key], platform).join(win ? ';' : ':');
+    const folders = absolutePathFolders(out[key], platform);
+    // No folder left: no PATH at all (an empty one reads as the working folder to execvp and POSIX shells).
+    if (folders.length === 0) delete out[key];
+    else out[key] = folders.join(win ? ';' : ':');
   }
   return out;
 }

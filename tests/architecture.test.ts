@@ -1206,3 +1206,53 @@ describe('epic 8 entry 2: Workbench paths are workspace-relative and no git runs
     ]);
   });
 });
+
+/** Every server file that registers routes or sockets, subfolders included: `*-route.ts`, `*-routes.ts`, `routes.ts`, `*-socket.ts` and `app.ts` (epic 27 entry 2). */
+const SERVER_ROUTE_FILE = /(^|[\\/])packages[\\/]server[\\/]src[\\/](?:[^\\/]+[\\/])*(?:[^\\/]+-routes?|routes|[^\\/]+-socket|app)\.ts$/;
+
+/** One message per child_process load or git command in a server route file: routes reach git only through core's VCS ports. */
+export function findServerRouteProcessViolations(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    const file = path.split('\\').join('/');
+    if (!SERVER_ROUTE_FILE.test(file)) continue;
+    const code = withoutComments(source);
+    if (CHILD_PROCESS.test(code)) violations.push(`${file}: loads child_process (AD-3: a route runs no process; adapters do)`);
+    if (GIT_COMMAND.test(code)) violations.push(`${file}: names a git command (AD-17, AD-37: git runs only behind VcsPort)`);
+    GIT_COMMAND.lastIndex = 0;
+  }
+  return violations;
+}
+
+describe('epic 27 entry 2: no server route file runs git', () => {
+  it('every server route file and app.ts load no child_process and name no git command', () => {
+    const files = loadWorkspaceSources();
+    const routes = files.filter((file) => SERVER_ROUTE_FILE.test(file.path.split('\\').join('/')));
+    expect(routes.length).toBeGreaterThan(20);
+    const scanned = routes.map((file) => file.path.split('\\').join('/'));
+    for (const name of ['where-work-runs-routes.ts', 'local-endpoint-models-route.ts', 'update-notice/routes.ts', 'event-socket.ts', 'pane-socket.ts', 'terminal-socket.ts', 'app.ts']) {
+      expect(scanned.some((path) => path.endsWith(`packages/server/src/${name}`)), name).toBe(true);
+    }
+    expect(findServerRouteProcessViolations(files)).toEqual([]);
+  });
+
+  it('flags a planted git command or child_process load in any route or socket file (subfolders too) or app.ts, but not a comment, a log line or another file', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/x-routes.ts', source: "await run('git status');" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/build-routes.ts', source: "execFile('git', []);" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/app.ts', source: "import { spawn } from 'node:child_process';" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/chat-routes.ts', source: "// git failed\nlog.warn('a version control operation failed');\nconst folder = '.git';" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/start.ts', source: "import { spawn } from 'node:child_process';" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/nested/y-routes.ts', source: "run('git diff');" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/z-socket.ts', source: "run('git log');" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/vcs-git/index.ts', source: "execFile('git', ['diff']);" },
+    ];
+    expect(findServerRouteProcessViolations(files)).toEqual([
+      'packages/server/src/x-routes.ts: names a git command (AD-17, AD-37: git runs only behind VcsPort)',
+      'packages/server/src/build-routes.ts: names a git command (AD-17, AD-37: git runs only behind VcsPort)',
+      'packages/server/src/app.ts: loads child_process (AD-3: a route runs no process; adapters do)',
+      'packages/server/src/nested/y-routes.ts: names a git command (AD-17, AD-37: git runs only behind VcsPort)',
+      'packages/server/src/z-socket.ts: names a git command (AD-17, AD-37: git runs only behind VcsPort)',
+    ]);
+  });
+});

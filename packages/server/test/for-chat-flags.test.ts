@@ -7,7 +7,7 @@
  * test (`chat-remote.test.ts`) gives the port straight to the chat; this one
  * goes through the real wrapper the started server builds.
  */
-import { createLocalAgent, LOCAL_ATTENDED_ONLY_REASON, LOCAL_ONLY_REASON } from '@ogden-agents/adapters';
+import { createCustomAgent, createLocalAgent, CUSTOM_AGENT_LOCAL_ONLY_REASON, customAgentDescriptor, LOCAL_ATTENDED_ONLY_REASON, LOCAL_ONLY_REASON } from '@ogden-agents/adapters';
 import type { AgentPort } from '@ogden-agents/core';
 import { describe, expect, it, vi } from 'vitest';
 import { startTestServer, tempDataDir } from './helpers.js';
@@ -52,5 +52,8 @@ describe("the server's chat wrapper keeps what Build and the remote check read o
     expect(local.localOnlyReason).toBe(LOCAL_ONLY_REASON);
     expect(local.attendedOnlyReason).toBe(LOCAL_ATTENDED_ONLY_REASON);
     expect(local.unattendedBuild).not.toBe(true);
+    // An agent you add yourself keeps its own too (27.5): a remote chat with it is refused before any connection.
+    const custom = forChat('custom-mine', createCustomAgent({ descriptor: customAgentDescriptor({ agentId: 'custom-mine', displayName: 'Mine' }), commandLine: 'mine --acp' }));
+    expect(custom.localOnlyReason).toBe(CUSTOM_AGENT_LOCAL_ONLY_REASON);
   });
 });

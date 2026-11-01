@@ -73,23 +73,33 @@ export interface StartedChat {
 }
 
 /**
+ * The connected tab `page`'s own REST client: `method path body` with its
+ * token, the way the app's client calls; a non-2xx answer throws with its body.
+ */
+export async function tabRest(page: Page): Promise<<T = Record<string, { id: string }>>(method: string, path: string, body?: unknown) => Promise<T>> {
+  const origin = new URL(page.url()).origin;
+  const token = await storedToken(page);
+  if (token === null) throw new Error('the page has no tab token; connect it first');
+  return async <T,>(method: string, path: string, body?: unknown): Promise<T> => {
+    const response = await fetch(`${origin}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${token}`, origin, 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    if (!response.ok) throw new Error(`${method} ${path} returned ${response.status}: ${await response.text()}`);
+    return (await response.json()) as T;
+  };
+}
+
+/**
  * Opens the project at `repo` and starts a chat in it through the REST API,
  * with the token of the connected tab `page`, then opens the chat there and
  * waits for it to be idle.
  */
 export async function startChat(page: Page, repo: string): Promise<StartedChat> {
   const origin = new URL(page.url()).origin;
-  const token = await storedToken(page);
-  if (token === null) throw new Error('the page has no tab token; connect it first');
-  const post = async (path: string, body: unknown) => {
-    const response = await fetch(`${origin}${path}`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, origin, 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) throw new Error(`POST ${path} returned ${response.status}: ${await response.text()}`);
-    return response.json() as Promise<Record<string, { id: string }>>;
-  };
+  const call = await tabRest(page);
+  const post = (path: string, body: unknown) => call('POST', path, body);
   const wsId = (await post(API_ROUTES.workspaces, { path: repo })).workspace!.id;
   const sesId = (await post(apiPath(API_ROUTES.workspaceSessions, { wsId }), { kind: 'chat' })).session!.id;
   const url = `${origin}/w/${wsId}/s/${sesId}`;

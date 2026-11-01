@@ -7,7 +7,7 @@
  */
 import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
 import { createMemoryEditorLauncher, createMemoryProjectCommandRunner, createMemoryVcsWorkingTree, createMemoryWorkspaceFiles, createWorkspaceFilesNode } from '../src/index.js';
 
@@ -57,6 +57,41 @@ describe('workspace-files-node: a chat worktree root (epic 8 entry 2)', () => {
       expect(await port.read(root, 'ogden.db', 'chat_worktree'), root).toEqual(PROTECTED);
       expect(await port.locate!(root, 'ogden.db', 'chat_worktree'), root).toEqual(PROTECTED);
     }
+  });
+
+  it("with the chat worktrees' folder given, refuses a root elsewhere in the data folder or that folder itself (27.9)", async () => {
+    const { home, dataDir } = setup();
+    const copies = join(dataDir, 'cw');
+    const copy = join(copies, 'abcdefgh');
+    write(copy, { 'src/b.ts': 'export const b = 2;\n' });
+    const port = createWorkspaceFilesNode({ home, dataDir, chatWorktreesRoot: copies });
+    expect(await port.read(copy, 'src/b.ts', 'chat_worktree')).toMatchObject({ kind: 'text', content: 'export const b = 2;\n' });
+    // `<data>/worktrees/chat` is in the data folder but not among the chats' copies.
+    for (const root of [join(dataDir, 'worktrees', 'chat'), copies, dataDir]) {
+      expect(await port.list(root, '', 'chat_worktree'), root).toEqual(PROTECTED);
+      expect(await port.read(root, 'src/a.ts', 'chat_worktree'), root).toEqual(PROTECTED);
+      expect(await port.locate!(root, 'src/a.ts', 'chat_worktree'), root).toEqual(PROTECTED);
+      expect(await port.search!(root, { q: 'export', mode: 'text', matchCase: false, regex: false }, 'chat_worktree'), root).toEqual({ files: [], truncated: false });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')("refuses every chat_worktree root when the chat worktrees' folder is a link, wherever it leads (27.9)", async () => {
+    const { home, dataDir } = setup();
+    // `<data>/cw` links to the data folder's parent, so a root "inside" it could be any sibling of the data folder.
+    const outside = tempDir('ogden-wb-outside-');
+    write(join(outside, 'abcdefgh'), { 'src/c.ts': 'export const c = 3;\n' });
+    symlinkSync(outside, join(dataDir, 'cw'), 'dir');
+    const port = createWorkspaceFilesNode({ home, dataDir, chatWorktreesRoot: join(dataDir, 'cw') });
+    for (const root of [join(dataDir, 'cw', 'abcdefgh'), join(outside, 'abcdefgh')]) {
+      expect(await port.list(root, '', 'chat_worktree'), root).toEqual(PROTECTED);
+      expect(await port.read(root, 'src/c.ts', 'chat_worktree'), root).toEqual(PROTECTED);
+      expect(await port.locate!(root, 'src/c.ts', 'chat_worktree'), root).toEqual(PROTECTED);
+      expect(await port.search!(root, { q: 'export', mode: 'text', matchCase: false, regex: false }, 'chat_worktree'), root).toEqual({ files: [], truncated: false });
+    }
+    // A linked `cw` pointing at an ancestor of the data folder doesn't open it either.
+    rmSync(join(dataDir, 'cw'));
+    symlinkSync(dirname(dataDir), join(dataDir, 'cw'), 'dir');
+    expect(await port.read(join(dataDir, 'cw', basename(dataDir), 'worktrees', 'chat'), 'src/a.ts', 'chat_worktree')).toEqual(PROTECTED);
   });
 
   it('keeps everything confined to the worktree: a link out to the rest of the data folder or a home fence is refused', async () => {

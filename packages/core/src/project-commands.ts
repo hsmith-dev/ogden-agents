@@ -22,6 +22,7 @@
  */
 import { createHash } from 'node:crypto';
 import {
+  chatPlaceOf,
   MAX_PROJECT_COMMAND_CHARS,
   MAX_PROJECT_COMMANDS,
   PackageScriptName,
@@ -38,7 +39,11 @@ import {
   type ProjectCommandRunResponse,
   type ProjectCommandsResponse,
   type ProblemItem,
+  type SessionId,
   type WorkspaceId,
+  type WorktreeSetupRun,
+  isWorktreePort,
+  WORKTREE_SETUP_COMMAND_ID,
 } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -51,7 +56,7 @@ import type { EventLog } from './event-log.js';
 import { newId } from './ids.js';
 import { parseProblems } from './project-command-parsers.js';
 import { shellFreeCommand } from './shell-free.js';
-import { isWorkspacePathRefusal, type WorkspaceFilesPort } from './workspace-files-port.js';
+import { isWorkspacePathRefusal, type WorkspaceFilesPort, type WorkspaceRootKind } from './workspace-files-port.js';
 import { resolveWorkspaceRoot } from './workspace-root.js';
 
 /** How one started command ended. */
@@ -79,8 +84,10 @@ export interface ProjectCommandRunner {
    * Starts `argv` (a program, by name or absolute path, and its arguments;
    * never a shell) in `cwd` (the project's real path). A program that can't
    * be found or started settles `done` at once with its plain `error`.
+   * `env` adds only `PORT` (a worktree copy's setup, 27.7), a decimal port;
+   * any other name or value is refused (`done` settles with an `error`).
    */
-  start(input: { cwd: string; argv: readonly string[] }): ProjectCommandProcess;
+  start(input: { cwd: string; argv: readonly string[]; env?: { readonly PORT: string } | undefined }): ProjectCommandProcess;
   /** Kills every tree still running and refuses new starts; resolves once each has settled. Safe to call twice. */
   close(): Promise<void>;
   /** The same kill, synchronously and without waiting (a crashing server's `process.on('exit')`). */
@@ -94,6 +101,24 @@ export interface ProjectCommands {
   run(workspaceId: unknown, commandId: unknown): Promise<ProjectCommandRunResponse>;
   get(workspaceId: unknown, runId: unknown): Promise<ProjectCommandRunDetail>;
   stop(workspaceId: unknown, runId: unknown): Promise<ProjectCommandRunResponse>;
+  /**
+   * Runs the project's setup command (id `setup`, 27.7) in a worktree chat's
+   * new copy `cwd`, with `PORT` when the copy has one: only in a trusted
+   * project, only while it is confirmed (a `package.json` one checked
+   * against the copy's own files), never through a shell. One per chat: a
+   * new one stops the chat's previous run. `undefined` when nothing ran (no
+   * setup declared, untrusted, unconfirmed, not this project's copy, or
+   * stopping). Never throws. Its run is read and stopped as any other.
+   */
+  runSetup(input: { workspaceId: WorkspaceId; sessionId: SessionId; cwd: string; port: number | null }): Promise<ProjectCommandRun | undefined>;
+  /** The chat's latest setup run since the server started, or `null`. */
+  setupOf(sessionId: SessionId): WorktreeSetupRun | null;
+  /**
+   * Stops the chat's setup run if it is still going and waits for its finish
+   * (its copy is put away, handed back or deleted); `forget` (a deleted
+   * chat) also drops its run. Never throws.
+   */
+  stopSetup(sessionId: SessionId, options?: { forget?: boolean }): Promise<void>;
   /** Stops every run still going (their finish is recorded) and the runner. */
   close(): Promise<void>;
 }
@@ -200,6 +225,8 @@ export function createProjectCommands({ orm, events, entities, trust, files, run
   const runs = new Map<string, RunRecord>();
   /** The latest run of each command, by `<workspaceId>\0<commandId>`. */
   const latest = new Map<string, string>();
+  /** Each chat's latest setup run (27.7), by session: one per chat, never in `latest`. */
+  const setups = new Map<SessionId, string>();
   const keyOf = (workspaceId: string, commandId: string) => `${workspaceId}\0${commandId}`;
 
   /** The workspace and its real path, refused before anything else when it isn't trusted. */
@@ -216,11 +243,11 @@ export function createProjectCommands({ orm, events, entities, trust, files, run
   };
 
   /** `package.json`'s scripts (only string values) and `packageManager`, or none when it is missing, unreadable or not JSON. */
-  const packageJsonOf = async (root: string): Promise<PackageJson> => {
+  const packageJsonOf = async (root: string, kind: WorkspaceRootKind = 'project'): Promise<PackageJson> => {
     const scripts = new Map<string, string>();
     let packageManager: string | null = null;
     try {
-      const read = await files.read(root, 'package.json');
+      const read = await files.read(root, 'package.json', kind);
       if (isWorkspacePathRefusal(read) || read.kind !== 'text') return { scripts, packageManager };
       const json = JSON.parse(read.content) as { scripts?: unknown; packageManager?: unknown };
       if (json === null || typeof json !== 'object') return { scripts, packageManager };
@@ -247,11 +274,11 @@ export function createProjectCommands({ orm, events, entities, trust, files, run
    * field and the contents (or absence) of {@link BINDING_FILES}.
    * `undefined` when one of those files can't be read as plain text (counts as changed).
    */
-  const configsOf = async (root: string): Promise<Record<string, string | null> | string | undefined> => {
+  const configsOf = async (root: string, kind: WorkspaceRootKind): Promise<Record<string, string | null> | string | undefined> => {
     if (filesFingerprint !== undefined) return filesFingerprint(root, BINDING_FILES);
     const configs: Record<string, string | null> = {};
     try {
-      const folder = await files.list(root, '');
+      const folder = await files.list(root, '', kind);
       if (isWorkspacePathRefusal(folder)) return undefined;
       const present = new Set(folder.entries.map((entry) => entry.name));
       for (const file of BINDING_FILES) {
@@ -259,7 +286,7 @@ export function createProjectCommands({ orm, events, entities, trust, files, run
           configs[file] = null;
           continue;
         }
-        const read = await files.read(root, file);
+        const read = await files.read(root, file, kind);
         if (isWorkspacePathRefusal(read) || read.kind !== 'text' || read.masked) return undefined;
         configs[file] = read.content;
       }
@@ -269,24 +296,24 @@ export function createProjectCommands({ orm, events, entities, trust, files, run
     return configs;
   };
 
-  const bindingOf = async (root: string, pkg: PackageJson, pm: PackageManager, script: string): Promise<string | undefined> => {
-    const configs = await configsOf(root);
+  const bindingOf = async (root: string, pkg: PackageJson, pm: PackageManager, script: string, kind: WorkspaceRootKind = 'project'): Promise<string | undefined> => {
+    const configs = await configsOf(root, kind);
     if (configs === undefined) return undefined;
     const scripts = { pre: pkg.scripts.get(`pre${script}`) ?? null, main: pkg.scripts.get(script) ?? null, post: pkg.scripts.get(`post${script}`) ?? null };
     return createHash('sha256').update(JSON.stringify({ pm, scripts, packageManager: pkg.packageManager, configs })).digest('hex');
   };
 
   /** Whether a stored script is still exactly what the user confirmed: its text, its package manager and its binding. */
-  const stillConfirmed = async (root: string, pkg: PackageJson, pm: PackageManager, command: Extract<StoredCommand, { source: 'package_json' }>): Promise<boolean> => {
+  const stillConfirmed = async (root: string, pkg: PackageJson, pm: PackageManager, command: Extract<StoredCommand, { source: 'package_json' }>, kind: WorkspaceRootKind = 'project'): Promise<boolean> => {
     const text = shownText(pkg, command.script);
     if (text === undefined || text !== command.confirmedScript || command.pm !== pm || command.binding === undefined) return false;
-    return (await bindingOf(root, pkg, pm, command.script)) === command.binding;
+    return (await bindingOf(root, pkg, pm, command.script, kind)) === command.binding;
   };
 
   /** The package manager its lockfile names; npm without one. */
-  const packageManagerOf = async (root: string): Promise<PackageManager> => {
+  const packageManagerOf = async (root: string, kind: WorkspaceRootKind = 'project'): Promise<PackageManager> => {
     try {
-      const folder = await files.list(root, '');
+      const folder = await files.list(root, '', kind);
       if (isWorkspacePathRefusal(folder)) return 'npm';
       const names = new Set(folder.entries.filter((entry) => entry.kind === 'file').map((entry) => entry.name));
       return LOCKFILES.find(([file]) => names.has(file))?.[1] ?? 'npm';
@@ -414,6 +441,8 @@ export function createProjectCommands({ orm, events, entities, trust, files, run
       const commandKey = ProjectCommandId.safeParse(commandId);
       const command = commandKey.success ? stored(id).find((one) => one.id === commandKey.data) : undefined;
       if (command === undefined) throw new NotFoundError('command', 'requested');
+      // The setup command runs only in a new worktree copy, with its port (27.7), never in the project folder.
+      if (command.id === WORKTREE_SETUP_COMMAND_ID) throw new InvalidOperationError('The setup command runs in each new worktree copy, not from Problems.');
       if (closed) throw new InvalidOperationError('Ogden is stopping, so nothing new runs.');
       let argv: string[];
       if (command.source === 'settings') {
@@ -469,6 +498,73 @@ export function createProjectCommands({ orm, events, entities, trust, files, run
         await record.finished;
       }
       return { run: { ...record.run } };
+    },
+
+    async runSetup({ workspaceId, sessionId, cwd, port }) {
+      try {
+        if (closed) return undefined;
+        const { id } = trusted(workspaceId);
+        // Only this project's own chat, in its own copy.
+        const session = entities.getSession(sessionId);
+        if (session === undefined || session.workspaceId !== id || session.kind !== 'chat' || chatPlaceOf(session) !== 'worktree' || session.worktreePath !== cwd) return undefined;
+        const command = stored(id).find((one) => one.id === WORKTREE_SETUP_COMMAND_ID);
+        if (command === undefined) return undefined;
+        let argv: string[];
+        if (command.source === 'settings') {
+          const checked = shellFreeCommand(command.command);
+          if (!checked.ok) return undefined;
+          argv = checked.argv;
+        } else {
+          // Checked against the copy's own files: the branch may hold another package.json than the project folder.
+          const [pkg, pm] = await Promise.all([packageJsonOf(cwd, 'chat_worktree'), packageManagerOf(cwd, 'chat_worktree')]);
+          if (!(await stillConfirmed(cwd, pkg, pm, command, 'chat_worktree'))) return undefined;
+          argv = [pm, 'run', command.script];
+        }
+        // Read again after the reads above: still trusted, and not stopping.
+        if (!trust.scriptsTrusted(id) || closed) return undefined;
+        // One per chat: a new copy's setup stops the one before.
+        const previous = setups.get(sessionId);
+        const previousRecord = previous === undefined ? undefined : runs.get(previous);
+        if (previousRecord?.run.state === 'running') {
+          previousRecord.process?.stop();
+          await previousRecord.finished;
+        }
+        if (closed) return undefined;
+        const run: ProjectCommandRun = { id: newId('pcr'), commandId: command.id, state: 'running', exitCode: null, itemCount: 0, startedAt: now().toISOString(), finishedAt: null };
+        events.append({ type: 'workspace.project_command_started', workspaceId: id, streamId: id, payload: { runId: run.id, commandId: command.id } });
+        const child = runner.start({ cwd, argv, ...(isWorktreePort(port) ? { env: { PORT: String(port) } } : {}) });
+        const record: RunRecord = { run, workspaceId: id, process: child, finished: Promise.resolve() };
+        record.finished = child.done.then(
+          (exit) => finish(record, exit, child.output(), cwd),
+          () => finish(record, { exitCode: null, stopped: false, error: "Ogden couldn't run this command." }, child.output(), cwd),
+        );
+        if (previous !== undefined) runs.delete(previous);
+        runs.set(run.id, record);
+        setups.set(sessionId, run.id);
+        return { ...record.run };
+      } catch {
+        // Untrusted, gone, or the database closed under a stopping server: nothing ran.
+        return undefined;
+      }
+    },
+
+    setupOf(sessionId) {
+      const runId = setups.get(sessionId);
+      const record = runId === undefined ? undefined : runs.get(runId);
+      return record === undefined ? null : { runId: record.run.id, state: record.run.state };
+    },
+
+    async stopSetup(sessionId, { forget = false } = {}) {
+      const runId = setups.get(sessionId);
+      const record = runId === undefined ? undefined : runs.get(runId);
+      if (record?.run.state === 'running') {
+        record.process?.stop();
+        await record.finished;
+      }
+      if (forget && runId !== undefined && setups.get(sessionId) === runId) {
+        setups.delete(sessionId);
+        runs.delete(runId);
+      }
     },
 
     async close() {

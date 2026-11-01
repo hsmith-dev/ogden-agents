@@ -45,7 +45,6 @@ covers = ["E27-R3"]
 after = [3]
 hitl = false
 risk = "high"
-unknown = "AD-8's CAP-33 note fixes `worktreePath` at creation; this entry waits for the architecture to allow it to change, or for a decision that hand-off starts a linked new chat instead, and with it whether the agent is resumed or restarted in the new folder."
 
 [[entry]]
 id = 5

@@ -12,6 +12,7 @@ import type {
   BuildAgent,
   CautionLevel,
   PermissionMode,
+  PutAwayCause,
   RemoteMachineId,
   RunDecision,
   RunOutcome,
@@ -19,6 +20,7 @@ import type {
   SessionKind,
   SessionState,
 } from '@ogden-agents/shared';
+import { sql } from 'drizzle-orm';
 import { foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const workspaces = sqliteTable(
@@ -159,7 +161,7 @@ export const sessions = sqliteTable(
     model: text('model'),
     /** The remote machine this chat runs its agent on (CAP-24, epic 19 story 19.7), set at creation, never changed; `NULL` for a local chat. */
     machineId: text('machine_id').$type<RemoteMachineId>(),
-    /** The chat's own worktree (AD-8 CAP-33 note), an absolute path, set at creation and never changed; `NULL` for a chat in the project folder. */
+    /** The chat's own worktree (AD-8 CAP-33 note), an absolute path, set at creation; changed only by Hand off or a Restore onto a new branch (`setSessionWorktree`, recorded as `session.location_changed`); `NULL` for a chat in the project folder. */
     worktreePath: text('worktree_path'),
     /** That worktree's branch (`ogden/chat/<id>`), set with it; `NULL` without one. */
     branch: text('branch'),
@@ -594,3 +596,100 @@ export const customAgents = sqliteTable('custom_agents', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/**
+ * The install's chat worktree cap (27.6; one row, `id = 1`, written on first
+ * change): how many chat worktrees, over every project, are kept before the
+ * oldest idle one is put away. A missing row reads as the default.
+ */
+export const chatWorktreeRetention = sqliteTable('chat_worktree_retention', {
+  id: integer('id').primaryKey(),
+  keep: integer('keep').notNull(),
+});
+
+/**
+ * A chat worktree put away (27.6; AD-17 CAP-33 note's exception): its saved
+ * changes' tree in AD-37's snapshot store (`NULL` when it had none), the
+ * branch's commit they were taken on and how many files they hold. Written
+ * before the folder is removed and removed once Restore brought it back, so
+ * a row always exists while the copy may be gone. No path.
+ */
+export const chatWorktreesPutAway = sqliteTable(
+  'chat_worktrees_put_away',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    branch: text('branch').notNull(),
+    snapshotTree: text('snapshot_tree'),
+    head: text('head').notNull(),
+    files: integer('files').notNull(),
+    cause: text('cause').$type<PutAwayCause>().notNull(),
+    putAwayAt: text('put_away_at').notNull(),
+  },
+  (t) => [uniqueIndex('chat_worktrees_put_away_session_unique').on(t.sessionId), index('chat_worktrees_put_away_workspace_idx').on(t.workspaceId)],
+);
+
+/**
+ * A worktree chat's port (27.7; CAP-35, AD-38): one row per chat that was
+ * ever given one. `held = 1` while its copy holds the port; a released row
+ * (`held = 0`) keeps the port the chat had, so Restore gives the same one
+ * back when it is still free. The partial unique index means two chats
+ * never hold one port. Gone with its session.
+ */
+export const chatWorktreePorts = sqliteTable(
+  'chat_worktree_ports',
+  {
+    sessionId: text('session_id')
+      .primaryKey()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    port: integer('port').notNull(),
+    held: integer('held').notNull(),
+    assignedAt: text('assigned_at').notNull(),
+  },
+  (t) => [uniqueIndex('chat_worktree_ports_held_port_unique').on(t.port).where(sql`${t.held} = 1`)],
+);
+
+/**
+ * One task tried by several agents (27.8; CAP-35): the task, as the user
+ * typed it (never in an event), and the chat kept (`NULL` until Keep this
+ * one; no foreign key: the kept chat can be deleted later and the trial
+ * still reads). Gone with its project, and with Delete history.
+ */
+export const trials = sqliteTable(
+  'trials',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    text: text('text').notNull(),
+    keptSessionId: text('kept_session_id'),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [index('trials_workspace_idx').on(t.workspaceId)],
+);
+
+/**
+ * A trial's chats (27.8), in the order the agents were picked, and what
+ * became of each (`open`, `kept`, `put_away`, `removed`, `left`). The
+ * session id has no foreign key: a chat deleted later keeps its row, read
+ * as gone.
+ */
+export const trialChats = sqliteTable(
+  'trial_chats',
+  {
+    trialId: text('trial_id')
+      .notNull()
+      .references(() => trials.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    sessionId: text('session_id').notNull(),
+    agentId: text('agent_id').$type<AgentId>().notNull(),
+    result: text('result').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.trialId, t.position] }), index('trial_chats_session_idx').on(t.sessionId)],
+);

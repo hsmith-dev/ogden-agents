@@ -31,6 +31,40 @@ export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequest>;
 export const WorkspaceResponse = z.object({ workspace: Workspace });
 export type WorkspaceResponse = z.infer<typeof WorkspaceResponse>;
 
+/** Where a chat works (27.1, CAP-35): the project's own folder, or its own worktree. */
+export const CHAT_LOCATIONS = ['this_folder', 'worktree'] as const;
+export const ChatLocation = z.enum(CHAT_LOCATIONS);
+export type ChatLocation = z.infer<typeof ChatLocation>;
+
+/** The Location chip's words for each place. */
+export const CHAT_LOCATION_LABELS: Readonly<Record<ChatLocation, string>> = { this_folder: 'This folder', worktree: 'Worktree' };
+/** What each place means, as the Location menu says it. */
+export const CHAT_LOCATION_DESCRIPTIONS: Readonly<Record<ChatLocation, string>> = {
+  this_folder: 'The project folder itself.',
+  worktree: 'A separate copy on its own branch. Changes stay there until you merge them.',
+};
+/** Why a worktree and a remote machine can't both be asked for (the chip holds one place, 27.5). */
+export const CHAT_WORKTREE_REMOTE_TEXT = "A worktree chat runs on this computer, so it can't also run on a remote machine. Pick one place.";
+/** Why a started chat's place can't be changed here. */
+export const CHAT_LOCATION_FIXED_TEXT = "A chat's place is set when it starts.";
+/** Why a started remote chat's place can't be changed (27.5): it never moves off its machine. */
+export const CHAT_REMOTE_FIXED_TEXT = 'A chat on a remote machine stays on that machine.';
+/** The Location menu's way to Settings, Remote machines (27.5). */
+export const CHAT_ADD_REMOTE_MACHINE_TEXT = 'Add a remote machine';
+/** What the Location menu says of a machine the live probe can't reach (27.5). */
+export const CHAT_MACHINE_UNREACHABLE_TEXT = "Check it's on, or pick another place.";
+/** A machine's live state in the Location menu, beside its name (27.5): before the probe answers it shows `user@host`. */
+export const CHAT_MACHINE_STATE_WORDS = { connected: 'connected', unreachable: "can't connect", host_key_changed: 'host key changed' } as const;
+/** A remote chat's machine on its Location chip once the machine was removed from Settings (27.5). */
+export const CHAT_REMOTE_MACHINE_WORDS = 'A remote machine';
+/** A remote chat's header words (27.5): "on build-box", or, once its machine was removed, "on a remote machine". */
+export const chatOnMachineText = (name: string | undefined) => (name === undefined ? 'on a remote machine' : `on ${name}`);
+/** The 409 refusals of a worktree chat, in plain sentences. */
+export const CHAT_WORKTREE_NOT_REPO_TEXT = 'A worktree needs this project to be a git repository with a branch checked out that has a commit. Start the chat in This folder.';
+export const CHAT_WORKTREE_NOT_TOP_TEXT = "This project is a folder inside another git repository, so a worktree can't be made for it. Start the chat in This folder.";
+export const CHAT_WORKTREE_FAILED_TEXT = "Ogden Agents couldn't make a worktree for this chat. Try again, or start it in This folder.";
+export const CHAT_WORKTREE_KIND_TEXT = 'Only a chat can start in its own worktree.';
+
 /**
  * `POST /api/v1/workspaces/:wsId/sessions`. Only chat sessions are created
  * this way so far. `agentId` picks the chat's agent (epic 6); omitted, the
@@ -52,6 +86,16 @@ export const CreateSessionRequest = z.object({
    * exists and is reachable is checked when the chat's agent starts, not here.
    */
   machineId: RemoteMachineId.nullable().optional(),
+  /**
+   * Where the chat works (epic 27, 27.1; CAP-35): `this_folder` (omitted:
+   * the project's folder, as before) or `worktree`, a new worktree of the
+   * project's repository on `ogden/chat/<ses>`, made as the chat is created.
+   * A worktree chat runs only on this computer, never with `machineId` (27.5).
+   */
+  location: ChatLocation.optional(),
+}).refine((body) => !(body.location === 'worktree' && body.machineId !== undefined && body.machineId !== null), {
+  message: CHAT_WORKTREE_REMOTE_TEXT,
+  path: ['location'],
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
 
@@ -110,6 +154,12 @@ export const ChatAgent = z.object({
    * (epic 15): the plain sentence. It is never a worker or asked by a manager.
    */
   interactiveOnly: z.string().min(1).optional(),
+  /**
+   * Present for an agent tied to this computer (the Local model, an agent you
+   * add yourself; 21.6, 27.5): the plain sentence why it never runs on a remote
+   * machine. The server refuses a remote chat with it before any connection.
+   */
+  localOnly: z.string().min(1).optional(),
   permissionModes: z.array(PermissionMode).min(1),
   unavailable: AgentUnavailable.optional(),
   /**

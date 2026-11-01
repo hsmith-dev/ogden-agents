@@ -3,22 +3,30 @@ import {
   API_ROUTES,
   apiPath,
   ChatAgentsResponse,
+  ChatDeletedResponse,
+  CopyIgnoredFilesResponse,
+  HandOffResponse,
   PermissionRulesResponse,
   SendMessageResponse,
+  SessionLocationResponse,
   SessionResponse,
   WorkspaceResponse,
   type BmadPiece,
+  type ChatLocation,
   type PermissionDecisionRequest,
   type PermissionMode,
   type PermissionRule,
   type RemoteMachineId,
   type Session,
   type SessionDriver,
+  type SessionLocation,
   type WhileWorking,
   type Workspace,
 } from '@ogden-agents/shared';
+import { useQuery } from '@tanstack/react-query';
 import { call, callNoContent, ChatApiError, postJson } from '@/api/http';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
+import { useEventInvalidation } from '@/events/use-event-invalidation';
 
 /**
  * The chat REST calls (story 2.2), sent with this tab's token. Replies and
@@ -48,10 +56,18 @@ export async function createChatSession(
   agentId?: string,
   model?: string | null,
   machineId?: RemoteMachineId | null,
+  location?: ChatLocation,
 ): Promise<Session> {
   // `model` (story 11): the model it starts on, as an agent handoff passes the target's; omitted, the project's or app's default.
   // `machineId` (CAP-24, epic 19 story 19.7): the machine this chat runs its agent on; omitted or `null` is local, as before this story.
-  const body = { kind: 'chat', ...(agentId === undefined ? {} : { agentId }), ...(model === undefined ? {} : { model }), ...(machineId === undefined ? {} : { machineId }) };
+  // `location` (27.1): This folder (omitted) or its own worktree; a worktree that can't be made is 409 with the plain reason.
+  const body = {
+    kind: 'chat',
+    ...(agentId === undefined ? {} : { agentId }),
+    ...(model === undefined ? {} : { model }),
+    ...(machineId === undefined ? {} : { machineId }),
+    ...(location === undefined || location === 'this_folder' ? {} : { location }),
+  };
   const json = await call(auth, apiPath(API_ROUTES.workspaceSessions, { wsId }), postJson(body), "Ogden Agents couldn't start a chat");
   return SessionResponse.parse(json).session;
 }
@@ -196,4 +212,65 @@ export async function setGlobalMcpServers(servers: unknown[], auth: Pick<TabAuth
     "Ogden Agents couldn't save global MCP servers",
   );
   return GlobalMcpServersResponse.parse(json).servers;
+}
+
+/**
+ * `DELETE /api/v1/workspaces/:wsId/sessions/:sesId` (Delete chat, 27.3): the
+ * chat and, for a worktree chat, its copy. `discardUncommitted` only after a
+ * confirmation that named the uncommitted changes; else 409 `uncommitted_changes`.
+ */
+export async function deleteChat(wsId: string, sesId: string, discardUncommitted = false, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ChatDeletedResponse> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSession, { wsId, sesId }),
+    { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ discardUncommitted }) },
+    "Ogden Agents couldn't delete this chat",
+  );
+  return ChatDeletedResponse.parse(json);
+}
+
+/**
+ * `POST /api/v1/workspaces/:wsId/sessions/:sesId/location` (Hand off, 27.4):
+ * moves the idle chat and its uncommitted changes to `to`. 409
+ * `agent_mid_turn`, `handoff_conflict` (`details.files`) or `invalid_operation`
+ * move nothing.
+ */
+/** The ignored files removing the chat's copy would lose (user decision 2026-11-01): names only, never contents. */
+export async function fetchCopyIgnoredFiles(wsId: string, sesId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<CopyIgnoredFilesResponse> {
+  return CopyIgnoredFilesResponse.parse(await call(auth, apiPath(API_ROUTES.sessionWorktreeIgnoredFiles, { wsId, sesId }), {}, "Ogden Agents couldn't list the ignored files"));
+}
+
+/** `GET …/sessions/:sesId/location` (27.4, 27.7): where the chat works; a worktree chat's branch, its copy's port and its setup run. */
+export async function fetchSessionLocation(wsId: string, sesId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<SessionLocation> {
+  return SessionLocationResponse.parse(await call(auth, apiPath(API_ROUTES.sessionLocation, { wsId, sesId }), {}, "Ogden Agents couldn't read where this chat works")).location;
+}
+
+export const sessionLocationQueryKey = (wsId: string, sesId: string) => ['session-location', wsId, sesId] as const;
+
+/**
+ * The chat's Location, read again when its port is given or given back,
+ * its place changes, its copy is put away or restored, or a project command
+ * starts or finishes (its setup run, 27.7); every second while the setup runs.
+ */
+export function useSessionLocation(wsId: string, sesId: string, { enabled = true, auth = tabAuth }: { enabled?: boolean; auth?: Pick<TabAuth, 'fetch'> } = {}) {
+  useEventInvalidation((event) => {
+    if (event.workspaceId !== wsId) return [];
+    const ownSession = event.streamId === sesId;
+    if (ownSession && (event.type === 'session.port_assigned' || event.type === 'session.port_released' || event.type === 'session.location_changed' || event.type === 'session.worktree_put_away' || event.type === 'session.worktree_restored')) {
+      return [sessionLocationQueryKey(wsId, sesId)];
+    }
+    return event.type === 'workspace.project_command_started' || event.type === 'workspace.project_command_finished' ? [sessionLocationQueryKey(wsId, sesId)] : [];
+  });
+  return useQuery({
+    queryKey: sessionLocationQueryKey(wsId, sesId),
+    queryFn: () => fetchSessionLocation(wsId, sesId, auth),
+    enabled,
+    retry: false,
+    refetchInterval: (query) => (query.state.data?.kind === 'worktree' && query.state.data.setup?.state === 'running' ? 1000 : false),
+  });
+}
+
+export async function handOffChat(wsId: string, sesId: string, to: ChatLocation, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<Session> {
+  const json = await call(auth, apiPath(API_ROUTES.sessionLocation, { wsId, sesId }), postJson({ to }), "Ogden Agents couldn't move this chat");
+  return HandOffResponse.parse(json).session;
 }

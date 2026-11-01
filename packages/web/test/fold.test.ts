@@ -25,4 +25,11 @@ describe('event fold (AD-5)', () => {
     events = addEvent(events, deleted);
     expect(events.map((e) => e.seq)).toEqual([2, 3]);
   });
+
+  it("a deleted chat (27.3) drops that chat's events and keeps the event", () => {
+    let events: CoreEvent[] = [delta(1, 'm1', 'a'), { ...delta(2, 'm2', 'b'), streamId: 'ses_2' } as CoreEvent];
+    const deleted = { ...base, streamId: 'ws_1', id: 'evt_3', seq: 3, type: 'workspace.chat_deleted', payload: { sessionId: 'ses_1', worktreeRemoved: false, branchKept: false } } as unknown as CoreEvent;
+    events = addEvent(events, deleted);
+    expect(events.map((e) => e.seq)).toEqual([2, 3]);
+  });
 });

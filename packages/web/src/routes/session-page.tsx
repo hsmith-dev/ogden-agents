@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ArrowsLeftRight, ChatCircle, House, Stop } from '@phosphor-icons/react';
-import type { PermissionMode } from '@ogden-agents/shared';
+import { chatOnMachineText, chatPlaceOf, localPlaceOf, WORKTREE_BADGE_TOOLTIP_TEXT, WORKTREE_PUT_AWAY_COMPOSER_TEXT, worktreeBadgeLabel, type PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
@@ -14,12 +14,17 @@ import { chatDraftKey } from '@/chat/drafts';
 import { HandoffDialog } from '@/chat/handoff-dialog';
 import { onBeforeChatDetailChange, setChatDetail, useChatDetail } from '@/chat/detail-level';
 import { NewChatButton } from '@/chat/new-chat-button';
+import { useOpenNewChat } from '@/chat/new-chat';
+import { continueBlockedReason, deleteBlockedReason, moveBlockedReason, type ChatActionState } from '@/chat/chat-actions';
+import { DeleteChatDialog } from '@/chat/delete-chat-dialog';
+import { MoveChatDialog } from '@/chat/move-chat-dialog';
 import { CONTINUE_WITH_ANOTHER_AGENT, SessionMenu } from '@/chat/session-menu';
+import { LocationChip, SessionAgentChip } from '@/chat/setup-row';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
 import { sessionView, type TranscriptCheckIn, type TranscriptItem } from '@/chat/transcript';
-import { AgentChangedMarker, EarlierHistory, InterruptedNote, Message, ResumedMarker, TurnChangesRow } from '@/chat/transcript-parts';
+import { AgentChangedMarker, EarlierHistory, InterruptedNote, LocationChangedMarker, Message, ResumedMarker, TurnChangesRow } from '@/chat/transcript-parts';
 import { QueuedMessages } from '@/chat/queued-messages';
 import { otherWayShortcutLabel, useWhileWorking } from '@/chat/send-mode';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
@@ -37,14 +42,21 @@ import { TerminalPanel } from '@/terminal/terminal-panel';
 import { conversationProps, TerminalPane } from '@/terminal/terminal-pane';
 import { focusComposer, useSessionDriver } from '@/terminal/use-session-driver';
 import { needsYouOpenCount, subscribeNeedsYouOpened } from '@/shell/needs-you-target';
+import { useRemoteMachines } from '@/remote-machines/remote-machines-api';
+import { BranchBadge, BranchBadgeName, MachineBadge } from '@/ui/badge';
 import { Banner } from '@/ui/banner';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { EmptyState, PageBody, PageFooter } from '@/ui/page';
 import { Skeleton } from '@/ui/skeleton';
 import { StateGlyph } from '@/ui/state-glyph';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { Text } from '@/ui/typography';
 import { fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
+import { PutAwayNotice } from '@/worktrees/put-away-notice';
+import { TrialLink } from '@/trials/trial-link';
+import { usePutAwayWorktrees } from '@/worktrees/worktree-retention';
+import { WorktreeCopyStatus } from '@/worktrees/worktree-copy-status';
 import { chatRoots, sessionKey } from '@/workbench/chat-folder';
 
 /** How close to the bottom (px) still counts as at the bottom, for auto-scroll. */
@@ -62,6 +74,8 @@ const itemKey = (item: TranscriptItem, index: number): string =>
           ? `document-${item.path}`
           : item.type === 'agent_changed'
             ? `agent-${item.at}-${index}`
+          : item.type === 'location_changed'
+            ? `location-${item.at}-${index}`
           : item.type === 'interrupted'
             ? `interrupted-${item.messageId}`
           : item.type === 'turn_changes'
@@ -104,7 +118,7 @@ const checkInWords = (checkIn: TranscriptCheckIn, agentName: string) =>
  * `session.driver_changed`, and `?driver=terminal` mirrors it. Story 4.7: a
  * planning session's `session.document_written` shows as a document card
  * (one per path) with Open and the next suggested step, which opens the new
- * planning session it starts. Permission modes: the header's picker sets
+ * planning session it starts. Permission modes: the setup row's Mode chip (moved from the header, 27.1) sets
  * the chat's mode (Skip all only in Developer mode, after its red warning),
  * the view follows only `session.permission_mode_changed`, and a chat in
  * Skip all shows the red banner above the conversation or the terminal.
@@ -135,6 +149,9 @@ export function SessionPage() {
   const agentRemoved = agentId !== undefined && chatAgents.data !== undefined && !chatAgents.data.agents.some((agent) => agent.agentId === agentId);
   const queryClient = useQueryClient();
   const [handoffOpen, setHandoffOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const openNewChat = useOpenNewChat();
   // Continue with another agent stays open for a chat whose agent was removed: the server hands it over.
   const severalAgents = (chatAgents.data?.agents.length ?? 0) > 1;
   // Sign in again (9.4) signs in to the chat's own agent, when it has a setup (entry 6); otherwise the plain error notice.
@@ -397,10 +414,17 @@ export function SessionPage() {
   const resumedSeq = useMemo(() => events.findLast((event) => event.type === 'session.resumed')?.seq, [events]);
   // And when the chat continues with another agent (handoff): its modes are the new agent's.
   const agentChangedSeq = useMemo(() => events.findLast((event) => event.type === 'session.agent_changed')?.seq, [events]);
+  // And when it moved between this folder and its own worktree (27.4): its place, branch and the sidebar's row follow.
+  const locationChangedSeq = useMemo(() => events.findLast((event) => event.type === 'session.location_changed')?.seq, [events]);
   const agentWorking = state === 'working';
   useEffect(() => {
     if (agentWorking || resumedSeq !== undefined || agentChangedSeq !== undefined) void refetchSession();
   }, [agentWorking, resumedSeq, agentChangedSeq, refetchSession]);
+  useEffect(() => {
+    if (locationChangedSeq === undefined) return;
+    void refetchSession();
+    void queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
+  }, [locationChangedSeq, refetchSession, queryClient, wsId]);
 
   // Whether the waiting card is out of view, for the "waiting for you" bar. Not while the terminal
   // drives: the conversation is read-only then, and nothing in it takes focus (3.6 review F2).
@@ -444,6 +468,15 @@ export function SessionPage() {
     card.focus({ preventScroll: true });
   }, [linked, opens, view.pendingPermissions, terminalDrives]);
 
+  // A remote chat's machine (27.5), named in its header; a machine removed since is "a remote machine".
+  const machineId = session.data?.session.machineId ?? null;
+  const machines = useRemoteMachines();
+  const machineName = machineId === null ? undefined : machines.data?.find((each) => each.id === machineId)?.label;
+
+  // Retention (27.6): a worktree chat whose copy was put away reads only, until Restore. Above every early return (hooks).
+  const putAwayList = usePutAwayWorktrees(wsId, { enabled: (session.data?.session.branch ?? null) !== null });
+  /** Where the last Restore here put the copy, in its own sentence (a new branch, a newer commit), until the chat changes. */
+  const [restoredNote, setRestoredNote] = useState<{ sesId: string; text: string } | undefined>(undefined);
   if (session.error instanceof ChatApiError && session.error.status === 404) {
     return (
       <>
@@ -490,19 +523,18 @@ export function SessionPage() {
     );
   };
 
-  // Handoff: offered while the chat is idle or in error and the chat drives it.
-  const handoffBlocked = terminalDrives
-    ? 'Switch back to the chat first: the terminal is driving it.'
-    : switchingTo !== undefined
-      ? 'This chat is switching to or from the terminal.'
-      : state === 'waiting'
-        ? `${agentName} is waiting for your answer. Answer it or stop it first.`
-        : state === 'working'
-          ? `${agentName} is working. Stop it first.`
-          : state === 'done'
-            ? 'This chat is finished.'
-            : undefined;
+  // The header's actions (`chat-actions.ts`): Continue with another agent, Delete chat (27.3) and Hand off (27.4).
+  const actionState: ChatActionState = { agentName, state, terminalDrives, switching: switchingTo !== undefined };
+  const handoffBlocked = continueBlockedReason(actionState);
   const nameOf = (id: string | undefined) => (id === undefined ? agentName : agentNameOf(chatAgents.data, id));
+  const sessionKind = session.data?.session.kind;
+  const branch = session.data?.session.branch ?? null;
+  const putAway = branch !== null && (putAwayList.data ?? []).some((worktree) => worktree.sessionId === sesId);
+  const deleteBlocked = deleteBlockedReason(session.data?.session, actionState);
+  // Where the chat works on this computer (`localPlaceOf`: its own worktree is a path with its branch).
+  const place = session.data === undefined ? undefined : chatPlaceOf(session.data.session);
+  const location = session.data === undefined ? 'this_folder' : localPlaceOf(session.data.session);
+  const moveReason = moveBlockedReason(putAway, actionState);
 
   /** A send refused with `agent_removed` (story 21.4): read the agent list again, so the page closes the chat. */
   const noteAgentRemoved = (failure: unknown) => {
@@ -517,6 +549,9 @@ export function SessionPage() {
       noteAgentRemoved(failure);
     });
   };
+
+  // Chat | Terminal in the header (Developer mode, a chat whose agent is still registered).
+  const driverShown = appearance.developerMode && !isBuild && !agentRemoved;
 
   return (
     <>
@@ -541,22 +576,30 @@ export function SessionPage() {
             {modelWords}
           </Text>
         ) : null}
+        {/* A worktree chat's branch (27.3): it opens the Workbench rooted at the chat's copy (AD-36). */}
+        {branch !== null && !isBuild ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <BranchBadge asChild>
+                <Link to="/w/$wsId/workbench" params={{ wsId }} search={{ session: sesId }} aria-label={worktreeBadgeLabel(branch)} data-testid="worktree-badge">
+                  <BranchBadgeName>{branch}</BranchBadgeName>
+                </Link>
+              </BranchBadge>
+            </TooltipTrigger>
+            <TooltipContent data-testid="worktree-badge-hint">{WORKTREE_BADGE_TOOLTIP_TEXT}</TooltipContent>
+          </Tooltip>
+        ) : null}
+        {/* Its copy's own port and the project's setup run there (27.7). */}
+        {branch !== null && !isBuild ? <WorktreeCopyStatus wsId={wsId} sesId={sesId} /> : null}
+        {/* The try it is part of (27.8). */}
+        {branch !== null && !isBuild ? <TrialLink wsId={wsId} sesId={sesId} /> : null}
+        {/* A remote chat's machine (27.5): it stays on that machine. */}
+        {place === 'remote' && !isBuild ? <MachineBadge data-testid="machine-badge">{chatOnMachineText(machineName)}</MachineBadge> : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
-        {isBuild || agentRemoved ? null : (
-          <span className={state === undefined ? 'ml-auto' : undefined}>
-            <PermissionModePicker
-              agentName={agentName}
-              mode={permissionMode}
-              options={session.data?.permissionModes}
-              developerMode={appearance.developerMode}
-              terminalDrives={terminalDrives}
-              changing={modeChanging}
-              onChoose={(mode, confirmed) => changeMode(mode, confirmed)}
-            />
-          </span>
-        )}
-        {appearance.developerMode && !isBuild && !agentRemoved ? (
+        {driverShown ? (
           <DriverToggle
+            // Before the state is known, the first of the right-hand controls takes the space.
+            className={state === undefined ? 'ml-auto' : undefined}
             agentName={agentName}
             driver={driver}
             switching={switchingTo}
@@ -565,16 +608,47 @@ export function SessionPage() {
           />
         ) : null}
         {/* New chat in one step (epic 26, E26-R2): the project's new-chat draft. */}
-        <NewChatButton wsId={wsId} />
+        {state === undefined && !driverShown ? (
+          <span className="ml-auto">
+            <NewChatButton wsId={wsId} />
+          </span>
+        ) : (
+          <NewChatButton wsId={wsId} />
+        )}
         {session.data !== undefined ? (
           <SessionMenu
             detail={detail}
             onDetail={(next) => setChatDetail(sesId, next)}
             blockedReason={handoffBlocked}
             onContinue={severalAgents ? () => setHandoffOpen(true) : undefined}
+            onDelete={isBuild ? undefined : () => setDeleteOpen(true)}
+            deleteBlockedReason={deleteBlocked}
           />
         ) : null}
       </WorkspaceHeader>
+      <DeleteChatDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        wsId={wsId}
+        sesId={sesId}
+        branch={branch}
+        onDeleted={() => {
+          void queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
+          openNewChat(wsId);
+        }}
+      />
+      <MoveChatDialog
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+        wsId={wsId}
+        sesId={sesId}
+        to={location === 'worktree' ? 'this_folder' : 'worktree'}
+        onMoved={() => {
+          void refetchSession();
+          void queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
+          focusComposer();
+        }}
+      />
       <HandoffDialog
         open={handoffOpen}
         onOpenChange={setHandoffOpen}
@@ -591,6 +665,19 @@ export function SessionPage() {
       {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
       {permissionMode === 'skip_all' && !agentRemoved ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
       {isBuild ? <BuildRunPanel wsId={wsId} run={buildRun.data} /> : null}
+      {putAway ? (
+        <PutAwayNotice
+          key={`put-away-${sesId}`}
+          wsId={wsId}
+          sesId={sesId}
+          onRestored={(text) => {
+            setRestoredNote({ sesId, text });
+            void refetchSession();
+          }}
+        />
+      ) : restoredNote?.sesId === sesId ? (
+        <Banner data-testid="worktree-restored">{restoredNote.text}</Banner>
+      ) : null}
       <StartModeNote key={sesId} note={startModeNote} />
       {agentRemoved ? (
         <Banner data-testid="agent-removed-banner">
@@ -640,6 +727,8 @@ export function SessionPage() {
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
                   ) : item.type === 'agent_changed' ? (
                     <AgentChangedMarker key={`agent-${item.at}-${index}`} agentName={nameOf(item.agentId)} />
+                  ) : item.type === 'location_changed' ? (
+                    <LocationChangedMarker key={`location-${item.at}-${index}`} location={item.location} branch={item.branch} />
                   ) : item.type === 'interrupted' ? (
                     <InterruptedNote key={`interrupted-${item.messageId}`} cancelledRequest={item.cancelledRequest} />
                   ) : item.type === 'turn_changes' ? (
@@ -791,7 +880,9 @@ export function SessionPage() {
           <Composer
             label={`Message ${agentName}`}
             blockedReason={
-              driver === 'terminal'
+              putAway
+                ? WORKTREE_PUT_AWAY_COMPOSER_TEXT
+                : driver === 'terminal'
                 ? TERMINAL_DRIVING_REASON
                 : state === 'waiting'
                   ? `${agentName} is waiting for your answer above.`
@@ -804,17 +895,41 @@ export function SessionPage() {
             draftKey={chatDraftKey(wsId, sesId)}
             disabled={leaving}
             footer={
-              <ModelPicker
-                agentName={agentName}
-                model={model}
-                models={sessionModels === undefined ? undefined : sessionModels.available}
-                current={sessionModels?.current}
-                terminalDrives={terminalDrives}
-                changing={modelChanging}
-                open={modelMenuOpen}
-                onOpenChange={setModelMenuOpen}
-                onChoose={changeModel}
-              />
+              // The setup row (epic 27, 27.1): the chat's agent, model, mode and place; the place is fixed once it started.
+              <>
+                {/* As the draft's Agent chip and the header's name: only while the install has several agents. */}
+                {severalAgents ? <SessionAgentChip agentId={agentId} agentName={agentName} blockedReason={handoffBlocked} onContinue={() => setHandoffOpen(true)} /> : null}
+                <ModelPicker
+                  agentName={agentName}
+                  model={model}
+                  models={sessionModels === undefined ? undefined : sessionModels.available}
+                  current={sessionModels?.current}
+                  terminalDrives={terminalDrives}
+                  changing={modelChanging}
+                  open={modelMenuOpen}
+                  onOpenChange={setModelMenuOpen}
+                  onChoose={changeModel}
+                />
+                <PermissionModePicker
+                  agentName={agentName}
+                  mode={permissionMode}
+                  options={session.data?.permissionModes}
+                  developerMode={appearance.developerMode}
+                  terminalDrives={terminalDrives}
+                  changing={modeChanging}
+                  onChoose={(mode, confirmed) => changeMode(mode, confirmed)}
+                />
+                {/* A remote chat's place is its machine (27.5); a local chat moves between this folder and its own worktree (27.4). */}
+                {session.data === undefined ? null : (
+                  <LocationChip
+                    value={location}
+                    machineId={machineId}
+                    branch={branch}
+                    onHandOff={sessionKind === 'chat' ? () => setMoveOpen(true) : undefined}
+                    handOffReason={moveReason}
+                  />
+                )}
+              </>
             }
             action={
               busy ? (

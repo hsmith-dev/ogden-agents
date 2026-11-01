@@ -35,6 +35,7 @@ import {
   HUNK_ACTIONS_NOT_AVAILABLE_MESSAGE,
   HUNK_CHANGED_SINCE_TEXT,
   HUNK_UNSUPPORTED_MESSAGE,
+  inOwnWorktree,
   ChangesQuery,
   CommitWorktreeRequest,
   FileDiffQuery,
@@ -63,7 +64,8 @@ import { serializedByRepo } from './repo-serialization.js';
 import type { SessionEvents } from './session-events.js';
 import type { VcsChangesTarget, VcsHunkResult, VcsWorkingTreePort } from './vcs-port.js';
 import { checkedWorkspacePath, isRefusedWorkspacePath } from './workspace-files.js';
-import { namedSession, resolveWorkspaceRoot, sessionFolder, vcsFolderOf, workspaceFolder } from './workspace-root.js';
+import { localFolderOf, namedSession, resolveWorkspaceRoot, vcsFolderOf, workspaceFolder } from './workspace-root.js';
+import { keptTurns } from './worktree-retention.js';
 
 export interface WorkspaceChanges {
   /** `ChangesQuery` → the view's changed files. {@link ValidationError}, {@link NotFoundError} (a foreign chat or turn). */
@@ -100,8 +102,8 @@ const shownPath = (path: string): boolean => WorkspaceRelativePath.safeParse(pat
 export const shownFile = (file: ChangedFile): boolean => shownPath(file.path) && (file.previousPath === undefined || shownPath(file.previousPath));
 
 export function createWorkspaceChanges({ entities, sessionEvents, port }: WorkspaceChangesOptions): WorkspaceChanges {
-  const recordedTurns = (session: Session): SessionTurnChangesRecordedEvent[] =>
-    entities.listSessionEvents(session.id, ['session.turn_changes_recorded']).filter((event): event is SessionTurnChangesRecordedEvent => event.type === 'session.turn_changes_recorded');
+  // Only the turns whose snapshots are kept (27.6): older ones are cleaned up from the store.
+  const recordedTurns = (session: Session): SessionTurnChangesRecordedEvent[] => keptTurns(entities, session.id);
 
   /** The port's target for a view: This turn's named turn (else the latest), `undefined` when the chat has recorded none. */
   const targetOf = (view: ChangesQuery['view'], session: Session | undefined, turn: TurnId | undefined): { target: VcsChangesTarget; turnId?: TurnId } | undefined => {
@@ -121,7 +123,7 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
     // A build works in its run's own worktree and a remote chat on its machine: neither is in this folder.
     const busy = entities
       .listSessions(workspace.id)
-      .some((other) => other.kind !== 'build' && other.machineId === null && (other.state === 'working' || other.state === 'waiting') && sessionFolder(workspace, other) === folder);
+      .some((other) => (other.state === 'working' || other.state === 'waiting') && localFolderOf(workspace, other) === folder);
     if (busy) throw new AgentMidTurnError(AGENT_MID_TURN_MESSAGE);
   };
 
@@ -215,7 +217,7 @@ export function createWorkspaceChanges({ entities, sessionEvents, port }: Worksp
     async commit(workspaceId, sessionId, body) {
       const { workspace, session } = sessionOf(workspaceId, sessionId);
       const { message } = parsed(CommitWorktreeRequest, body, 'A commit needs a message.');
-      if (session.worktreePath === null || session.branch === null) throw new InvalidOperationError(COMMIT_NEEDS_WORKTREE_MESSAGE);
+      if (!inOwnWorktree(session)) throw new InvalidOperationError(COMMIT_NEEDS_WORKTREE_MESSAGE);
       // The project folder is never the worktree, so only chats in this worktree can block it.
       if (session.worktreePath === workspaceFolder(workspace)) throw new InvalidOperationError(COMMIT_NEEDS_WORKTREE_MESSAGE);
       const worktreePath = session.worktreePath;

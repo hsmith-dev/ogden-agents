@@ -23,9 +23,14 @@ import { createWorkspaceFiles, type WorkspaceFiles } from './workspace-files.js'
 import type { WorkspaceFilesPort } from './workspace-files-port.js';
 import { createWorkspaceChanges, type WorkspaceChanges } from './workspace-changes.js';
 import { createTurnSnapshots, type TurnSnapshots } from './turn-snapshots.js';
-import type { VcsWorkingTreePort } from './vcs-port.js';
+import type { VcsSnapshotStorePort, VcsWorkingTreePort } from './vcs-port.js';
+import { createWorktreePutAwayStore, type WorktreePutAwayStore } from './worktree-put-away-store.js';
+import { createSnapshotCleanup, createWorktreeRetention, type SnapshotCleanup, type WorktreeRetentionOptions, type WorktreeRetentionSweep } from './worktree-retention.js';
 import { createEditorLaunch, type EditorLaunch } from './editor-launch.js';
 import type { EditorLauncherPort } from './editor-launcher-port.js';
+import type { ChatLocations, PortProbePort, Trials, WorktreePorts } from './where-work-runs.js';
+import { createWorktreePorts } from './worktree-ports.js';
+import { createTrials, createTrialStore, type TrialStore, type TrialsOptions } from './trials.js';
 import { createEditorChoice } from './editor-choice.js';
 import { createProjectCommands, type ProjectCommandRunner, type ProjectCommands } from './project-commands.js';
 import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
@@ -111,6 +116,25 @@ export interface Core {
   readonly turnSnapshots: TurnSnapshots | undefined;
   /** Open in editor (AD-39; epic 8 entry 2); `undefined` without an {@link OpenCoreOptions.editorLauncherPort} or a files port that can locate. */
   readonly editorLaunch: EditorLaunch | undefined;
+  /**
+   * Where work runs (CAP-35; epic 27 entry 2's contract): a chat's place and
+   * hand-off (27.4), retention and Restore (27.6), a worktree's port (27.7)
+   * and trials (27.8). Each is `undefined` until its lane builds it over
+   * `VcsChatWorktreePort` and `PortProbePort`, so their routes answer 501.
+   */
+  readonly chatLocations: ChatLocations | undefined;
+  /** Put-away chat worktrees and the install's cap (27.6), for `createChat`'s `worktreePutAway` and retention. */
+  readonly worktreePutAway: WorktreePutAwayStore;
+  /** Worktree retention and Restore (27.6) over the server's chat; call once, after the chat. */
+  readonly createWorktreeRetention: (ports: Pick<WorktreeRetentionOptions, 'chat' | 'dataDir' | 'onSkipped'>) => WorktreeRetentionSweep;
+  /** The snapshot store's cleanup (27.6) over the server's store port. */
+  readonly createSnapshotCleanup: (port: VcsSnapshotStorePort) => SnapshotCleanup;
+  /** A worktree chat's own port (27.7), for `createChat`'s `worktreePorts`; `undefined` without a {@link OpenCoreOptions.portProbe}. */
+  readonly worktreePorts: WorktreePorts | undefined;
+  /** The trials' rows (27.8): what retention spares until Keep. */
+  readonly trialStore: TrialStore;
+  /** One task tried by several agents (27.8) over the server's chat; call once, after the chat. */
+  readonly createTrials: (ports: Pick<TrialsOptions, 'chat' | 'onChatError' | 'onKept'>) => Trials;
   /** Problems (AD-38; 8.9): the project's declared commands, their runs and parsed failures; `undefined` without a {@link OpenCoreOptions.projectCommandRunner} and a files port. */
   readonly projectCommands: ProjectCommands | undefined;
   /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
@@ -214,6 +238,8 @@ export type OpenCoreOptions = OpenDatabaseOptions &
     onEditorChoiceError?: (code: string) => void;
     /** Runs a project's declared commands (AD-38; 8.9: `project-commands-node`). Absent: no Problems use-case. The server closes it on stop. */
     projectCommandRunner?: ProjectCommandRunner;
+    /** Whether a port on this computer is free (27.7: `port-probe-node`, on `127.0.0.1` only). Absent: no worktree chat is given a port. */
+    portProbe?: PortProbePort;
     /**
      * The repo-relative files the registered agents that need project trust
      * run (their descriptors' `projectFiles`, epic 12, 12.3); the trust is
@@ -277,6 +303,8 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     ...(options.onPermissionError === undefined ? {} : { onError: options.onPermissionError }),
   });
   const workspaceFiles = options.workspaceFilesPort === undefined ? undefined : createWorkspaceFiles({ entities, port: options.workspaceFilesPort });
+  const worktreePutAway = createWorktreePutAwayStore({ db, events, sessionEvents });
+  const trialStore = createTrialStore({ db, events });
   return {
     events,
     sessionEvents,
@@ -302,6 +330,18 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
       options.editorLauncherPort === undefined || workspaceFiles?.locate === undefined
         ? undefined
         : createEditorLaunch({ entities, files: { locate: workspaceFiles.locate }, launcher: options.editorLauncherPort, choice: createEditorChoice({ dataDir, ...(options.onEditorChoiceError === undefined ? {} : { onError: options.onEditorChoiceError }) }) }),
+    // Where work runs (epic 27 entry 2): contracts only until 27.4, 27.7 and 27.8; retention (27.6) is made over the server's chat.
+    chatLocations: undefined,
+    worktreePutAway,
+    // A trial's copies count, but are never put away before Keep (27.8).
+    createWorktreeRetention: (ports) => createWorktreeRetention({ ...ports, entities, store: worktreePutAway, spared: trialStore.spared }),
+    createSnapshotCleanup: (port) => createSnapshotCleanup({ entities, store: worktreePutAway, port }),
+    worktreePorts:
+      options.portProbe === undefined
+        ? undefined
+        : createWorktreePorts({ db, events, sessionEvents, entities, probe: options.portProbe, putAway: (sessionId) => worktreePutAway.get(sessionId) !== undefined }),
+    trialStore,
+    createTrials: (ports) => createTrials({ ...ports, store: trialStore, isPutAway: (sessionId) => worktreePutAway.get(sessionId) !== undefined }),
     projectCommands:
       options.projectCommandRunner === undefined || options.workspaceFilesPort === undefined
         ? undefined

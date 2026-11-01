@@ -8,9 +8,9 @@
 import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createLocalBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitVcs, createGitWorkingTree, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, BUILD_AUTO_SKILL, createAntigravityBuildRunner, createLocalBuildRunner, createCodexBuildRunner, createGrokBuildRunner, createDockerStep, createFixedSandbox, createGitChatWorktree, createGitVcs, createGitWorkingTree, createNativeSandboxStep, createSandboxChain, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
-import { createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsPort, type VcsWorkingTreePort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
+import { chatWorktreesRootOf, createBuilds, type SandboxPort, RUNS_DIR, worktreesRootOf, type BmadSourceUseCases, type BuildsDeps, type VcsPort, type VcsWorkingTreePort, type VcsChatWorktreePort, type VcsSnapshotStorePort, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import { createPerAgentSandbox } from './build-agent-sandbox.js';
 import type { Logger } from './log.js';
 import { agentEnvironment, withoutAgentKeys } from './start-env.js';
@@ -29,7 +29,8 @@ export function gitHooksDir(dataDir: string): string {
  * own (`StartOptions.vcs`) replaces it.
  */
 export function createServerVcs(options: StartOptions, dataDir: string): VcsPort {
-  return options.vcs ?? createGitVcs({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), worktreesRoot: worktreesRootOf(dataDir), runsRoot: join(dataDir, RUNS_DIR) });
+  // Chats' own worktrees (`<data>/cw`, 27.3) may be removed too, each only with its `ogden/chat/<ses>` branch.
+  return options.vcs ?? createGitVcs({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), worktreesRoot: worktreesRootOf(dataDir), chatWorktreesRoot: chatWorktreesRootOf(dataDir), runsRoot: join(dataDir, RUNS_DIR) });
 }
 
 /** Where the Workbench's turn snapshots are kept (AD-37; story 8.4): a real folder of the data folder, never a link. */
@@ -47,7 +48,24 @@ export const WORKING_TREE_GIT_TIMEOUT_MS = 30_000;
  * A test's own (`StartOptions.vcsWorkingTreePort`) replaces it.
  */
 export function createServerWorkingTree(options: StartOptions, dataDir: string): VcsWorkingTreePort {
-  return options.vcsWorkingTreePort ?? createGitWorkingTree({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), snapshotsRoot: snapshotsRootOf(dataDir), timeoutMs: WORKING_TREE_GIT_TIMEOUT_MS });
+  return options.vcsWorkingTreePort ?? gitWorkingTree(dataDir);
+}
+
+const gitWorkingTree = (dataDir: string) =>
+  createGitWorkingTree({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), snapshotsRoot: snapshotsRootOf(dataDir), timeoutMs: WORKING_TREE_GIT_TIMEOUT_MS });
+
+/**
+ * Retention's git (27.6): a chat worktree's changes saved before it is put
+ * away, Restore, and the snapshot store's cleanup; a chat's hand-off between
+ * this folder and its own worktree (27.4) moves its changes with it, with the Workbench's
+ * environment, hooks folder and store. A test's own
+ * (`StartOptions.vcsChatWorktree`) replaces it.
+ */
+export function createServerChatWorktree(options: StartOptions, dataDir: string): VcsChatWorktreePort & VcsSnapshotStorePort {
+  return (
+    options.vcsChatWorktree ??
+    createGitChatWorktree({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), snapshotsRoot: snapshotsRootOf(dataDir), chatWorktreesRoot: chatWorktreesRootOf(dataDir), timeoutMs: WORKING_TREE_GIT_TIMEOUT_MS })
+  );
 }
 
 export function createBuildsWiring({

@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, createProjectCommandsNode, createWorkspaceFilesNode, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, createPortProbeNode, createProjectCommandsNode, createWorkspaceFilesNode, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
@@ -12,8 +12,10 @@ import {
   createChat,
   createDataDir,
   createNewProjectDefaults,
+  createChatLocations,
   createOnboarding,
   createRemoteWorktreeSync,
+  chatWorktreesRootOf,
   clampCheckInDelay,
   CoreError,
   openRemoteConnection,
@@ -27,7 +29,7 @@ import {
   type AgentPort,
   type Core,
 } from '@ogden-agents/core';
-import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERRUPTED, SERVER_STREAM, type AgentId, type LocalEndpointId, type RemoteMachineId, type Session } from '@ogden-agents/shared';
+import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERRUPTED, SERVER_STREAM, type AgentId, type LocalEndpointId, type RemoteMachineId, type Session, type SessionId } from '@ogden-agents/shared';
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
@@ -50,7 +52,7 @@ import { createPanesWiring } from './start-panes.js';
 import { createServerEditorLauncher } from './start-editor.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
-import { createBuildsWiring, createServerVcs, createServerWorkingTree } from './start-builds.js';
+import { createBuildsWiring, createServerChatWorktree, createServerVcs, createServerWorkingTree } from './start-builds.js';
 import { createNotificationsWiring } from './start-notifications.js';
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
@@ -95,6 +97,11 @@ function defaultWebRoot(): string {
 
 /** How long a stopping server waits for a killed install to remove its temp folder. */
 const INSTALL_STOP_MS = 10_000;
+/** How long a stop waits for a put-away or Restore in progress (27.6). */
+const RETENTION_STOP_MS = 15_000;
+/** The snapshot store's first cleanup after a start, then how often (27.6). */
+const SNAPSHOT_CLEANUP_DELAY_MS = 60_000;
+const SNAPSHOT_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /** Session states that keep the server from restarting (AD-4, AD-20). */
 const BUSY_STATES = new Set(['working', 'waiting']);
@@ -214,14 +221,16 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       isAgentRegistered: registeredAgent(options, hooks),
       // Generic developer CLI tools (CAP-25): the real adapter, or a test's own.
       devToolsPort: options.devToolsPort ?? createDevToolsAdapter(),
-      // The Workbench's Files (AD-36): confined to each project, with the home credential and data-folder fences.
-      workspaceFilesPort: options.workspaceFilesPort ?? createWorkspaceFilesNode({ home: homedir(), dataDir }),
+      // The Workbench's Files (AD-36): confined to each project, with the home credential and data-folder fences; a chat's copy only inside `<data>/cw` (27.9).
+      workspaceFilesPort: options.workspaceFilesPort ?? createWorkspaceFilesNode({ home: homedir(), dataDir, chatWorktreesRoot: chatWorktreesRootOf(dataDir) }),
       // The Workbench's Changes (AD-37, story 8.4): the user's git, no hook, snapshots in the data folder.
       vcsWorkingTreePort: createServerWorkingTree(options, dataDir),
       // Open in editor (AD-39; 8.10): a fixed list of editors found on this computer, argv only, no shell; a test run looks only in its own folder.
       editorLauncherPort: createServerEditorLauncher(options, hooks),
       onEditorChoiceError: (code) => log.warn('editor choice unusable', { code }),
       projectCommandRunner,
+      // A worktree chat's own port (27.7): probed free on 127.0.0.1 only.
+      portProbe: options.portProbe ?? createPortProbeNode(),
       agentConfigFolders: () => agentConfigFolders(descriptors.current),
       agentProjectFiles: () => agentProjectFiles(descriptors.current),
       projectFilesFingerprint,
@@ -395,6 +404,9 @@ async function listenAndAnnounce({
   const panes = createPanesWiring({ options, hooks, core, terminal, dataDir, onError: (error) => log.warn('a terminal pane listener failed', { error: error instanceof Error ? error.name : 'unknown' }), onSweep: (result) => log.info('terminal panes left running by a hard stop were cleaned up', result) });
   // Document cards (story 4.7, `start-planning.ts`).
   const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, agentOf, log });
+  // Retention (27.6): the chat's put-aways and Restore on the user's git; the sweep is bound once it exists, below.
+  const chatWorktree = createServerChatWorktree(options, dataDir);
+  const sweepRef: { current: ((sessionId: SessionId) => void) | undefined } = { current: undefined };
   const chat = createChat({
     dataDir,
     entities: core.entities,
@@ -423,11 +435,64 @@ async function listenAndAnnounce({
     buildSessions: core.buildSessions,
     // A plain chat's remote target (CAP-24, epic 19 story 19.7): `Session.machineId`, opened fresh at each agent start.
     remote,
+    // A chat started in its own worktree (27.1): the same git as builds, made in `<data>/cw`; removed by Delete chat (27.3).
+    vcs,
+    // Whether a worktree chat's copy has uncommitted changes before it is deleted (27.3): the Workbench's own git.
+    vcsWorkingTree: createServerWorkingTree(options, dataDir),
+    // Both folders' snapshots taken before a hand-off moved anything (AD-37): tree ids, never a path.
+    onHandOffSnapshot: (sessionId, snapshots) => log.info('a chat hand-off snapshotted both folders', { sessionId, fromTree: snapshots.from, toTree: snapshots.to }),
+    // A deleted chat's copy that couldn't be removed (27.3): the session id and the step, never a path.
+    onWorktreeCleanupError: (sessionId, step, error) =>
+      log.warn('a chat worktree was left in place', { sessionId, step, code: error instanceof CoreError ? error.code : error === undefined ? 'refused' : 'unexpected' }),
     // Each prompt's snapshots for This turn (AD-37, story 8.4).
     turnSnapshots: core.turnSnapshots,
+    // Retention (27.6): a copy's changes saved before it is put away, and Restore; a put-away chat takes no message.
+    // A chat's hand-off between this folder and its own worktree (27.4) moves its uncommitted changes with the same git.
+    vcsChatWorktree: chatWorktree,
+    worktreePutAway: core.worktreePutAway,
+    // One more chat worktree (made, or restored): the sweep runs, sparing it.
+    onChatWorktreeAdded: (sessionId) => sweepRef.current?.(sessionId),
+    // A worktree chat's own port (27.7), given to its agent and terminal as PORT.
+    worktreePorts: core.worktreePorts,
+    // Its setup run stops before its copy is put away, handed back or deleted (27.7).
+    stopChatSetup: (sessionId, stopOptions) => core.projectCommands?.stopSetup(sessionId, stopOptions) ?? Promise.resolve(),
+    // A new copy (made, handed off to, restored): the project's setup command runs there with its port, in the background.
+    onChatWorktreeReady: (sessionId, copy) => {
+      if (copy.port === null && core.worktreePorts !== undefined) log.warn('a worktree chat was given no port', { sessionId });
+      const commands = core.projectCommands;
+      if (commands === undefined) return;
+      void commands.runSetup({ sessionId, workspaceId: copy.workspaceId, cwd: copy.worktreePath, port: copy.port }).then(
+        (run) => {
+          if (run !== undefined) log.info('a worktree setup started', { sessionId, runId: run.id });
+        },
+        () => log.warn('a worktree setup could not start', { sessionId }),
+      );
+    },
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   stopChats.current = (agentId) => chat.stopAgent(agentId);
+  // Worktree retention (27.6): one cap for the install; a refusal or failure is logged with ids and codes only.
+  const worktreeRetention = core.createWorktreeRetention({
+    chat,
+    dataDir,
+    onSkipped: (sessionId, error) => log.warn('a chat worktree was not put away', { sessionId, code: error instanceof CoreError ? error.code : 'unexpected' }),
+  });
+  const sweep = (spare?: SessionId) =>
+    void worktreeRetention.enforce({ spare }).then(
+      (putAway) => {
+        if (putAway.length > 0) log.info('chat worktrees were put away to keep the limit', { sessions: putAway.map((each) => each.sessionId) });
+      },
+      (error: unknown) => log.warn('the worktree retention sweep failed', { code: error instanceof CoreError ? error.code : 'unexpected' }),
+    );
+  sweepRef.current = (sessionId) => sweep(sessionId);
+  // Trials (27.8): one task, several agents, each in its own worktree chat; ids and codes only in the log.
+  const trials = core.createTrials({
+    chat,
+    onChatError: (sessionId, step, error) => log.warn('a trial chat step did not finish', { sessionId, step, code: error instanceof CoreError ? error.code : 'unexpected' }),
+    // Kept: its copies count as any other's again, so the cap applies, sparing the chat just kept.
+    onKept: (sessionId) => sweep(sessionId),
+  });
+  const snapshotCleanup = core.createSnapshotCleanup(chatWorktree);
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
   const { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
     vcs,
@@ -550,6 +615,9 @@ async function listenAndAnnounce({
     // Changes and Open in editor (epic 8 entry 2; 8.4, 8.10).
     workspaceChanges: core.workspaceChanges,
     editorLaunch: core.editorLaunch,
+    // A chat's Location and its hand-off (27.4): the chat's own, its ids and body parsed here.
+    // A worktree chat's Location carries its copy's setup run (27.7).
+    chatLocations: createChatLocations(chat, { setupOf: (sessionId) => core.projectCommands?.setupOf(sessionId) ?? null }),
     // Problems (AD-38; 8.9): only in a trusted project, only the confirmed text.
     projectCommands: core.projectCommands,
     notifications,
@@ -572,6 +640,9 @@ async function listenAndAnnounce({
     panes,
     terminalsSettings: core.terminalsSettings,
     tabs,
+    // Retention and Restore (27.6).
+    worktreeRetention,
+    trials,
   });
 
   // Saved API keys and, for an agent with one, its subscription state, before the first chat (story 9.2).
@@ -622,6 +693,8 @@ async function listenAndAnnounce({
     writePortFile(portFile, identity);
     core.events.append({ type: 'server.started', workspaceId: null, streamId: SERVER_STREAM, payload: { version } });
     ticketWatcher.start();
+    // A lower cap set while the server was stopped, or chats made by an older version: the sweep runs once now (27.6).
+    sweep();
   } catch (error) {
     // As on stop: the runner's close kills any run a watch waits on.
     const watching = ticketWatcher.close();
@@ -645,6 +718,28 @@ async function listenAndAnnounce({
   // Only when asked: a code nobody redeems is a live secret for nothing.
   const launchUrl = options.launch === true || options.open === true ? issueLaunchUrl() : undefined;
 
+  // The snapshot store's cleanup (27.6): a minute after the start, then daily; counts only in the log. Never keeps the process alive.
+  const cleanSnapshots = () =>
+    void snapshotCleanup.run().then(
+      (pruned) => {
+        if (pruned.objects + pruned.stores + pruned.temporary > 0) log.info('snapshot store cleaned', { objects: pruned.objects, stores: pruned.stores, temporary: pruned.temporary });
+        // A link where a store or the snapshots folder should be, or a project that couldn't be read: left whole, said so.
+        if (pruned.refused > 0) log.warn('snapshot store cleanup left stores whole', { refused: pruned.refused });
+      },
+      (error: unknown) => log.warn('the snapshot store cleanup failed', { code: error instanceof CoreError ? error.code : 'unexpected' }),
+    );
+  let cleanupInterval: ReturnType<typeof setInterval> | undefined;
+  const cleanupStart = setTimeout(() => {
+    cleanSnapshots();
+    cleanupInterval = setInterval(cleanSnapshots, SNAPSHOT_CLEANUP_INTERVAL_MS);
+    cleanupInterval.unref();
+  }, options.snapshotCleanupDelayMs ?? SNAPSHOT_CLEANUP_DELAY_MS);
+  cleanupStart.unref();
+  const stopCleanup = () => {
+    clearTimeout(cleanupStart);
+    if (cleanupInterval !== undefined) clearInterval(cleanupInterval);
+  };
+
   let resolveStopped!: (reason: StopReason) => void;
   const stopped = new Promise<StopReason>((resolve) => (resolveStopped = resolve));
   let closing: Promise<void> | undefined;
@@ -663,6 +758,11 @@ async function listenAndAnnounce({
       // So does every project command and its tree (AD-38): their finish is recorded first.
       .finally(() => core.projectCommands?.close().catch((error: unknown) => log.warn('stopping project commands failed', { reason: String(error) })))
       .finally(releaseCrashKill)
+      // No cleanup starts any more; a put-away in progress finishes (bounded) before the agents stop.
+      .finally(async () => {
+        stopCleanup();
+        await Promise.race([Promise.all([worktreeRetention.settled(), chat.worktreeOpsSettled()]), new Promise((resolve) => setTimeout(resolve, RETENTION_STOP_MS).unref())]);
+      })
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
       // An outcome being worked out finishes (bounded by its own reads), then the builds stop following the log.
       .finally(async () => {

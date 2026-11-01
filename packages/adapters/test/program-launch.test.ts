@@ -17,6 +17,9 @@ describe('program-launch', () => {
   it('rewrites PATH (each spelling on Windows) and leaves the rest', () => {
     expect(withAbsolutePath({ PATH: '/a::rel', HOME: '/h' }, 'linux')).toEqual({ PATH: '/a', HOME: '/h' });
     expect(withAbsolutePath({ Path: 'C:\\a;rel', PATH: ';C:\\b' }, 'win32')).toEqual({ Path: 'C:\\a', PATH: 'C:\\b' });
+    // Nothing absolute left: the key goes, never an empty PATH (the working folder to execvp and POSIX shells).
+    expect(withAbsolutePath({ PATH: '::rel:.', HOME: '/h' }, 'linux')).toEqual({ HOME: '/h' });
+    expect(withAbsolutePath({ Path: ';rel;\\top', HOME: 'C:\\h' }, 'win32')).toEqual({ HOME: 'C:\\h' });
   });
 
   it('the launch environment is the allowlist, never a key, with the absolute PATH', () => {

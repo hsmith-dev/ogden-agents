@@ -17,7 +17,8 @@
  *
  * Refused, changing nothing: while the terminal drives, while the chat works,
  * waits or switches, for its own agent or an unknown one, and for an agent
- * that can't take a chat in this project now (trust, install, sign-in).
+ * that can't take a chat in this project now (trust, install, sign-in), and,
+ * for a remote chat, an agent tied to this computer (27.5).
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
@@ -31,12 +32,13 @@ import {
   type WorkspaceId,
 } from '@ogden-agents/shared';
 import { declaredModes, handoffBudget, type AgentDescriptor } from '../agent-descriptor.js';
-import { DriverIsTerminalError, HandoffNotPreviewedError, InvalidOperationError, SessionNotIdleError, UnknownAgentError } from '../errors.js';
+import { DriverIsTerminalError, HandoffNotPreviewedError, InvalidOperationError, LocalOnlyAgentError, SessionNotIdleError, UnknownAgentError } from '../errors.js';
 import { buildHandoffBrief, HANDOFF_EVENT_TYPES } from '../handoff-brief.js';
 import type { Agents } from './agents.js';
 import type { Models } from './model.js';
 import { AGENT_SESSION_REF, agentSessionRefOf, HANDOFF_PENDING_REF, HANDOFF_PREVIEW_TTL_MS, handoffLeftRefOf, MAX_HANDOFF_PREVIEWS } from './constants.js';
 import type { ChatContext } from './context.js';
+import { refuseWhileFolderMoves } from './folder-hold.js';
 import type { Chat } from './types.js';
 import { requireAgentReady } from './workspaces.js';
 
@@ -87,7 +89,11 @@ export function createHandoff(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent
   const checkNow = (workspaceId: WorkspaceId, sessionId: SessionId, agentId: AgentId): { session: Session; current: AgentId } => {
     const session = getSession(workspaceId, sessionId);
     const current = ctx.agentIdOf(session);
+    // A hand-off between this folder and a worktree is moving its folder (27.4): no agent switch meanwhile.
+    refuseWhileFolderMoves(ctx, getWorkspace(workspaceId), session);
     if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
+    // A put-away copy takes no message, so no other agent either, until Restore (27.6).
+    ctx.requireCopyPresent(sessionId);
     if (session.driver === 'terminal') {
       throw new DriverIsTerminalError('The terminal is driving this chat. Switch back to the chat before continuing with another agent.');
     }
@@ -99,6 +105,9 @@ export function createHandoff(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent
     if (session.state !== 'idle' && session.state !== 'error') throw new SessionNotIdleError('This chat is finished, so it can’t continue with another agent.');
     if (agents.get(agentId) === undefined || agents.describe(agentId) === undefined) throw new UnknownAgentError();
     if (agentId === current) throw new InvalidOperationError(`This chat is already with ${nameOf(current)}.`);
+    // A remote chat stays on its machine, so an agent tied to this computer can't take it (27.5); nothing connects.
+    const localOnly = agents.get(agentId)?.localOnlyReason;
+    if (session.machineId !== null && localOnly !== undefined) throw new LocalOnlyAgentError(localOnly);
     return { session, current };
   };
 

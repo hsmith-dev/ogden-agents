@@ -88,6 +88,11 @@
  *   JSON file inside the temp folder, as {@link CLAUDE_INSTALL_ENV} does for
  *   Claude Code, so a suite can install Codex from a local fixture lock.
  *
+ * - {@link REMOTE_HOST_ENV} = `memory`: remote machines go through the
+ *   in-memory remote host (epic 19's `createMemoryRemoteHostPort`) instead of
+ *   SSH (story 27.10), so the installed-package suite can add and confirm a
+ *   machine and pick it in the Location chip with no SSH, key or network.
+ *
  * {@link resolveTestHooks} reads them all for `start()`, and
  * {@link testHooksLogFields} is its "test hooks in use" line. Every
  * `OGDEN_AGENTS_TEST_*` name is declared here and read only beside a
@@ -182,6 +187,11 @@ export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
  * per ready worker and calls no model (tests only; epic 15, 15.3). Without it a real install has no manager yet.
  */
 export const MANAGER_ENV = 'OGDEN_AGENTS_TEST_MANAGER';
+/**
+ * `memory`: remote machines go through the in-memory remote host instead of SSH (tests only; story 27.10).
+ * Without it every install uses the real SSH remote host.
+ */
+export const REMOTE_HOST_ENV = 'OGDEN_AGENTS_TEST_REMOTE_HOST';
 /** `available` or `unavailable`: the sandbox check unattended builds get (tests only; story 5.2). */
 export const SANDBOX_ENV = 'OGDEN_AGENTS_TEST_SANDBOX';
 
@@ -234,6 +244,11 @@ export function testSandbox(env: Env, dataDir: string, tmp: string = tmpdir()): 
 /** `memory` when a test asked for the stub manager and test hooks are allowed for `dataDir`; otherwise `undefined` (no manager yet). */
 export function testManager(env: Env, dataDir: string, tmp: string = tmpdir()): 'memory' | undefined {
   return env[MANAGER_ENV] === 'memory' && testHooksAllowed(env, dataDir, tmp) ? 'memory' : undefined;
+}
+
+/** `memory` when a test asked for the in-memory remote host and test hooks are allowed for `dataDir`; otherwise `undefined` (the real SSH host). */
+export function testRemoteHost(env: Env, dataDir: string, tmp: string = tmpdir()): 'memory' | undefined {
+  return env[REMOTE_HOST_ENV] === 'memory' && testHooksAllowed(env, dataDir, tmp) ? 'memory' : undefined;
 }
 
 /** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). Honoured only when `testHooksAllowed`. */
@@ -630,7 +645,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'editorLauncher' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox' | 'notifier' | 'manager'> & {
+export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'editorLauncher' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox' | 'notifier' | 'manager' | 'remoteHost'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -660,6 +675,7 @@ export interface TestHooks {
   secretStore: 'memory' | undefined;
   sandbox: SandboxCheck | undefined;
   manager: 'memory' | undefined;
+  remoteHost: 'memory' | undefined;
   notifier: NotifierPort | undefined;
 }
 
@@ -704,6 +720,8 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     sandbox: options.sandbox === undefined ? testSandbox(env, dataDir, tmp) : undefined,
     // A manager a test passes decides it: the hook is not read.
     manager: options.manager === undefined ? testManager(env, dataDir, tmp) : undefined,
+    // A remote host a test passes decides it: the hook is not read.
+    remoteHost: options.remoteHost === undefined ? testRemoteHost(env, dataDir, tmp) : undefined,
     // A notifier a test passes decides it: the hook is not read.
     notifier: options.notifier === undefined ? testNotifier(env, dataDir, tmp) : undefined,
   };
@@ -736,6 +754,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.bmadSource !== undefined ||
     hooks.checkInMs !== undefined ||
     hooks.manager !== undefined ||
+    hooks.remoteHost !== undefined ||
     hooks.sandbox !== undefined ||
     hooks.notifier !== undefined;
   if (!inUse) return undefined;
@@ -759,6 +778,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     bmadAvailable: hooks.bmadAvailable.join(','),
     bmadSource: hooks.bmadSource !== undefined,
     manager: hooks.manager !== undefined,
+    remoteHost: hooks.remoteHost !== undefined,
     ...(hooks.sandbox === undefined ? {} : { sandbox: hooks.sandbox.available ? 'available' : 'unavailable' }),
     ...(hooks.notifier === undefined ? {} : { notifier: true }),
     ...(hooks.checkInMs === undefined ? {} : { checkInMs: hooks.checkInMs }),

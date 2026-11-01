@@ -14,6 +14,7 @@
  *   tool that runs or writes reaches a card through the shared client.
  * - It needs a trusted project (it may run the project's own config), and
  *   its skills go in `.agents/skills`, run as a slash command (`/name idea`).
+ * - It runs only on this computer (27.5): `localOnlyReason`.
  */
 import { AgentError, type AgentDescriptor } from '@ogden-agents/core';
 import type { AgentId, CustomAgentAdvertised } from '@ogden-agents/shared';
@@ -22,6 +23,13 @@ import { resolveLinkedCommand } from '../acp-base/linked-command.js';
 import { maskSecrets, secretValues } from '../acp-base/mask.js';
 import { slashSkillInvocation } from '../acp-base/quirks.js';
 import type { AcpToolInputPaths } from '../acp-base/tool-paths.js';
+
+/**
+ * Why an agent you add yourself never runs on a remote machine (27.5, v1.3):
+ * its command is found and checked on this computer, and its key is this
+ * computer's. Core refuses a remote chat with it before any connection.
+ */
+export const CUSTOM_AGENT_LOCAL_ONLY_REASON = 'An agent you add yourself runs only on this computer, where its command and key are.';
 
 /** Every custom agent's id starts with this (`custom-<slug>`). */
 export const CUSTOM_AGENT_ID_PREFIX = 'custom-';
@@ -103,6 +111,7 @@ export function createCustomAgent(options: CustomAgentOptions): AcpAgentPort {
     // Ask is all it has, so there is nothing to send.
     startOptions: () => ({ guardsPaths: false }),
     skillInvocation: slashSkillInvocation,
+    localOnlyReason: CUSTOM_AGENT_LOCAL_ONLY_REASON,
   };
   return createAcpAgent(descriptor, quirks, { onDiagnostic: options.onDiagnostic, startTimeoutMs: options.startTimeoutMs });
 }

@@ -1,8 +1,8 @@
 import type { SessionState, TicketRow } from '@ogden-agents/shared';
-import { Bell, Desktop, Folder, Moon, NotePencil, Rows, Sun, Ticket, type Icon } from '@phosphor-icons/react';
+import { Bell, Desktop, File as FileIcon, Files, Folder, MagnifyingGlass, Moon, NotePencil, Rows, Sun, Ticket, type Icon } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ThemePreference } from '@/appearance/appearance';
 import { useAppearance } from '@/appearance/appearance-provider';
 import { DETAIL_MENU_WORDS, setChatDetail, useChatDetail, type ChatDetail } from '@/chat/detail-level';
@@ -14,7 +14,10 @@ import { markNeedsYouOpened, needsYouTarget, nextNeedsYou, lastNeedsYouOpened } 
 import { useSidebarData } from '@/shell/sidebar-data';
 import { UNTITLED, type SidebarWorkspace } from '@/shell/sidebar-model';
 import { visibleWorkspaceTabs } from '@/shell/workspace-tabs';
+import { parentOf, usePaletteFileSearch } from '@/workbench/workbench-api';
+import { SEARCH_DEBOUNCE_MS } from '@/workbench/workbench-search';
 import { fetchBmadPieces, fetchWorkspaceSettings } from '@/workspaces/workspace-settings-api';
+import { rankItems } from './palette-match';
 import type { PaletteMode } from './palette-store';
 import { recentChats, type RecentChat } from './recent-chats';
 
@@ -22,12 +25,12 @@ import { recentChats, type RecentChat } from './recent-chats';
  * Where the command palette's results come from (epic 26 story 3;
  * EXPERIENCE.md Command palette). Each source is a hook for one group, and
  * {@link PALETTE_SOURCES} is a constant list called in the same order on
- * every render, so a later story adds a group (8.11's Files, in the reserved
- * `files` slot) by appending one entry. The builders are pure, so what each
+ * every render, so a story adds a group by appending one entry (8.11 added
+ * Files, in the `files` slot). The builders are pure, so what each
  * source offers in each context is unit-tested.
  */
 
-/** The groups, in the order typed results show them. `files` is reserved for story 8.11. */
+/** The groups, in the order typed results show them. */
 export type PaletteGroupId = 'chats' | 'projects' | 'files' | 'tickets' | 'actions';
 
 export const PALETTE_GROUP_ORDER: readonly PaletteGroupId[] = ['chats', 'projects', 'files', 'tickets', 'actions'];
@@ -73,6 +76,8 @@ export interface PaletteItem {
 /** What every source sees. */
 export interface PaletteContext {
   open: boolean;
+  /** Everything, or "New chat in..." (which lists only projects). */
+  mode: PaletteMode;
   query: string;
   /** The project on screen, if any. */
   wsId: string | undefined;
@@ -182,6 +187,64 @@ function useTicketItems(ctx: PaletteContext): PaletteItem[] {
   return ticketItems(wsId, rows, ctx.query, (ws, ref) => void navigate({ to: '/w/$wsId/board/$ref', params: { wsId: ws, ref } }));
 }
 
+// ---- Files ----
+
+/** At most this many files show (the best by the palette's own matcher). */
+export const PALETTE_FILES_SHOWN = 8;
+
+/**
+ * The current project's files from the name search: each by its name, its
+ * folder in caption (none at the root), its path as a keyword (a folder
+ * part matches, ranked below a name); the best {@link PALETTE_FILES_SHOWN}.
+ * None outside a project, without results, or on the empty query.
+ */
+export function fileItems(wsId: string | undefined, paths: readonly string[] | undefined, query: string, openFile: (wsId: string, path: string) => void): PaletteItem[] {
+  if (wsId === undefined || paths === undefined || isEmpty(query)) return [];
+  const items: PaletteItem[] = paths.map((path) => {
+    const folder = parentOf(path);
+    return {
+      id: `file:${path}`,
+      group: 'files',
+      label: path.slice(folder === '' ? 0 : folder.length + 1),
+      context: folder === '' ? undefined : folder,
+      glyph: { icon: FileIcon },
+      keywords: [path],
+      run: () => openFile(wsId, path),
+    };
+  });
+  return rankItems(query, items, ['files'], PALETTE_FILES_SHOWN).map((ranked) => ranked.item);
+}
+
+/** `value` once it has stayed the same for `delay` ms; `''` at once. */
+function useDebouncedValue(value: string, delay: number): string {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    if (value === '') {
+      setSettled('');
+      return;
+    }
+    const timer = setTimeout(() => setSettled(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return value === '' ? '' : settled;
+}
+
+/**
+ * The current project's files (8.11): only while the palette is open on
+ * everything, in a project, with something typed, after a pause in typing.
+ * Closing, leaving the project or a newer query cancels the request in
+ * flight; any failure leaves the group out. Results are never kept.
+ */
+function useFileItems(ctx: PaletteContext): PaletteItem[] {
+  const navigate = useNavigate();
+  const active = ctx.open && ctx.mode === 'all' && ctx.wsId !== undefined;
+  const typed = active ? ctx.query.trim() : '';
+  const settled = useDebouncedValue(typed, SEARCH_DEBOUNCE_MS);
+  const search = usePaletteFileSearch(ctx.wsId, settled, active);
+  const paths = active && settled !== '' && !search.isError ? search.data?.files.map((file) => file.path) : undefined;
+  return fileItems(ctx.wsId, paths, ctx.query, (wsId, path) => void navigate({ to: '/w/$wsId/workbench', params: { wsId }, search: { path } }));
+}
+
 // ---- Actions ----
 
 /** The theme actions' words, as the Appearance page names them. */
@@ -198,6 +261,8 @@ export interface ActionInputs {
   settingsGroups: readonly SettingsGroup[];
   theme: ThemePreference;
   newChat: (wsId: string) => void;
+  /** The project's Workbench, or its Search panel. */
+  openWorkbench: (wsId: string, panel?: 'search') => void;
   goToNeedsYou: () => void;
   setDetail: (sesId: string, level: ChatDetail) => void;
   openPage: (to: string) => void;
@@ -206,9 +271,9 @@ export interface ActionInputs {
 
 /**
  * New chat (in a project), New chat in..., Go to Needs you (when it has
- * anything), the detail level (on a chat), each Settings group, and the two
- * themes not in use. Files' Workbench, Search the project and Run tests are
- * story 8.11's.
+ * anything), Workbench and Search the project (in a project, as `g w` and
+ * `g s` open them), the detail level (on a chat), each Settings group, and
+ * the two themes not in use. Run tests waits for Problems (epic 8).
  */
 export function actionItems(inputs: ActionInputs): PaletteItem[] {
   const items: PaletteItem[] = [];
@@ -219,6 +284,10 @@ export function actionItems(inputs: ActionInputs): PaletteItem[] {
   items.push({ id: 'action:new-chat-in', group: 'actions', label: 'New chat in...', glyph: { icon: NotePencil }, mode: 'new-chat-in' });
   if (inputs.hasNeedsYou) {
     items.push({ id: 'action:needs-you', group: 'actions', label: 'Go to Needs you', glyph: { icon: Bell }, keys: ['g', 'y'], run: inputs.goToNeedsYou });
+  }
+  if (wsId !== undefined) {
+    items.push({ id: 'action:workbench', group: 'actions', label: 'Workbench', glyph: { icon: Files }, keys: ['g', 'w'], run: () => inputs.openWorkbench(wsId) });
+    items.push({ id: 'action:search', group: 'actions', label: 'Search the project', glyph: { icon: MagnifyingGlass }, keys: ['g', 's'], run: () => inputs.openWorkbench(wsId, 'search') });
   }
   if (sesId !== undefined) {
     const next: ChatDetail = inputs.detail === 'normal' ? 'verbose' : 'normal';
@@ -272,6 +341,7 @@ function useActionItems(ctx: PaletteContext): PaletteItem[] {
     settingsGroups: visibleSettingsGroups(ctx.pathname, ctx.developerMode),
     theme: appearance.theme,
     newChat: openNewChat,
+    openWorkbench: (wsId, panel) => void navigate({ to: '/w/$wsId/workbench', params: { wsId }, search: panel === undefined ? {} : { panel } }),
     // As `g y` does (needs-you-keys.tsx): the row after the one last opened, wrapping.
     goToNeedsYou: () => {
       const next = nextNeedsYou(model.needsYou, lastNeedsYouOpened());
@@ -285,10 +355,11 @@ function useActionItems(ctx: PaletteContext): PaletteItem[] {
   });
 }
 
-/** The sources, in a fixed order (hooks are called in it every render). Story 8.11 appends Files. */
+/** The sources, in a fixed order (hooks are called in it every render); Files (8.11) last, shown in its slot by the group order. */
 export const PALETTE_SOURCES: readonly PaletteSource[] = [
   { group: 'chats', useItems: useChatItems },
   { group: 'projects', useItems: useProjectItems },
   { group: 'tickets', useItems: useTicketItems },
   { group: 'actions', useItems: useActionItems },
+  { group: 'files', useItems: useFileItems },
 ];

@@ -9,8 +9,11 @@
  * on (a stub ticket store, the project trusted), a ticket is found by its ref
  * and opens on the Board. Outside a project, `g n` opens the palette on "New
  * chat in...", whose Enter opens that project's draft. At 390px the open
- * palette fits the viewport (a screenshot under `test-results/`). Each test
- * runs its own server with the fake agent.
+ * palette fits the viewport (a screenshot under `test-results/`). 8.11: in
+ * a fixture project, typing part of a file's name lists it under Files (at
+ * most 3 searches for one word typed), axe finds nothing, a 390px page has
+ * no sideways scroll, and Enter opens the file in the viewer. Each test runs
+ * its own server with the fake agent.
  */
 import AxeBuilder from '@axe-core/playwright';
 import { basename } from 'node:path';
@@ -204,4 +207,48 @@ test('g n on home opens the palette on "New chat in...", and Enter opens that pr
     await expect(page).toHaveURL(new RegExp(`/w/${wsId}/new$`));
     await expect(composer(page)).toBeFocused();
   });
+});
+
+test('in a project, part of a file name lists it under Files and Enter opens it in the viewer; axe clean, no sideways scroll at 390px', async ({ page }) => {
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const { wsId } = await openProject(page, repo);
+      const searches: string[] = [];
+      page.on('request', (request) => {
+        if (new URL(request.url()).pathname.endsWith('/files/search')) searches.push(request.url());
+      });
+      await page.goto(`${server.url}/w/${wsId}`);
+      await expect(page.getByTestId('workspace-tab-workbench')).toBeVisible();
+      await blur(page);
+
+      await openPalette(page);
+      await field(page).pressSequentially('zebra');
+      const files = palette(page).getByRole('group', { name: 'Files' });
+      await expect(files.getByRole('option')).toHaveCount(1);
+      await expect(files.getByRole('option')).toContainText('zebra-notes.md');
+      await expect(files.getByRole('option')).toContainText('src');
+      expect(searches.length).toBeGreaterThanOrEqual(1);
+      expect(searches.length).toBeLessThanOrEqual(3);
+      expect(new URL(searches.at(-1)!).searchParams.get('mode')).toBe('names');
+
+      const axe = await new AxeBuilder({ page }).include('[data-slot="command-palette"]').analyze();
+      expect(axe.violations.map((v) => `${v.id}: ${v.nodes.map((node) => node.target.join(' ')).join(', ')}`)).toEqual([]);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(files.getByRole('option')).toBeVisible();
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+      expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+      const row = await files.getByRole('option').boundingBox();
+      expect(row).not.toBeNull();
+      expect(row!.x + row!.width).toBeLessThanOrEqual(390);
+      await page.setViewportSize({ width: 1440, height: 900 });
+
+      await expect(files.getByRole('option')).toHaveAttribute('aria-selected', 'true');
+      await page.keyboard.press('Enter');
+      await expect(palette(page)).toHaveCount(0);
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/workbench\\?path=src%2Fzebra-notes\\.md$`));
+      await expect(page.getByTestId('markdown-rendered').getByRole('heading', { name: 'Zebra notes' })).toBeVisible();
+    },
+    { files: { 'src/zebra-notes.md': '# Zebra notes\n\nStripes.\n', 'src/a.ts': 'export const a = 1;\n' } },
+  );
 });

@@ -37,7 +37,7 @@ export function AppShell() {
         <NeedsYouKeys />
         {/* `g n` and the desktop app's File > New Chat open the project's new-chat draft (epic 26). */}
         <NewChatKeys />
-        {/* Cmd/Ctrl+K: projects, chats, tickets and actions (epic 26). */}
+        {/* Cmd/Ctrl+K: projects, chats, files, tickets and actions (epic 26). */}
         <CommandPalette />
         {/* A desktop notification and a sound for each new need (backlog story 8). */}
         <AttentionNotifier />

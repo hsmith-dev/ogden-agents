@@ -16,7 +16,10 @@ import { defineConfig, devices } from '@playwright/test';
  * the fake) side by side, Antigravity's fixture install, and the agent trust
  * gate, through more test hooks. Epic 26's everyday polish journey (story
  * 26.10) runs Needs you and `g y`, `g n`, Cmd/Ctrl+K and a prefix Always
- * allow rule on a server of its own.
+ * allow rule on a server of its own. Epic 8's Workbench journey (story 8.13)
+ * runs This turn, a hunk reverted and undone, a line comment the agent
+ * receives, search, Problems, Open in editor (a fake `code`, through a test
+ * hook) and Cmd/Ctrl+K on a server of its own.
  * Every server a spec starts is stopped with its whole process tree.
  *
  *   pnpm run pack && pnpm e2e:installed
@@ -49,8 +52,8 @@ export default defineConfig({
   // optional dependencies), epic 10's BMad journey (story 10.9), epic 4's
   // planning journey and the permission modes journey (story 4.13), and the
   // 0.2.0 upgrade (story 10.7), epic 6's agents journey (entry 10), epic 12's
-  // Codex and Grok journeys, epic 11's and 17's builds journeys and epic 26's
-  // everyday polish journey (story 26.10), each on a server of its own from the
+  // Codex and Grok journeys, epic 11's and 17's builds journeys, epic 26's
+  // everyday polish journey (story 26.10) and epic 8's Workbench journey (story 8.13), each on a server of its own from the
   // same install; then epic 1's journey on the first server, last since it quits it.
   projects: [
     { name: 'gate', testMatch: /(^|[\\/])(gate|bypass)\.spec\.ts$/ },
@@ -75,6 +78,8 @@ export default defineConfig({
     { name: 'builds-agents', testMatch: /(^|[\\/])builds-agents-journey\.spec\.ts$/, dependencies: ['builds'] },
     // Epic 26's everyday polish (story 26.10): Needs you and g y, g n, Cmd/Ctrl+K, a prefix Always allow rule.
     { name: 'polish', testMatch: /(^|[\\/])everyday-polish-journey\.spec\.ts$/, dependencies: ['builds-agents'] },
-    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['polish'] },
+    // Epic 8's Workbench (story 8.13): This turn, Revert and Undo, a line comment to the agent, search, Problems, Open in editor, Cmd/Ctrl+K.
+    { name: 'workbench', testMatch: /(^|[\\/])workbench-journey\.spec\.ts$/, dependencies: ['polish'] },
+    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['workbench'] },
   ],
 });

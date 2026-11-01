@@ -21,11 +21,12 @@
  * Projects, Editor chooses Cursor; with none found the button is disabled
  * with its reason; axe finds nothing and a 390px page has no sideways scroll.
  */
-import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { recordedEditorArgs as recorded, writeFakeEditors } from '../fixtures/fake-editors.js';
 import { API_ROUTES } from '../support.js';
 import { send, startChat, withChatServer } from './chat-server.js';
 import { storedToken } from './tab.js';
@@ -243,29 +244,9 @@ test('g s opens Search; a word is found in the tracked file and not the ignored 
   );
 });
 
-/** A folder inside the temp folder holding fake `code` and `cursor`, each recording its argv (one per line) in `<folder>/<name>.argv`. */
-function fakeEditors(): string {
-  const folder = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-editors-'));
-  for (const name of ['code', 'cursor']) {
-    if (process.platform === 'win32') {
-      writeFileSync(join(folder, `${name}.cmd`), `@echo off\r\n(for %%a in (%*) do @echo %%~a) > "%~dp0${name}.argv"\r\n`);
-    } else {
-      writeFileSync(join(folder, name), `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done > "${join(folder, `${name}.argv`)}"\n`);
-      chmodSync(join(folder, name), 0o755);
-    }
-  }
-  return folder;
-}
-
-/** What a fake editor last recorded, or `undefined`. */
-const recorded = (folder: string, name: string): string | undefined => {
-  const file = join(folder, `${name}.argv`);
-  return existsSync(file) ? readFileSync(file, 'utf8').replaceAll('\r\n', '\n') : undefined;
-};
-
 test('Open in editor hands src/a.ts at line 12 to a fake code; Cmd/Ctrl+click on a reply link opens it too; Settings chooses Cursor; axe clean at 390px', async ({ page }) => {
   // The launcher looks only in a folder of fakes (a test hook that needs a test run and a temp data folder).
-  const folder = fakeEditors();
+  const folder = writeFakeEditors(mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-editors-')));
   const before = { path: process.env.OGDEN_AGENTS_TEST_EDITOR_PATH, env: process.env.NODE_ENV };
   process.env.OGDEN_AGENTS_TEST_EDITOR_PATH = folder;
   process.env.NODE_ENV = 'test';

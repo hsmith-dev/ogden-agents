@@ -78,8 +78,12 @@ export interface TranscriptCheckIn {
 export interface TranscriptPermission {
   requestId: string;
   toolCall: { toolCallId: string; title: string; kind: ToolKind; command?: string | undefined; protectedPath?: true | undefined };
-  /** What Always allow would cover; `null` when it is not offered. */
+  /** What Always allow would cover, its first (default) scope; `null` when it is not offered. */
   scope: AlwaysAllowScope | null;
+  /** The second scope a command offers: commands starting with Ogden's prefix (AD-40). */
+  prefixScope?: AlwaysAllowScope | undefined;
+  /** Why Always allow isn't offered, as the server said (AD-40); absent on older events. */
+  refusal?: string | undefined;
   cautionLevel: CautionLevel;
   /** The chat's permission mode when it asked (absent before permission modes: Ask). */
   permissionMode?: PermissionMode | undefined;
@@ -91,6 +95,8 @@ export interface TranscriptPermission {
         by: PermissionResolvedEvent['payload']['by'];
         reason: string | undefined;
         ruleId: string | undefined;
+        /** On an Always allow, the scope the rule covers (AD-40); absent on older events. */
+        scope?: AlwaysAllowScope | undefined;
         /** The rule was undone since (`workspace.permission_rule_removed`). */
         ruleRemoved: boolean;
         at: string;
@@ -337,12 +343,14 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
         break;
       }
       case 'permission.requested': {
-        const { requestId, toolCall: call, alwaysAllowScope, cautionLevel, permissionMode } = event.payload;
+        const { requestId, toolCall: call, alwaysAllowScope, alwaysAllowPrefix, alwaysAllowRefusal, cautionLevel, permissionMode } = event.payload;
         if (permissions.has(requestId)) break;
         const permission: TranscriptPermission = {
           requestId,
           toolCall: call,
           scope: alwaysAllowScope,
+          ...(alwaysAllowPrefix === undefined ? {} : { prefixScope: alwaysAllowPrefix }),
+          ...(alwaysAllowRefusal === undefined ? {} : { refusal: alwaysAllowRefusal }),
           cautionLevel,
           ...(permissionMode === undefined ? {} : { permissionMode }),
           requestedAt: event.at,
@@ -364,6 +372,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
           by: event.payload.by,
           reason: event.payload.reason,
           ruleId: event.payload.ruleId,
+          ...(event.payload.scope === undefined ? {} : { scope: event.payload.scope }),
           ruleRemoved: false,
           at: event.at,
         };

@@ -122,22 +122,23 @@ describe('permission cards through the fake ACP agent', () => {
     expect(lines.join('')).not.toContain('secret-reason-words');
   });
 
-  it('Always allow stores a rule; the same prefix then runs without a card until the rule is undone', async () => {
+  it('Always allow by prefix stores a rule; the same prefix then runs without a card until the rule is undone', async () => {
     const { server, tab } = await startChatServer();
     const { workspace, session } = await openChat(server, tab);
     const rulesPath = apiPath(API_ROUTES.permissionRules, { wsId: workspace.id });
-    const first = await ask(server, tab, workspace.id, session.id, 'permission npm install stripe');
-    expect(first.payload.alwaysAllowScope).toEqual({ kind: 'command_prefix', value: 'npm install', label: 'npm install' });
-    expect((await decide(server, tab, workspace.id, session.id, first.payload.requestId, { decision: 'allow_always' })).status).toBe(204);
+    const first = await ask(server, tab, workspace.id, session.id, 'permission npm test -- cart');
+    expect(first.payload.alwaysAllowScope).toEqual({ kind: 'command_exact', value: 'npm test -- cart', label: 'npm test -- cart' });
+    expect(first.payload.alwaysAllowPrefix).toEqual({ kind: 'command_prefix', value: 'npm test', label: 'npm test' });
+    expect((await decide(server, tab, workspace.id, session.id, first.payload.requestId, { decision: 'allow_always', scope: 'prefix' })).status).toBe(204);
     await idle(server, session.id);
 
     const { rules } = PermissionRulesResponse.parse(await (await request(server, tab, 'GET', rulesPath)).json());
-    expect(rules.map((rule) => rule.scope.value)).toEqual(['npm install']);
+    expect(rules.map((rule) => rule.scope.value)).toEqual(['npm test']);
 
-    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId: workspace.id, sesId: session.id }), { text: 'permission npm install lodash' })).status).toBe(202);
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId: workspace.id, sesId: session.id }), { text: 'permission npm test -- lodash' })).status).toBe(202);
     await waitFor(() => replies(server, session.id).length === 2, 'the second reply', 15_000);
     await idle(server, session.id);
-    expect(replies(server, session.id)).toEqual(['Ran npm install stripe.', 'Ran npm install lodash.']);
+    expect(replies(server, session.id)).toEqual(['Ran npm test -- cart.', 'Ran npm test -- lodash.']);
     expect(sessionEvents(server, session.id).flatMap((e) => (e.type === 'session.state_changed' ? [e.payload.state] : []))).toEqual([
       'working',
       'waiting',
@@ -149,7 +150,7 @@ describe('permission cards through the fake ACP agent', () => {
     expect(sessionEvents(server, session.id).filter((e) => e.type === 'permission.resolved').at(-1)?.payload).toMatchObject({ by: 'rule', ruleId: rules[0]!.id });
 
     // A compound command is never covered by a rule.
-    const compound = await ask(server, tab, workspace.id, session.id, 'permission npm install x && rm -rf build');
+    const compound = await ask(server, tab, workspace.id, session.id, 'permission npm test x && rm -rf build');
     expect((await decide(server, tab, workspace.id, session.id, compound.payload.requestId, { decision: 'deny' })).status).toBe(204);
     await idle(server, session.id);
 
@@ -157,7 +158,7 @@ describe('permission cards through the fake ACP agent', () => {
     expect((await request(server, tab, 'DELETE', rulePath)).status).toBe(204);
     expect((await request(server, tab, 'DELETE', rulePath)).status).toBe(404);
     expect(PermissionRulesResponse.parse(await (await request(server, tab, 'GET', rulesPath)).json()).rules).toEqual([]);
-    const after = await ask(server, tab, workspace.id, session.id, 'permission npm install lodash');
+    const after = await ask(server, tab, workspace.id, session.id, 'permission npm test -- lodash');
     expect((await decide(server, tab, workspace.id, session.id, after.payload.requestId, { decision: 'deny' })).status).toBe(204);
     await idle(server, session.id);
   });
@@ -197,6 +198,58 @@ describe('permission cards through the fake ACP agent', () => {
       await idle(server, session.id);
     }
     expect(PermissionRulesResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.permissionRules, { wsId: workspace.id }))).json()).rules).toEqual([]);
+  });
+
+  it('the decision body carries only a choice (AD-40): scope text from the client, a prefix not offered, or a scope without Always allow is 400 and writes nothing', async () => {
+    const { server, tab } = await startChatServer();
+    const { workspace, session } = await openChat(server, tab);
+    const rules = async () => PermissionRulesResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.permissionRules, { wsId: workspace.id }))).json()).rules;
+    const card = await ask(server, tab, workspace.id, session.id, 'permission npm test -- cart');
+    const { requestId } = card.payload;
+    for (const body of [
+      { decision: 'allow_always', scope: { kind: 'command_prefix', value: 'rm', label: 'rm' } },
+      { decision: 'allow_always', scope: 'rm' },
+      { decision: 'allow_always', scope: 'command_prefix' },
+      { decision: 'allow_once', scope: 'prefix' },
+      { decision: 'deny', scope: 'current' },
+    ]) {
+      const refused = await decide(server, tab, workspace.id, session.id, requestId, body);
+      expect(refused.status, JSON.stringify(body)).toBe(400);
+      expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('invalid_request');
+      expect(stateOf(server, session.id)).toBe('waiting');
+    }
+    expect(await rules()).toEqual([]);
+    // Pressing 2 without changing the choice saves the exact command.
+    expect((await decide(server, tab, workspace.id, session.id, requestId, { decision: 'allow_always' })).status).toBe(204);
+    await idle(server, session.id);
+    expect((await rules()).map((rule) => rule.scope)).toEqual([{ kind: 'command_exact', value: 'npm test -- cart', label: 'npm test -- cart' }]);
+
+    // A tool card offers no prefix.
+    const edit = await ask(server, tab, workspace.id, session.id, 'permission-edit src/a.ts');
+    expect(edit.payload.alwaysAllowPrefix).toBeUndefined();
+    const noPrefix = await decide(server, tab, workspace.id, session.id, edit.payload.requestId, { decision: 'allow_always', scope: 'prefix' });
+    expect(noPrefix.status).toBe(400);
+    expect(ApiErrorBody.parse(await noPrefix.json()).error.code).toBe('invalid_request');
+    expect(await rules()).toHaveLength(1);
+    expect((await decide(server, tab, workspace.id, session.id, edit.payload.requestId, { decision: 'deny' })).status).toBe(204);
+    await idle(server, session.id);
+  });
+
+  it('a chained or outside command offers no Always allow and says why', async () => {
+    const { server, tab } = await startChatServer();
+    const { workspace, session } = await openChat(server, tab);
+    for (const [command, reason] of [
+      ['npm test && npm run deploy', /runs more than one thing/],
+      ['cat /etc/passwd', /outside this project/],
+    ] as const) {
+      const { payload } = await ask(server, tab, workspace.id, session.id, `permission ${command}`);
+      expect(payload.alwaysAllowScope).toBeNull();
+      expect(payload.alwaysAllowRefusal).toMatch(reason);
+      const refused = await decide(server, tab, workspace.id, session.id, payload.requestId, { decision: 'allow_always', scope: 'prefix' });
+      expect(refused.status).toBe(400);
+      expect((await decide(server, tab, workspace.id, session.id, payload.requestId, { decision: 'deny' })).status).toBe(204);
+      await idle(server, session.id);
+    }
   });
 
   it('an edit rule covers edits inside the project only', async () => {

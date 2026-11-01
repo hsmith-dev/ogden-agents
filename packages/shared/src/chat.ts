@@ -434,15 +434,29 @@ export type UpdateWorkspaceSettingsRequest = z.infer<typeof UpdateWorkspaceSetti
 // Permissions (story 2.3 contracts; filled by 2.6).
 // ---------------------------------------------------------------------------
 
+/**
+ * Which of the scopes the card offered an Always allow saves (AD-40):
+ * `current`, the first (for a command, the exact command), or `prefix`,
+ * every command starting with Ogden's prefix. Only a choice: the server picks
+ * the scope it computed, never text from the client.
+ */
+export const ALWAYS_ALLOW_CHOICES = ['current', 'prefix'] as const;
+export const AlwaysAllowChoice = z.enum(ALWAYS_ALLOW_CHOICES);
+export type AlwaysAllowChoice = z.infer<typeof AlwaysAllowChoice>;
+
 /** `POST /api/v1/workspaces/:wsId/sessions/:sesId/permissions/:requestId`: the user's answer on the card. */
-export const PermissionDecisionRequest = z.object({
-  decision: PermissionDecision,
-  /** Optional reason on Deny, sent back to the agent. */
-  reason: z
-    .string()
-    .max(MAX_DENY_REASON_LENGTH, `A reason can be at most ${MAX_DENY_REASON_LENGTH} characters.`)
-    .optional(),
-});
+export const PermissionDecisionRequest = z
+  .object({
+    decision: PermissionDecision,
+    /** Optional reason on Deny, sent back to the agent. */
+    reason: z
+      .string()
+      .max(MAX_DENY_REASON_LENGTH, `A reason can be at most ${MAX_DENY_REASON_LENGTH} characters.`)
+      .optional(),
+    /** With `allow_always` only: which offered scope to save (absent: `current`). */
+    scope: AlwaysAllowChoice.optional(),
+  })
+  .refine((body) => body.scope === undefined || body.decision === 'allow_always', { message: 'A scope goes only with Always allow.', path: ['scope'] });
 export type PermissionDecisionRequest = z.infer<typeof PermissionDecisionRequest>;
 
 /** An always-allow rule: stored and enforced in core, scoped to one workspace, and undoable (E2-R3). */

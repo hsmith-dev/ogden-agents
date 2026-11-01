@@ -82,6 +82,36 @@ const resolved = (requestId: string, decision: string, by: string, extra: Record
   event('permission.resolved', { sessionId: 'ses_1', requestId, decision, by, ...extra });
 
 describe('sessionView: permission requests (story 2.6)', () => {
+  it('carries the second scope, the refusal and the chosen scope (AD-40)', () => {
+    const exact = { kind: 'command_exact', value: 'npm test -- cart', label: 'npm test -- cart' };
+    const prefix = { kind: 'command_prefix', value: 'npm test', label: 'npm test' };
+    const card = event('permission.requested', {
+      sessionId: 'ses_1',
+      requestId: 'p1',
+      toolCall: { toolCallId: 't-p1', title: 'Run npm test -- cart', kind: 'execute', command: 'npm test -- cart' },
+      alwaysAllowScope: exact,
+      alwaysAllowPrefix: prefix,
+      cautionLevel: 'ask_every_time',
+    });
+    const pendingView = sessionView([created(), stateChanged('working', 'idle'), card, stateChanged('waiting', 'working')], 'ses_1');
+    expect(pendingView.pendingPermissions[0]).toMatchObject({ scope: exact, prefixScope: prefix });
+    const decided = sessionView([created(), stateChanged('working', 'idle'), card, resolved('p1', 'allow_always', 'user', { ruleId: 'rule_01J9Z3K4M5N6P7Q8R9S0T1V2W3', scope: prefix })], 'ses_1');
+    const item = decided.items.find((entry) => entry.type === 'permission');
+    expect(item?.type === 'permission' && item.permission.resolution?.scope).toEqual(prefix);
+
+    const refused = event('permission.requested', {
+      sessionId: 'ses_1',
+      requestId: 'p2',
+      toolCall: { toolCallId: 't-p2', title: 'Run x', kind: 'execute', command: 'cat /etc/passwd' },
+      alwaysAllowScope: null,
+      alwaysAllowRefusal: 'Because.',
+      cautionLevel: 'ask_every_time',
+    });
+    const refusedView = sessionView([created(), stateChanged('working', 'idle'), refused, stateChanged('waiting', 'working')], 'ses_1');
+    expect(refusedView.pendingPermissions[0]).toMatchObject({ scope: null, refusal: 'Because.' });
+    expect(refusedView.pendingPermissions[0]?.prefixScope).toBeUndefined();
+  });
+
   it('folds a request in order among the messages, pending while the session waits', () => {
     const events = [created(), completed('u1', 'user', 'Run the tests'), stateChanged('working', 'idle'), requested('p1'), stateChanged('waiting', 'working')];
     const view = sessionView(events, 'ses_1');

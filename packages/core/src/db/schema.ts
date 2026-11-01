@@ -238,8 +238,8 @@ export const permissionRules = sqliteTable(
     workspaceId: text('workspace_id')
       .notNull()
       .references(() => workspaces.id),
-    /** `command_prefix` or `tool` (`AlwaysAllowScope.kind`). */
-    kind: text('kind').$type<'command_prefix' | 'tool'>().notNull(),
+    /** `command_exact` (AD-40), `command_prefix` or `tool` (`AlwaysAllowScope.kind`); a text column, so no migration. */
+    kind: text('kind').$type<'command_exact' | 'command_prefix' | 'tool'>().notNull(),
     value: text('value').notNull(),
     label: text('label').notNull(),
     createdAt: text('created_at').notNull(),

@@ -16,7 +16,7 @@ describe('settings groups (epic 26, E26-R7)', () => {
 
   it('maps every settings route in the router to exactly one group and page', () => {
     const paths = routerSettingsPaths();
-    expect(paths).toHaveLength(12);
+    expect(paths).toHaveLength(13);
     for (const path of paths) {
       expect(settingsGroupFor(path), path).toBeDefined();
       const owners = SETTINGS_GROUPS.filter((g) => g.pages.some((p) => path === p.to || path.startsWith(`${p.to}/`)));
@@ -31,6 +31,9 @@ describe('settings groups (epic 26, E26-R7)', () => {
     expect(currentSettingsPage('/settings/mcp')?.label).toBe('MCP servers');
     expect(settingsGroupFor('/settings/mcp')?.pages.map((p) => p.label)).toEqual(['Tools', 'Developer tools', 'MCP servers', 'About']);
     expect(settingsGroupFor('/settings/builds')?.id).toBe('projects');
+    // Every project's Always allow rules sit in Projects (epic 26 story 8).
+    expect(settingsGroupFor('/settings/always-allow')?.pages.map((p) => p.label)).toEqual(['New projects', 'Always allow rules', 'Builds']);
+    expect(currentSettingsPage('/settings/always-allow')?.label).toBe('Always allow rules');
   });
 
   it('Add your own agent is Agents, and a trailing slash changes nothing', () => {

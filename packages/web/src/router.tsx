@@ -101,6 +101,13 @@ const aboutRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/about-page'), 'AboutPage'),
 });
 
+/** Every project's Always allow rules, each with Remove (epic 26 story 8, AD-40). */
+const alwaysAllowSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/always-allow',
+  component: lazyRouteComponent(() => import('./routes/always-allow-settings-page'), 'AlwaysAllowSettingsPage'),
+});
+
 /** The app-wide default for new projects (story 10.4). */
 const newProjectsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -204,7 +211,7 @@ const routeTree = rootRoute.addChildren([
   workspaceOrchestrateRoute,
   workspaceTerminalsRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, alwaysAllowSettingsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

@@ -398,8 +398,16 @@ export const PermissionRequestedInput = z.object({
        */
       protectedPath: z.literal(true).optional(),
     }),
-    /** What "Always allow" would cover; `null` when it is not offered. */
+    /**
+     * What "Always allow" would cover; `null` when it is not offered. For a
+     * command it is the exact command (`command_exact`, AD-40), selected by
+     * default; before AD-40 it was the prefix (`command_prefix`).
+     */
     alwaysAllowScope: AlwaysAllowScope.nullable(),
+    /** The second scope a command offers: every command starting with Ogden's prefix (AD-40). Absent when not offered. */
+    alwaysAllowPrefix: AlwaysAllowScope.optional(),
+    /** Why Always allow isn't offered, in plain words for the card (AD-40). Absent when it is, or on older events. */
+    alwaysAllowRefusal: z.string().min(1).optional(),
     /** The workspace's caution level when the card was shown. */
     cautionLevel: CautionLevel,
     /**
@@ -427,6 +435,8 @@ export const PermissionResolvedInput = z.object({
     by: z.enum(['user', 'rule', 'caution', 'cancelled']),
     /** The always-allow rule that decided, or that `allow_always` created. */
     ruleId: PermissionRuleId.optional(),
+    /** On an `allow_always`, the scope the user chose and the rule covers (AD-40). Absent on older events. */
+    scope: AlwaysAllowScope.optional(),
   }),
 });
 /** A permission request was decided (or cancelled); the card collapses to its record line. */

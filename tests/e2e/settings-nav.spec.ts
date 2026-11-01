@@ -39,6 +39,7 @@ test.describe('settings nav at 1440 px', () => {
     { path: '/settings/agents', heading: 'Agents', current: 'Agents' },
     { path: '/settings/agents/new', heading: 'Agents', current: 'Agents' },
     { path: '/settings/new-projects', heading: NEW_PROJECTS_SETTINGS_LABEL, current: NEW_PROJECTS_SETTINGS_LABEL },
+    { path: '/settings/always-allow', heading: 'Always allow rules', current: 'Always allow rules' },
     { path: '/settings/builds', heading: 'Builds', current: 'Builds' },
     { path: '/settings/notifications', heading: 'Notifications', current: 'Notifications' },
     { path: '/settings/terminals', heading: 'Terminals', current: 'Terminals' },

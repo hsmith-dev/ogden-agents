@@ -86,6 +86,7 @@ The project root is the git worktree `/Users/harrisonsmith/Library/Caches/ogden-
 - `tests/architecture.test.ts`: `workspaceFileLinks` added to the Workbench route keys and `WorkspaceFileLinksRequest.paths` to the checked path fields.
 
 - Verified (after review fixes): `pnpm typecheck` clean; `pnpm test` at load below 40: first run 2 failures (the security lens's body-limit row still sized for the old 512 KiB limit, now 4 MiB; one timing failure that passed on re-run), then 5588 passed, 13 skipped (427 files) apart from that row, which passes alone with the security files (48 tests); `pnpm run build` then `workbench-files.spec.ts` (axe, 390px) and `chat.spec.ts` passed (5); provenance check passed.
+- Syntax colour (epic follow-up after the 8.3 merge): `CodeView`'s `renderLine` defaults to `useSyntaxRenderLine` (`ui/syntax/syntax-lines.tsx`) on 8.3's lazy Lezer highlighter, so a file has the same colours as its diff; plain until the grammar loads, plain for an unknown language.
 - Review fix choice: a decoded relative link may hold a plain space (`my notes.md`); every other character `safeHref` refuses is refused.
 
 ## Plan Change Log
@@ -114,7 +115,6 @@ Pass 1 (2026-11-01; lenses: quick, security-links). Verdicts: high 1, medium 3, 
 - Links in tool-call rows, search results and Problems rows (EXPERIENCE.md Path links) go through `PathLink` when those surfaces are built or touched; tool rows are not linked yet.
 - An absolute path inside the project in a reply (`/Users/me/proj/src/a.ts`) stays plain text; mapping it to a relative path would need the project's real path in the client.
 - `Cmd/Ctrl` with click to open in the editor, and Open in editor in the viewer header, wait for 8.10.
-- Syntax colour: `CodeView`'s `renderLine` hook is left for 8.3's highlighter; lines are plain `mono` today.
 
 ## Design Notes
 

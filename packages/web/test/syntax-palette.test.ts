@@ -79,7 +79,7 @@ describe('syntax and diff tokens', () => {
   });
 
   it('the diff viewer sets code only on those surfaces and colours it only with those tokens (story 8.3)', () => {
-    const source = ['../src/ui/diff/diff-file.tsx', '../src/ui/diff-viewer.tsx', '../src/ui/syntax/highlight.ts'].map((path) => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n');
+    const source = ['../src/ui/diff/diff-file.tsx', '../src/ui/diff-viewer.tsx', '../src/ui/syntax/highlight.ts', '../src/ui/syntax/syntax-lines.tsx'].map((path) => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n');
     // The chevron's hover fill holds an icon, never code.
     const surfaces = new Set([...source.matchAll(/\bbg-([a-z-]+)/g)].map((match) => match[1]!).filter((surface) => surface !== 'accent'));
     expect([...surfaces].sort()).toEqual(expect.arrayContaining(['background', 'diff-add', 'diff-remove']));

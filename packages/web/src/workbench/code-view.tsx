@@ -1,14 +1,15 @@
 import { Check, Copy } from '@phosphor-icons/react';
 import { WORKSPACE_FILE_COPIED_TEXT, WORKSPACE_FILE_COPY_FAILED_TEXT, WORKSPACE_FILE_COPY_PATH_LABEL } from '@ogden-agents/shared';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@/ui/button';
+import { useSyntaxRenderLine } from '@/ui/syntax/syntax-lines';
 import { Text } from '@/ui/typography';
 import { cn } from '@/ui/utils';
 
 /** How long "Copied" or "Couldn't copy" shows before Copy path comes back. */
 const COPY_FEEDBACK_MS = 2_000;
 
-/** A line's content as shown: the hook a highlighter (8.3) fills; absent, the text exactly as sent. */
+/** A line's content as shown: the hook 8.3's highlighter fills by default; absent, the text exactly as sent. */
 export type RenderLine = (line: string, index: number) => ReactNode;
 
 /** A file's text as lines: a last line ending (of any kind) ends the last line; it doesn't start another. */
@@ -17,8 +18,9 @@ export const linesOf = (text: string): string[] => text.replace(/(?:\r\n|\r|\n)$
 /**
  * The Files panel's viewer (AD-36): the file's path over its text, read-only,
  * one row per line with its number. Long lines wrap rather than scroll
- * sideways, so the page fits a phone. No colour of its own: `renderLine` is
- * where a highlighter goes. `line` (a `file:line` link, 8.7) is scrolled into
+ * sideways, so the page fits a phone. Colour comes through `renderLine`:
+ * by default 8.3's lazy highlighter for the path's language, the same colour
+ * as a diff (plain until the grammar loads). `line` (a `file:line` link, 8.7) is scrolled into
  * view and highlighted until the next click; past the end, nothing is.
  */
 export function CodeView({
@@ -37,7 +39,9 @@ export function CodeView({
   actions?: ReactNode;
   renderLine?: RenderLine | undefined;
 }) {
-  const lines = linesOf(text);
+  const lines = useMemo(() => linesOf(text), [text]);
+  const syntax = useSyntaxRenderLine(path, lines);
+  const render = renderLine ?? syntax;
   const target = line !== undefined && line >= 1 && line <= lines.length ? line : undefined;
   const [highlighted, setHighlighted] = useState(target);
   const targetRow = useRef<HTMLDivElement | null>(null);
@@ -72,7 +76,7 @@ export function CodeView({
               <span aria-hidden className="text-right text-muted-foreground tabular-nums select-none" data-testid="code-line-number">
                 {number}
               </span>
-              <span className="min-w-0 whitespace-pre-wrap wrap-anywhere">{renderLine === undefined ? each : renderLine(each, index)}</span>
+              <span className="min-w-0 whitespace-pre-wrap wrap-anywhere">{render === undefined ? each : render(each, index)}</span>
             </div>
           );
         })}

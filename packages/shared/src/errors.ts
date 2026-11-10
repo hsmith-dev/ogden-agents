@@ -208,6 +208,12 @@ export const API_ERROR_CODES = [
   'no_install_command',
   /** CAP-25: a dev tool's real install command failed (409). The message is its plain reason, never the raw installer output. */
   'install_failed',
+  /** CAP-35 (epic 27): the tracker refused the account's token (401 or 403 from it; answered 409). */
+  'tracker_unauthorized',
+  /** CAP-35: the tracker could not be reached, timed out or answered unexpectedly (502). */
+  'tracker_unreachable',
+  /** CAP-35: the tracker has no such repository, team or issue (404). */
+  'tracker_not_found',
   /** CAP-24 (epic 19 story 19.3): a remote machine could not be reached within the connect timeout (502). */
   'remote_host_unreachable',
   /** CAP-24: reading a remote machine's host key timed out (504). */

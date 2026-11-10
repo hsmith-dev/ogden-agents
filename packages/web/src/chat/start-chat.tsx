@@ -7,6 +7,7 @@ import { Button } from '@/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/ui/dropdown-menu';
 import { SET_UP_AGENTS } from './agent-picker';
 import { CHAT_AGENTS_QUERY_KEY, createChatSession } from './chat-api';
+import { chatDraftKey, writeDraft } from './drafts';
 import { agentAvailability, type AgentAvailability } from './use-chat-agents';
 
 /** Said when starting a chat fails with no reason from the server. */
@@ -14,6 +15,12 @@ export const START_FAILED = "Ogden Agents couldn't start a chat. Try again.";
 
 /** The primary action of an empty project (its Chats page and its sidebar entry). */
 export const START_A_CHAT = 'Start a chat';
+
+/** What a chat starts from besides its agent (epic 27): its name, and the text waiting in its composer. */
+export interface StartFrom {
+  autoTitle?: string;
+  draft?: string;
+}
 
 /**
  * Starts a chat in a project and opens it (the empty project's one click,
@@ -28,7 +35,7 @@ export function useStartChat(wsId: string, onOpened?: () => void) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const start = useCallback(
-    (agentId: string | undefined, machineId?: RemoteMachineId | null) => {
+    (agentId: string | undefined, machineId?: RemoteMachineId | null, from?: StartFrom) => {
       if (inFlight.current) return;
       inFlight.current = true;
       setStarting(true);
@@ -37,8 +44,10 @@ export function useStartChat(wsId: string, onOpened?: () => void) {
         inFlight.current = false;
         setStarting(false);
       };
-      createChatSession(wsId, undefined, agentId, undefined, machineId).then(
+      createChatSession(wsId, undefined, agentId, undefined, machineId, from?.autoTitle).then(
         (session) => {
+          // A chat from an issue (epic 27): its context waits in the chat's composer for the person to read and send.
+          if (from?.draft !== undefined) writeDraft(chatDraftKey(wsId, session.id), from.draft);
           // Still starting until the chat replaces this action: the sidebar row stays until the chat's event arrives, and a click then must not start a second chat.
           onOpened?.();
           void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId: session.id } }).catch(done);

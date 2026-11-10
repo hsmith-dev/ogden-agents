@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { createAcpBuildRunner, createMemoryManager, ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createDevToolsAdapter, projectFilesFingerprint, createTrackers } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
@@ -520,6 +520,7 @@ async function listenAndAnnounce({
     devTools: core.devTools,
     notifications,
     remoteMachines,
+    trackerAccounts: core.trackerAccounts(secrets, options.trackers ?? createTrackers()),
     ...endpointApi,
     bmadSource,
     // Setup also places the skills in each other agent's folder the project uses (epic 6 entry 8).

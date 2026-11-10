@@ -737,6 +737,12 @@ const EXPECTED_API_ROUTES = [
   `DELETE ${API_ROUTES.remoteMachine}`,
   `POST ${API_ROUTES.remoteMachineHostKeyCheck}`,
   `POST ${API_ROUTES.remoteMachineHostKeyConfirm}`,
+  // The issue tracker accounts (CAP-35, epic 27).
+  `GET ${API_ROUTES.trackerAccounts}`,
+  `POST ${API_ROUTES.trackerAccounts}`,
+  `DELETE ${API_ROUTES.trackerAccount}`,
+  `GET ${API_ROUTES.trackerIssues}`,
+  `GET ${API_ROUTES.trackerIssueContext}`,
   // Orchestration (epic 15, 15.2): behind the gate and core's Orchestration guard (its own helper, not a BMad piece's).
   `GET ${API_ROUTES.workspaceOrchestration}`,
   `GET ${API_ROUTES.workspaceTeamRoster}`,

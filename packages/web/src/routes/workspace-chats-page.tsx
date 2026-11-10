@@ -10,6 +10,7 @@ import { Composer } from '@/chat/composer';
 import { StartChatActions, useStartChat } from '@/chat/start-chat';
 import { newChatDraftKey } from '@/chat/drafts';
 import { agentAvailability, projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
+import { IssuePicker } from '@/trackers/issue-picker';
 import { MachinePicker } from '@/remote-machines/machine-picker';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
@@ -110,6 +111,8 @@ function ChatsPage({ wsId }: { wsId: string }) {
                 <GearSix aria-hidden />
               </Link>
             </Button>
+            {/* A chat from a tracker issue (epic 27): named after it, its context in the composer; only once an account exists. */}
+            <IssuePicker disabled={creating || blocked !== undefined} onPicked={(picked) => (blocked === undefined ? start(agentId, pickedMachine, { autoTitle: picked.chatName, draft: picked.context }) : setCreateError(blocked.description))} />
             {/* While the list is empty, Start a chat in the page is the one primary action. */}
             <Button
               variant={startShown ? 'outline' : 'primary'}

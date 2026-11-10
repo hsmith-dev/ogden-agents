@@ -23,6 +23,8 @@ export const ID_PREFIXES = {
   orchestrationRun: 'orc',
   /** A remote machine added over SSH (CAP-24, epic 19 story 19.1; architecture's id-prefix note). */
   remoteMachine: 'mach',
+  /** An issue tracker account (CAP-35, epic 27). */
+  trackerAccount: 'trk',
 } as const;
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
 
@@ -71,3 +73,7 @@ export type OrchestrationRunId = z.infer<typeof OrchestrationRunId>;
 /** A remote machine the user added over SSH (CAP-24, epic 19 story 19.1). */
 export const RemoteMachineId = prefixedUlid('mach');
 export type RemoteMachineId = z.infer<typeof RemoteMachineId>;
+
+/** An issue tracker account (CAP-35, epic 27). */
+export const TrackerAccountId = prefixedUlid('trk');
+export type TrackerAccountId = z.infer<typeof TrackerAccountId>;

@@ -571,6 +571,20 @@ export const remoteMachines = sqliteTable('remote_machines', {
 });
 
 /**
+ * Issue tracker accounts (CAP-35, epic 27): install-level, one row per
+ * account. Never a token: it is only in the keychain under
+ * `tracker-token/<id>` (AD-16). `scope` is a GitHub `owner/name` or a Linear
+ * team key (`NULL`: every team). Read only through `tracker-accounts.ts`.
+ */
+export const trackerAccounts = sqliteTable('tracker_accounts', {
+  id: text('id').primaryKey(),
+  kind: text('kind').notNull(),
+  label: text('label').notNull(),
+  scope: text('scope'),
+  createdAt: text('created_at').notNull(),
+});
+
+/**
  * The ACP agents the user brings (epic 21, story 21.2; CAP-27, AD-11): one
  * row per custom agent, install-wide, by the id the server gave it
  * (`custom-<slug>`). The command line is kept exactly as typed and resolved

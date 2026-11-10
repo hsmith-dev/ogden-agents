@@ -18,6 +18,7 @@ import {
   type LocalEndpoints,
   type LocalModels,
   type RemoteMachines,
+  type TrackerAccounts,
   type BuildsUseCases,
   type Chat,
   type EventLog,
@@ -60,6 +61,7 @@ import { registerRetrospectiveRoutes } from './retrospective-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
 import { registerLocalEndpointRoutes } from './local-endpoint-routes.js';
 import { registerRemoteMachineRoutes } from './remote-machine-routes.js';
+import { registerTrackerRoutes } from './tracker-routes.js';
 import { registerLocalEndpointModelsRoute } from './local-endpoint-models-route.js';
 import { registerLocalEndpointUseRoutes, type EndpointPresetData } from './local-endpoint-use-routes.js';
 import { registerRunSettingsRoutes } from './run-settings-routes.js';
@@ -170,6 +172,8 @@ export interface AppOptions {
   localEndpoints?: LocalEndpoints | undefined;
   /** The remote-machine registry (CAP-24, epic 19 story 19.3); without it those routes answer 501. */
   remoteMachines?: RemoteMachines | undefined;
+  /** The issue tracker accounts (CAP-35, epic 27); without it those routes answer 501. */
+  trackerAccounts?: TrackerAccounts | undefined;
   /** Test connection and Detect (epic 14 story 14.4); without it those routes answer 501. */
   localModels?: LocalModels | undefined;
   /** The one-click presets served to the page (story 14.4). */
@@ -245,6 +249,7 @@ export function createApp({
   notifications,
   localEndpoints,
   remoteMachines,
+  trackerAccounts,
   localModels,
   endpointPresets,
   bmadSource,
@@ -384,6 +389,8 @@ export function createApp({
   registerLocalEndpointRoutes(app, { localEndpoints, log });
   // The remote-machine registry (CAP-24, epic 19 story 19.3): app-wide, behind the gate; a credential never leaves.
   registerRemoteMachineRoutes(app, { remoteMachines, log });
+  // The issue tracker accounts (CAP-35, epic 27): app-wide, behind the gate; a token never leaves.
+  registerTrackerRoutes(app, { trackerAccounts, log });
   registerLocalEndpointUseRoutes(app, { localModels, presets: endpointPresets ?? [], log });
   registerLocalEndpointModelsRoute(app, { localModels, log });
   registerUpdateRoutes(app, { updates, desktop: desktopUpdate, shell });

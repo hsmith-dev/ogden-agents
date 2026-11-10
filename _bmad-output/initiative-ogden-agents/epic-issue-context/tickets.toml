@@ -1,0 +1,58 @@
+# Epic 27 breakdown (v1.3, start from an issue). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-11-10. References to other epics use "<epic id>.<entry id>".
+# CI never uses a real tracker, keychain or network: fetch fakes on loopback only. Live checks with real accounts are hitl.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Contracts and the issue context block"
+description = "Adds the tracker kinds (github, linear), the Issue and IssueList schemas, the tracker account schema (no token in any response), the routes under the AD-15 gate, and core's pure issue-context builder: one fenced, masked block capped at 8 KB, with the chat name `<identifier> <title>`."
+verify = "Contract tests; unit tests for the block's fields, fence escaping, masking and cap."
+covers = ["E27-R1", "E27-R3", "E27-R4"]
+after = []
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 2
+type = "story"
+title = "TrackerPort with GitHub and Linear adapters over guarded HTTPS"
+description = "Adds TrackerPort (verify, recent, search, get) and the trackers-github (REST, a fine-grained token, one owner/repo) and trackers-linear (GraphQL, a personal API key) adapters on fixed hosts, HTTPS only, no redirects, a timeout and a response cap; fetch is injected."
+verify = "Adapter tests against a fetch fake: mapping, errors to plain reasons, no redirect followed, token only in the Authorization header."
+covers = ["E27-R1", "E27-R2"]
+after = [1]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Tracker accounts: add, test, remove, token in the keychain"
+description = "Core keeps install-level tracker accounts (kind, label, GitHub repository or Linear team) in one table with their events; the token goes through SecretStorePort only and is refused with the plain keychain sentence when there is none; Settings, Trackers lists, adds (Test first), and removes them."
+verify = "Core and server tests: no token in any event, response or log; removing deletes the secret; DOM test of the Settings page."
+covers = ["E27-R1"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Start a chat from an issue"
+description = "New chat gets From an issue: choose an account, see recent issues or search, pick one; the composer shows the context block that will lead the first message; the chat is named from the issue. Works in any project, git or not."
+verify = "DOM tests of the picker; a core test that the first message carries the block and the session title is set, in a workspace that is not a git repository."
+covers = ["E27-R2", "E27-R3", "E27-R4"]
+after = [3]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Live check: a real Linear and a real GitHub issue start a chat"
+description = "With the user's own Linear key and GitHub token, an issue starts a chat in a folder that is not a git repository."
+verify = "The user records both."
+covers = ["E27-R1", "E27-R2"]
+after = [4]
+hitl = true
+risk = "low"

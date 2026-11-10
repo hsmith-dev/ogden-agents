@@ -48,10 +48,11 @@ export async function createChatSession(
   agentId?: string,
   model?: string | null,
   machineId?: RemoteMachineId | null,
+  autoTitle?: string,
 ): Promise<Session> {
   // `model` (story 11): the model it starts on, as an agent handoff passes the target's; omitted, the project's or app's default.
   // `machineId` (CAP-24, epic 19 story 19.7): the machine this chat runs its agent on; omitted or `null` is local, as before this story.
-  const body = { kind: 'chat', ...(agentId === undefined ? {} : { agentId }), ...(model === undefined ? {} : { model }), ...(machineId === undefined ? {} : { machineId }) };
+  const body = { kind: 'chat', ...(agentId === undefined ? {} : { agentId }), ...(model === undefined ? {} : { model }), ...(machineId === undefined ? {} : { machineId }), ...(autoTitle === undefined ? {} : { autoTitle }) };
   const json = await call(auth, apiPath(API_ROUTES.workspaceSessions, { wsId }), postJson(body), "Ogden Agents couldn't start a chat");
   return SessionResponse.parse(json).session;
 }

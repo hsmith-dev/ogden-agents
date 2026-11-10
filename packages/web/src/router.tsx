@@ -76,6 +76,11 @@ const remoteMachinesSettingsRoute = createRoute({
   path: '/remote-machines',
   component: lazyRouteComponent(() => import('./routes/remote-machines-settings-page'), 'RemoteMachinesSettingsPage'),
 });
+const trackersSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/trackers',
+  component: lazyRouteComponent(() => import('./routes/trackers-settings-page'), 'TrackersSettingsPage'),
+});
 
 /** Desktop notifications and the sound for when a chat needs you (backlog story 8). */
 const notificationsRoute = createRoute({
@@ -201,7 +206,7 @@ const routeTree = rootRoute.addChildren([
   workspaceOrchestrateRoute,
   workspaceTerminalsRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, mcpSettingsRoute, agentsSettingsRoute, newCustomAgentRoute, devToolsSettingsRoute, remoteMachinesSettingsRoute, trackersSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

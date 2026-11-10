@@ -46,4 +46,9 @@ Not here: writing back to the tracker (status, comments), PR links, `@issue` men
 
 ## Notes
 
-- Status: DRAFT; to be broken into tickets after epic 26 lands.
+- Status: DRAFT, broken into tickets 2026-11-10 (tickets.toml); built on branch `epic-27-issue-context`. Jira (E27-R5) waits on epic 18 being wired and is not in these tickets.
+- Built 2026-11-10 (27.1 to 27.4): `packages/shared/src/trackers.ts`, `packages/core/src/{issue-context,tracker-accounts,tracker-port}.ts`, `packages/adapters/src/trackers/`, `packages/server/src/tracker-routes.ts`, `packages/web/src/trackers/`, Settings > Issue trackers, and From an issue on a project's Chats page.
+- Decision (2026-11-10, autonomous): the context block goes into the new chat's composer draft, not a hidden prefix, so the person reads and can edit exactly what the agent gets (E27-R3's "shown in the composer before it is sent"); the server builds it from a fresh fetch, never from text the page sent.
+- Decision (2026-11-10, autonomous): a build note from a linked issue (second half of E27-R4) is left for a follow-up ticket; nothing links a BMad ticket to a tracker issue yet.
+- Assumption: Linear's GraphQL shapes (`searchIssues`, `issue(id:)` by identifier, the personal key sent bare in Authorization) follow its public docs and are proven only against a fake here; live check 27.5 confirms them.
+

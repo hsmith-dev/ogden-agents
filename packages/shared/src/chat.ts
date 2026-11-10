@@ -52,6 +52,13 @@ export const CreateSessionRequest = z.object({
    * exists and is reachable is checked when the chat's agent starts, not here.
    */
   machineId: RemoteMachineId.nullable().optional(),
+  /**
+   * The chat's automatic name to start with (epic 27, E27-R4: a chat started
+   * from an issue is named after it). Stored through `autoChatName` like any
+   * automatic name: the user's own rename still wins, and the first message
+   * no longer names it.
+   */
+  autoTitle: z.string().trim().min(1).max(200).optional(),
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
 

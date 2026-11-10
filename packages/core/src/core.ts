@@ -23,6 +23,8 @@ import { createNotifications, type Notifications, type NotificationsPorts } from
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
 import type { RemoteHostPort } from './remote-host-port.js';
 import { createRemoteMachines, type RemoteMachines } from './remote-machines.js';
+import { createTrackerAccounts, type TrackerAccounts } from './tracker-accounts.js';
+import type { TrackerPort } from './tracker-port.js';
 import { createJiraLinks, type JiraLinkPort, type JiraLinks } from './jira-links.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
@@ -115,6 +117,8 @@ export interface Core {
    * {@link JiraLinkPort}. The server calls it once, after it has both.
    */
   jiraLinks(secrets: SecretStorePort, jira: JiraLinkPort): JiraLinks;
+  /** The issue tracker accounts (CAP-35, epic 27) over the keychain and the `trackers-*` adapters. The server calls it once. */
+  trackerAccounts(secrets: SecretStorePort, trackers: TrackerPort): TrackerAccounts;
   /**
    * The Orchestration use-case (epic 15, 15.3) over the chat the server holds and a manager when there is one.
    * Every call is behind {@link Core.orchestration}'s guard. The server calls it once, after it has its chat.
@@ -263,6 +267,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     customAgents: (secrets) => createCustomAgents({ db, events, secrets }),
     remoteMachines: (secrets, hosts) => createRemoteMachines({ db, events, secrets, hosts }),
     jiraLinks: (secrets, jira) => createJiraLinks({ db, events, secrets, jira }),
+    trackerAccounts: (secrets, trackers) => createTrackerAccounts({ db, events, secrets, trackers }),
     createOrchestration: (ports) => createOrchestration({ db, events, feature: orchestration, ...ports }),
     createManagerSource: (ports) => createManagerSource({ db, ...ports }),
     createTeam: (ports) => createTeam({ db, events, ...ports }),

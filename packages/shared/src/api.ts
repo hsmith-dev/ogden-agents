@@ -219,6 +219,18 @@ export const API_ROUTES = {
    * (`host-key/confirm`, below). Never carries a credential (AD-16/AD-26).
    */
   remoteMachines: `${API_BASE}/remote-machines`,
+  /**
+   * `GET` → `TrackerAccountsResponse` (CAP-35, epic 27); `POST AddTrackerAccountRequest` → 201
+   * `TrackerAccountResponse` after the token is tested; 503 `secrets_unavailable` with no keychain.
+   * Never carries a token.
+   */
+  trackerAccounts: `${API_BASE}/tracker-accounts`,
+  /** `DELETE` → 204, its token removed from the keychain too. 404 `not_found`. */
+  trackerAccount: `${API_BASE}/tracker-accounts/:accountId`,
+  /** `GET ?q=` → `IssuesResponse`: recent open issues, or those matching `q`. */
+  trackerIssues: `${API_BASE}/tracker-accounts/:accountId/issues`,
+  /** `GET` → `IssueContextResponse`: the issue fetched again, its masked context block and the chat's name. */
+  trackerIssueContext: `${API_BASE}/tracker-accounts/:accountId/issues/:issueKey/context`,
   /** `PATCH RenameRemoteMachineRequest` → `RemoteMachineResponse`; `DELETE` → 204 (also removes its stored credential, if any). 404 `not_found`. */
   remoteMachine: `${API_BASE}/remote-machines/:machineId`,
   /**

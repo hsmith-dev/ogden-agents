@@ -14,6 +14,7 @@ export * from './ids.js';
 export * from './panes.js';
 export * from './local-endpoints.js';
 export * from './remote-machines.js';
+export * from './trackers.js';
 export * from './permissions.js';
 export * from './planning.js';
 export * from './retrospectives.js';

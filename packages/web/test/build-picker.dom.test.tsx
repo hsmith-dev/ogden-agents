@@ -32,7 +32,7 @@ const state = vi.hoisted(() => ({
   calls: [] as string[],
   bodies: [] as unknown[],
   patches: [] as unknown[],
-  settings: { maxConcurrentRuns: 2, testCommand: null, defaultBuildAgentId: null } as unknown,
+  settings: { maxConcurrentRuns: 2, testCommand: null, defaultBuildAgentId: null, copyPatterns: [], setupCommand: null } as unknown,
   tickets: undefined as unknown,
   /** Confirmed remote machines (CAP-24, epic 19 story 19.7): empty by default, exactly as before this story. */
   machines: [] as unknown[],
@@ -126,7 +126,7 @@ beforeEach(() => {
   state.calls.length = 0;
   state.bodies.length = 0;
   state.patches.length = 0;
-  state.settings = { maxConcurrentRuns: 2, testCommand: null, defaultBuildAgentId: null };
+  state.settings = { maxConcurrentRuns: 2, testCommand: null, defaultBuildAgentId: null, copyPatterns: [], setupCommand: null };
   state.agents = TWO;
   state.machines = [];
 });
@@ -247,6 +247,28 @@ describe('the default build agent (epic 17)', () => {
     fireEvent.click(screen.getByTestId('default-build-agent-automatic'));
     await settle();
     expect(state.patches).toEqual([{ defaultBuildAgentId: 'codex' }, { defaultBuildAgentId: null }]);
+  });
+
+  it('saves the files to copy, one a line, refuses a protected one as typed, and saves the setup command (epic 26)', async () => {
+    mount(<ProjectBuildLimit wsId={WS} />);
+    await settle();
+    const patterns = screen.getByTestId('copy-patterns') as HTMLTextAreaElement;
+    fireEvent.change(patterns, { target: { value: '.git/config' } });
+    expect(screen.getByTestId('copy-patterns-error').textContent).toContain('protected');
+    expect(screen.getByTestId('copy-patterns-save').hasAttribute('disabled')).toBe(true);
+    fireEvent.change(patterns, { target: { value: ' .env \n\nnode_modules\n' } });
+    expect(screen.queryByTestId('copy-patterns-error')).toBeNull();
+    fireEvent.click(screen.getByTestId('copy-patterns-save'));
+    await settle();
+    expect(screen.getByTestId('copy-patterns-saved')).toBeTruthy();
+    fireEvent.change(screen.getByTestId('setup-command'), { target: { value: 'pnpm install --offline' } });
+    fireEvent.click(screen.getByTestId('setup-command-save'));
+    await settle();
+    expect(state.patches).toEqual([{ copyPatterns: ['.env', 'node_modules'] }, { setupCommand: 'pnpm install --offline' }]);
+    fireEvent.change(screen.getByTestId('setup-command'), { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('setup-command-save'));
+    await settle();
+    expect(state.patches.at(-1)).toEqual({ setupCommand: null });
   });
 
   it('shows nothing to choose with one agent', async () => {

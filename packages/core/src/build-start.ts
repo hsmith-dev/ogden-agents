@@ -9,6 +9,7 @@ import { ATTENDED_SANDBOX, blockedSentence, RUN_NOT_ACTIVE_MESSAGE, RunId, BMAD_
 import { runShortOf } from './build-run-folder.js';
 import { removeObjectStore } from './build-object-store.js';
 import { ensureWorktreesRoot, freeBytesOf } from './build-worktrees.js';
+import { attendedSetupNote, copyIgnoredFiles, runSetupCommand, setupFailedReason } from './build-new-copy.js';
 import { BuildRefusedError, NotFoundError, ScriptsChangedError, ValidationError } from './errors.js';
 import type { RemoteHostConnection } from './remote-host-port.js';
 import type { VcsHead } from './vcs-port.js';
@@ -26,13 +27,36 @@ import {
   atCheckpoint,
 } from './build-names.js';
 import type { BuildCtx } from './build-context.js';
+import type { BuildSessionSetup } from './build-sessions.js';
 
 export function createStarter(ctx: BuildCtx) {
   const {
     deps, trust, entities, tickets, vcs, sandbox, runner, runnerFor, chat, buildSessions, dataDir, paths, report, writeResult, guarded,
     requirePlanCommitted, requireGit, requireSandbox, unattendedSetup, hasCapacity, deadlineFromNow, pendingNotes, disarmDeadline,
-    cleanUp, fn, remote
+    cleanUp, fn, remote, settings, commandEnv, mask
   } = ctx;
+
+  /**
+   * The new copy's own files and setup (epic 26): the ignored files the
+   * project names, copied in, then an unattended run's setup command in its
+   * sandbox. `undefined` when it is ready (or there was nothing to do), else
+   * the failed setup's blocked reason. A remote run gets neither yet.
+   */
+  const prepareNewCopy = async (workspaceId: WorkspaceId, repoPath: string, worktreePath: string, setup: BuildSessionSetup): Promise<string | undefined> => {
+    if (setup.attended === true && setup.remote !== undefined) return undefined;
+    const { copyPatterns, setupCommand } = settings.workspaceSettings(workspaceId);
+    await copyIgnoredFiles(vcs, repoPath, worktreePath, copyPatterns);
+    if (setupCommand === null || setup.attended === true) return undefined;
+    const ran = await runSetupCommand({ sandbox, mask }, { sandbox: setup.sandbox, cwd: worktreePath, command: setupCommand, env: { ...commandEnv(), ...setup.env } });
+    return ran.ok ? undefined : setupFailedReason(blockedSentence('setup_failed'), ran);
+  };
+
+  /** An attended local run's first message also asks for the project's setup command (epic 26): it comes as a card. */
+  const noteWithSetup = (workspaceId: WorkspaceId, setup: BuildSessionSetup, note: string | undefined): string | undefined => {
+    const { setupCommand } = settings.workspaceSettings(workspaceId);
+    if (setupCommand === null || setup.attended !== true || setup.remote !== undefined) return note;
+    return attendedSetupNote(setupCommand, note);
+  };
 
   /** What a start checked about the ticket and the checkout, for the run it makes or the queued run it dispatches. */
   interface StartPlan {
@@ -188,6 +212,13 @@ export function createStarter(ctx: BuildCtx) {
             ? ({ attended: true, cwd: real } as const)
             : await unattendedSetup(workspaceId, sandboxKind, real, branch, runShort);
       buildSessions.set(session.id, setup);
+      const setupFailed = await prepareNewCopy(workspaceId, repoPath, real, setup);
+      if (setupFailed !== undefined) {
+        // The agent never started: the run waits, blocked, in its copy; Retry runs the setup again (prepareContinue).
+        run = entities.setRunOutcome(run.id, 'blocked', setupFailed, { blockedCode: 'setup_failed' });
+        await writeResult(run, repoPath, ticket, setupFailed, true);
+        return { run, session };
+      }
       if (ticket.plan_checkpoint === true) {
         // The plan checkpoint (story 5.4): paused before the prompt is sent; `resume` sends it.
         const reason = blockedSentence('checkpoint_plan');
@@ -198,7 +229,7 @@ export function createStarter(ctx: BuildCtx) {
       fn.armDeadline(run);
       const own = runnerFor(agent);
       if (own === undefined) throw new BuildRefusedError('sandbox_unavailable', NO_BUILD_RUNNER_MESSAGE);
-      chat.sendMessage(workspaceId, session.id, own.invocation(ref, { note }), { build: true });
+      chat.sendMessage(workspaceId, session.id, own.invocation(ref, { note: noteWithSetup(workspaceId, setup, note) }), { build: true });
       // The ticket's previous run, undecided and not running, is superseded (story 5.5 review): no Retry or Reject reaches it now, so its worktree and branch go.
       if (latest !== undefined && latest.id !== run.id && latest.decision === null && latest.outcome !== 'running') await cleanUp(repoPath, latest);
       return { run, session };
@@ -279,6 +310,11 @@ export function createStarter(ctx: BuildCtx) {
       const short = runShortOf(run);
       if (short === undefined) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
       buildSessions.set(run.sessionId, attended ? { attended: true, cwd: run.worktreePath } : await unattendedSetup(workspaceId, sandboxKind, run.worktreePath, run.branch, short));
+    }
+    // A run whose setup failed (epic 26) copies and runs it again before its agent's first start; failing again, it stays blocked.
+    if (run.outcome === 'blocked' && run.blockedCode === 'setup_failed') {
+      const failed = await prepareNewCopy(workspaceId, repoPath, run.worktreePath, buildSessions.get(run.sessionId)!);
+      if (failed !== undefined) throw new BuildRefusedError('setup_failed', failed);
     }
   };
 

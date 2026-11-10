@@ -249,10 +249,21 @@ describe('requests and responses (story 5.3)', () => {
     expect(testsFailedDetail(1)).toBe('1 test failed when re-run');
   });
 
+  it('copy patterns are relative git globs inside the project, never protected, and a setup command is one line (epic 26)', () => {
+    const ok = (list: string[]) => UpdateWorkspaceBuildSettingsRequest.safeParse({ copyPatterns: list }).success;
+    expect(ok(['.env', '.env.*', 'node_modules', 'apps/*/.env', '**/node_modules'])).toBe(true);
+    for (const bad of ['/etc/passwd', 'C:/x', '../x', 'a/../b', './x', ':(exclude)x', 'a\\b', '.git/config', '.claude/settings.json', 'x/.CLAUDE', '_bmad/scripts', '.mcp.json', 'AGENTS.md', '']) expect(ok([bad])).toBe(false);
+    expect(ok(['.env', '.env'])).toBe(false);
+    expect(ok(Array.from({ length: 21 }, (_, n) => `f${n}`))).toBe(false);
+    expect(UpdateWorkspaceBuildSettingsRequest.safeParse({ setupCommand: 'pnpm install --offline' }).success).toBe(true);
+    expect(UpdateWorkspaceBuildSettingsRequest.safeParse({ setupCommand: 'a\nb' }).success).toBe(false);
+    expect(UpdateWorkspaceBuildSettingsRequest.safeParse({ setupCommand: null }).success).toBe(true);
+  });
+
   it('run limits: defaults 2 per project, 3 per install, 45 minutes; changes within bounds only', () => {
     expect(RUN_LIMIT_DEFAULTS).toEqual({ maxConcurrentRunsPerWorkspace: 2, maxConcurrentRunsPerInstall: 3, maxRunMinutes: 45 });
     expect(RunLimitSettings.parse({})).toEqual({ maxConcurrentRunsPerInstall: 3, maxRunMinutes: 45 });
-    expect(WorkspaceBuildSettings.parse({})).toEqual({ maxConcurrentRuns: 2, testCommand: null, defaultBuildAgentId: null });
+    expect(WorkspaceBuildSettings.parse({})).toEqual({ maxConcurrentRuns: 2, testCommand: null, defaultBuildAgentId: null, copyPatterns: [], setupCommand: null });
     expect(UpdateRunLimitSettingsRequest.safeParse({ maxRunMinutes: 30 }).success).toBe(true);
     expect(UpdateRunLimitSettingsRequest.safeParse({ maxRunMinutes: 1 }).success).toBe(false);
     expect(UpdateRunLimitSettingsRequest.safeParse({ maxConcurrentRunsPerInstall: 2.5 }).success).toBe(false);

@@ -676,7 +676,8 @@ export type BuildRefusalCode =
   | 'plan_uncommitted'
   | 'vcs_unavailable'
   | 'disk_space_low'
-  | 'run_not_active';
+  | 'run_not_active'
+  | 'setup_failed';
 
 /**
  * A use-case whose lane has not shipped yet was asked for (story 5.3: such

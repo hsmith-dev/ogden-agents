@@ -338,6 +338,10 @@ export const workspaceBuildSettings = sqliteTable('workspace_build_settings', {
   testCommand: text('test_command'),
   /** The agent a Build with no choice uses in this project (epic 17); `NULL` falls back to the project's default chat agent when it can build, else Claude Code. */
   defaultBuildAgentId: text('default_build_agent_id'),
+  /** Ignored files copied into each build's new copy (epic 26): a JSON array of patterns; `NULL` reads as none. */
+  copyPatterns: text('copy_patterns'),
+  /** Run in each build's new copy before the agent (epic 26); `NULL` runs none. */
+  setupCommand: text('setup_command'),
 });
 
 /**

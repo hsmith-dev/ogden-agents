@@ -152,6 +152,8 @@ export function fakeVcs() {
   const state = {
     head: { branch: 'main', revision: REVISION } as VcsHead | undefined,
     status: [] as string[],
+    /** What `ignoredPaths` answers, whatever the patterns (epic 26); each call's patterns are in `calls`. */
+    ignored: [] as string[],
     files: ['src/thing.ts', PLAN],
     merged: false,
     merge: 'merged' as 'merged' | 'conflict' | 'refused',
@@ -195,6 +197,10 @@ export function fakeVcs() {
     branchRevision: async (_repo, branch) => (state.branches.has(branch) ? (state.revisions.get(branch) ?? 'b'.repeat(40)) : undefined),
     operationInProgress: async () => state.inProgress,
     staged: async () => state.staged,
+    async ignoredPaths(_repo, patterns) {
+      calls.push(`ignored ${patterns.join(',')}`);
+      return patterns.length === 0 ? [] : state.ignored;
+    },
     async restore(_repo, paths) {
       calls.push(`restore ${paths.join(',')}`);
     },

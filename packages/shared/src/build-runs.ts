@@ -119,6 +119,8 @@ export const BLOCKED_CODES = [
   'usage_limit',
   /** The run's remote machine (CAP-24, epic 19 story 19.6) dropped its connection, mid-run or during the pull-back; never retried by itself. */
   'connection_lost',
+  /** The project's setup command (epic 26, E26-R2) failed or timed out in the run's new copy, before the agent started. */
+  'setup_failed',
   'other',
 ] as const;
 export const BlockedCode = z.enum(BLOCKED_CODES);
@@ -150,6 +152,7 @@ export const BLOCKED_SENTENCES: Readonly<Record<Exclude<BlockedCode, 'time_limit
   checkpoint_plan: 'The plan is ready. Check it, then continue the build.',
   checkpoint_done: 'The build is finished. Check it, then continue.',
   agent_error: 'The agent stopped with an error before it finished.',
+  setup_failed: "The project's setup command failed in the build's copy, so the agent never started. Fix the command in the project's build settings, then retry.",
   // Epic 17: the run shows the agent's own plain reason (its name, its key or limit); these are the words when it has none.
   auth_required: 'The agent needs a valid key or sign in. Fix that in Settings, then retry.',
   usage_limit: 'The agent has reached its usage limit. Retry later, or build again with another agent.',

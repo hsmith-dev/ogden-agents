@@ -177,6 +177,8 @@ describe('vcs-memory (story 5.3): every VcsPort method', () => {
     vcs.repo(repo).staged = ['notes.txt'];
     expect(await port.status(repo)).toEqual(['notes.txt']);
     expect(await port.staged(repo)).toEqual(['notes.txt']);
+    vcs.repo(repo).ignored = ['.env', '.env.local', 'node_modules', 'apps/web/.env'];
+    expect(await port.ignoredPaths(repo, ['.env*', 'node_modules'])).toEqual(['.env', '.env.local', 'node_modules']);
     await port.restore(repo, ['notes.txt']);
     expect(await port.status(repo)).toEqual([]);
     expect(await port.operationInProgress(repo)).toBe(false);

@@ -131,6 +131,22 @@ describe('vcs-git (story 5.2)', () => {
     await expect(vcs.diff(repo, 'main', 'ogden/ok')).rejects.toBeInstanceOf(VcsError);
   });
 
+  it('lists only the untracked files git ignores that a pattern names, an ignored folder as one entry (epic 26)', async () => {
+    const { repo, vcs } = setup();
+    writeFileSync(join(repo, '.gitignore'), 'node_modules\n.env*\n*.log\n');
+    git(repo, 'add', '.gitignore');
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'ignore');
+    mkdirSync(join(repo, 'node_modules', 'a'), { recursive: true });
+    mkdirSync(join(repo, 'apps', 'web', 'node_modules', 'b'), { recursive: true });
+    for (const file of ['node_modules/a/x.js', 'apps/web/node_modules/b/y.js', '.env', '.env.local', 'apps/web/.env', 'debug.log', 'wip.txt']) writeFileSync(join(repo, file), 'x');
+    expect(await vcs.ignoredPaths(repo, [])).toEqual([]);
+    expect(await vcs.ignoredPaths(repo, ['node_modules'])).toEqual(['node_modules']);
+    expect((await vcs.ignoredPaths(repo, ['.env*'])).sort()).toEqual(['.env', '.env.local']);
+    expect((await vcs.ignoredPaths(repo, ['**/node_modules', 'apps/web/.env'])).sort()).toEqual(['apps/web/.env', 'apps/web/node_modules', 'node_modules']);
+    // Untracked but not ignored (the user's own work), and tracked files, are never listed.
+    expect(await vcs.ignoredPaths(repo, ['wip.txt', 'README.md', '.gitignore'])).toEqual([]);
+  });
+
   it('lists staged, unstaged and untracked changes, those under _bmad-output too', async () => {
     const { repo, vcs } = setup();
     expect(await vcs.status(repo)).toEqual([]);

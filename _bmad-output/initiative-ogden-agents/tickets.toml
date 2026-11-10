@@ -197,3 +197,17 @@ slug = "epic-answer-from-your-phone"
 title = "v2: Answer what needs you from your phone"
 covers = ["CAP-31", "CAP-4", "CAP-28"]
 after = [{ epic = 20, needs = "the gate, the screen-prompt model and Needs you (20.5, 20.6, 20.9)" }, { epic = 9, needs = "SecretStorePort (9.2)" }, { epic = 2, needs = "the AD-15 security gate and tab tokens (2.1)" }]
+
+[[epic]]
+id = 26
+slug = "epic-new-copy-setup"
+title = "v1.3: Each build's copy starts ready to work"
+covers = ["CAP-34", "CAP-8", "CAP-10"]
+after = [{ epic = 5, needs = "worktrees, the sandbox's run and the test re-run (5.5, 5.8)" }, { epic = 11, needs = "the project's test command setting (11.2)" }]
+
+[[epic]]
+id = 27
+slug = "epic-issue-context"
+title = "v1.3: Start a chat or a build from an issue in your tracker"
+covers = ["CAP-35", "CAP-3"]
+after = [{ epic = 9, needs = "SecretStorePort (9.2)" }, { epic = 18, needs = "the outbound URL guard and, for Jira, the link (18.x)" }]

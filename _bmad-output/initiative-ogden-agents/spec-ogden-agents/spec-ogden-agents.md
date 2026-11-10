@@ -118,6 +118,13 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** In the desktop app: a tray or menu-bar icon with the Needs you count; a global shortcut that opens a quick-entry box to start or continue a chat; files and images attached to a message for agents that accept them; a per-chat choice to work in its own worktree; and, for such a chat, its diff and a local commit from the chat.
   - **success:** Each works on macOS, Windows and Linux in the desktop app; a worktree chat's diff shows its changes and its commit lands on its own branch, never pushed; the npm route lacks only the tray and the global shortcut.
 
+- **CAP-34** (v1.3)
+  - **intent:** Each build's new copy of the project starts ready to work: the user lists, per project, files git ignores to copy in from the project (`.env`, `node_modules`) and one setup command to run there before the agent starts. Unattended builds run it in the run's own sandbox with no network; attended builds ask the agent to run it, so it comes as a permission card. Nothing is configured by default, and no file in the repo can set it. (After emdash's worktree `preservePatterns` and setup scripts; ideas only.)
+  - **success:** A build in a project listing `.env` and `node_modules` with setup `pnpm install --offline` has both in its copy and runs its tests there; a failing setup blocks the run before the agent starts, with its exit code and the end of its output, and Retry runs it again; a tracked or uncommitted file is never copied over.
+- **CAP-35** (v1.3)
+  - **intent:** A chat or a build can start from an issue in the user's tracker (GitHub Issues, Linear, or a linked Jira board): the issue's title, description, status and link become context for the agent's first message, and name the chat. Trackers are connected once per install with the user's own token, never inferred from the project's git remote, so it works in a project that is not a git repository. (After emdash's issue context; ideas only.)
+  - **success:** From a project folder with no git, the user picks a Linear or GitHub issue and the new chat's first message carries its context; no tracker token reaches an agent or the event log.
+
 CAP-11 (cost caps) is retired and its number is not reused.
 
 ## Constraints

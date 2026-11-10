@@ -173,6 +173,8 @@ export const API_ERROR_CODES = [
   'vcs_unavailable',
   /** Build was refused: the data folder's disk has too little free space for a worktree (409; story 5.5). */
   'disk_space_low',
+  /** Retry of a run blocked `setup_failed` (epic 26): the project's setup command failed again in its copy; the run stays blocked (409). */
+  'setup_failed',
   /** Stop, Retry or Check again was asked of a run in the wrong state: Stop of a finished run, Retry of one not blocked or failed (409; story 5.3). */
   'run_not_active',
   // Retrospectives (epic 7, story 7.2). Each is a 409 and nothing was written.

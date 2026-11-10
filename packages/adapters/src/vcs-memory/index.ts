@@ -19,6 +19,8 @@ export interface MemoryRepo {
   branches: Map<string, string>;
   /** Uncommitted paths (staged, unstaged or untracked). */
   status: string[];
+  /** Untracked paths git ignores (epic 26); `ignoredPaths` answers those a pattern names exactly or by a `*` within one segment. */
+  ignored: string[];
   staged: string[];
   inProgress: boolean;
   /** Each branch's changed files against where it started. */
@@ -57,7 +59,7 @@ export function createMemoryVcs(): MemoryVcs {
   const repo = (path: string): MemoryRepo => {
     let found = repos.get(path);
     if (found === undefined) {
-      found = { branch: 'main', branches: new Map([['main', nextRevision()]]), status: [], staged: [], inProgress: false, changes: new Map(), conflicts: new Set(), merged: new Set(), merging: undefined };
+      found = { branch: 'main', branches: new Map([['main', nextRevision()]]), status: [], ignored: [], staged: [], inProgress: false, changes: new Map(), conflicts: new Set(), merged: new Set(), merging: undefined };
       repos.set(path, found);
     }
     return found;
@@ -122,6 +124,11 @@ export function createMemoryVcs(): MemoryVcs {
       calls.push(`operationInProgress ${repoPath}`);
       const state = repo(repoPath);
       return state.inProgress || state.merging !== undefined;
+    },
+    async ignoredPaths(repoPath, patterns) {
+      calls.push(`ignoredPaths ${repoPath} ${patterns.join(',')}`);
+      const matchers = patterns.map((pattern) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')}$`));
+      return repo(repoPath).ignored.filter((path) => matchers.some((matcher) => matcher.test(path)));
     },
     async staged(repoPath) {
       calls.push(`staged ${repoPath}`);

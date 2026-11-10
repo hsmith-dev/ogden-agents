@@ -1,0 +1,58 @@
+# Epic 26 breakdown (v1.3, a build's copy starts ready). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-11-10. References to other epics use "<epic id>.<entry id>".
+# CI never uses a real agent, sandbox or network: fakes and temp repos only.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Copy patterns and setup command in a project's build settings"
+description = "Adds `copyPatterns` and `setupCommand` to WorkspaceBuildSettings with their validation (relative git globs, no `..`, no pathspec magic, no protected name; one-line command), the two columns and migration 0039, and the `setup_failed` blocked and refusal codes."
+verify = "Contract tests accept and refuse the patterns; the settings round-trip through core and the route."
+covers = ["E26-R1", "E26-R2", "E26-R3"]
+after = ["5.8", "11.2"]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 2
+type = "story"
+title = "Copy ignored files into the run's worktree"
+description = "Adds VcsPort.ignoredPaths (git ls-files of ignored, untracked paths) and core's copy into the worktree, after the trust and skill checks, never following a link on either side."
+verify = "Adapter tests list ignored paths in a temp repo; core tests copy folders with relative links and refuse links, protected names, paths through links and committed links in the worktree."
+covers = ["E26-R1"]
+after = [1]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Run the setup command before the agent, and Retry it"
+description = "Runs an unattended run's setup in its sandbox before the prompt or plan checkpoint, blocks `setup_failed` with exit code and masked output tail, reruns it from prepareContinue on Retry; an attended run's first message asks for it."
+verify = "Builds-harness tests: success sends the prompt after the setup; failure blocks with no prompt; Retry refused while failing and sends after; no sandbox fails closed; attended note names the command."
+covers = ["E26-R2", "E26-R3", "E26-R4"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Project settings fields for the copy and the setup"
+description = "Adds Files to copy (one pattern a line, checked as typed) and Setup command beside Test command in Project settings, Builds, reusing one command field."
+verify = "DOM test saves patterns and a command; a refused pattern shows its message and disables Save."
+covers = ["E26-R1", "E26-R2"]
+after = [1]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Live check: a real Node project builds unattended with its node_modules copied"
+description = "On macOS and Linux with the native sandbox, a pnpm project with `.env` and `node_modules` copied and `pnpm install --offline` as setup builds a small ticket and its tests pass on re-run."
+verify = "The user records the run on each OS."
+covers = ["E26-R1", "E26-R2"]
+after = [3, 4]
+hitl = true
+risk = "medium"

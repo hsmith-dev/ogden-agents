@@ -1,8 +1,9 @@
 /**
  * Unattended builds' settings (story 5.8): the install's run limits (runs at
  * once, maximum run time) and a project's (runs at once, the test command
- * the verification re-run uses instead of the detected one). One row of
- * each, written on first change; a missing value reads as the default
+ * the verification re-run uses instead of the detected one, and what each
+ * build's new copy gets before the agent: ignored files copied in and a
+ * setup command, epic 26). One row of each, written on first change; a missing value reads as the default
  * (`RUN_LIMIT_DEFAULTS`). Every change appends its event
  * (`settings.run_limits_changed`, `workspace.build_settings_changed`) in the
  * same transaction; nothing changed appends nothing. Read at every
@@ -24,6 +25,16 @@ import type { Entities } from './entities.js';
 import type { EventLog } from './event-log.js';
 
 const ROW_ID = 1;
+
+/** A stored JSON list, or `undefined` (the default) when there is none or it is damaged. */
+const parseJsonList = (text: string | null): unknown => {
+  if (text === null) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
 
 export interface BuildSettings {
   /** The install's run limits (defaults for what was never set). */
@@ -52,7 +63,13 @@ export function createBuildSettings({ db, events, entities }: { db: Database; ev
   };
   const readWorkspace = (workspaceId: WorkspaceId): WorkspaceBuildSettings => {
     const row = orm.select().from(workspaceBuildSettings).where(eq(workspaceBuildSettings.workspaceId, workspaceId)).get();
-    const parsed = WorkspaceBuildSettings.safeParse({ maxConcurrentRuns: row?.maxConcurrentRuns ?? undefined, testCommand: row?.testCommand ?? null, defaultBuildAgentId: row?.defaultBuildAgentId ?? null });
+    const parsed = WorkspaceBuildSettings.safeParse({
+      maxConcurrentRuns: row?.maxConcurrentRuns ?? undefined,
+      testCommand: row?.testCommand ?? null,
+      defaultBuildAgentId: row?.defaultBuildAgentId ?? null,
+      copyPatterns: parseJsonList(row?.copyPatterns ?? null),
+      setupCommand: row?.setupCommand ?? null,
+    });
     return parsed.success ? parsed.data : WorkspaceBuildSettings.parse({});
   };
   const refuse = (error: { issues: Array<{ path: PropertyKey[]; message: string }> }, fallback: string): never => {
@@ -92,11 +109,18 @@ export function createBuildSettings({ db, events, entities }: { db: Database; ev
       return events.transaction(() => {
         const previous = readWorkspace(workspaceId);
         const settings = WorkspaceBuildSettings.parse({ ...previous, ...parsed.data });
-        if (settings.maxConcurrentRuns === previous.maxConcurrentRuns && settings.testCommand === previous.testCommand && settings.defaultBuildAgentId === previous.defaultBuildAgentId) return settings;
+        if (JSON.stringify(settings) === JSON.stringify(previous)) return settings;
+        const values = {
+          maxConcurrentRuns: settings.maxConcurrentRuns,
+          testCommand: settings.testCommand,
+          defaultBuildAgentId: settings.defaultBuildAgentId,
+          copyPatterns: settings.copyPatterns.length === 0 ? null : JSON.stringify(settings.copyPatterns),
+          setupCommand: settings.setupCommand,
+        };
         orm
           .insert(workspaceBuildSettings)
-          .values({ workspaceId, maxConcurrentRuns: settings.maxConcurrentRuns, testCommand: settings.testCommand, defaultBuildAgentId: settings.defaultBuildAgentId })
-          .onConflictDoUpdate({ target: workspaceBuildSettings.workspaceId, set: { maxConcurrentRuns: settings.maxConcurrentRuns, testCommand: settings.testCommand, defaultBuildAgentId: settings.defaultBuildAgentId } })
+          .values({ workspaceId, ...values })
+          .onConflictDoUpdate({ target: workspaceBuildSettings.workspaceId, set: values })
           .run();
         events.append({ type: 'workspace.build_settings_changed', workspaceId, streamId: workspaceId, payload: { settings, previous } });
         return settings;

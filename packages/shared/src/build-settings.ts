@@ -58,10 +58,55 @@ const testCommand = z
   .max(MAX_TEST_COMMAND_LENGTH, `A test command can be at most ${MAX_TEST_COMMAND_LENGTH} characters.`)
   .refine((text) => !/[\r\n\0]/.test(text), 'A test command is one line.');
 
+// ---- A build's new copy (epic 26, E26-R1..R3) ----
+
+/** The most patterns a project lists, and the longest one. */
+export const MAX_COPY_PATTERNS = 20;
+export const MAX_COPY_PATTERN_LENGTH = 200;
+/**
+ * Names a pattern may never start with or contain as a path segment: git's
+ * own folder and the protected agent and BMad paths (core's
+ * `PROTECTED_PATHS`), so copying never plants settings, hooks or scripts
+ * the user did not commit. Lowercase; compared case-insensitively.
+ */
+export const COPY_PATTERN_REFUSED_NAMES: readonly string[] = ['.git', '.claude', '.vscode', '.idea', '_bmad', '.gemini', '.agents', '.mcp.json', 'claude.md', 'agents.md', '.envrc'];
+
+/**
+ * One pattern of files git ignores to copy from the project into each
+ * build's new copy (E26-R1): a git glob relative to the project's top
+ * folder (`.env`, `.env.*`, `node_modules`, `apps/web/.env`), never absolute, never
+ * `..`, never a git pathspec magic (`:`), and never a protected name.
+ */
+export const CopyPattern = z
+  .string()
+  .trim()
+  .min(1, 'A pattern names at least one file.')
+  .max(MAX_COPY_PATTERN_LENGTH, `A pattern can be at most ${MAX_COPY_PATTERN_LENGTH} characters.`)
+  .refine((text) => !/[\r\n\0\\]/.test(text), 'A pattern is one line, with / between folders.')
+  .refine((text) => !text.startsWith('/') && !text.startsWith(':') && !/^[a-zA-Z]:/.test(text), 'A pattern is relative to the project folder.')
+  .refine((text) => !text.split('/').includes('..') && !text.split('/').includes('.'), 'A pattern stays inside the project folder.')
+  .refine((text) => !text.split('/').some((segment) => COPY_PATTERN_REFUSED_NAMES.includes(segment.toLowerCase())), "That path is protected: Ogden Agents never copies git's, BMad's or an agent's own settings.");
+export type CopyPattern = z.infer<typeof CopyPattern>;
+const copyPatterns = z
+  .array(CopyPattern)
+  .max(MAX_COPY_PATTERNS, `A project can list at most ${MAX_COPY_PATTERNS} patterns.`)
+  .refine((list) => new Set(list).size === list.length, 'Each pattern is listed once.');
+
+/** The most characters a project's setup command may have. */
+export const MAX_SETUP_COMMAND_LENGTH = 500;
+const setupCommand = z
+  .string()
+  .trim()
+  .min(1, 'Type a setup command, or clear it to run none.')
+  .max(MAX_SETUP_COMMAND_LENGTH, `A setup command can be at most ${MAX_SETUP_COMMAND_LENGTH} characters.`)
+  .refine((text) => !/[\r\n\0]/.test(text), 'A setup command is one line.');
+
 /**
  * A project's build settings (Workspace settings; served behind the
- * `builds` piece): its limit (5.8) and the test command the verification
- * re-run uses instead of the detected one, `null` to detect it (11.2).
+ * `builds` piece): its limit (5.8), the test command the verification
+ * re-run uses instead of the detected one, `null` to detect it (11.2), and
+ * what each build's new copy gets before the agent starts (epic 26): the
+ * ignored files copied in, and a setup command, `null` for none.
  * `GET` and `PATCH /api/v1/workspaces/:wsId/build-settings`.
  */
 export const WorkspaceBuildSettings = z.object({
@@ -69,14 +114,24 @@ export const WorkspaceBuildSettings = z.object({
   testCommand: testCommand.nullable().default(null),
   /** The agent a Build with no choice uses here (epic 17); `null`: the project's default chat agent when it can build, else Claude Code. */
   defaultBuildAgentId: AgentId.nullable().default(null),
+  /** Ignored files copied from the project into each new copy (E26-R1); none by default. */
+  copyPatterns: copyPatterns.default([]),
+  /** Run in each new copy after the copy, before the agent (E26-R2); `null`: none. */
+  setupCommand: setupCommand.nullable().default(null),
 });
 export type WorkspaceBuildSettings = z.infer<typeof WorkspaceBuildSettings>;
 export const WorkspaceBuildSettingsResponse = z.object({ settings: WorkspaceBuildSettings });
 export type WorkspaceBuildSettingsResponse = z.infer<typeof WorkspaceBuildSettingsResponse>;
 export const UpdateWorkspaceBuildSettingsRequest = z
-  .object({ maxConcurrentRuns: perWorkspace.optional(), testCommand: testCommand.nullable().optional(), defaultBuildAgentId: AgentId.nullable().optional() })
+  .object({
+    maxConcurrentRuns: perWorkspace.optional(),
+    testCommand: testCommand.nullable().optional(),
+    defaultBuildAgentId: AgentId.nullable().optional(),
+    copyPatterns: copyPatterns.optional(),
+    setupCommand: setupCommand.nullable().optional(),
+  })
   .strict()
-  .refine((request) => request.maxConcurrentRuns !== undefined || request.testCommand !== undefined || request.defaultBuildAgentId !== undefined, 'Choose a setting to change.');
+  .refine((request) => Object.values(request).some((value) => value !== undefined), 'Choose a setting to change.');
 export type UpdateWorkspaceBuildSettingsRequest = z.infer<typeof UpdateWorkspaceBuildSettingsRequest>;
 
 // ---- Notifications (E11-R5; app-wide, never piece-guarded) ----
@@ -194,3 +249,7 @@ export const RUN_LIMITS_LABEL = 'Builds at a time';
 export const RUN_TIME_LIMIT_LABEL = 'Time limit per build (minutes)';
 export const TEST_COMMAND_LABEL = 'Test command';
 export const TEST_COMMAND_HINT = 'Leave empty to use the one Ogden Agents finds.';
+export const COPY_PATTERNS_LABEL = 'Files to copy into each build';
+export const COPY_PATTERNS_HINT = 'One per line, like .env or node_modules. Only files git ignores are copied, so nothing you have committed or are still editing is.';
+export const SETUP_COMMAND_LABEL = 'Setup command';
+export const SETUP_COMMAND_HINT = 'Runs in each build\'s copy before the agent starts, in the same sandbox, with no network. Leave empty to run none.';

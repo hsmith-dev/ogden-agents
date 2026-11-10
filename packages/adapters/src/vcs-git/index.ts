@@ -366,6 +366,17 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
       return false;
     },
 
+    async ignoredPaths(repoPath, patterns) {
+      if (patterns.length === 0) return [];
+      // `top,glob` magic: from the top folder, `*` stops at `/`; a pattern that brought its own magic was refused by the settings.
+      const specs = patterns.map((pattern) => `:(top,glob)${checkRelative(pattern)}`);
+      const out = await must(checkPath(repoPath), ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory', '--', ...specs], 'list the ignored files');
+      return out
+        .split('\0')
+        .map((name) => name.replace(/\/$/, ''))
+        .filter((name) => name !== '');
+    },
+
     async staged(repoPath) {
       const out = await must(checkPath(repoPath), ['diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z'], 'read the staged changes');
       return out.split('\0').filter((name) => name !== '');

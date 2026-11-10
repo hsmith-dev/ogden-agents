@@ -92,6 +92,13 @@ export interface VcsPort {
   removeWorktree(repoPath: string, path: string, options?: RemoveWorktreeOptions): Promise<void>;
   /** The paths with uncommitted changes (staged, unstaged or untracked), repo-relative, `/`-separated. */
   status(repoPath: string): Promise<string[]>;
+  /**
+   * The untracked paths git ignores that match `patterns` (git globs from the
+   * top folder; epic 26's copy), repo-relative and `/`-separated; an ignored
+   * folder is one entry with no trailing `/`, never its files. Never a
+   * tracked path; `[]` for no patterns.
+   */
+  ignoredPaths(repoPath: string, patterns: readonly string[]): Promise<string[]>;
   /** `branch`'s changes since `base`. */
   diff(repoPath: string, base: string, branch: string, options?: { maxBytes?: number }): Promise<VcsDiff>;
   /** Whether commit `revision` is the checked-out commit or one of its ancestors (story 5.5: approve's branch check). */
